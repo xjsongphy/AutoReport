@@ -1,0 +1,7 @@
+[project]
+name = "autoreport"
+version = "0.1.0"
+description = "基于Agent的自动化物理实验报告撰写系统"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
