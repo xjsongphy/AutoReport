@@ -65,7 +65,12 @@
 |--------|------|------|
 | `download_files` | 下载或移动文件，自动转 Markdown | instruction |
 | `parse_download_urls` | 解析 URL 和路径 | text |
+| `download_file_to` | 下载指定文件到指定位置 | url, destination, filename |
+| `move_file_to` | 复制文件到指定位置（保留原文件） | source, destination, filename |
 | `convert_to_pdf` | 文档转 PDF（Office/文本） | file_path, output_dir |
+| `convert_office_to_pdf` | Office 文档转 PDF（LibreOffice） | doc_path, output_dir |
+| `convert_text_to_pdf` | 文本/Markdown 转 PDF（ReportLab） | text_path, output_dir |
+| `check_dependencies` | 检查依赖是否安装 | 无 |
 | `read_pdf_metadata` | 读取 PDF 元数据 | file_path |
 
 ---
