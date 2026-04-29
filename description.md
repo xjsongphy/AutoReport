@@ -150,4 +150,6 @@ project/
 ## 参考项目
 
 - [DeepCode](../DeepCode) — API 配置方式（YAML secrets + 环境变量回退）、多 provider 支持、错误处理和重试机制、循环检测
-- [nanobot](../nanobot) — AgentLoop 核心架构、工具定义、多 provider 原生 SDK 调用、compact/命令系统、Pydantic 配置 schema
+- [nanobot](../nanobot) — AgentLoop 核心架构、工具定义、多 provider 原生 SDK 调用、compact/命令系统、Pydantic 配置 schema、WebUI 交互模式
+
+Agent 交互界面参考 nanobot 的 WebUI 实现，使用 PyQt 替代 Web 前端，保留 WebSocket 式的消息流和对话管理机制。
