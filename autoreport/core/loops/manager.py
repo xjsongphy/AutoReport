@@ -7,9 +7,10 @@ from typing import Any
 from loguru import logger
 
 from ...config import ConfigManager
-from ...interfaces.types import AgentType, RestartRequest, Message
+from ...interfaces.types import AgentType, RestartRequest, Message, Checkpoint
 from ...interfaces.protocol import GUIAPI
 from ...core.providers import ProviderManager, ProviderFactory, ProviderType
+from ..checkpoints import CheckpointManager
 from ..tools.registry import ToolRegistry
 from ..tools import (
     ReadFileTool,
@@ -50,6 +51,7 @@ class LoopManager:
         self._loops: dict[AgentType, AgentLoop] = {}
         self._running = False
         self._provider_manager = ProviderManager()
+        self.checkpoint_manager = CheckpointManager(self.workspace)
 
         # Subscribe to restart requests
         self.bus.subscribe(RestartRequest, self._handle_restart_request)
@@ -216,6 +218,41 @@ class LoopManager:
             registry.register(PDFParseTool())
 
         return registry
+
+    async def create_checkpoint(self, description: str) -> str:
+        """Create a checkpoint.
+
+        Args:
+            description: Description of the checkpoint.
+
+        Returns:
+            Checkpoint ID.
+        """
+        checkpoint_id = await self.checkpoint_manager.create_checkpoint(description)
+
+        # Notify GUI about new checkpoint
+        checkpoint = self.checkpoint_manager.get_checkpoint(checkpoint_id)
+        if checkpoint:
+            from ....interfaces.types import Checkpoint as CheckpointMsg
+            msg = CheckpointMsg(
+                checkpoint_id=checkpoint_id,
+                description=description,
+                file_states={path: state.hash for path, state in checkpoint.file_states.items()},
+            )
+            await self.bus.publish(msg)
+
+        return checkpoint_id
+
+    async def rollback_to_checkpoint(self, checkpoint_id: str) -> None:
+        """Rollback to a checkpoint.
+
+        Args:
+            checkpoint_id: Checkpoint ID to rollback to.
+        """
+        await self.checkpoint_manager.rollback_to_checkpoint(checkpoint_id)
+
+        # Create a new checkpoint after rollback
+        await self.create_checkpoint(f"After rollback to {checkpoint_id[:8]}")
 
     async def _handle_restart_request(self, message: Message) -> None:
         """Handle restart request from GUI.

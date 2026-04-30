@@ -59,6 +59,9 @@ class AutoReportApp:
             gui=self.backend,
         )
 
+        # Set loop manager in backend (for rollback functionality)
+        self.backend.set_loop_manager(self.loop_manager)
+
         # Start message bus processing
         asyncio.create_task(self.bus.process_queue())
 
@@ -179,6 +182,15 @@ class BackendAPIImpl(BackendAPI):
         """
         self.config_manager = config_manager
         self.bus = bus
+        self.loop_manager: LoopManager | None = None
+
+    def set_loop_manager(self, loop_manager: LoopManager) -> None:
+        """Set the loop manager (called after it's created).
+
+        Args:
+            loop_manager: Loop manager instance.
+        """
+        self.loop_manager = loop_manager
 
     async def send_user_message(
         self,
@@ -216,8 +228,10 @@ class BackendAPIImpl(BackendAPI):
 
     async def rollback_to_checkpoint(self, checkpoint_id: str) -> None:
         """Rollback to a specific checkpoint."""
-        # TODO: Implement rollback
-        pass
+        if self.loop_manager is None:
+            raise RuntimeError("Loop manager not initialized")
+
+        await self.loop_manager.rollback_to_checkpoint(checkpoint_id)
 
     def subscribe_to_messages(
         self,
