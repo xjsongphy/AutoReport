@@ -297,7 +297,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="从 cc-switch 仓库同步最新预设模板并退出",
     )
     parser.add_argument(
-        "--debug",
+        "-v", "--verbose",
         action="store_true",
         default=False,
         help="输出 DEBUG 级别调试信息",
@@ -352,7 +352,7 @@ def main():
         qt_app.setWindowIcon(QIcon(str(icon_path)))
 
     # Now safe to setup logging and exception handling
-    log_level = "DEBUG" if args.debug else "INFO"
+    log_level = "DEBUG" if args.verbose else "INFO"
     setup_logging(log_level=log_level, log_to_file=True)
     setup_exception_handler()
 

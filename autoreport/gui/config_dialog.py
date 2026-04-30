@@ -504,18 +504,18 @@ class ConfigDialog(QDialog):
 
         if error_msg:
             QMessageBox.warning(
-                self, "同步失败",
+                None, "同步失败",
                 f"预设同步出错：{error_msg}\n将使用内置预设模板。",
             )
         elif cached:
             count = len(load_presets())
             QMessageBox.information(
-                self, "同步完成",
+                None, "同步完成",
                 f"成功同步 {n} 个文件。\n当前共 {count} 个预设模板可用。",
             )
         else:
             QMessageBox.warning(
-                self, "同步失败",
+                None, "同步失败",
                 "无法下载预设文件，请检查网络连接和代理设置。\n"
                 "将使用内置预设模板。",
             )
