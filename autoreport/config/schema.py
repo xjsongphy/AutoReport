@@ -45,11 +45,10 @@ class ProvidersConfig(Base):
 
 
 class MinerUAPIConfig(Base):
-    """MinerU API configuration for PDF parsing."""
+    """MinerU CLI configuration for document parsing."""
 
-    url: str = "http://localhost:9999"
-    enabled: bool = True
     timeout: int = 300
+    enabled: bool = True
     validate_on_startup: bool = True
 
 

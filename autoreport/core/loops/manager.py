@@ -210,9 +210,22 @@ class LoopManager:
                 timeout=60,
             ))
 
-        # PDF parsing (main agent only)
-        if agent_type == AgentType.MAIN:
-            registry.register(PDFParseTool())
+        # PDF parsing (all agents that may need to read reference materials)
+        if agent_type in (
+            AgentType.MAIN,
+            AgentType.THEORY,
+            AgentType.DATA_ANALYSIS,
+            AgentType.REPORT,
+        ):
+            mineru_timeout = (
+                self.config_manager.config.mineru_api.timeout
+                if hasattr(self.config_manager.config, "mineru_api")
+                else 300
+            )
+            registry.register(PDFParseTool(
+                workspace=self.workspace,
+                timeout=mineru_timeout,
+            ))
 
         return registry
 

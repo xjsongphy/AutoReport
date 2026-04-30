@@ -10,7 +10,6 @@ agents:
 mineru_api:
   enabled: true
   timeout: 300
-  url: http://localhost:9999
   validate_on_startup: true
 providers:
   configurations:

@@ -21,6 +21,7 @@ ALLOWED_COMMANDS = {
     "git",
     "echo", "printf",
     "wc", "sort", "uniq", "cut",
+    "mineru-open-api",
 }
 
 # Allowed Python modules for PythonExecTool

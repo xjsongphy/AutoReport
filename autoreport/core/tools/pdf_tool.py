@@ -15,6 +15,7 @@ import httpx
 from loguru import logger
 
 from ..tools.registry import Tool
+from .path_utils import resolve_and_validate_path
 
 
 class PDFParseTool(Tool):
@@ -77,14 +78,14 @@ class PDFParseTool(Tool):
             >>> result = await parse_pdf("references/handout.pdf", "references/handout.md")
             >>> print(result["markdown_content"])
         """
-        pdf_file = self._resolve_and_validate_path(pdf_path)
+        pdf_file = resolve_and_validate_path(pdf_path, self.workspace)
 
         if not pdf_file.exists():
             raise FileNotFoundError(f"PDF file not found: {pdf_file}")
 
         output_file = None
         if output_path:
-            output_file = self._resolve_and_validate_path(output_path)
+            output_file = resolve_and_validate_path(output_path, self.workspace)
 
         logger.debug("Parsing PDF: {}", pdf_path)
 
@@ -212,45 +213,6 @@ class PDFParseTool(Tool):
             )
         else:
             logger.info("mineru-open-api is available at {}", health["url"])
-
-    def _resolve_and_validate_path(self, path: str) -> Path:
-        """Resolve and validate a path is within workspace.
-
-        Args:
-            path: Path to resolve and validate.
-
-        Returns:
-            Resolved absolute path.
-
-        Raises:
-            ValueError: If path is outside workspace or contains path traversal.
-        """
-        # Reject absolute paths for security
-        path_obj = Path(path)
-        if path_obj.is_absolute():
-            raise ValueError(
-                f"Absolute paths are not allowed: {path}. "
-                "Please use paths relative to the workspace."
-            )
-
-        # Reject path traversal attempts
-        if ".." in path_obj.parts:
-            raise ValueError(
-                f"Path traversal with '..' is not allowed: {path}"
-            )
-
-        # Resolve relative to workspace
-        resolved = (self.workspace / path_obj).resolve()
-
-        # Verify the resolved path is within workspace
-        try:
-            resolved.relative_to(self.workspace)
-        except ValueError:
-            raise ValueError(
-                f"Resolved path is outside workspace: {resolved}"
-            )
-
-        return resolved
 
     async def __aenter__(self):
         """Async context manager entry."""
