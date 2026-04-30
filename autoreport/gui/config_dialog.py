@@ -70,6 +70,15 @@ class NoWheelComboBox(QComboBox):
         painter.drawLine(x + 5, y + 5, x + 10, y)
         painter.end()
 
+    def showPopup(self) -> None:  # noqa: N802
+        if self.count() == 0:
+            self.addItem("（无可用项）")
+            self.model().item(0).setEnabled(False)
+            super().showPopup()
+            self.clear()
+        else:
+            super().showPopup()
+
 
 class ConfigCard(QFrame):
     """Card widget for a single API configuration."""
