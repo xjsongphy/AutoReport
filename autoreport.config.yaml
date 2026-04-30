@@ -1,0 +1,21 @@
+# AutoReport Configuration
+
+agents:
+  defaults:
+    model: "anthropic/claude-sonnet-4.5"
+    provider: "auto"
+    max_tokens: 8192
+    temperature: 0.1
+    max_tool_iterations: 200
+    timezone: "Asia/Shanghai"
+
+providers:
+  anthropic:
+    api_key: null  # Set via ANTHROPIC_API_KEY environment variable or here
+    api_base: null
+  openai:
+    api_key: null  # Set via OPENAI_API_KEY environment variable or here
+    api_base: null
+  deepseek:
+    api_key: null  # Set via DEEPSEEK_API_KEY environment variable or here
+    api_base: null
