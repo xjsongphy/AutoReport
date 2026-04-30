@@ -1,62 +1,44 @@
-# AutoReport Configuration
-# Multi-provider support inspired by OpenClaw's plugin-based provider system
-
 agents:
   defaults:
-    model: "anthropic/claude-sonnet-4.5"
-    provider: "auto"
     max_tokens: 8192
-    temperature: 0.1
     max_tool_iterations: 200
-    timezone: "Asia/Shanghai"
-    prompt_templates_dir: "templates/agents"
-
-providers:
-  anthropic:
-    api_key: null  # ANTHROPIC_API_KEY
-    api_base: null
-    enabled: true
-    default_model: "claude-sonnet-4-20250514"
-
-  openai:
-    api_key: null  # OPENAI_API_KEY
-    api_base: null
-    enabled: true
-    default_model: "gpt-4o"
-
-  google:
-    api_key: null  # GOOGLE_API_KEY
-    api_base: null
-    enabled: false
-    default_model: "gemini-2.0-flash-exp"
-
-  deepseek:
-    api_key: null  # DEEPSEEK_API_KEY
-    api_base: "https://api.deepseek.com/v1"
-    enabled: true
-    default_model: "deepseek-chat"
-
-  openrouter:
-    api_key: null  # OPENROUTER_API_KEY
-    api_base: "https://openrouter.ai/api/v1"
-    enabled: false
-    default_model: null
-
-  groq:
-    api_key: null  # GROQ_API_KEY
-    api_base: "https://api.groq.com/openai/v1"
-    enabled: false
-    default_model: "llama-3.3-70b-versatile"
-
-  custom:
-    api_key: null
-    api_base: "http://localhost:11434/v1"
-    enabled: false
-    default_model: null
-
-# MinerU API configuration for PDF parsing
+    model: anthropic/claude-sonnet-4.5
+    prompt_templates_dir: templates/agents
+    provider: auto
+    temperature: 0.1
+    timezone: Asia/Shanghai
 mineru_api:
-  url: "http://localhost:9999"
   enabled: true
   timeout: 300
+  url: http://localhost:9999
   validate_on_startup: true
+providers:
+  configurations:
+  - enabled: true
+    id: anthropic-default
+    name: Anthropic
+    provider: anthropic
+  - enabled: true
+    id: openai-default
+    name: OpenAI
+    provider: openai
+  - enabled: false
+    id: google-default
+    name: Google Gemini
+    provider: google
+  - enabled: true
+    id: deepseek-default
+    name: DeepSeek
+    provider: deepseek
+  - enabled: false
+    id: openrouter-default
+    name: OpenRouter
+    provider: openrouter
+  - enabled: false
+    id: groq-default
+    name: Groq
+    provider: groq
+  - enabled: false
+    id: custom-default
+    name: Custom
+    provider: custom

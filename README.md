@@ -280,6 +280,8 @@ Contributions are welcome! Please feel free to submit issues or pull requests.
 
 ## Reference Projects
 
+- [cc-switch](https://github.com/farion1231/cc-switch) — Provider preset templates (50+ providers), multi-configuration switching, category-based preset selector
+- [OpenClaw](../openclaw) — Plugin-based multi-provider system (50+ LLM providers), model catalog management, provider configuration patterns
 - [DeepCode](../DeepCode) — API configuration (YAML secrets + env fallback), multi-provider support, error handling, loop detection
 - [nanobot](../nanobot) — AgentLoop core architecture, tool definitions, multi-provider native SDK, compact/command system, Pydantic config schema
 

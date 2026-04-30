@@ -261,14 +261,7 @@ class BackendAPIImpl(BackendAPI):
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """Parse command-line arguments.
-
-    Args:
-        argv: Argument list (defaults to sys.argv).
-
-    Returns:
-        Parsed arguments.
-    """
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
         description="AutoReport - 物理实验报告自动撰写系统",
     )
@@ -279,7 +272,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=["data_analysis", "plotting", "theory", "report"],
         help="在调试模式下启动指定的 Agent（可重复使用）",
     )
+    parser.add_argument(
+        "--sync-presets",
+        action="store_true",
+        default=False,
+        help="从 cc-switch 仓库同步最新预设模板并退出",
+    )
     return parser.parse_args(argv)
+
+
+def _try_sync_presets(silent: bool = False) -> bool:
+    """Try to sync presets from cc-switch. Returns True on success."""
+    from .core.preset_sync import is_cached, sync_presets
+
+    try:
+        if is_cached():
+            logger.debug("Presets already cached, skipping auto-sync")
+            return True
+        n = sync_presets(timeout=10)
+        logger.info("Auto-synced {} preset files from cc-switch", n)
+        return True
+    except Exception as e:
+        if not silent:
+            logger.warning("Preset sync failed (network/proxy issue): {}", e)
+        return False
 
 
 def main():
@@ -295,16 +311,33 @@ def main():
 
     logger.info("AutoReport starting...")
 
+    # Handle --sync-presets (CLI mode, no GUI)
+    if args.sync_presets:
+        print("Syncing presets from cc-switch...")
+        ok = _try_sync_presets(silent=False)
+        if ok:
+            from .config.presets import load_presets
+            presets = load_presets()
+            print(f"Sync complete. {len(presets)} presets available.")
+        else:
+            print("Sync failed. Check network/proxy settings.")
+        sys.exit(0 if ok else 1)
+
     app = AutoReportApp()
 
     # Store debug agents for activation after loop manager starts
     app._debug_agents_on_start = args.debug_agent
 
-    # Check API configuration first
-    is_valid, _ = app.config_manager.validate_api_keys()
-
     # Create Qt application first (needed for dialogs)
     _ = QApplication(sys.argv)  # noqa: F841
+
+    # Auto-sync presets on startup (failure is non-fatal)
+    from PyQt6.QtWidgets import QMessageBox
+    if not _try_sync_presets(silent=True):
+        logger.info("Presets not synced — UI sync button available for retry")
+
+    # Check API configuration first
+    is_valid, _ = app.config_manager.validate_api_keys()
 
     if not is_valid:
         # Show config dialog

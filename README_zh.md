@@ -279,6 +279,8 @@ mineru_api:
 
 ## 参考项目
 
+- [cc-switch](https://github.com/farion1231/cc-switch) — Provider 预设模板（50+ 服务商）、多配置切换、分类预设选择器，本项目预设数据来源于此
+- [OpenClaw](../openclaw) — 插件式多 Provider 系统（50+ LLM Provider）、模型目录管理、Provider 配置模式
 - [DeepCode](../DeepCode) — API 配置方式（YAML secrets + 环境变量回退）、多 provider 支持、错误处理和重试机制、循环检测
 - [nanobot](../nanobot) — AgentLoop 核心架构、工具定义、多 provider 原生 SDK 调用、compact/命令系统、Pydantic 配置 schema
 

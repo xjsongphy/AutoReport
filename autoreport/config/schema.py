@@ -2,8 +2,9 @@
 
 from pathlib import Path
 from typing import Literal
+from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,13 +19,17 @@ class Base(BaseModel):
     )
 
 
-class ProviderConfig(Base):
-    """LLM provider configuration.
+class ApiConfig(Base):
+    """A single API provider configuration.
 
-    Based on OpenClaw's ModelProviderConfig pattern: each provider has
-    an API key, base URL (with sensible default), and optional flags.
+    Replaces the old fixed-slot ProviderConfig with an identity-based
+    config that users can add/remove freely, inspired by cc-switch's
+    multi-configuration provider system.
     """
 
+    id: str = Field(default_factory=lambda: uuid4().hex[:8])
+    name: str = "Unnamed"
+    provider: str = "custom"  # anthropic | openai | google | deepseek | openrouter | groq | custom
     api_key: str | None = None
     api_base: str | None = None
     enabled: bool = True
@@ -33,18 +38,10 @@ class ProviderConfig(Base):
 
 
 class ProvidersConfig(Base):
-    """Configuration for LLM providers.
+    """List of API provider configurations."""
 
-    Provider list inspired by OpenClaw's plugin-based provider system.
-    """
-
-    anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
-    openai: ProviderConfig = Field(default_factory=ProviderConfig)
-    google: ProviderConfig = Field(default_factory=ProviderConfig)
-    deepseek: ProviderConfig = Field(default_factory=ProviderConfig)
-    openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
-    groq: ProviderConfig = Field(default_factory=ProviderConfig)
-    custom: ProviderConfig = Field(default_factory=ProviderConfig)
+    configurations: list[ApiConfig] = Field(default_factory=list)
+    active: str | None = None  # ID of currently active configuration
 
 
 class MinerUAPIConfig(Base):
@@ -104,18 +101,62 @@ class Settings(BaseSettings):
     config_path: Path = Field(default=Path("autoreport.config.yaml"))
 
     def load_config(self) -> AppConfig:
-        """Load configuration from YAML file and merge with environment variables."""
+        """Load configuration from YAML, migrating old format if needed."""
         import yaml
 
-        config_data = {}
+        config_data: dict = {}
         if self.config_path.exists():
             with open(self.config_path, "r", encoding="utf-8") as f:
                 config_data = yaml.safe_load(f) or {}
 
+        # Migrate old fixed-slot providers format
+        providers_data = config_data.get("providers", {})
+        if providers_data and "configurations" not in providers_data:
+            config_data["providers"] = self._migrate_providers(providers_data)
+
         config = AppConfig(**config_data)
 
-        # Override API keys from environment
-        env_overrides: dict[str, str | None] = {
+        # Override API keys from environment variables
+        self._apply_env_overrides(config)
+
+        return config
+
+    def _migrate_providers(self, old_providers: dict) -> dict:
+        """Migrate old fixed-slot provider format to list-based format."""
+        _NAMES = {
+            "anthropic": "Anthropic",
+            "openai": "OpenAI",
+            "google": "Google Gemini",
+            "deepseek": "DeepSeek",
+            "openrouter": "OpenRouter",
+            "groq": "Groq",
+            "custom": "Custom",
+        }
+        configurations = []
+        for name in _NAMES:
+            data = old_providers.get(name, {})
+            if isinstance(data, dict):
+                configurations.append({
+                    "id": f"{name}-default",
+                    "name": _NAMES[name],
+                    "provider": name,
+                    "api_key": data.get("api_key"),
+                    "api_base": data.get("api_base"),
+                    "enabled": data.get("enabled", True),
+                    "default_model": data.get("default_model"),
+                })
+
+        active = None
+        for cfg in configurations:
+            if cfg.get("enabled") and cfg.get("api_key"):
+                active = cfg["id"]
+                break
+
+        return {"configurations": configurations, "active": active}
+
+    def _apply_env_overrides(self, config: AppConfig) -> None:
+        """Apply environment variable API keys to matching configurations."""
+        env_map: dict[str, str | None] = {
             "anthropic": self.anthropic_api_key,
             "openai": self.openai_api_key,
             "google": self.google_api_key,
@@ -123,17 +164,15 @@ class Settings(BaseSettings):
             "openrouter": self.openrouter_api_key,
             "groq": self.groq_api_key,
         }
-        for provider_name, env_key in env_overrides.items():
+        for cfg in config.providers.configurations:
+            env_key = env_map.get(cfg.provider)
             if env_key:
-                getattr(config.providers, provider_name).api_key = env_key
-
-        return config
+                cfg.api_key = env_key
 
     def validate_api_keys(self, config: AppConfig) -> list[str]:
-        """Validate that at least one enabled provider has an API key."""
-        available = []
-        for name in ("anthropic", "openai", "google", "deepseek", "openrouter", "groq", "custom"):
-            provider = getattr(config.providers, name)
-            if provider.enabled and provider.api_key:
-                available.append(name)
+        """Validate that at least one enabled configuration has an API key."""
+        available: list[str] = []
+        for cfg in config.providers.configurations:
+            if cfg.enabled and cfg.api_key:
+                available.append(cfg.provider)
         return available

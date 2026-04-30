@@ -4,18 +4,13 @@ from pathlib import Path
 
 from loguru import logger
 
-from .schema import AppConfig, Settings
+from .schema import ApiConfig, AppConfig, Settings
 
 
 class ConfigManager:
     """Manages application configuration."""
 
     def __init__(self, config_path: Path | None = None):
-        """Initialize configuration manager.
-
-        Args:
-            config_path: Optional path to configuration file.
-        """
         if config_path:
             self._settings = Settings(config_path=config_path)
         else:
@@ -39,31 +34,34 @@ class ConfigManager:
         """Validate API configuration.
 
         Returns:
-            Tuple of (is_valid, list_of_available_providers)
+            Tuple of (is_valid, list_of_available_provider_types).
         """
         available = self._settings.validate_api_keys(self.config)
         is_valid = len(available) > 0
         return is_valid, available
 
+    def get_active_config(self) -> ApiConfig | None:
+        """Get the currently active API configuration."""
+        for cfg in self.config.providers.configurations:
+            if cfg.id == self.config.providers.active:
+                return cfg
+        # Fallback: return first enabled config with a key
+        for cfg in self.config.providers.configurations:
+            if cfg.enabled and cfg.api_key:
+                return cfg
+        return None
+
     def get_active_provider(self) -> str:
-        """Get the active provider based on configuration and available API keys.
+        """Get the active provider type string.
 
-        Returns:
-            Provider name that should be used.
+        Returns provider type of active config, or falls back to
+        priority order: anthropic > openai > deepseek.
         """
+        active = self.get_active_config()
+        if active:
+            return active.provider
+
         _, available = self.validate_api_keys()
-
-        # If explicit provider is set and available, use it
-        if self.config.agents.defaults.provider != "auto":
-            if self.config.agents.defaults.provider in available:
-                return self.config.agents.defaults.provider
-            logger.warning(
-                "Configured provider '{}' is not available. Available: {}",
-                self.config.agents.defaults.provider,
-                available,
-            )
-
-        # Auto-select: prefer anthropic > openai > deepseek
         for provider in ["anthropic", "openai", "deepseek"]:
             if provider in available:
                 return provider
@@ -71,31 +69,32 @@ class ConfigManager:
         raise ValueError("No API keys configured. Please set at least one provider.")
 
     def get_provider_config(self, provider: str) -> dict:
-        """Get configuration for a specific provider.
+        """Get configuration for a specific provider type.
 
-        Args:
-            provider: Provider name (anthropic, openai, deepseek)
-
-        Returns:
-            Dictionary with api_key, api_base, extra_headers
+        Returns the first enabled config matching the provider type.
         """
-        provider_config = getattr(self.config.providers, provider)
-        return {
-            "api_key": provider_config.api_key,
-            "api_base": provider_config.api_base,
-            "extra_headers": provider_config.extra_headers,
-        }
+        for cfg in self.config.providers.configurations:
+            if cfg.provider == provider and cfg.enabled and cfg.api_key:
+                return {
+                    "api_key": cfg.api_key,
+                    "api_base": cfg.api_base,
+                    "extra_headers": cfg.extra_headers,
+                }
+
+        raise ValueError(f"No enabled configuration found for provider '{provider}'")
 
     def save_config(self) -> None:
         """Save configuration to file."""
         import yaml
 
         config_path = self._settings.config_path
-
-        # Convert config to dict
         config_dict = self.config.model_dump(mode="json", exclude_none=True)
+        providers = config_dict.get("providers", {})
+        config_dict["providers"] = {
+            "configurations": providers.get("configurations", []),
+            "active": self.config.providers.active,
+        }
 
-        # Write to file
         with open(config_path, "w", encoding="utf-8") as f:
             yaml.dump(config_dict, f, default_flow_style=False, allow_unicode=True)
 
@@ -103,6 +102,5 @@ class ConfigManager:
 
     def reset_config(self) -> None:
         """Reset configuration to defaults."""
-        # Create new default config
         self._config = AppConfig()
         logger.info("Configuration reset to defaults")

@@ -1,7 +1,5 @@
 """Provider factory for creating LLM provider instances."""
 
-from typing import Literal
-
 from loguru import logger
 
 from .anthropic_provider import AnthropicProvider
@@ -9,7 +7,23 @@ from .base import LLMProvider
 from .deepseek_provider import DeepSeekProvider
 from .openai_provider import OpenAIProvider
 
-ProviderType = Literal["anthropic", "openai", "deepseek"]
+# All supported provider types
+ALL_PROVIDER_TYPES = (
+    "anthropic", "openai", "google", "deepseek", "openrouter", "groq", "custom",
+)
+
+# Providers that use OpenAI-compatible Chat Completions API
+_OPENAI_COMPATIBLE = {"openai", "google", "openrouter", "groq", "custom"}
+
+_DEFAULT_MODELS: dict[str, str] = {
+    "anthropic": "claude-sonnet-4-20250514",
+    "openai": "gpt-4o",
+    "google": "gemini-2.0-flash-exp",
+    "deepseek": "deepseek-chat",
+    "openrouter": "anthropic/claude-sonnet-4.6",
+    "groq": "llama-3.3-70b-versatile",
+    "custom": "",
+}
 
 
 class ProviderFactory:
@@ -17,7 +31,7 @@ class ProviderFactory:
 
     @staticmethod
     def create_provider(
-        provider_type: ProviderType,
+        provider_type: str,
         api_key: str,
         api_base: str | None = None,
         model: str | None = None,
@@ -25,7 +39,7 @@ class ProviderFactory:
         """Create a provider instance.
 
         Args:
-            provider_type: Type of provider to create.
+            provider_type: anthropic|openai|google|deepseek|openrouter|groq|custom.
             api_key: API key for authentication.
             api_base: Optional custom API base URL.
             model: Optional model override.
@@ -36,89 +50,66 @@ class ProviderFactory:
         Raises:
             ValueError: If provider type is unknown.
         """
+        if provider_type not in ALL_PROVIDER_TYPES:
+            raise ValueError(f"Unknown provider type: {provider_type}")
+
+        default_model = model or _DEFAULT_MODELS.get(provider_type, "")
+
         if provider_type == "anthropic":
-            default_model = model or "claude-sonnet-4.5"
             return AnthropicProvider(api_key, api_base, default_model)
-        elif provider_type == "openai":
-            default_model = model or "gpt-4o"
-            return OpenAIProvider(api_key, api_base, default_model)
         elif provider_type == "deepseek":
-            default_model = model or "deepseek-chat"
             return DeepSeekProvider(api_key, api_base, default_model)
+        elif provider_type in _OPENAI_COMPATIBLE:
+            return OpenAIProvider(api_key, api_base, default_model)
         else:
             raise ValueError(f"Unknown provider type: {provider_type}")
 
 
 class ProviderManager:
-    """Manager for LLM providers."""
+    """Manager for LLM provider instances.
+
+    Stores providers keyed by provider type string. Multiple configs
+    of the same type are stored by their config ID.
+    """
 
     def __init__(self):
-        """Initialize provider manager."""
-        self._providers: dict[ProviderType, LLMProvider] = {}
-        self._active_provider: ProviderType | None = None
+        self._providers: dict[str, LLMProvider] = {}
+        self._active_key: str | None = None
 
     def register_provider(
         self,
-        provider_type: ProviderType,
+        key: str,
         provider: LLMProvider,
     ) -> None:
         """Register a provider.
 
         Args:
-            provider_type: Type of provider.
+            key: Unique key for this provider instance (config ID).
             provider: Provider instance.
         """
-        self._providers[provider_type] = provider
-        logger.debug("Registered provider: {}", provider_type)
+        self._providers[key] = provider
+        logger.debug("Registered provider: {}", key)
 
-        # Set as active if first provider
-        if self._active_provider is None:
-            self._active_provider = provider_type
+        if self._active_key is None:
+            self._active_key = key
 
     def get_active_provider(self) -> LLMProvider:
-        """Get the active provider.
-
-        Returns:
-            Active provider instance.
-
-        Raises:
-            ValueError: If no active provider.
-        """
-        if self._active_provider is None:
+        """Get the active provider."""
+        if self._active_key is None:
             raise ValueError("No active provider")
+        return self._providers[self._active_key]
 
-        return self._providers[self._active_provider]
+    def set_active_provider(self, key: str) -> None:
+        """Set the active provider by key."""
+        if key not in self._providers:
+            raise ValueError(f"Provider not registered: {key}")
+        self._active_key = key
+        logger.info("Active provider set to: {}", key)
 
-    def set_active_provider(self, provider_type: ProviderType) -> None:
-        """Set the active provider.
-
-        Args:
-            provider_type: Provider type to activate.
-
-        Raises:
-            ValueError: If provider not registered.
-        """
-        if provider_type not in self._providers:
-            raise ValueError(f"Provider not registered: {provider_type}")
-
-        self._active_provider = provider_type
-        logger.info("Active provider set to: {}", provider_type)
-
-    def get_available_providers(self) -> list[ProviderType]:
-        """Get list of available providers.
-
-        Returns:
-            List of available provider types.
-        """
+    def get_available_providers(self) -> list[str]:
+        """Get list of available provider keys."""
         return list(self._providers.keys())
 
-    def has_provider(self, provider_type: ProviderType) -> bool:
-        """Check if a provider is registered.
-
-        Args:
-            provider_type: Provider type to check.
-
-        Returns:
-            True if provider is registered.
-        """
-        return provider_type in self._providers
+    def has_provider(self, key: str) -> bool:
+        """Check if a provider is registered."""
+        return key in self._providers

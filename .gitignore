@@ -6,3 +6,4 @@ dist/
 .uv/
 CLAUDE.md
 logs/
+external/cc-switch/

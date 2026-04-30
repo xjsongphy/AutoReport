@@ -83,40 +83,38 @@ class LoopManager:
         """Initialize LLM providers from configuration."""
         config = self.config_manager.config
 
-        # Initialize Anthropic
-        if config.providers.anthropic.api_key:
-            provider = ProviderFactory.create_provider(
-                "anthropic",
-                config.providers.anthropic.api_key,
-                config.providers.anthropic.api_base,
-            )
-            self._provider_manager.register_provider("anthropic", provider)
-            logger.info("Initialized Anthropic provider")
+        for cfg in config.providers.configurations:
+            if not cfg.enabled or not cfg.api_key:
+                continue
 
-        # Initialize OpenAI
-        if config.providers.openai.api_key:
-            provider = ProviderFactory.create_provider(
-                "openai",
-                config.providers.openai.api_key,
-                config.providers.openai.api_base,
-            )
-            self._provider_manager.register_provider("openai", provider)
-            logger.info("Initialized OpenAI provider")
-
-        # Initialize DeepSeek
-        if config.providers.deepseek.api_key:
-            provider = ProviderFactory.create_provider(
-                "deepseek",
-                config.providers.deepseek.api_key,
-                config.providers.deepseek.api_base,
-            )
-            self._provider_manager.register_provider("deepseek", provider)
-            logger.info("Initialized DeepSeek provider")
+            try:
+                provider = ProviderFactory.create_provider(
+                    cfg.provider,
+                    cfg.api_key,
+                    cfg.api_base,
+                    cfg.default_model,
+                )
+                self._provider_manager.register_provider(cfg.id, provider)
+                logger.info("Initialized {} provider: {}", cfg.provider, cfg.name)
+            except Exception as e:
+                logger.warning(
+                    "Failed to initialize provider {} ({}): {}",
+                    cfg.name, cfg.provider, e,
+                )
 
         # Set active provider
-        active_provider = self._provider_manager.get_available_providers()[0]
-        self._provider_manager.set_active_provider(active_provider)
-        logger.info("Active provider: {}", active_provider)
+        available = self._provider_manager.get_available_providers()
+        if not available:
+            logger.warning("No LLM providers initialized")
+            return
+
+        active_id = config.providers.active
+        if active_id and self._provider_manager.has_provider(active_id):
+            self._provider_manager.set_active_provider(active_id)
+        else:
+            self._provider_manager.set_active_provider(available[0])
+
+        logger.info("Active provider: {}", self._provider_manager._active_key)
 
     async def stop(self) -> None:
         """Stop all agent loops."""

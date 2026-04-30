@@ -9,7 +9,7 @@ from .base import (
     ToolResult,
 )
 from .deepseek_provider import DeepSeekProvider
-from .factory import ProviderFactory, ProviderManager, ProviderType
+from .factory import ALL_PROVIDER_TYPES, ProviderFactory, ProviderManager
 from .openai_provider import OpenAIProvider
 
 __all__ = [
@@ -23,5 +23,5 @@ __all__ = [
     "DeepSeekProvider",
     "ProviderFactory",
     "ProviderManager",
-    "ProviderType",
+    "ALL_PROVIDER_TYPES",
 ]
