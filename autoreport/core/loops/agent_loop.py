@@ -7,6 +7,7 @@ from typing import Any
 from loguru import logger
 
 from ...config.schema import AgentDefaults
+from ...core.prompts import PromptLoader
 from ...core.providers.base import LLMProvider
 from ...core.providers.base import Message as LLMMessage
 from ...core.providers.base import ToolResult as LLMToolResult
@@ -24,64 +25,6 @@ from .bus import MessageBus
 class AgentLoop:
     """Agent loop for processing user messages and generating responses."""
 
-    # System prompts for each agent type
-    SYSTEM_PROMPTS = {
-        AgentType.MAIN: """You are the Main Agent for an automated physics experiment report writing system.
-
-Your role is to:
-1. Coordinate the work of sub-agents (data analysis, plotting, theory, report)
-2. Communicate with the user to understand requirements
-3. Make decisions about which sub-agent should handle which task
-4. Review and integrate the outputs from sub-agents
-
-You have access to various tools for file operations, PDF parsing, and execution.
-Use these tools to help manage the project and coordinate with sub-agents.""",
-
-        AgentType.DATA_ANALYSIS: """You are the Data Analysis Agent for a physics experiment report writing system.
-
-Your role is to:
-1. Read experimental data from CSV/Excel files
-2. Process and analyze the data
-3. Perform statistical calculations
-4. Generate summary results for the report
-
-You have access to file operations and Python execution tools.
-Focus on accurate data analysis and clear presentation of results.""",
-
-        AgentType.PLOTTING: """You are the Plotting Agent for a physics experiment report writing system.
-
-Your role is to:
-1. Create data visualizations based on analysis results
-2. Generate charts and graphs using matplotlib
-3. Save plots as image files for the report
-4. Ensure plots are properly labeled and formatted
-
-You have access to file operations, Python execution, and image creation tools.
-Focus on clear, publication-quality visualizations.""",
-
-        AgentType.THEORY: """You are the Theory Agent for a physics experiment report writing system.
-
-Your role is to:
-1. Analyze reference materials and experimental requirements
-2. Derive relevant theoretical formulas and explanations
-3. Provide theoretical background for the experiment
-4. Ensure theoretical accuracy and completeness
-
-You have access to file operations and PDF reference materials.
-Focus on clear, accurate theoretical explanations.""",
-
-        AgentType.REPORT: """You are the Report Writing Agent for a physics experiment report writing system.
-
-Your role is to:
-1. Integrate all outputs from other agents
-2. Write complete LaTeX report sections
-3. Ensure proper formatting and structure
-4. Compile LaTeX to generate final PDF
-
-You have access to file operations, LaTeX compilation, and all project outputs.
-Focus on producing a well-structured, professional report.""",
-    }
-
     def __init__(
         self,
         agent_type: AgentType,
@@ -91,6 +34,7 @@ Focus on producing a well-structured, professional report.""",
         gui: GUIAPI,
         config: AgentDefaults,
         llm_provider: LLMProvider,
+        prompt_loader: PromptLoader | None = None,
     ):
         """Initialize agent loop.
 
@@ -102,6 +46,7 @@ Focus on producing a well-structured, professional report.""",
             gui: GUI API for sending messages.
             config: Agent configuration.
             llm_provider: LLM provider for generating responses.
+            prompt_loader: Optional custom PromptLoader instance.
         """
         self.agent_type = agent_type
         self.workspace = Path(workspace).resolve()
@@ -110,6 +55,11 @@ Focus on producing a well-structured, professional report.""",
         self.gui = gui
         self.config = config
         self.llm_provider = llm_provider
+
+        # Initialize prompt loader
+        self._prompt_loader = prompt_loader or PromptLoader()
+        self._identity_prompt: str | None = None
+        self._full_prompt_loaded = False
 
         self._status = AgentStatus.IDLE
         self._running = False
@@ -193,11 +143,8 @@ Focus on producing a well-structured, professional report.""",
                 LLMMessage(role="user", content=message.content)
             )
 
-            # Get system prompt
-            system_prompt = self.SYSTEM_PROMPTS.get(
-                self.agent_type,
-                "You are a helpful assistant."
-            )
+            # Get system prompt with progressive loading
+            system_prompt = await self._get_system_prompt()
 
             # Prepare messages with system prompt
             messages = [LLMMessage(role="system", content=system_prompt)]
@@ -448,3 +395,48 @@ Focus on producing a well-structured, professional report.""",
             True if debug mode is enabled.
         """
         return self._debug_mode
+
+    async def _get_system_prompt(self) -> str:
+        """Get system prompt with progressive loading.
+
+        Returns:
+            Complete system prompt (identity + full instructions).
+
+        Progressive loading strategy:
+        - First call: Load identity (fast startup)
+        - Subsequent calls: Load full prompt (detailed instructions)
+        """
+        agent_type_str = self._get_agent_type_str()
+
+        # First call: load identity only
+        if self._identity_prompt is None:
+            logger.debug("Loading identity prompt for agent: {}", self.agent_type)
+            self._identity_prompt = self._prompt_loader.load_identity(agent_type_str)
+            return self._identity_prompt
+
+        # Check if we need to load full prompt
+        if not self._full_prompt_loaded:
+            logger.debug("Loading full prompt for agent: {}", self.agent_type)
+            full_prompt = self._prompt_loader.load_full(agent_type_str)
+            # Combine identity and full prompts
+            complete_prompt = f"{self._identity_prompt}\n\n{full_prompt}"
+            self._full_prompt_loaded = True
+            return complete_prompt
+
+        # Return cached complete prompt
+        return f"{self._identity_prompt}\n\n{self._prompt_loader.load_full(agent_type_str)}"
+
+    def _get_agent_type_str(self) -> str:
+        """Convert AgentType to string for prompt loading.
+
+        Returns:
+            Agent type string identifier.
+        """
+        type_mapping = {
+            AgentType.MAIN: "main",
+            AgentType.DATA_ANALYSIS: "data_analysis",
+            AgentType.PLOTTING: "plotting",
+            AgentType.THEORY: "theory",
+            AgentType.REPORT: "report",
+        }
+        return type_mapping.get(self.agent_type, str(self.agent_type).lower())

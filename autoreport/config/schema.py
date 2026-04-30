@@ -31,6 +31,15 @@ class ProvidersConfig(Base):
     deepseek: ProviderConfig = Field(default_factory=ProviderConfig)
 
 
+class MinerUAPIConfig(Base):
+    """MinerU API configuration for PDF parsing."""
+
+    url: str = "http://localhost:9999"
+    enabled: bool = True
+    timeout: int = 300  # seconds
+    validate_on_startup: bool = True  # Soft warning if unavailable
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -40,6 +49,7 @@ class AgentDefaults(Base):
     temperature: float = 0.1
     max_tool_iterations: int = 200
     timezone: str = "Asia/Shanghai"
+    prompt_templates_dir: str = "templates/agents"
 
 
 class AgentsConfig(Base):
@@ -53,6 +63,7 @@ class AppConfig(Base):
 
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
+    mineru_api: MinerUAPIConfig = Field(default_factory=MinerUAPIConfig)
 
 
 class Settings(BaseSettings):

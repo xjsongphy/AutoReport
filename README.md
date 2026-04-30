@@ -1,39 +1,41 @@
 # AutoReport
 
-基于多 Agent 协作的自动化物理实验报告撰写系统。用户提供实验数据和参考资料，Agent 团队通过理论推导、数据分析、可视化绘图和 LaTeX 排版，自动生成完整的实验报告。
+[中文README](README.zh.md)
 
-## 功能特性
+An automated physics experiment report writing system based on multi-agent collaboration. Users provide experimental data and reference materials, then agents collaboratively generate LaTeX reports through theoretical derivation, data analysis, visualization, and typesetting.
 
-- **多 Agent 协作** — 主 Agent 调度，数据分析、图像绘制、理论推导、报告撰写四个子 Agent 各司其职
-- **多 Provider 支持** — Anthropic、OpenAI、DeepSeek 等，运行时可切换模型，切换 Provider 支持 Restart
-- **目录权限隔离** — 每个 Agent 只能写入指定目录，防止交叉污染
-- **检查点回滚** — 关键节点自动创建检查点，可回滚到任意历史状态
-- **子 Agent 调试模式** — 断开与主 Agent 的通道，独立测试单个 Agent
-- **交互式调整** — 用户可随时向任意 Agent 发送消息进行干预和优化
+## Features
 
-## 快速开始
+- **Multi-Agent Collaboration** — Main Agent orchestrates, with four sub-agents (data analysis, plotting, theory, report) each specializing in their domain
+- **Multi-Provider Support** — Anthropic, OpenAI, DeepSeek, etc. Runtime model switching, provider switch requires restart
+- **Directory Permission Isolation** — Each agent can only write to designated directories, preventing cross-contamination
+- **Checkpoint Rollback** — Automatically creates checkpoints at key nodes, can rollback to any historical state
+- **Sub-Agent Debug Mode** — Disconnect from Main Agent channel, test individual agents independently
+- **Interactive Adjustment** — Users can send messages to any agent at any time for intervention and optimization
 
-### 前置依赖
+## Quick Start
+
+### Prerequisites
 
 - Python >= 3.12
-- [uv](https://docs.astral.sh/uv/) 包管理器
-- TeX 发行版（如 TeX Live 或 MiKTeX，用于编译 LaTeX）
-- 至少一个 LLM Provider 的 API Key
+- [uv](https://docs.astral.sh/uv/) package manager
+- TeX distribution (TeX Live or MiKTeX for LaTeX compilation)
+- At least one LLM Provider API key
 
-### 安装
+### Installation
 
 ```bash
 git clone <repo-url> && cd AutoReport
 uv sync
 ```
 
-### 运行
+### Running
 
 ```bash
 autoreport
 ```
 
-首次启动会提示配置 API 密钥。也可通过环境变量预配置：
+On first launch, you'll be prompted to configure API keys. You can also pre-configure via environment variables:
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
@@ -42,80 +44,191 @@ export DEEPSEEK_API_KEY="sk-..."
 autoreport
 ```
 
-## 项目结构
+## Project Structure
 
-每个实验报告对应一个项目文件夹，固定目录结构：
+Each experiment report corresponds to a project folder with a fixed directory structure:
 
 ```
 my_experiment/
-├── data/            # 原始实验数据（用户放入）+ 分析结果
-│   └── processed/   # 数据分析 Agent 输出
-├── references/      # 参考资料（PDF、图片）、自定义模板
-├── theory/          # 理论推导 Agent 输出
-├── code/            # 图像绘制 Agent 的代码和图片
-└── tex/             # 报告 Agent 的 LaTeX 源码和编译产物
+├── data/            # Raw experimental data (user input) + analysis results
+│   └── processed/   # Data Analysis Agent output
+├── references/      # Reference materials (PDF, images), custom templates
+├── theory/          # Theory Agent output
+├── code/            # Plotting Agent code and generated images
+└── tex/             # Report Agent LaTeX source and compiled output
 ```
 
-### Agent 权限
+### Agent Permissions
 
-| Agent | 写入目录 | 读取范围 |
-|-------|---------|---------|
-| 数据分析 | `data/processed/` | 全部 |
-| 图像绘制 | `code/` | 全部 |
-| 理论推导 | `theory/` | 全部 |
-| 报告撰写 | `tex/` | 全部 |
-| 用户 | `data/`、`references/` | 全部 |
+| Agent | Write Directory | Read Scope |
+|-------|----------------|------------|
+| Data Analysis | `data/processed/` | All |
+| Plotting | `code/` | All |
+| Theory | `theory/` | All |
+| Report | `tex/` | All |
+| User | `data/`, `references/` | All |
 
-## 架构
+## Architecture
 
 ```
 autoreport/
-├── config/          # 配置管理（Pydantic Settings + YAML）
+├── config/          # Configuration management (Pydantic Settings + YAML)
 ├── core/
-│   ├── loops/       # Agent Loop、消息总线、Agent 管理器
-│   ├── providers/   # LLM Provider 抽象层（Anthropic/OpenAI/DeepSeek）
-│   └── tools/       # 工具集（文件操作、Shell 执行、PDF 解析）
-├── gui/             # PyQt6 界面（主窗口、项目对话框、配置对话框）
-│   └── widgets/     # 可复用组件（文件树、预览、Agent 面板）
-├── interfaces/      # GUI-后台通信协议（Protocol + 消息类型）
-├── utils/           # 日志配置（loguru）
-└── app.py           # 入口点
+│   ├── loops/       # Agent Loop, message bus, agent manager
+│   ├── providers/   # LLM Provider abstraction layer
+│   ├── prompts/     # Agent prompt templates with progressive loading
+│   └── tools/       # Tool set (file operations, shell execution, PDF parsing)
+├── gui/             # PyQt6 interface (main window, dialogs, widgets)
+├── interfaces/      # GUI-backend communication protocol
+├── utils/           # Logging configuration (loguru)
+├── templates/       # Built-in templates (agent prompts, report templates)
+└── app.py           # Entry point
 ```
 
-GUI 与后台通过 `interfaces` 层解耦：定义了 `GUIAPI` / `BackendAPI` Protocol 和消息类型，双方通过异步消息总线通信。
+GUI and backend are decoupled through the `interfaces` layer: defining `GUIAPI`/`BackendAPI` protocols and message types, communicating via an asynchronous message bus.
 
-## 开发
+## Development
 
-### 运行测试
+### Run Tests
 
 ```bash
 uv run pytest -v
 ```
 
-### 代码检查
+### Code Linting
 
 ```bash
 uv run ruff check autoreport tests
-uv run ruff check --fix autoreport tests   # 自动修复
+uv run ruff check --fix autoreport tests   # Auto-fix
 ```
 
-### 运行单个测试
+### Run Single Test
 
 ```bash
 uv run pytest tests/test_config.py -v
 uv run pytest tests/test_file_tools.py::test_read_file -v
 ```
 
-## 技术栈
+## Tech Stack
 
-| 层 | 技术 |
-|----|------|
-| 语言 | Python 3.12 |
-| 包管理 | uv + hatchling |
+| Layer | Technology |
+|-------|------------|
+| Language | Python 3.12 |
+| Package Management | uv + hatchling |
 | GUI | PyQt6 |
-| LLM | 原生 SDK（anthropic / openai） |
-| 配置 | pydantic-settings + YAML |
-| 日志 | loguru |
-| 数据处理 | pandas, matplotlib |
-| LaTeX 编译 | xelatex / lualatex（系统安装） |
-| PDF 解析 | mineru-open-api（外部服务） |
+| LLM | Native SDK (anthropic / openai) |
+| Configuration | pydantic-settings + YAML |
+| Logging | loguru |
+| Data Processing | pandas, matplotlib |
+| LaTeX Compilation | xelatex / lualatex (system installed) |
+| PDF Parsing | mineru-open-api (external service) |
+
+## Configuration
+
+Configuration file: `autoreport.config.yaml`
+
+### Agent Configuration
+
+```yaml
+agents:
+  defaults:
+    model: "anthropic/claude-sonnet-4.5"
+    provider: "auto"
+    max_tokens: 8192
+    temperature: 0.1
+    max_tool_iterations: 200
+    prompt_templates_dir: "templates/agents"
+```
+
+### MinerU API Configuration
+
+```yaml
+mineru_api:
+  url: "http://localhost:9999"
+  enabled: true
+  timeout: 300
+  validate_on_startup: true  # Soft warning if unavailable
+```
+
+### Provider Configuration
+
+```yaml
+providers:
+  anthropic:
+    api_key: null  # Set via ANTHROPIC_API_KEY env var
+    api_base: null
+  openai:
+    api_key: null  # Set via OPENAI_API_KEY env var
+    api_base: null
+  deepseek:
+    api_key: null  # Set via DEEPSEEK_API_KEY env var
+    api_base: "https://api.deepseek.com/v1"
+```
+
+## Agent Prompts
+
+AutoReport uses a progressive loading system for agent prompts:
+
+- **Identity** (loaded at startup): Brief role definition (~100-200 words)
+- **Full Instructions** (loaded on first activation): Detailed workflow, reference handling, narrative style, output format
+
+Prompt templates are located in `autoreport/templates/agents/`:
+- `main_agent.md` - Main coordination agent
+- `data_analysis_agent.md` - Data processing and analysis
+- `plotting_agent.md` - Data visualization
+- `theory_agent.md` - Theoretical derivation
+- `report_agent.md` - LaTeX report writing
+
+## Report Templates
+
+Built-in report templates are in `autoreport/templates/reports/`:
+
+- `default_experiment_report.tex` - Standard physics experiment report template
+- `requirements.md` - Narrative style and formatting guidelines
+- `README.md` - Template documentation
+
+Users can override built-in templates by placing custom templates in `project/references/`.
+
+**Priority**: User templates > Built-in templates > Standard LaTeX
+
+## MinerU Open API Integration
+
+AutoReport uses [mineru-open-api](https://github.com/opendatalab/MinerU) for PDF parsing.
+
+### Setup
+
+1. Install and start mineru-open-api service:
+```bash
+pip install mineru-open-api
+mineru-open-api --port 9999
+```
+
+2. Configure in `autoreport.config.yaml`:
+```yaml
+mineru_api:
+  url: "http://localhost:9999"
+  enabled: true
+  timeout: 300
+```
+
+3. The system will show a soft warning on startup if the API is unavailable, but will still allow the application to run.
+
+### Features
+
+- Converts PDF reference materials to Markdown
+- Extracts text, images, and tables
+- Supports multi-page documents
+- Asynchronous processing with 5-minute timeout
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit issues or pull requests.
+
+## Reference Projects
+
+- [DeepCode](../DeepCode) — API configuration (YAML secrets + env fallback), multi-provider support, error handling, loop detection
+- [nanobot](../nanobot) — AgentLoop core architecture, tool definitions, multi-provider native SDK, compact/command system, Pydantic config schema
+
+## License
+
+MIT License - see LICENSE file for details
