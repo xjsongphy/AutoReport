@@ -176,7 +176,15 @@ class ProjectDialog(QDialog):
                     return
 
             # Create project structure
-            self._create_project_structure(path)
+            try:
+                self._create_project_structure(path)
+            except OSError as e:
+                logger.error("Failed to create project structure: {}", e)
+                QMessageBox.critical(
+                    self, "创建失败",
+                    f"无法在 '{path.name}' 中创建项目结构：\n{e}"
+                )
+                return
 
             # Add to recent list
             self._add_project_to_list(path)
@@ -210,7 +218,15 @@ class ProjectDialog(QDialog):
                 )
 
                 if reply == QMessageBox.StandardButton.Yes:
-                    self._create_project_structure(path)
+                    try:
+                        self._create_project_structure(path)
+                    except OSError as e:
+                        logger.error("Failed to create project structure: {}", e)
+                        QMessageBox.critical(
+                            self, "创建失败",
+                            f"无法在 '{path.name}' 中创建项目结构：\n{e}"
+                        )
+                        return
                     self._add_project_to_list(path)
                 else:
                     return
@@ -241,7 +257,11 @@ class ProjectDialog(QDialog):
         """
         for dir_name in PROJECT_DIRECTORIES:
             dir_path = path / dir_name
-            dir_path.mkdir(parents=True, exist_ok=True)
+            try:
+                dir_path.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                logger.error("Failed to create directory {}: {}", dir_path, e)
+                raise
 
         logger.debug("Created project structure in: {}", path)
 

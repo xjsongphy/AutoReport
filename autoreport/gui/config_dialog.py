@@ -1,9 +1,7 @@
 """Configuration dialog with multi-provider support and cc-switch presets."""
 
-import os
-
 from loguru import logger
-from PyQt6.QtCore import QEvent, Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -13,8 +11,6 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -51,7 +47,7 @@ PROVIDER_LABELS = {
 class NoWheelComboBox(QComboBox):
     """QComboBox that ignores mouse wheel events to prevent accidental changes."""
 
-    def wheelEvent(self, event):
+    def wheelEvent(self, event) -> None:  # noqa: N802
         event.ignore()
 
 
@@ -292,10 +288,13 @@ class PresetSelectorDialog(QDialog):
 class ConfigDialog(QDialog):
     """Multi-configuration API settings dialog with preset support."""
 
+    _sync_finished = pyqtSignal(int, bool, str)  # n, cached, error_msg
+
     def __init__(self, config_manager: ConfigManager, parent=None):
         super().__init__(parent)
         self._config_manager = config_manager
         self._cards: list[ConfigCard] = []
+        self._sync_finished.connect(self._on_sync_finished)
         self._setup_ui()
         self._apply_style()
 
@@ -415,11 +414,19 @@ class ConfigDialog(QDialog):
         configs = [c.get_config() for c in self._cards] if self._cards else []
         active_id = self._config_manager.config.providers.active
 
+        matched = False
         for cfg in configs:
             label = f"{cfg.name} ({PROVIDER_LABELS.get(cfg.provider, cfg.provider)})"
             self.active_combo.addItem(label, cfg.id)
             if cfg.id == active_id:
                 self.active_combo.setCurrentIndex(self.active_combo.count() - 1)
+                matched = True
+
+        if not matched and configs:
+            self._config_manager.config.providers.active = configs[0].id
+            self.active_combo.setCurrentIndex(0)
+        elif not configs:
+            self._config_manager.config.providers.active = ""
 
     def _rebuild_cards(self) -> None:
         for card in self._cards:
@@ -435,9 +442,15 @@ class ConfigDialog(QDialog):
             self._cards.append(card)
 
     def _remove_card(self, card: ConfigCard) -> None:
+        cfg = card.get_config()
+        was_active = cfg.id == self._config_manager.config.providers.active
         self._cards.remove(card)
         self.scroll_layout.removeWidget(card)
         card.deleteLater()
+        if was_active and self._cards:
+            self._config_manager.config.providers.active = self._cards[0].get_config().id
+        elif was_active:
+            self._config_manager.config.providers.active = ""
         self._refresh_active_combo()
 
     def _add_card(self, cfg: ApiConfig) -> None:
@@ -467,33 +480,45 @@ class ConfigDialog(QDialog):
             ))
 
     def _sync_presets(self) -> None:
+        from threading import Thread
+
         self.sync_btn.setEnabled(False)
         self.sync_btn.setText("同步中...")
-        QApplication.processEvents()
 
-        try:
-            n = sync_presets(timeout=15)
-            cached = is_cached()
-            if cached:
-                count = len(load_presets())
-                QMessageBox.information(
-                    self, "同步完成",
-                    f"成功同步 {n} 个文件。\n当前共 {count} 个预设模板可用。",
-                )
-            else:
-                QMessageBox.warning(
-                    self, "同步失败",
-                    "无法下载预设文件，请检查网络连接和代理设置。\n"
-                    "将使用内置预设模板。",
-                )
-        except Exception as e:
+        def _run():
+            try:
+                n = sync_presets(timeout=15)
+                cached = is_cached()
+                error_msg = ""
+            except Exception as e:
+                n = 0
+                cached = False
+                error_msg = str(e)
+            self._sync_finished.emit(n, cached, error_msg)
+
+        Thread(target=_run, daemon=True).start()
+
+    def _on_sync_finished(self, n: int, cached: bool, error_msg: str) -> None:
+        self.sync_btn.setEnabled(True)
+        self.sync_btn.setText("同步预设")
+
+        if error_msg:
             QMessageBox.warning(
                 self, "同步失败",
-                f"预设同步出错：{e}\n将使用内置预设模板。",
+                f"预设同步出错：{error_msg}\n将使用内置预设模板。",
             )
-        finally:
-            self.sync_btn.setEnabled(True)
-            self.sync_btn.setText("同步预设")
+        elif cached:
+            count = len(load_presets())
+            QMessageBox.information(
+                self, "同步完成",
+                f"成功同步 {n} 个文件。\n当前共 {count} 个预设模板可用。",
+            )
+        else:
+            QMessageBox.warning(
+                self, "同步失败",
+                "无法下载预设文件，请检查网络连接和代理设置。\n"
+                "将使用内置预设模板。",
+            )
 
     def _save_config(self) -> None:
         cfg = self._config_manager.config
@@ -773,7 +798,6 @@ class ConfigDialog(QDialog):
                 subcontrol-position: top right;
                 width: 24px;
                 border: none;
-                border-left: 1px solid {c["inputBorder"]};
                 background: transparent;
             }}
             QComboBox::down-arrow {{

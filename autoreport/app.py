@@ -296,6 +296,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=False,
         help="从 cc-switch 仓库同步最新预设模板并退出",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        default=False,
+        help="输出 DEBUG 级别调试信息",
+    )
     return parser.parse_args(argv)
 
 
@@ -346,7 +352,8 @@ def main():
         qt_app.setWindowIcon(QIcon(str(icon_path)))
 
     # Now safe to setup logging and exception handling
-    setup_logging(log_level="INFO", log_to_file=True)
+    log_level = "DEBUG" if args.debug else "INFO"
+    setup_logging(log_level=log_level, log_to_file=True)
     setup_exception_handler()
 
     logger.info("AutoReport starting...")
