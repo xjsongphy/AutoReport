@@ -1,6 +1,6 @@
 # AutoReport
 
-[中文README](README.zh.md)
+[中文](README_zh.md)
 
 An automated physics experiment report writing system based on multi-agent collaboration. Users provide experimental data and reference materials, then agents collaboratively generate LaTeX reports through theoretical derivation, data analysis, visualization, and typesetting.
 
