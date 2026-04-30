@@ -2,6 +2,7 @@
 
 from loguru import logger
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -45,10 +46,29 @@ PROVIDER_LABELS = {
 
 
 class NoWheelComboBox(QComboBox):
-    """QComboBox that ignores mouse wheel events to prevent accidental changes."""
+    """QComboBox that ignores mouse wheel events and paints a clean arrow."""
 
     def wheelEvent(self, event) -> None:  # noqa: N802
         event.ignore()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        x = self.width() - 16
+        y = self.height() // 2 - 2
+        hints = QApplication.styleHints()
+        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
+        color = QColor("#999") if dark else QColor("#666")
+
+        pen = QPen(color, 1.5)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.drawLine(x, y, x + 5, y + 5)
+        painter.drawLine(x + 5, y + 5, x + 10, y)
+        painter.end()
 
 
 class ConfigCard(QFrame):
@@ -170,11 +190,11 @@ class ConfigCard(QFrame):
     def _toggle_key_visibility(self, checked: bool) -> None:
         if checked:
             self.key_input.setEchoMode(QLineEdit.EchoMode.Normal)
-            self.show_key_btn.setText("◎")
+            self.show_key_btn.setText("🙈")
             self.show_key_btn.setToolTip("隐藏 API Key")
         else:
             self.key_input.setEchoMode(QLineEdit.EchoMode.Password)
-            self.show_key_btn.setText("◉")
+            self.show_key_btn.setText("👁")
             self.show_key_btn.setToolTip("显示 API Key")
 
     _DEFAULT_BASES: dict[str, str] = {
@@ -822,7 +842,7 @@ class ConfigDialog(QDialog):
             QComboBox {{
                 border: 1px solid {c["inputBorder"]};
                 border-radius: 4px;
-                padding: 6px 28px 6px 10px;
+                padding: 6px 30px 6px 10px;
                 font-size: 13px;
                 background-color: {c["inputBg"]};
                 color: {c["inputFg"]};
@@ -830,19 +850,15 @@ class ConfigDialog(QDialog):
             QComboBox::drop-down {{
                 subcontrol-origin: padding;
                 subcontrol-position: top right;
-                width: 26px;
+                width: 0px;
                 border: none;
-                background: {c["inputBg"]};
+                background: transparent;
             }}
             QComboBox::down-arrow {{
                 image: none;
-                width: 14px;
-                height: 14px;
-                margin-top: 3px;
-                margin-right: 4px;
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 7px solid {c["subtitleFg"]};
+                width: 0px;
+                height: 0px;
+                border: none;
             }}
             QComboBox QAbstractItemView {{
                 border: 1px solid {c["inputBorder"]};
