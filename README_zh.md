@@ -37,6 +37,8 @@ uv sync --all-extras
 autoreport
 ```
 
+> 如果提示 `autoreport` 命令未找到，请使用 `uv run autoreport` 代替，或先激活虚拟环境：`.\.venv\Scripts\Activate.ps1`。
+
 首次启动会提示配置 API 密钥。也可通过环境变量预配置：
 
 ```bash

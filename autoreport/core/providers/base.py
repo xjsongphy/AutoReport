@@ -1,16 +1,8 @@
 """LLM Provider base classes and interfaces."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
-
-
-@dataclass
-class Message:
-    """Chat message."""
-
-    role: str  # "user", "assistant", "system"
-    content: str
 
 
 @dataclass
@@ -31,11 +23,29 @@ class ToolResult:
 
 
 @dataclass
+class Message:
+    """Chat message with optional structured content for tool calls/results.
+
+    Providers convert these to API-specific formats:
+    - Anthropic: tool_calls → content blocks with type="tool_use",
+                 tool_results → user message with type="tool_result" blocks
+    - OpenAI-compat: tool_calls → assistant message with tool_calls field,
+                     tool_results → separate "tool" role messages
+    """
+
+    role: str  # "user", "assistant", "system"
+    content: str
+    tool_calls: list[ToolCall] | None = None  # assistant messages with tool calls
+    tool_call_id: str | None = None  # tool result messages (role="tool" for OpenAI)
+    is_tool_result: bool = False  # marks this as a tool result message
+
+
+@dataclass
 class LLMResponse:
     """Response from LLM."""
 
     content: str | None
-    tool_calls: list[ToolCall]
+    tool_calls: list[ToolCall] = field(default_factory=list)
     usage: dict[str, int] | None = None
 
 
@@ -70,33 +80,11 @@ class LLMProvider(ABC):
         """Send chat completion request.
 
         Args:
-            messages: List of chat messages.
+            messages: List of chat messages (may contain tool calls/results).
             tools: Optional list of tool definitions for function calling.
             temperature: Sampling temperature.
             max_tokens: Maximum tokens to generate.
 
         Returns:
             LLM response with content and/or tool calls.
-        """
-
-    @abstractmethod
-    async def chat_with_tools(
-        self,
-        messages: list[Message],
-        tool_results: list[ToolResult],
-        tools: list[dict],
-        temperature: float = 0.1,
-        max_tokens: int = 8192,
-    ) -> LLMResponse:
-        """Send chat completion with tool results.
-
-        Args:
-            messages: List of chat messages (including tool calls).
-            tool_results: Results from tool executions.
-            tools: List of tool definitions.
-            temperature: Sampling temperature.
-            max_tokens: Maximum tokens to generate.
-
-        Returns:
-            LLM response.
         """

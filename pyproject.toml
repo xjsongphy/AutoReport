@@ -46,4 +46,4 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [project.scripts]
-autoreport = "autoreport.app:main"
+autoreport = "autoreport.__main__:main"

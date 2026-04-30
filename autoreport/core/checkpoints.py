@@ -1,5 +1,6 @@
 """Checkpoint management for rollback functionality."""
 
+import asyncio
 import hashlib
 import json
 from dataclasses import asdict, dataclass
@@ -19,6 +20,7 @@ class FileState:
     size: int
     mtime: float
     is_binary: bool = False
+    content: str | None = None  # Text file content snapshot (None for binary)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -210,13 +212,25 @@ class CheckpointManager:
                 # Get file stats
                 stat = file_path.stat()
                 relative_path = file_path.relative_to(self.workspace)
+                posix_path = relative_path.as_posix()
 
-                file_states[str(relative_path)] = FileState(
-                    path=str(relative_path),
+                is_binary = await self._is_binary_file(file_path)
+                content = None
+                if not is_binary and stat.st_size < 1_000_000:  # Skip files > 1MB
+                    try:
+                        content = await asyncio.to_thread(
+                            file_path.read_text, encoding="utf-8"
+                        )
+                    except (UnicodeDecodeError, OSError):
+                        content = None
+
+                file_states[posix_path] = FileState(
+                    path=posix_path,
                     hash=file_hash,
                     size=stat.st_size,
                     mtime=stat.st_mtime,
-                    is_binary=await self._is_binary_file(file_path),
+                    is_binary=is_binary,
+                    content=content,
                 )
 
         return file_states
@@ -235,20 +249,28 @@ class CheckpointManager:
     async def _restore_files(self, checkpoint: CheckpointData) -> None:
         """Restore files to checkpoint state.
 
+        Implementation uses content snapshots stored at checkpoint creation
+        time. Each checkpoint captures file content for non-binary files.
+
         Args:
             checkpoint: Checkpoint to restore.
         """
-        # Note: This is a simplified implementation
-        # A full implementation would need:
-        # 1. Backup current state before restoring
-        # 2. Handle files that didn't exist at checkpoint
-        # 3. Handle files that exist now but didn't at checkpoint
-        # 4. Handle file content restoration (would need to store actual content or use git)
+        restored = 0
+        for relative_path, state in checkpoint.file_states.items():
+            file_path = self.workspace / relative_path
 
-        logger.warning(
-            "File restoration not fully implemented. "
-            "Checkpoint data saved but files not restored."
-        )
+            if state.content is not None:
+                # Restore file content from snapshot
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                await asyncio.to_thread(
+                    file_path.write_text, state.content, encoding="utf-8"
+                )
+                logger.info("Restored file: {}", relative_path)
+                restored += 1
+            elif not file_path.exists():
+                logger.warning("Cannot restore binary file without snapshot: {}", relative_path)
+
+        logger.info("Restored {}/{} files from checkpoint {}", restored, len(checkpoint.file_states), checkpoint.id)
 
         # For now, just verify that checkpoint files exist
         missing_files = []

@@ -39,6 +39,8 @@ uv sync --all-extras
 autoreport
 ```
 
+> If `autoreport` command is not found, use `uv run autoreport` instead, or activate the virtual environment first: `source .venv/bin/activate` (Linux/macOS) or `.\.venv\Scripts\Activate.ps1` (Windows).
+
 On first launch, you'll be prompted to configure API keys. You can also pre-configure via environment variables:
 
 ```bash

@@ -100,6 +100,8 @@ class AutoReportApp:
 
     def run_gui(self) -> None:
         """Run GUI application."""
+        import threading
+
         # QApplication already created in main(), get the instance
         app = QApplication.instance()
 
@@ -128,18 +130,27 @@ class AutoReportApp:
             logger.error("No workspace selected")
             sys.exit(1)
 
-        # Now startup with selected workspace
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        # Create a dedicated async event loop for the backend
+        self._async_loop = asyncio.new_event_loop()
 
+        # Run startup in the async loop
         try:
-            success = loop.run_until_complete(self.startup(workspace))
+            success = self._async_loop.run_until_complete(self.startup(workspace))
             if not success:
                 logger.error("Failed to start application")
                 sys.exit(1)
         except Exception as e:
             log_exception("Error during startup", e)
             sys.exit(1)
+
+        # Keep the async loop running in a background thread so
+        # run_coroutine_threadsafe works from the Qt GUI thread.
+        def _run_loop():
+            asyncio.set_event_loop(self._async_loop)
+            self._async_loop.run_forever()
+
+        self._loop_thread = threading.Thread(target=_run_loop, daemon=True)
+        self._loop_thread.start()
 
         # Activate debug mode for agents specified via --debug-agent
         for agent in getattr(self, "_debug_agents_on_start", []):
@@ -151,9 +162,16 @@ class AutoReportApp:
             backend=self.backend,
             workspace=workspace,
         )
+        self.main_window.set_async_loop(self._async_loop)
         self.main_window.show()
 
-        sys.exit(app.exec())
+        exit_code = app.exec()
+
+        # Stop the background event loop
+        self._async_loop.call_soon_threadsafe(self._async_loop.stop)
+        self._loop_thread.join(timeout=5)
+
+        sys.exit(exit_code)
 
 
 class BackendAPIImpl(BackendAPI):
@@ -300,19 +318,12 @@ def _try_sync_presets(silent: bool = False) -> bool:
 
 def main():
     """Main entry point."""
-    # Setup logging
-    setup_logging(log_level="INFO", log_to_file=True)
-
-    # Setup global exception handler
-    setup_exception_handler()
-
-    # Parse arguments
+    # Parse arguments first (no GUI needed)
     args = parse_args()
-
-    logger.info("AutoReport starting...")
 
     # Handle --sync-presets (CLI mode, no GUI)
     if args.sync_presets:
+        setup_logging(log_level="INFO", log_to_file=True)
         print("Syncing presets from cc-switch...")
         ok = _try_sync_presets(silent=False)
         if ok:
@@ -323,16 +334,23 @@ def main():
             print("Sync failed. Check network/proxy settings.")
         sys.exit(0 if ok else 1)
 
+    # Create Qt application BEFORE any other initialization.
+    # Must keep a strong reference to prevent garbage collection.
+    qt_app = QApplication(sys.argv)
+    assert QApplication.instance() is not None, "QApplication creation failed"
+
+    # Now safe to setup logging and exception handling
+    setup_logging(log_level="INFO", log_to_file=True)
+    setup_exception_handler()
+
+    logger.info("AutoReport starting...")
+
     app = AutoReportApp()
 
     # Store debug agents for activation after loop manager starts
     app._debug_agents_on_start = args.debug_agent
 
-    # Create Qt application first (needed for dialogs)
-    _ = QApplication(sys.argv)  # noqa: F841
-
     # Auto-sync presets on startup (failure is non-fatal)
-    from PyQt6.QtWidgets import QMessageBox
     if not _try_sync_presets(silent=True):
         logger.info("Presets not synced — UI sync button available for retry")
 
@@ -358,12 +376,14 @@ def main():
     # Run GUI (includes project selection and startup)
     app.run_gui()
 
-    # Shutdown
+    # Shutdown (keep qt_app alive until exit)
     try:
         loop = asyncio.get_event_loop()
         loop.run_until_complete(app.shutdown())
     except Exception as e:
         log_exception("Error during shutdown", e)
+    finally:
+        del qt_app
 
 
 if __name__ == "__main__":

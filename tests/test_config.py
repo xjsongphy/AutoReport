@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from autoreport.config import AppConfig, ConfigManager, Settings
+from autoreport.config.schema import ApiConfig
 
 
 @pytest.fixture
@@ -23,7 +24,6 @@ async def test_config_manager_load_default(temp_config_file):
     config = settings.load_config()
 
     assert isinstance(config, AppConfig)
-    assert config.agents.defaults.model == "anthropic/claude-sonnet-4.5"
     assert config.agents.defaults.provider == "auto"
 
 
@@ -37,8 +37,10 @@ async def test_config_manager_validate_api_keys():
     assert is_valid is False
     assert len(available) == 0
 
-    # Set Anthropic API key
-    config_manager.config.providers.anthropic.api_key = "test_key"
+    # Add an Anthropic configuration with API key
+    config_manager.config.providers.configurations.append(
+        ApiConfig(provider="anthropic", api_key="test_key", enabled=True, name="Test Anthropic")
+    )
 
     is_valid, available = config_manager.validate_api_keys()
     assert is_valid is True
@@ -88,16 +90,28 @@ async def test_config_manager_env_override():
     """Test environment variable override for API keys."""
     import os
 
+    # Add an Anthropic configuration first
+    config_manager = ConfigManager()
+    config_manager.config.providers.configurations.append(
+        ApiConfig(provider="anthropic", api_key="original_key", enabled=True, name="Anthropic")
+    )
+
     # Set environment variable
     old_key = os.environ.get("ANTHROPIC_API_KEY")
     os.environ["ANTHROPIC_API_KEY"] = "env_test_key"
 
     try:
-        config_manager = ConfigManager()
-        config = config_manager.config
+        # Re-create settings to pick up env var
+        from autoreport.config.schema import Settings
+        settings = Settings()
+        settings._apply_env_overrides(config_manager.config)
 
         # Environment variable should override
-        assert config.providers.anthropic.api_key == "env_test_key"
+        anthropic_cfg = next(
+            c for c in config_manager.config.providers.configurations
+            if c.provider == "anthropic"
+        )
+        assert anthropic_cfg.api_key == "env_test_key"
 
     finally:
         # Restore

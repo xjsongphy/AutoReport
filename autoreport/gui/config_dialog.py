@@ -3,7 +3,7 @@
 import os
 
 from loguru import logger
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QEvent, Qt
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -48,6 +48,13 @@ PROVIDER_LABELS = {
 }
 
 
+class NoWheelComboBox(QComboBox):
+    """QComboBox that ignores mouse wheel events to prevent accidental changes."""
+
+    def wheelEvent(self, event):
+        event.ignore()
+
+
 class ConfigCard(QFrame):
     """Card widget for a single API configuration."""
 
@@ -90,7 +97,7 @@ class ConfigCard(QFrame):
         type_label.setFixedWidth(60)
         row2.addWidget(type_label)
 
-        self.provider_combo = QComboBox()
+        self.provider_combo = NoWheelComboBox()
         for pid, label in PROVIDER_LABELS.items():
             self.provider_combo.addItem(label, pid)
         idx = self.provider_combo.findData(self.config.provider)
@@ -245,14 +252,7 @@ class PresetSelectorDialog(QDialog):
                 btn.setCursor(Qt.CursorShape.PointingHandCursor)
                 btn.clicked.connect(lambda checked, p=preset: self._select(p))
 
-                # Format button text
-                info_parts = [preset.name]
-                if preset.default_model:
-                    info_parts.append(preset.default_model)
-                if preset.base_url:
-                    info_parts.append(preset.base_url[:60])
-
-                btn.setText("  ".join(info_parts))
+                btn.setText(preset.name)
                 scroll_layout.addWidget(btn)
 
         scroll_layout.addStretch()
@@ -321,7 +321,7 @@ class ConfigDialog(QDialog):
         active_label.setObjectName("activeLabel")
         active_row.addWidget(active_label)
 
-        self.active_combo = QComboBox()
+        self.active_combo = NoWheelComboBox()
         self.active_combo.setMinimumWidth(200)
         self._refresh_active_combo()
         active_row.addWidget(self.active_combo, 1)

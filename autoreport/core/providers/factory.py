@@ -4,16 +4,12 @@ from loguru import logger
 
 from .anthropic_provider import AnthropicProvider
 from .base import LLMProvider
-from .deepseek_provider import DeepSeekProvider
-from .openai_provider import OpenAIProvider
+from .openai_provider import OpenAICompatProvider
 
 # All supported provider types
 ALL_PROVIDER_TYPES = (
     "anthropic", "openai", "google", "deepseek", "openrouter", "groq", "custom",
 )
-
-# Providers that use OpenAI-compatible Chat Completions API
-_OPENAI_COMPATIBLE = {"openai", "google", "openrouter", "groq", "custom"}
 
 _DEFAULT_MODELS: dict[str, str] = {
     "anthropic": "claude-sonnet-4-20250514",
@@ -57,12 +53,13 @@ class ProviderFactory:
 
         if provider_type == "anthropic":
             return AnthropicProvider(api_key, api_base, default_model)
-        elif provider_type == "deepseek":
-            return DeepSeekProvider(api_key, api_base, default_model)
-        elif provider_type in _OPENAI_COMPATIBLE:
-            return OpenAIProvider(api_key, api_base, default_model)
         else:
-            raise ValueError(f"Unknown provider type: {provider_type}")
+            return OpenAICompatProvider(
+                api_key=api_key,
+                api_base=api_base,
+                model=default_model,
+                provider_type=provider_type,
+            )
 
 
 class ProviderManager:

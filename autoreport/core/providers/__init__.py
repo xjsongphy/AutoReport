@@ -8,9 +8,8 @@ from .base import (
     ToolCall,
     ToolResult,
 )
-from .deepseek_provider import DeepSeekProvider
 from .factory import ALL_PROVIDER_TYPES, ProviderFactory, ProviderManager
-from .openai_provider import OpenAIProvider
+from .openai_provider import OpenAICompatProvider
 
 __all__ = [
     "LLMProvider",
@@ -19,8 +18,7 @@ __all__ = [
     "ToolResult",
     "LLMResponse",
     "AnthropicProvider",
-    "OpenAIProvider",
-    "DeepSeekProvider",
+    "OpenAICompatProvider",
     "ProviderFactory",
     "ProviderManager",
     "ALL_PROVIDER_TYPES",

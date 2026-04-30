@@ -10,7 +10,6 @@ from ...config.schema import AgentDefaults
 from ...core.prompts import PromptLoader
 from ...core.providers.base import LLMProvider
 from ...core.providers.base import Message as LLMMessage
-from ...core.providers.base import ToolResult as LLMToolResult
 from ...interfaces.protocol import GUIAPI
 from ...interfaces.types import (
     AgentStatus,
@@ -56,10 +55,10 @@ class AgentLoop:
         self.config = config
         self.llm_provider = llm_provider
 
-        # Initialize prompt loader
         self._prompt_loader = prompt_loader or PromptLoader()
         self._identity_prompt: str | None = None
         self._full_prompt_loaded = False
+        self._cached_full_prompt: str | None = None
 
         self._status = AgentStatus.IDLE
         self._running = False
@@ -69,9 +68,10 @@ class AgentLoop:
 
         # Debug mode
         self._debug_mode = False
+        self._bus_callback = self._handle_user_message
 
         # Subscribe to user messages for this agent type
-        self.bus.subscribe(UserMessage, self._handle_user_message)
+        self.bus.subscribe(UserMessage, self._bus_callback)
 
     @property
     def status(self) -> AgentStatus:
@@ -215,14 +215,12 @@ class AgentLoop:
     ) -> None:
         """Handle tool calls from LLM response.
 
-        Args:
-            response: LLM response with tool calls.
-            user_message_id: Original user message ID.
+        Stores structured messages (not formatted text) so each provider
+        can convert them to the correct API format.
         """
         max_iterations = self.config.max_tool_iterations
         iteration = 0
 
-        # Start with current conversation history
         current_messages = list(self._conversation_history)
 
         while response.tool_calls and iteration < max_iterations:
@@ -234,28 +232,23 @@ class AgentLoop:
                 len(response.tool_calls),
             )
 
-            # Add assistant message with tool calls to conversation
-            # This creates a placeholder for the assistant's tool call response
-            tool_call_content = self._format_tool_calls_for_conversation(response.tool_calls)
-            current_messages.append(
-                LLMMessage(role="assistant", content=tool_call_content)
-            )
+            # Add assistant message with tool calls as structured data
+            current_messages.append(LLMMessage(
+                role="assistant",
+                content=response.content or "",
+                tool_calls=response.tool_calls,
+            ))
 
-            # Track pending tool calls
-            tool_results = []
-
-            # Execute each tool call
+            # Execute each tool call and add results as structured messages
             for tool_call in response.tool_calls:
                 await self._set_status(AgentStatus.RUNNING_TOOL)
 
-                # Notify GUI about tool call
                 await self.gui.show_tool_call(
                     agent_type=str(self.agent_type),
                     tool_name=tool_call.name,
                     arguments=tool_call.arguments,
                 )
 
-                # Execute tool
                 try:
                     tool = self.tools.get(tool_call.name)
                     if tool is None:
@@ -263,21 +256,13 @@ class AgentLoop:
 
                     result = await tool(**tool_call.arguments)
 
-                    # Notify GUI about result
                     await self.gui.show_tool_result(
                         agent_type=str(self.agent_type),
                         tool_name=tool_call.name,
                         result=result,
                     )
 
-                    # Format result for LLM
                     result_str = self._format_tool_result(result)
-                    tool_results.append(
-                        LLMToolResult(
-                            tool_call_id=tool_call.id,
-                            content=result_str,
-                        )
-                    )
 
                 except Exception as e:
                     logger.error("Tool execution error: {}", e)
@@ -289,27 +274,21 @@ class AgentLoop:
                         result=None,
                         error=error_msg,
                     )
+                    result_str = error_msg
 
-                    tool_results.append(
-                        LLMToolResult(
-                            tool_call_id=tool_call.id,
-                            content=error_msg,
-                        )
-                    )
-
-            # Add tool results as user message to conversation
-            tool_results_content = self._format_tool_results_for_conversation(tool_results)
-            current_messages.append(
-                LLMMessage(role="user", content=tool_results_content)
-            )
+                # Add tool result as structured message
+                current_messages.append(LLMMessage(
+                    role="tool",
+                    content=result_str,
+                    tool_call_id=tool_call.id,
+                    is_tool_result=True,
+                ))
 
             # Call LLM again with updated conversation
             await self._set_status(AgentStatus.THINKING)
 
-            # Get tool definitions again
             tool_definitions = self.tools.get_definitions()
 
-            # Call LLM with current conversation history (now includes tool calls and results)
             response = await self.llm_provider.chat(
                 messages=current_messages,
                 tools=tool_definitions,
@@ -323,44 +302,10 @@ class AgentLoop:
                 LLMMessage(role="assistant", content=response.content)
             )
 
-        # Save the complete conversation back to history
         self._conversation_history = current_messages
 
         if iteration >= max_iterations:
             logger.warning("Max tool iterations reached for agent: {}", self.agent_type)
-
-    def _format_tool_calls_for_conversation(self, tool_calls: list) -> str:
-        """Format tool calls for conversation history.
-
-        Args:
-            tool_calls: List of tool calls.
-
-        Returns:
-            Formatted string describing tool calls.
-        """
-        parts = []
-        for tc in tool_calls:
-            args_str = ", ".join(f"{k}={v}" for k, v in tc.arguments.items())
-            parts.append(f"[Tool Call: {tc.name}({args_str})]")
-        return " | ".join(parts)
-
-    def _format_tool_results_for_conversation(self, tool_results: list) -> str:
-        """Format tool results for conversation history.
-
-        Args:
-            tool_results: List of tool results.
-
-        Returns:
-            Formatted string describing tool results.
-        """
-        parts = []
-        for tr in tool_results:
-            # Truncate long results
-            result = tr.content
-            if len(result) > 500:
-                result = result[:497] + "..."
-            parts.append(f"[Tool Result for {tr.tool_call_id}: {result}]")
-        return "\n".join(parts)
 
     def _format_tool_result(self, result: Any) -> str:
         """Format tool result for LLM.
@@ -398,15 +343,21 @@ class AgentLoop:
     def set_debug_mode(self, enabled: bool) -> None:
         """Enable or disable debug mode.
 
+        When enabled, unsubscribes from the MessageBus entirely so the
+        agent only processes direct user input (no Main Agent coordination).
+        When disabled, re-subscribes to the bus.
+
         Args:
             enabled: Whether debug mode is enabled.
         """
         self._debug_mode = enabled
 
         if enabled:
-            logger.info("Debug mode enabled for agent: {}", self.agent_type)
+            self.bus.unsubscribe(UserMessage, self._bus_callback)
+            logger.info("Debug mode enabled for agent: {} (unsubscribed from bus)", self.agent_type)
         else:
-            logger.info("Debug mode disabled for agent: {}", self.agent_type)
+            self.bus.subscribe(UserMessage, self._bus_callback)
+            logger.info("Debug mode disabled for agent: {} (re-subscribed to bus)", self.agent_type)
 
     @property
     def debug_mode(self) -> bool:
@@ -439,13 +390,12 @@ class AgentLoop:
         if not self._full_prompt_loaded:
             logger.debug("Loading full prompt for agent: {}", self.agent_type)
             full_prompt = self._prompt_loader.load_full(agent_type_str)
-            # Combine identity and full prompts
-            complete_prompt = f"{self._identity_prompt}\n\n{full_prompt}"
+            self._cached_full_prompt = f"{self._identity_prompt}\n\n{full_prompt}"
             self._full_prompt_loaded = True
-            return complete_prompt
+            return self._cached_full_prompt
 
         # Return cached complete prompt
-        return f"{self._identity_prompt}\n\n{self._prompt_loader.load_full(agent_type_str)}"
+        return self._cached_full_prompt
 
     def _get_agent_type_str(self) -> str:
         """Convert AgentType to string for prompt loading.

@@ -1,5 +1,6 @@
 """Main application window."""
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +45,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.backend = backend
         self.workspace = Path(workspace).resolve()
+        self._async_loop: asyncio.AbstractEventLoop | None = None
 
         self.setWindowTitle("AutoReport - 物理实验报告撰写系统")
         self.resize(1400, 900)
@@ -151,49 +153,32 @@ class MainWindow(QMainWindow):
         self.preview.load_file(file_path)
         logger.debug("File selected: {}", file_path)
 
-    def _on_main_agent_message(self, content: str) -> None:
-        """Handle main agent message send.
+    def set_async_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Set the async event loop for thread-safe coroutine dispatch.
+
+        Must be called after startup() creates the loop, before the user
+        can interact with the GUI.
 
         Args:
-            content: Message content.
+            loop: The running asyncio event loop from the backend.
         """
-        import asyncio
+        self._async_loop = loop
 
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.create_task(self._async_send_main_agent_message(content))
-            else:
-                # If no loop is running, we can't send the message
-                logger.warning("No event loop running, cannot send message")
-        except RuntimeError:
-            logger.warning("Failed to get event loop for message send")
+    def _submit_coroutine(self, coro):
+        """Submit a coroutine to the async event loop from the Qt thread."""
+        if self._async_loop is None:
+            logger.warning("No async loop set, cannot dispatch coroutine")
+            return
+        asyncio.run_coroutine_threadsafe(coro, self._async_loop)
 
-    async def _async_send_main_agent_message(self, content: str) -> None:
-        """Async wrapper for sending main agent message."""
-        await self.backend.send_user_message(content, "main")
+    def _on_main_agent_message(self, content: str) -> None:
+        """Handle main agent message send."""
+        self._submit_coroutine(self.backend.send_user_message(content, "main"))
 
     def _on_sub_agent_message(self, content: str) -> None:
-        """Handle sub-agent message send.
-
-        Args:
-            content: Message content.
-        """
-        import asyncio
-
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.create_task(self._async_send_sub_agent_message(content))
-            else:
-                logger.warning("No event loop running, cannot send message")
-        except RuntimeError:
-            logger.warning("Failed to get event loop for message send")
-
-    async def _async_send_sub_agent_message(self, content: str) -> None:
-        """Async wrapper for sending sub-agent message."""
+        """Handle sub-agent message send."""
         agent_type = self.sub_agent_panel.agent_type
-        await self.backend.send_user_message(content, agent_type)
+        self._submit_coroutine(self.backend.send_user_message(content, agent_type))
 
     def _on_debug_mode_toggled(self, enabled: bool) -> None:
         """Handle debug mode toggle.

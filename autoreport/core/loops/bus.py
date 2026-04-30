@@ -1,6 +1,7 @@
 """Message bus for async communication between components."""
 
 import asyncio
+import threading
 from typing import Awaitable, Callable
 
 from loguru import logger
@@ -15,6 +16,7 @@ class MessageBus:
         """Initialize message bus."""
         self._subscribers: dict[type[Message], list[Callable]] = {}
         self._lock = asyncio.Lock()
+        self._subscribers_lock = threading.Lock()
         self._queue: asyncio.Queue[Message] = asyncio.Queue()
 
     async def publish(self, message: Message) -> None:
@@ -38,15 +40,12 @@ class MessageBus:
         callbacks = []
 
         async with self._lock:
-            # Get callbacks for exact message type
             callbacks.extend(self._subscribers.get(message_type, []))
 
-            # Also check parent classes for inheritance
             for msg_type, subs in self._subscribers.items():
                 if msg_type != message_type and isinstance(message, msg_type):
                     callbacks.extend(subs)
 
-        # Notify all callbacks
         for callback in callbacks:
             try:
                 if asyncio.iscoroutinefunction(callback):
@@ -63,16 +62,13 @@ class MessageBus:
     ) -> None:
         """Subscribe to a message type.
 
-        Args:
-            message_type: Type of message to subscribe to.
-            callback: Callback function for messages.
+        Thread-safe: can be called from any thread (e.g. during startup
+        before the async loop starts processing).
         """
-        # Note: This is not async, so we can't use async with
-        # For simplicity in this implementation, we're not locking here
-        # In production, you'd want to use threading.Lock or restructure
-        if message_type not in self._subscribers:
-            self._subscribers[message_type] = []
-        self._subscribers[message_type].append(callback)
+        with self._subscribers_lock:
+            if message_type not in self._subscribers:
+                self._subscribers[message_type] = []
+            self._subscribers[message_type].append(callback)
         logger.debug("Subscribed to message type: {}", message_type.__name__)
 
     def unsubscribe(
@@ -82,13 +78,12 @@ class MessageBus:
     ) -> None:
         """Unsubscribe from a message type.
 
-        Args:
-            message_type: Type of message to unsubscribe from.
-            callback: Callback to remove.
+        Thread-safe: safe to call while the bus is processing messages.
         """
-        if message_type in self._subscribers:
-            try:
-                self._subscribers[message_type].remove(callback)
-                logger.debug("Unsubscribed from message type: {}", message_type.__name__)
-            except ValueError:
-                pass
+        with self._subscribers_lock:
+            if message_type in self._subscribers:
+                try:
+                    self._subscribers[message_type].remove(callback)
+                    logger.debug("Unsubscribed from message type: {}", message_type.__name__)
+                except ValueError:
+                    pass

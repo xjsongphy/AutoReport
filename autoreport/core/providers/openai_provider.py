@@ -1,34 +1,84 @@
-"""OpenAI provider."""
+"""OpenAI-compatible provider.
 
+Handles all providers using the OpenAI Chat Completions API format:
+OpenAI, DeepSeek, Google, OpenRouter, Groq, and custom endpoints.
+"""
+
+import json
 from typing import Any
 
 from loguru import logger
 from openai import AsyncOpenAI
 
-from .base import LLMProvider, LLMResponse, Message, ToolCall, ToolResult
+from .base import LLMProvider, LLMResponse, Message, ToolCall
+
+_DEFAULT_API_BASES: dict[str, str] = {
+    "deepseek": "https://api.deepseek.com",
+}
 
 
-class OpenAIProvider(LLMProvider):
-    """OpenAI provider."""
+class OpenAICompatProvider(LLMProvider):
+    """Provider for OpenAI-compatible APIs."""
 
     def __init__(
         self,
         api_key: str,
         api_base: str | None = None,
         model: str = "gpt-4o",
+        provider_type: str = "openai",
     ):
-        """Initialize OpenAI provider.
-
-        Args:
-            api_key: OpenAI API key.
-            api_base: Optional custom API base URL.
-            model: Model to use.
-        """
         super().__init__(api_key, api_base, model)
-        self.client = AsyncOpenAI(
-            api_key=api_key,
-            base_url=api_base,
-        )
+        self.provider_type = provider_type
+        if api_base is None:
+            api_base = _DEFAULT_API_BASES.get(provider_type)
+        self.client = AsyncOpenAI(api_key=api_key, base_url=api_base)
+
+    def _convert_messages(self, messages: list[Message]) -> list[dict]:
+        """Convert internal messages to OpenAI Chat Completions format.
+
+        Handles three special message types:
+        1. Assistant messages with tool_calls → message with tool_calls field
+        2. Tool result messages (is_tool_result=True) → "tool" role messages
+        3. Regular messages → simple role/content dicts
+        """
+        openai_messages: list[dict] = []
+
+        for msg in messages:
+            # Assistant message with tool calls
+            if msg.role == "assistant" and msg.tool_calls:
+                tool_calls_api = []
+                for tc in msg.tool_calls:
+                    tool_calls_api.append({
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": json.dumps(tc.arguments, ensure_ascii=False),
+                        },
+                    })
+                openai_messages.append({
+                    "role": "assistant",
+                    "content": msg.content or None,
+                    "tool_calls": tool_calls_api,
+                })
+                continue
+
+            # Tool result message
+            if msg.is_tool_result:
+                openai_messages.append({
+                    "role": "tool",
+                    "tool_call_id": msg.tool_call_id,
+                    "content": msg.content,
+                })
+                continue
+
+            # Regular message
+            openai_messages.append({
+                "role": msg.role,
+                "content": msg.content,
+            })
+
+        return openai_messages
 
     async def chat(
         self,
@@ -38,13 +88,8 @@ class OpenAIProvider(LLMProvider):
         max_tokens: int = 8192,
     ) -> LLMResponse:
         """Send chat completion request."""
-        # Convert messages
-        openai_messages = [
-            {"role": msg.role, "content": msg.content}
-            for msg in messages
-        ]
+        openai_messages = self._convert_messages(messages)
 
-        # Prepare request
         params: dict[str, Any] = {
             "model": self.model,
             "messages": openai_messages,
@@ -56,153 +101,57 @@ class OpenAIProvider(LLMProvider):
             params["tools"] = self._convert_tools(tools)
             params["tool_choice"] = "auto"
 
-        logger.debug("Sending OpenAI request: model={}, messages={}", self.model, len(messages))
+        logger.debug("Sending {} request: model={}, messages={}", self.provider_type, self.model, len(messages))
 
-        try:
-            response = await self.client.chat.completions.create(**params)
+        response = await self.client.chat.completions.create(**params)
 
-            # Extract response
-            message = response.choices[0].message
-            content = message.content
-            tool_calls = []
+        message = response.choices[0].message
+        content = message.content
+        tool_calls = []
 
-            if message.tool_calls:
-                for call in message.tool_calls:
-                    tool_calls.append(ToolCall(
-                        id=call.id,
-                        name=call.function.name,
-                        arguments=self._parse_arguments(call.function.arguments),
-                    ))
+        if message.tool_calls:
+            for call in message.tool_calls:
+                tool_calls.append(ToolCall(
+                    id=call.id,
+                    name=call.function.name,
+                    arguments=self._parse_arguments(call.function.arguments),
+                ))
 
-            logger.debug(
-                "OpenAI response: content_length={}, tool_calls={}, prompt_tokens={}, completion_tokens={}",
-                len(content) if content else 0,
-                len(tool_calls),
-                response.usage.prompt_tokens,
-                response.usage.completion_tokens,
-            )
+        logger.debug(
+            "{} response: content_length={}, tool_calls={}, prompt_tokens={}, completion_tokens={}",
+            self.provider_type,
+            len(content) if content else 0,
+            len(tool_calls),
+            response.usage.prompt_tokens if response.usage else 0,
+            response.usage.completion_tokens if response.usage else 0,
+        )
 
-            return LLMResponse(
-                content=content,
-                tool_calls=tool_calls,
-                usage={
-                    "input_tokens": response.usage.prompt_tokens,
-                    "output_tokens": response.usage.completion_tokens,
-                    "total_tokens": response.usage.total_tokens,
-                },
-            )
-
-        except Exception as e:
-            logger.error("OpenAI API error: {}", e)
-            raise
-
-    async def chat_with_tools(
-        self,
-        messages: list[Message],
-        tool_results: list[ToolResult],
-        tools: list[dict],
-        temperature: float = 0.1,
-        max_tokens: int = 8192,
-    ) -> LLMResponse:
-        """Send chat completion with tool results.
-
-        Note: This method is deprecated in favor of using chat() with properly
-        maintained conversation history. It's kept for backward compatibility.
-
-        The proper way to handle tool calls is:
-        1. Add assistant message with tool_calls to conversation history
-        2. Add tool results as "tool" role messages with matching tool_call_id
-        3. Call chat() with the updated conversation history
-        """
-        # Since the conversation history should already contain the tool calls,
-        # we just need to append the tool results
-        openai_messages = []
-
-        for msg in messages:
-            openai_messages.append({
-                "role": msg.role,
-                "content": msg.content,
-            })
-
-        # Add tool results at the end (assuming they come after the last assistant message)
-        for result in tool_results:
-            openai_messages.append({
-                "role": "tool",
-                "tool_call_id": result.tool_call_id,
-                "content": result.content,
-            })
-
-        # Prepare request
-        params: dict[str, Any] = {
-            "model": self.model,
-            "messages": openai_messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "tools": self._convert_tools(tools),
-            "tool_choice": "auto",
-        }
-
-        try:
-            response = await self.client.chat.completions.create(**params)
-
-            message = response.choices[0].message
-            content = message.content
-            tool_calls = []
-
-            if message.tool_calls:
-                for call in message.tool_calls:
-                    tool_calls.append(ToolCall(
-                        id=call.id,
-                        name=call.function.name,
-                        arguments=self._parse_arguments(call.function.arguments),
-                    ))
-
-            return LLMResponse(
-                content=content,
-                tool_calls=tool_calls,
-                usage={
-                    "input_tokens": response.usage.prompt_tokens,
-                    "output_tokens": response.usage.completion_tokens,
-                },
-            )
-
-        except Exception as e:
-            logger.error("OpenAI API error with tools: {}", e)
-            raise
+        return LLMResponse(
+            content=content,
+            tool_calls=tool_calls,
+            usage={
+                "input_tokens": response.usage.prompt_tokens if response.usage else 0,
+                "output_tokens": response.usage.completion_tokens if response.usage else 0,
+                "total_tokens": response.usage.total_tokens if response.usage else 0,
+            },
+        )
 
     def _convert_tools(self, tools: list[dict]) -> list[dict]:
-        """Convert tools to OpenAI format.
-
-        Args:
-            tools: Tool definitions in standard format.
-
-        Returns:
-            Tools in OpenAI format.
-        """
-        openai_tools = []
-
-        for tool in tools:
-            openai_tools.append({
+        """Convert tools to OpenAI function calling format."""
+        return [
+            {
                 "type": "function",
                 "function": {
                     "name": tool["name"],
                     "description": tool["description"],
                     "parameters": tool["input_schema"],
                 },
-            })
-
-        return openai_tools
+            }
+            for tool in tools
+        ]
 
     def _parse_arguments(self, arguments: str) -> dict:
-        """Parse JSON arguments string.
-
-        Args:
-            arguments: JSON string.
-
-        Returns:
-            Parsed arguments dict.
-        """
-        import json
+        """Parse JSON arguments string."""
         try:
             return json.loads(arguments)
         except json.JSONDecodeError:
