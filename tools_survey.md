@@ -158,16 +158,9 @@
 ### 需要新增的工具
 
 - **PDF 解析** — 调用 mineru-open-api 将 PDF 转为 Markdown
-- **LaTeX 编译** — 调用 xelatex/lualatex 编译，支持错误捕获
 - **数据读取** — 读取 CSV/Excel，返回结构化摘要
 - **Python 执行** — 执行数据分析代码（可借鉴 DeepCode 的 execute_python）
-- **图片管理** — 图片生成和引用管理
 
 ### 工具隔离策略
 
-按 Agent 分配不同工具子集：
-- 数据分析 Agent：read_file, write_file(仅 data/processed/), exec(Python), 数据读取
-- 图像绘制 Agent：read_file, write_file(仅 code/), exec(Python), 图片管理
-- 理论推导 Agent：read_file, write_file(仅 theory/)
-- 报告撰写 Agent：read_file, write_file(仅 tex/), edit_file(仅 tex/), LaTeX 编译
-- 主 Agent：全部工具 + spawn/消息
+所有 Agent 共享同一套工具，不按 Agent 类型分配不同工具子集。权限通过目录写入隔离实现（Agent 只能写入自己管辖的目录），而非通过工具子集分配。
