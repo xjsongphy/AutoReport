@@ -12,8 +12,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ...interfaces.protocol import GUIAPI, BackendAPI
-from ...interfaces.types import (
+from ..interfaces.protocol import BackendAPI
+from ..interfaces.types import (
     AgentResponse,
     Checkpoint,
     Error,
@@ -27,8 +27,12 @@ from .widgets.file_tree import FileTreeWidget
 from .widgets.preview import PreviewWidget
 
 
-class MainWindow(QMainWindow, GUIAPI):
-    """Main application window."""
+class MainWindow(QMainWindow):
+    """Main application window.
+
+    Implements the GUIAPI protocol via duck-typing (cannot use multiple
+    inheritance with QMainWindow because of metaclass conflict).
+    """
 
     def __init__(self, backend: BackendAPI, workspace: Path):
         """Initialize main window.
@@ -206,7 +210,7 @@ class MainWindow(QMainWindow, GUIAPI):
         Args:
             message: Message from backend.
         """
-        from ...interfaces.types import (
+        from ..interfaces.types import (
             AgentResponse,
             Checkpoint,
             Error,

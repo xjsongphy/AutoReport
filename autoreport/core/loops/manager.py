@@ -232,7 +232,7 @@ class LoopManager:
         # Notify GUI about new checkpoint
         checkpoint = self.checkpoint_manager.get_checkpoint(checkpoint_id)
         if checkpoint:
-            from ....interfaces.types import Checkpoint as CheckpointMsg
+            from ...interfaces.types import Checkpoint as CheckpointMsg
             msg = CheckpointMsg(
                 checkpoint_id=checkpoint_id,
                 description=description,

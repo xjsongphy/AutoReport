@@ -1,5 +1,6 @@
 """Main application entry point."""
 
+import argparse
 import asyncio
 import sys
 from pathlib import Path
@@ -140,6 +141,11 @@ class AutoReportApp:
             log_exception("Error during startup", e)
             sys.exit(1)
 
+        # Activate debug mode for agents specified via --debug-agent
+        for agent in getattr(self, "_debug_agents_on_start", []):
+            self.set_agent_debug_mode(agent, enabled=True)
+            logger.info("Debug mode activated for {} (via CLI)", agent)
+
         # Create main window with selected workspace
         self.main_window = MainWindow(
             backend=self.backend,
@@ -180,10 +186,18 @@ class BackendAPIImpl(BackendAPI):
         self,
         content: str,
         agent_type: str,
-        message_id: str | None = None
+        message_id: str | None = None,
+        source: str = "user",
     ) -> None:
-        """Send a user message to an agent."""
-        from ...interfaces.types import AgentType, UserMessage
+        """Send a user message to an agent.
+
+        Args:
+            content: Message content.
+            agent_type: Target agent type.
+            message_id: Optional message ID for tracking.
+            source: "user" for direct input, "main_agent" for coordination.
+        """
+        from .interfaces.types import AgentType, UserMessage
 
         # Map string to AgentType enum
         agent_type_map = {
@@ -200,12 +214,13 @@ class BackendAPIImpl(BackendAPI):
             content=content,
             agent_type=agent_type_enum,
             message_id=message_id,
+            source=source,
         )
         await self.bus.publish(message)
 
     async def restart_agents(self, reason: str) -> None:
         """Restart the agent system."""
-        from ...interfaces.types import RestartRequest
+        from .interfaces.types import RestartRequest
         message = RestartRequest(reason=reason)
         await self.bus.publish(message)
 
@@ -241,8 +256,30 @@ class BackendAPIImpl(BackendAPI):
         callback
     ) -> None:
         """Subscribe to all backend messages."""
-        from ...interfaces.types import Message
+        from .interfaces.types import Message
         self.bus.subscribe(Message, callback)
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments.
+
+    Args:
+        argv: Argument list (defaults to sys.argv).
+
+    Returns:
+        Parsed arguments.
+    """
+    parser = argparse.ArgumentParser(
+        description="AutoReport - 物理实验报告自动撰写系统",
+    )
+    parser.add_argument(
+        "--debug-agent",
+        action="append",
+        default=[],
+        choices=["data_analysis", "plotting", "theory", "report"],
+        help="在调试模式下启动指定的 Agent（可重复使用）",
+    )
+    return parser.parse_args(argv)
 
 
 def main():
@@ -253,9 +290,15 @@ def main():
     # Setup global exception handler
     setup_exception_handler()
 
+    # Parse arguments
+    args = parse_args()
+
     logger.info("AutoReport starting...")
 
     app = AutoReportApp()
+
+    # Store debug agents for activation after loop manager starts
+    app._debug_agents_on_start = args.debug_agent
 
     # Check API configuration first
     is_valid, _ = app.config_manager.validate_api_keys()

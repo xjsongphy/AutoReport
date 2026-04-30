@@ -8,6 +8,8 @@
 - **多 Provider 支持** — Anthropic、OpenAI、DeepSeek 等，运行时可切换模型，切换 Provider 支持 Restart
 - **目录权限隔离** — 每个 Agent 只能写入指定目录，防止交叉污染
 - **检查点回滚** — 关键节点自动创建检查点，可回滚到任意历史状态
+- **@ 文件引用** — 在聊天输入中输入 `@` 触发模糊文件搜索，选择文件后插入 Markdown 引用链接
+- **选中行上下文** — 在预览面板中选中文本后，上下文自动附加到 Agent 消息中
 - **子 Agent 调试模式** — 断开与主 Agent 的通道，独立测试单个 Agent
 - **交互式调整** — 用户可随时向任意 Agent 发送消息进行干预和优化
 
@@ -24,8 +26,10 @@
 
 ```bash
 git clone <repo-url> && cd AutoReport
-uv sync
+uv sync --all-extras
 ```
+
+> **注意**：使用 `--all-extras` 安装开发依赖（pytest、ruff）。生产部署可省略此参数。
 
 ### 运行
 
@@ -88,6 +92,12 @@ GUI 与后台通过 `interfaces` 层解耦：定义了 `GUIAPI` / `BackendAPI` P
 
 ## 开发
 
+首先确保已安装开发依赖：
+
+```bash
+uv sync --all-extras
+```
+
 ### 运行测试
 
 ```bash
@@ -133,10 +143,14 @@ agents:
   defaults:
     model: "anthropic/claude-sonnet-4.5"
     provider: "auto"
-    max_tokens: 8192
+    max_tokens_policy: "adaptive"
+    base_max_tokens: 8192
+    retry_max_tokens: 16384  # 复杂任务重试时增大输出
     temperature: 0.1
     max_tool_iterations: 200
+    timezone: "Asia/Shanghai"
     prompt_templates_dir: "templates/agents"
+    context_window_tokens: 200000
 ```
 
 ### MinerU API 配置
@@ -162,6 +176,46 @@ providers:
   deepseek:
     api_key: null  # 通过 DEEPSEEK_API_KEY 环境变量设置
     api_base: "https://api.deepseek.com/v1"
+```
+
+## 调试模式
+
+子 Agent 支持独立调试模式，可以隔离测试单个 Agent 的工具和输出。
+
+### 调试模式行为
+
+| 行为 | 正常模式 | 调试模式 |
+|------|---------|---------|
+| 主 Agent 协调命令 | 接受 | **忽略** |
+| 用户直接输入 | 接受 | 接受 |
+| 状态显示 | 正常 | 显示"调试模式"（紫色） |
+| 消息上下文 | 正常 | 注入 `[调试模式]` 前缀 |
+
+### 使用方式
+
+**GUI**: 点击子 Agent 面板中的"调试模式"按钮，按钮变红即启用。
+
+**CLI**: 启动时使用 `--debug-agent` 参数（可重复使用）：
+
+```bash
+# 以调试模式启动数据分析 Agent
+autoreport --debug-agent data_analysis
+
+# 以调试模式启动多个 Agent
+autoreport --debug-agent data_analysis --debug-agent plotting
+```
+
+可选 Agent 名称：`data_analysis`（数据分析）、`plotting`（图像绘制）、`theory`（理论推导）、`report`（报告撰写）
+
+### 示例
+
+数据分析 Agent 处于调试模式时，首条消息会收到上下文提示：
+
+```
+[调试模式] 此 Agent 处于独立调试模式，不与其他 Agent 通信。
+你可以直接测试此 Agent 的工具和输出。
+
+请分析 data/experiment_1.csv 中的数据
 ```
 
 ## Agent 提示词

@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from ...config import ConfigManager
+from ..config import ConfigManager
 
 
 class ConfigDialog(QDialog):

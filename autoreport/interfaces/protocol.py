@@ -30,9 +30,17 @@ class BackendAPI(ABC):
         self,
         content: str,
         agent_type: str,
-        message_id: str | None = None
+        message_id: str | None = None,
+        source: str = "user",
     ) -> None:
-        """Send a user message to an agent."""
+        """Send a user message to an agent.
+
+        Args:
+            content: Message content.
+            agent_type: Target agent type.
+            message_id: Optional message ID for tracking.
+            source: "user" for direct input, "main_agent" for coordination.
+        """
 
     @abstractmethod
     async def restart_agents(self, reason: str) -> None:

@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from ...config import ConfigManager
+from ..config import ConfigManager
 
 # Fixed directory structure for projects
 PROJECT_DIRECTORIES = ["data", "data/processed", "references", "theory", "code", "tex"]

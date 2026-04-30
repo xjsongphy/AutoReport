@@ -117,6 +117,9 @@ class AgentLoop:
     async def _handle_user_message(self, message: Message) -> None:
         """Handle user message from bus.
 
+        In debug mode, only direct user input is accepted;
+        main-agent coordination commands are silently dropped.
+
         Args:
             message: User message.
         """
@@ -125,6 +128,15 @@ class AgentLoop:
 
         # Check if message is for this agent
         if message.agent_type != self.agent_type:
+            return
+
+        # Debug mode: ignore main-agent coordination
+        if self._debug_mode and message.source == "main_agent":
+            logger.debug(
+                "Debug mode: ignoring main-agent message for {}: {}",
+                self.agent_type,
+                message.content[:80],
+            )
             return
 
         await self._message_queue.put(message)
@@ -138,9 +150,18 @@ class AgentLoop:
         await self._set_status(AgentStatus.THINKING)
 
         try:
+            # In debug mode, wrap message with context
+            content = message.content
+            if self._debug_mode:
+                content = (
+                    "[调试模式] 此 Agent 处于独立调试模式，不与其他 Agent 通信。\n"
+                    "你可以直接测试此 Agent 的工具和输出。\n\n"
+                    + content
+                )
+
             # Add user message to conversation history
             self._conversation_history.append(
-                LLMMessage(role="user", content=message.content)
+                LLMMessage(role="user", content=content)
             )
 
             # Get system prompt with progressive loading

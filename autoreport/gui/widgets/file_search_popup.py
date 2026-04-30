@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QStyledItemDelegate,
     QVBoxLayout,
     QWidget,
 )
@@ -261,7 +262,7 @@ class FileSearchPopup(QWidget):
         return row_count * row_height + 20  # +20 for margins
 
 
-class HTMLDelegate(QListWidget.ItemDelegate):
+class HTMLDelegate(QStyledItemDelegate):
     """Delegate for rendering HTML in list items."""
 
     @override

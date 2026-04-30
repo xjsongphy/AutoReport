@@ -10,6 +10,8 @@ An automated physics experiment report writing system based on multi-agent colla
 - **Multi-Provider Support** — Anthropic, OpenAI, DeepSeek, etc. Runtime model switching, provider switch requires restart
 - **Directory Permission Isolation** — Each agent can only write to designated directories, preventing cross-contamination
 - **Checkpoint Rollback** — Automatically creates checkpoints at key nodes, can rollback to any historical state
+- **@ File References** — Type `@` in chat to fuzzy-search and insert file references as markdown links
+- **Selected Line Context** — Text selections in the preview pane are automatically appended to agent messages
 - **Sub-Agent Debug Mode** — Disconnect from Main Agent channel, test individual agents independently
 - **Interactive Adjustment** — Users can send messages to any agent at any time for intervention and optimization
 
@@ -26,8 +28,10 @@ An automated physics experiment report writing system based on multi-agent colla
 
 ```bash
 git clone <repo-url> && cd AutoReport
-uv sync
+uv sync --all-extras
 ```
+
+> **Note**: Use `--all-extras` to install development dependencies (pytest, ruff). For production deployment, omit this flag.
 
 ### Running
 
@@ -89,6 +93,12 @@ GUI and backend are decoupled through the `interfaces` layer: defining `GUIAPI`/
 
 ## Development
 
+First, ensure development dependencies are installed:
+
+```bash
+uv sync --all-extras
+```
+
 ### Run Tests
 
 ```bash
@@ -134,10 +144,14 @@ agents:
   defaults:
     model: "anthropic/claude-sonnet-4.5"
     provider: "auto"
-    max_tokens: 8192
+    max_tokens_policy: "adaptive"
+    base_max_tokens: 8192
+    retry_max_tokens: 16384  # Increase on retry for complex tasks
     temperature: 0.1
     max_tool_iterations: 200
+    timezone: "Asia/Shanghai"
     prompt_templates_dir: "templates/agents"
+    context_window_tokens: 200000
 ```
 
 ### MinerU API Configuration
@@ -163,6 +177,46 @@ providers:
   deepseek:
     api_key: null  # Set via DEEPSEEK_API_KEY env var
     api_base: "https://api.deepseek.com/v1"
+```
+
+## Debug Mode
+
+Sub-agents support standalone debug mode for isolated testing of individual agent tools and outputs.
+
+### What Debug Mode Does
+
+| Behavior | Normal | Debug Mode |
+|----------|--------|------------|
+| Main Agent coordination | Accepted | **Ignored** |
+| Direct user input | Accepted | Accepted |
+| Status reporting | Normal | Shows "调试模式" (Debug Mode) |
+| Message context | Normal | `[调试模式]` prefix injected |
+
+### Usage
+
+**GUI**: Click the "调试模式" button in the sub-agent panel. The button turns red when active.
+
+**CLI**: Start with `--debug-agent` (repeatable):
+
+```bash
+# Start with Data Analysis agent in debug mode
+autoreport --debug-agent data_analysis
+
+# Start with multiple agents in debug mode
+autoreport --debug-agent data_analysis --debug-agent plotting
+```
+
+Valid agent names: `data_analysis`, `plotting`, `theory`, `report`
+
+### Example
+
+With Data Analysis agent in debug mode, the first message receives context:
+
+```
+[调试模式] 此 Agent 处于独立调试模式，不与其他 Agent 通信。
+你可以直接测试此 Agent 的工具和输出。
+
+请分析 data/experiment_1.csv 中的数据
 ```
 
 ## Agent Prompts

@@ -55,12 +55,18 @@ class Message(BaseModel):
 
 
 class UserMessage(Message):
-    """User message to agent."""
+    """User message to agent.
+
+    source distinguishes direct user input ("user") from
+    main-agent coordination commands ("main_agent").  Debug
+    mode filters out the latter.
+    """
 
     type: MessageType = MessageType.USER_MESSAGE
     content: str
     agent_type: AgentType = AgentType.MAIN
     message_id: str | None = None
+    source: str = "user"  # "user" | "main_agent"
 
 
 class AgentResponse(Message):
