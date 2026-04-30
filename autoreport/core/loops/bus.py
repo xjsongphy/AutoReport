@@ -66,11 +66,13 @@ class MessageBus:
             message_type: Type of message to subscribe to.
             callback: Callback function for messages.
         """
-        async with self._lock:
-            if message_type not in self._subscribers:
-                self._subscribers[message_type] = []
-            self._subscribers[message_type].append(callback)
-            logger.debug("Subscribed to message type: {}", message_type.__name__)
+        # Note: This is not async, so we can't use async with
+        # For simplicity in this implementation, we're not locking here
+        # In production, you'd want to use threading.Lock or restructure
+        if message_type not in self._subscribers:
+            self._subscribers[message_type] = []
+        self._subscribers[message_type].append(callback)
+        logger.debug("Subscribed to message type: {}", message_type.__name__)
 
     def unsubscribe(
         self,
@@ -83,10 +85,9 @@ class MessageBus:
             message_type: Type of message to unsubscribe from.
             callback: Callback to remove.
         """
-        async with self._lock:
-            if message_type in self._subscribers:
-                try:
-                    self._subscribers[message_type].remove(callback)
-                    logger.debug("Unsubscribed from message type: {}", message_type.__name__)
-                except ValueError:
-                    pass
+        if message_type in self._subscribers:
+            try:
+                self._subscribers[message_type].remove(callback)
+                logger.debug("Unsubscribed from message type: {}", message_type.__name__)
+            except ValueError:
+                pass

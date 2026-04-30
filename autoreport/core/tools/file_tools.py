@@ -143,6 +143,13 @@ class WriteFileTool(Tool):
             logger.error("Failed to write file {}: {}", file_path, e)
             raise
 
+    def _resolve_path(self, path: str) -> Path:
+        """Resolve a path relative to workspace."""
+        path_obj = Path(path)
+        if path_obj.is_absolute():
+            return path_obj.resolve()
+        return (self.workspace / path_obj).resolve()
+
 
 class EditFileTool(Tool):
     """Tool for editing files by text replacement."""

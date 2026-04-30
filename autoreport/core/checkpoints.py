@@ -11,7 +11,7 @@ from dataclasses import dataclass, asdict
 
 from loguru import logger
 
-from ...interfaces.types import Checkpoint, Message
+from autoreport.interfaces.types import Checkpoint
 
 
 @dataclass
