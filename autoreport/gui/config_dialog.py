@@ -708,9 +708,33 @@ class ConfigDialog(QDialog):
                 border: 1px solid {c["inputBorder"]};
                 border-radius: 4px;
                 padding: 6px 10px;
+                padding-right: 28px;
                 font-size: 13px;
                 background-color: {c["inputBg"]};
                 color: {c["inputFg"]};
+            }}
+            QComboBox::drop-down {{
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 24px;
+                border: none;
+                background: transparent;
+            }}
+            QComboBox::down-arrow {{
+                width: 8px;
+                height: 8px;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid {c["inputBorder"]};
+            }}
+            QComboBox QAbstractItemView {{
+                border: 1px solid {c["inputBorder"]};
+                border-radius: 4px;
+                background-color: {c["inputBg"]};
+                color: {c["inputFg"]};
+                selection-background-color: {c["primaryBtnBg"]};
+                selection-color: {c["primaryBtnFg"]};
+                padding: 4px;
             }}
             QScrollArea {{ background-color: transparent; }}
         """)
