@@ -156,7 +156,7 @@ class ProjectDialog(QDialog):
         # Let user choose location
         dialog = QFileDialog(self)
         dialog.setFileMode(QFileDialog.FileMode.Directory)
-        dialog.setOption(QFileDialog.ShowDirsOnlyOnly)
+        dialog.setOption(QFileDialog.Option.ShowDirsOnly)
 
         if dialog.exec():
             path = Path(dialog.selectedFiles()[0])
@@ -193,7 +193,7 @@ class ProjectDialog(QDialog):
         """Handle open folder button click."""
         dialog = QFileDialog(self)
         dialog.setFileMode(QFileDialog.FileMode.Directory)
-        dialog.setOption(QFileDialog.ShowDirsOnlyOnly)
+        dialog.setOption(QFileDialog.Option.ShowDirsOnly)
 
         if dialog.exec():
             path = Path(dialog.selectedFiles()[0])

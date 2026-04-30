@@ -32,14 +32,17 @@ class ReadFileTool(Tool):
         """Read a file.
 
         Args:
-            path: Path to file (relative to workspace or absolute)
+            path: Path to file (relative to workspace)
             offset: Optional starting line number (0-indexed)
             limit: Optional maximum number of lines to read
 
         Returns:
             Dictionary with content, line_count, and path
+
+        Raises:
+            ValueError: If path is outside workspace or contains path traversal.
         """
-        file_path = self._resolve_path(path)
+        file_path = self._resolve_and_validate_path(path)
         logger.debug("Reading file: {}", file_path)
 
         try:
@@ -64,12 +67,44 @@ class ReadFileTool(Tool):
             logger.error("Failed to read file {}: {}", file_path, e)
             raise
 
-    def _resolve_path(self, path: str) -> Path:
-        """Resolve a path relative to workspace."""
+    def _resolve_and_validate_path(self, path: str) -> Path:
+        """Resolve and validate a path is within workspace.
+
+        Args:
+            path: Path to resolve and validate.
+
+        Returns:
+            Resolved absolute path.
+
+        Raises:
+            ValueError: If path is outside workspace or contains path traversal.
+        """
+        # Reject absolute paths for security
         path_obj = Path(path)
         if path_obj.is_absolute():
-            return path_obj.resolve()
-        return (self.workspace / path_obj).resolve()
+            raise ValueError(
+                f"Absolute paths are not allowed: {path}. "
+                "Please use paths relative to the workspace."
+            )
+
+        # Reject path traversal attempts
+        if ".." in path_obj.parts:
+            raise ValueError(
+                f"Path traversal with '..' is not allowed: {path}"
+            )
+
+        # Resolve relative to workspace
+        resolved = (self.workspace / path_obj).resolve()
+
+        # Verify the resolved path is within workspace
+        try:
+            resolved.relative_to(self.workspace)
+        except ValueError:
+            raise ValueError(
+                f"Resolved path is outside workspace: {resolved}"
+            )
+
+        return resolved
 
 
 class WriteFileTool(Tool):
@@ -97,14 +132,18 @@ class WriteFileTool(Tool):
         """Write to a file.
 
         Args:
-            path: Path to file
+            path: Path to file (relative to workspace)
             content: Content to write
             create_backup: Whether to create backup before overwriting
 
         Returns:
             Dictionary with path and backup_path (if created)
+
+        Raises:
+            ValueError: If path is outside workspace or contains path traversal.
+            PermissionError: If write not allowed in target directory.
         """
-        file_path = self._resolve_path(path)
+        file_path = self._resolve_and_validate_path(path)
         logger.debug("Writing file: {}", file_path)
 
         # Check write permission
@@ -142,12 +181,44 @@ class WriteFileTool(Tool):
             logger.error("Failed to write file {}: {}", file_path, e)
             raise
 
-    def _resolve_path(self, path: str) -> Path:
-        """Resolve a path relative to workspace."""
+    def _resolve_and_validate_path(self, path: str) -> Path:
+        """Resolve and validate a path is within workspace.
+
+        Args:
+            path: Path to resolve and validate.
+
+        Returns:
+            Resolved absolute path.
+
+        Raises:
+            ValueError: If path is outside workspace or contains path traversal.
+        """
+        # Reject absolute paths for security
         path_obj = Path(path)
         if path_obj.is_absolute():
-            return path_obj.resolve()
-        return (self.workspace / path_obj).resolve()
+            raise ValueError(
+                f"Absolute paths are not allowed: {path}. "
+                "Please use paths relative to the workspace."
+            )
+
+        # Reject path traversal attempts
+        if ".." in path_obj.parts:
+            raise ValueError(
+                f"Path traversal with '..' is not allowed: {path}"
+            )
+
+        # Resolve relative to workspace
+        resolved = (self.workspace / path_obj).resolve()
+
+        # Verify the resolved path is within workspace
+        try:
+            resolved.relative_to(self.workspace)
+        except ValueError:
+            raise ValueError(
+                f"Resolved path is outside workspace: {resolved}"
+            )
+
+        return resolved
 
 
 class EditFileTool(Tool):
@@ -176,15 +247,19 @@ class EditFileTool(Tool):
         """Edit a file by replacing text.
 
         Args:
-            path: Path to file
+            path: Path to file (relative to workspace)
             old_text: Text to find and replace
             new_text: Replacement text
             replace_all: Replace all occurrences (default: False, replaces first only)
 
         Returns:
             Dictionary with path and replacements_made
+
+        Raises:
+            ValueError: If path is outside workspace or contains path traversal.
+            PermissionError: If write not allowed in target directory.
         """
-        file_path = self._resolve_path(path)
+        file_path = self._resolve_and_validate_path(path)
         logger.debug("Editing file: {}", file_path)
 
         # Check write permission
@@ -219,12 +294,44 @@ class EditFileTool(Tool):
             logger.error("Failed to edit file {}: {}", file_path, e)
             raise
 
-    def _resolve_path(self, path: str) -> Path:
-        """Resolve a path relative to workspace."""
+    def _resolve_and_validate_path(self, path: str) -> Path:
+        """Resolve and validate a path is within workspace.
+
+        Args:
+            path: Path to resolve and validate.
+
+        Returns:
+            Resolved absolute path.
+
+        Raises:
+            ValueError: If path is outside workspace or contains path traversal.
+        """
+        # Reject absolute paths for security
         path_obj = Path(path)
         if path_obj.is_absolute():
-            return path_obj.resolve()
-        return (self.workspace / path_obj).resolve()
+            raise ValueError(
+                f"Absolute paths are not allowed: {path}. "
+                "Please use paths relative to the workspace."
+            )
+
+        # Reject path traversal attempts
+        if ".." in path_obj.parts:
+            raise ValueError(
+                f"Path traversal with '..' is not allowed: {path}"
+            )
+
+        # Resolve relative to workspace
+        resolved = (self.workspace / path_obj).resolve()
+
+        # Verify the resolved path is within workspace
+        try:
+            resolved.relative_to(self.workspace)
+        except ValueError:
+            raise ValueError(
+                f"Resolved path is outside workspace: {resolved}"
+            )
+
+        return resolved
 
 
 class ListDirTool(Tool):
@@ -249,13 +356,16 @@ class ListDirTool(Tool):
         """List directory contents.
 
         Args:
-            path: Path to directory (relative to workspace or absolute)
+            path: Path to directory (relative to workspace)
             recursive: Whether to list recursively
 
         Returns:
             Dictionary with directories, files, and path
+
+        Raises:
+            ValueError: If path is outside workspace or contains path traversal.
         """
-        dir_path = self._resolve_path(path)
+        dir_path = self._resolve_and_validate_path(path)
         logger.debug("Listing directory: {}", dir_path)
 
         if not dir_path.exists():
@@ -291,9 +401,41 @@ class ListDirTool(Tool):
             logger.error("Failed to list directory {}: {}", dir_path, e)
             raise
 
-    def _resolve_path(self, path: str) -> Path:
-        """Resolve a path relative to workspace."""
+    def _resolve_and_validate_path(self, path: str) -> Path:
+        """Resolve and validate a path is within workspace.
+
+        Args:
+            path: Path to resolve and validate.
+
+        Returns:
+            Resolved absolute path.
+
+        Raises:
+            ValueError: If path is outside workspace or contains path traversal.
+        """
+        # Reject absolute paths for security
         path_obj = Path(path)
         if path_obj.is_absolute():
-            return path_obj.resolve()
-        return (self.workspace / path_obj).resolve()
+            raise ValueError(
+                f"Absolute paths are not allowed: {path}. "
+                "Please use paths relative to the workspace."
+            )
+
+        # Reject path traversal attempts
+        if ".." in path_obj.parts:
+            raise ValueError(
+                f"Path traversal with '..' is not allowed: {path}"
+            )
+
+        # Resolve relative to workspace
+        resolved = (self.workspace / path_obj).resolve()
+
+        # Verify the resolved path is within workspace
+        try:
+            resolved.relative_to(self.workspace)
+        except ValueError:
+            raise ValueError(
+                f"Resolved path is outside workspace: {resolved}"
+            )
+
+        return resolved

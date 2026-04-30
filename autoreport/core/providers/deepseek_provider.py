@@ -107,7 +107,11 @@ class DeepSeekProvider(LLMProvider):
         temperature: float = 0.1,
         max_tokens: int = 8192,
     ) -> LLMResponse:
-        """Send chat completion with tool results."""
+        """Send chat completion with tool results.
+
+        Note: This method is deprecated in favor of using chat() with properly
+        maintained conversation history. It's kept for backward compatibility.
+        """
         openai_messages = []
 
         for msg in messages:
@@ -116,14 +120,13 @@ class DeepSeekProvider(LLMProvider):
                 "content": msg.content,
             })
 
-            # Add tool results
-            if msg.role == "assistant":
-                for result in tool_results:
-                    openai_messages.append({
-                        "role": "tool",
-                        "tool_call_id": result.tool_call_id,
-                        "content": result.content,
-                    })
+        # Add tool results at the end (assuming they come after the last assistant message)
+        for result in tool_results:
+            openai_messages.append({
+                "role": "tool",
+                "tool_call_id": result.tool_call_id,
+                "content": result.content,
+            })
 
         # Prepare request
         params: dict[str, Any] = {

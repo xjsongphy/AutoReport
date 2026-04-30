@@ -66,13 +66,36 @@ async def test_write_file_permission_denied(temp_workspace):
     write_dir = temp_workspace / "output"
     write_dir.mkdir()
 
+    # Create another directory that's not allowed
+    other_dir = temp_workspace / "other"
+    other_dir.mkdir()
+
     tool = WriteFileTool(
         workspace=temp_workspace,
         write_allowed_dir=write_dir,
     )
 
-    # Try to write outside allowed directory
+    # Try to write in workspace but outside allowed directory
     with pytest.raises(PermissionError):
+        await tool(
+            path="other/unauthorized.txt",
+            content="Should fail",
+        )
+
+
+@pytest.mark.asyncio
+async def test_write_file_path_traversal_blocked(temp_workspace):
+    """Test that path traversal is blocked."""
+    write_dir = temp_workspace / "output"
+    write_dir.mkdir()
+
+    tool = WriteFileTool(
+        workspace=temp_workspace,
+        write_allowed_dir=write_dir,
+    )
+
+    # Try to use path traversal
+    with pytest.raises(ValueError, match="Path traversal"):
         await tool(
             path="../unauthorized.txt",
             content="Should fail",

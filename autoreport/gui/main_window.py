@@ -121,20 +121,47 @@ class MainWindow(QMainWindow, GUIAPI):
         agent_type = agent_map.get(directory, "sub")
         self.sub_agent_panel.set_agent_type(agent_type)
 
-    async def _on_main_agent_message(self, content: str) -> None:
+    def _on_main_agent_message(self, content: str) -> None:
         """Handle main agent message send.
 
         Args:
             content: Message content.
         """
+        import asyncio
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self._async_send_main_agent_message(content))
+            else:
+                # If no loop is running, we can't send the message
+                logger.warning("No event loop running, cannot send message")
+        except RuntimeError:
+            logger.warning("Failed to get event loop for message send")
+
+    async def _async_send_main_agent_message(self, content: str) -> None:
+        """Async wrapper for sending main agent message."""
         await self.backend.send_user_message(content, "main")
 
-    async def _on_sub_agent_message(self, content: str) -> None:
+    def _on_sub_agent_message(self, content: str) -> None:
         """Handle sub-agent message send.
 
         Args:
             content: Message content.
         """
+        import asyncio
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self._async_send_sub_agent_message(content))
+            else:
+                logger.warning("No event loop running, cannot send message")
+        except RuntimeError:
+            logger.warning("Failed to get event loop for message send")
+
+    async def _async_send_sub_agent_message(self, content: str) -> None:
+        """Async wrapper for sending sub-agent message."""
         agent_type = self.sub_agent_panel.agent_type
         await self.backend.send_user_message(content, agent_type)
 

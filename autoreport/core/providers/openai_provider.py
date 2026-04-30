@@ -104,7 +104,18 @@ class OpenAIProvider(LLMProvider):
         temperature: float = 0.1,
         max_tokens: int = 8192,
     ) -> LLMResponse:
-        """Send chat completion with tool results."""
+        """Send chat completion with tool results.
+
+        Note: This method is deprecated in favor of using chat() with properly
+        maintained conversation history. It's kept for backward compatibility.
+
+        The proper way to handle tool calls is:
+        1. Add assistant message with tool_calls to conversation history
+        2. Add tool results as "tool" role messages with matching tool_call_id
+        3. Call chat() with the updated conversation history
+        """
+        # Since the conversation history should already contain the tool calls,
+        # we just need to append the tool results
         openai_messages = []
 
         for msg in messages:
@@ -113,15 +124,13 @@ class OpenAIProvider(LLMProvider):
                 "content": msg.content,
             })
 
-            # Add any tool results for this assistant message
-            # This is simplified - real implementation would track tool calls properly
-            if msg.role == "assistant":
-                for result in tool_results:
-                    openai_messages.append({
-                        "role": "tool",
-                        "tool_call_id": result.tool_call_id,
-                        "content": result.content,
-                    })
+        # Add tool results at the end (assuming they come after the last assistant message)
+        for result in tool_results:
+            openai_messages.append({
+                "role": "tool",
+                "tool_call_id": result.tool_call_id,
+                "content": result.content,
+            })
 
         # Prepare request
         params: dict[str, Any] = {

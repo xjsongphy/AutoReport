@@ -91,23 +91,6 @@ class AutoReportApp:
 
         logger.debug("Ensured project structure in: {}", workspace)
 
-        # Create loop manager
-        self.loop_manager = LoopManager(
-            workspace=workspace,
-            config_manager=self.config_manager,
-            bus=self.bus,
-            gui=self.backend,
-        )
-
-        # Start message bus processing
-        asyncio.create_task(self.bus.process_queue())
-
-        # Start agent loops
-        await self.loop_manager.start()
-
-        logger.info("Application started successfully")
-        return True
-
     async def shutdown(self) -> None:
         """Shutdown application."""
         if self.loop_manager:
@@ -116,7 +99,8 @@ class AutoReportApp:
 
     def run_gui(self) -> None:
         """Run GUI application."""
-        app = QApplication(sys.argv)
+        # QApplication already created in main(), get the instance
+        app = QApplication.instance()
 
         # Show project selection dialog first
         from .gui.project_dialog import ProjectDialog
@@ -199,10 +183,22 @@ class BackendAPIImpl(BackendAPI):
         message_id: str | None = None
     ) -> None:
         """Send a user message to an agent."""
-        from ...interfaces.types import UserMessage
+        from ...interfaces.types import AgentType, UserMessage
+
+        # Map string to AgentType enum
+        agent_type_map = {
+            "main": AgentType.MAIN,
+            "data_analysis": AgentType.DATA_ANALYSIS,
+            "plotting": AgentType.PLOTTING,
+            "theory": AgentType.THEORY,
+            "report": AgentType.REPORT,
+            "sub": AgentType.MAIN,  # Default to main for "sub"
+        }
+        agent_type_enum = agent_type_map.get(agent_type, AgentType.MAIN)
+
         message = UserMessage(
             content=content,
-            agent_type=agent_type,
+            agent_type=agent_type_enum,
             message_id=message_id,
         )
         await self.bus.publish(message)

@@ -9,14 +9,47 @@ from loguru import logger
 
 from ..tools.registry import Tool
 
-# Dangerous commands that should be blocked
-DANGEROUS_COMMANDS = {
-    "rm -rf /",
-    "rm -rf /*",
-    "mkfs",
-    "dd if=/dev/zero",
-    ":(){ :|:& };:",  # Fork bomb
-    "chmod 000",  # Locking files
+# Allowed commands for ExecTool (allowlist approach)
+ALLOWED_COMMANDS = {
+    "python", "python3", "pip", "pip3",
+    "xelatex", "lualatex", "pdflatex",
+    "bibtex", "makeindex",
+    "ls", "dir", "cd", "pwd",
+    "cat", "head", "tail", "grep", "find",
+    "cp", "mv", "rm", "mkdir", "touch", "rmdir",
+    "chmod", "chown",
+    "git",
+    "echo", "printf",
+    "wc", "sort", "uniq", "cut",
+}
+
+# Allowed Python modules for PythonExecTool
+ALLOWED_PYTHON_MODULES = {
+    # Math and data analysis
+    "math", "cmath", "statistics", "random",
+    "decimal", "fractions", "itertools", "collections",
+    "numpy", "np",  # numpy and its common alias
+    "pandas", "pd",  # pandas and its common alias
+    "scipy", "sympy",
+    # Plotting
+    "matplotlib", "matplotlib.pyplot", "plt",  # matplotlib and common alias
+    "plotly",
+    # File I/O (within working directory)
+    "pathlib", "Path",
+    "json", "csv", "yaml",
+    # Standard utilities
+    "datetime", "time", "re", "string", "textwrap",
+    # Type hints
+    "typing",
+}
+
+# Blocked Python modules (high-risk)
+BLOCKED_PYTHON_MODULES = {
+    "os", "sys", "subprocess", "shutil", "commands",
+    "pty", "fcntl", "signal", "socket",
+    "http", "urllib", "requests", "httpx",
+    "eval", "exec", "compile", "__import__",
+    "globals", "locals", "vars", "dir",
 }
 
 
@@ -51,11 +84,36 @@ class ExecTool(Tool):
 
         Returns:
             Dictionary with stdout, stderr, returncode, and timed_out
+
+        Raises:
+            ValueError: If command is not in the allowlist or contains dangerous patterns.
         """
-        # Check for dangerous commands
-        for dangerous in DANGEROUS_COMMANDS:
-            if dangerous in command:
-                raise ValueError(f"Dangerous command blocked: {dangerous}")
+        # Extract the base command (first word)
+        import shlex
+        try:
+            tokens = shlex.split(command.strip())
+            if not tokens:
+                raise ValueError("Empty command")
+            base_command = tokens[0]
+        except ValueError:
+            # If shlex fails, try simple split
+            base_command = command.strip().split()[0] if command.strip() else ""
+
+        # Check if base command is allowed
+        if base_command not in ALLOWED_COMMANDS:
+            raise ValueError(
+                f"Command '{base_command}' is not allowed. "
+                f"Allowed commands: {', '.join(sorted(ALLOWED_COMMANDS))}"
+            )
+
+        # Additional safety checks for certain commands
+        if base_command in ("rm", "rmdir"):
+            # Block deletion of root or system directories
+            for arg in tokens[1:]:
+                if arg.startswith("/") and arg in ("/", "/home", "/usr", "/etc", "/var", "/root"):
+                    raise ValueError(f"Cannot delete system directory: {arg}")
+                if ".." in arg:
+                    raise ValueError("Path traversal with '..' is not allowed")
 
         logger.debug("Executing command: {} (in {})", command, self.working_dir)
 
@@ -124,12 +182,22 @@ class PythonExecTool(Tool):
 
         Returns:
             Dictionary with output, error, and execution_time
+
+        Raises:
+            ValueError: If code attempts to import blocked modules.
         """
         import sys
         import time
         from io import StringIO
 
         logger.debug("Executing Python code ({} chars)", len(code))
+
+        # Check for blocked module imports
+        code_lower = code.lower()
+        for blocked in BLOCKED_PYTHON_MODULES:
+            # Check for import statements
+            if f"import {blocked}" in code_lower or f"from {blocked}" in code_lower:
+                raise ValueError(f"Module '{blocked}' is not allowed for security reasons")
 
         # Capture stdout
         old_stdout = sys.stdout
@@ -141,13 +209,63 @@ class PythonExecTool(Tool):
         sys.stderr = stderr_capture
 
         start_time = time.time()
+        exec_time = None  # Initialize to avoid UnboundLocalError
         error = None
 
         try:
-            # Prepare execution environment
+            # Prepare restricted execution environment
             exec_globals = {
                 "__name__": "__exec__",
-                "__builtins__": __builtins__,
+                "__builtins__": {
+                    # Safe builtins
+                    "abs": abs,
+                    "all": all,
+                    "any": any,
+                    "bin": bin,
+                    "bool": bool,
+                    "bytearray": bytearray,
+                    "bytes": bytes,
+                    "chr": chr,
+                    "complex": complex,
+                    "dict": dict,
+                    "divmod": divmod,
+                    "enumerate": enumerate,
+                    "filter": filter,
+                    "float": float,
+                    "format": format,
+                    "frozenset": frozenset,
+                    "hex": hex,
+                    "int": int,
+                    "isinstance": isinstance,
+                    "issubclass": issubclass,
+                    "iter": iter,
+                    "len": len,
+                    "list": list,
+                    "map": map,
+                    "max": max,
+                    "min": min,
+                    "next": next,
+                    "oct": oct,
+                    "ord": ord,
+                    "pow": pow,
+                    "print": print,
+                    "range": range,
+                    "reversed": reversed,
+                    "round": round,
+                    "set": set,
+                    "slice": slice,
+                    "sorted": sorted,
+                    "str": str,
+                    "sum": sum,
+                    "tuple": tuple,
+                    "zip": zip,
+                    # Constants
+                    "True": True,
+                    "False": False,
+                    "None": None,
+                },
+                # Add allowed modules (will be populated on first import)
+                "__imported_modules": {},
             }
 
             # Execute with timeout
@@ -175,5 +293,5 @@ class PythonExecTool(Tool):
             "output": output,
             "stderr": stderr_output,
             "error": error,
-            "execution_time": exec_time if error is None else None,
+            "execution_time": exec_time,
         }

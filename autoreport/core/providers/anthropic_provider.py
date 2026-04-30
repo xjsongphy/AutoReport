@@ -112,8 +112,15 @@ class AnthropicProvider(LLMProvider):
         temperature: float = 0.1,
         max_tokens: int = 8192,
     ) -> LLMResponse:
-        """Send chat completion with tool results."""
-        # Convert messages and add tool results
+        """Send chat completion with tool results.
+
+        Note: This method is deprecated in favor of using chat() with properly
+        maintained conversation history. It's kept for backward compatibility.
+
+        Per Anthropic API spec, tool_result blocks must be in a user role message,
+        not in the assistant message that initiated the tool call.
+        """
+        # Convert messages
         anthropic_messages = []
         system_message = None
 
@@ -128,17 +135,20 @@ class AnthropicProvider(LLMProvider):
                     "content": content,
                 })
 
-        # Add tool results
-        for msg in anthropic_messages:
-            if msg["role"] == "assistant":
-                # Find tool calls in this message
-                # This is a simplified version - real implementation would track tool calls
-                for result in tool_results:
-                    msg["content"].append({
-                        "type": "tool_result",
-                        "tool_use_id": result.tool_call_id,
-                        "content": result.content,
-                    })
+        # Add tool results as a new user message
+        # According to Anthropic API, tool_result blocks go in a user message
+        if tool_results:
+            tool_result_blocks = []
+            for result in tool_results:
+                tool_result_blocks.append({
+                    "type": "tool_result",
+                    "tool_use_id": result.tool_call_id,
+                    "content": result.content,
+                })
+            anthropic_messages.append({
+                "role": "user",
+                "content": tool_result_blocks,
+            })
 
         # Prepare request
         params: dict[str, Any] = {
