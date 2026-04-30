@@ -417,7 +417,9 @@ class ConfigDialog(QDialog):
 
     def _add_config(self) -> None:
         dlg = PresetSelectorDialog(self)
-        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.selected_preset:
+        result = dlg.exec()
+
+        if result == QDialog.DialogCode.Accepted and dlg.selected_preset:
             preset = dlg.selected_preset
             new_cfg = ApiConfig(
                 name=preset.name,
@@ -432,9 +434,6 @@ class ConfigDialog(QDialog):
                 self.scroll_layout.count() - 1, card
             )
             self._cards.append(card)
-        elif dlg.exec() == QDialog.DialogCode.Rejected:
-            # User cancelled — still allow adding a blank config
-            pass
 
     def _sync_presets(self) -> None:
         self.sync_btn.setEnabled(False)
