@@ -1,17 +1,18 @@
-"""PDF parsing tool using mineru-open-api.
+"""Document parsing tool using mineru-open-api CLI.
 
-MinerU OpenAPI Documentation:
-- GitHub: https://github.com/opendatalab/MinerU
-- API Docs: https://mineru.net/apiManage/docs
+Requires mineru-open-api to be installed globally and authenticated.
+Install: https://github.com/opendatalab/MinerU
+Auth:    mineru-open-api auth
 
-Supported formats: PDF, images, DOCX, PPTX, XLSX
+Supported formats: PDF, images, DOCX, PPTX, XLSX (up to 200MB, 600 pages)
 """
 
 import asyncio
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
-import httpx
 from loguru import logger
 
 from ..tools.registry import Tool
@@ -19,209 +20,179 @@ from .path_utils import resolve_and_validate_path
 
 
 class PDFParseTool(Tool):
-    """Tool for parsing PDF files using mineru-open-api.
+    """Tool for parsing documents using mineru-open-api CLI.
 
-    Features:
-    - Converts PDF files to Markdown format
-    - Extracts text, images, and tables
-    - Supports multi-page documents
-    - Asynchronous processing with configurable timeout
-    - Health check for API availability
+    Uses the authenticated ``extract`` command for high-quality extraction
+    with full asset support (images, tables, formulas).
     """
 
     name = "parse_pdf"
-    description = "Parse PDF file and convert to Markdown using mineru-open-api. Supports PDF, images, DOCX, PPTX, XLSX formats."
+    description = (
+        "Parse PDF/image/DOCX/PPTX files and convert to Markdown "
+        "using mineru-open-api (authenticated). Supports batch processing. "
+        "Output .md is saved next to each source file. "
+        "Supports up to 200MB and 600 pages per file."
+    )
 
     def __init__(
         self,
         workspace: Path,
-        api_url: str | None = None,
         timeout: int = 300,
     ):
-        """Initialize PDF parser.
-
-        Args:
-            workspace: Base workspace directory for path validation.
-            api_url: URL for mineru-open-api service.
-                    If None, uses default http://localhost:9999.
-            timeout: Request timeout in seconds (default: 300).
-        """
         self.workspace = Path(workspace).resolve()
-        self.api_url = api_url or "http://localhost:9999"
         self.timeout = timeout
-        self.client = httpx.AsyncClient(timeout=float(timeout))
+        self._cli_name = "mineru-open-api"
+
+    @staticmethod
+    def is_available() -> bool:
+        """Check whether mineru-open-api CLI is installed."""
+        return shutil.which("mineru-open-api") is not None
 
     async def __call__(
         self,
-        pdf_path: str,
-        output_path: str | None = None,
+        file_paths: str | list[str],
+        output_dir: str | None = None,
+        language: str = "ch",
     ) -> dict[str, Any]:
-        """Parse a PDF file.
+        """Parse one or more document files to Markdown.
 
         Args:
-            pdf_path: Path to PDF file (relative to workspace)
-            output_path: Optional path to save Markdown output (relative to workspace)
+            file_paths: Single file path or list of paths (relative to workspace).
+                        Supports PDF, images, DOCX, PPTX, XLSX.
+            output_dir: Optional output directory (relative to workspace).
+                        Defaults to the same directory as each source file.
+            language: Document language hint, e.g. "ch" or "en".
 
         Returns:
             Dictionary with:
-            - markdown_content: Extracted Markdown text
-            - page_count: Number of pages processed
-            - output_path: Path where output was saved (if specified)
-            - pdf_path: Original PDF file path
-
-        Raises:
-            ValueError: If path is outside workspace or contains path traversal.
-            FileNotFoundError: If PDF file not found.
-            RuntimeError: If API call fails.
-
-        Example:
-            >>> result = await parse_pdf("references/handout.pdf", "references/handout.md")
-            >>> print(result["markdown_content"])
+            - results: List of per-file results (source_path, output_path, content, size_bytes)
+            - total: Number of files processed
+            - errors: List of files that failed (None if all succeeded)
         """
-        pdf_file = resolve_and_validate_path(pdf_path, self.workspace)
+        if isinstance(file_paths, str):
+            paths = [file_paths]
+        else:
+            paths = list(file_paths)
 
-        if not pdf_file.exists():
-            raise FileNotFoundError(f"PDF file not found: {pdf_file}")
-
-        output_file = None
-        if output_path:
-            output_file = resolve_and_validate_path(output_path, self.workspace)
-
-        logger.debug("Parsing PDF: {}", pdf_path)
-
-        try:
-            # Read PDF file asynchronously
-            pdf_bytes = await asyncio.to_thread(pdf_file.read_bytes)
-
-            # Prepare the request
-            files = {"file": (pdf_file.name, pdf_bytes)}
-            data = {"output_format": "markdown"}
-
-            # Call mineru-open-api
-            endpoint = f"{self.api_url}/parse"
-            logger.debug("Sending request to: {}", endpoint)
-
-            response = await self.client.post(
-                endpoint,
-                files=files,
-                data=data,
+        if not self.is_available():
+            raise RuntimeError(
+                "mineru-open-api is not installed. "
+                "Install: https://github.com/opendatalab/MinerU"
             )
-            response.raise_for_status()
 
-            result = response.json()
+        # Resolve output directory
+        if output_dir:
+            out_base = resolve_and_validate_path(output_dir, self.workspace)
+            out_base.mkdir(parents=True, exist_ok=True)
+        else:
+            out_base = None
 
-            # Save to file if output_path specified
-            saved_path = None
-            if output_file and "markdown" in result:
-                output_file.parent.mkdir(parents=True, exist_ok=True)
-                await asyncio.to_thread(
-                    output_file.write_text,
-                    result["markdown"],
-                    encoding="utf-8"
+        results: list[dict[str, Any]] = []
+        errors: list[str] = []
+
+        for raw_path in paths:
+            try:
+                src = resolve_and_validate_path(raw_path, self.workspace)
+                if not src.exists():
+                    errors.append(f"{raw_path}: file not found")
+                    continue
+
+                file_out_dir = out_base if out_base else src.parent
+
+                result = await self._parse_single(src, file_out_dir, language)
+                results.append(result)
+                logger.info("Parsed {} -> {}", src.name, result["output_path"])
+
+            except Exception as e:
+                logger.error("Failed to parse {}: {}", raw_path, e)
+                errors.append(f"{raw_path}: {e}")
+
+        return {
+            "results": results,
+            "total": len(paths),
+            "errors": errors if errors else None,
+        }
+
+    async def _parse_single(
+        self,
+        src: Path,
+        out_dir: Path,
+        language: str,
+    ) -> dict[str, Any]:
+        """Parse a single file using ``mineru-open-api extract``."""
+        with tempfile.TemporaryDirectory(prefix="autoreport_pdf_") as tmp:
+            tmp_dir = Path(tmp)
+
+            cmd = [
+                self._cli_name,
+                "extract",
+                str(src),
+                "-o", str(tmp_dir),
+                "-f", "md",
+                "--language", language,
+                "--timeout", str(self.timeout),
+            ]
+
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=self.timeout + 30,
+            )
+
+            if proc.returncode != 0:
+                err_msg = stderr.decode(errors="replace").strip()
+                raise RuntimeError(
+                    f"mineru-open-api exited with code {proc.returncode}: {err_msg}"
                 )
-                saved_path = str(output_file)
-                logger.info("Saved parsed content to: {}", saved_path)
+
+            # Locate generated .md file in temp output
+            md_files = list(tmp_dir.rglob("*.md"))
+            if not md_files:
+                raise RuntimeError(
+                    f"No .md output found for {src.name}. "
+                    f"stderr: {stderr.decode(errors='replace')}"
+                )
+
+            md_file = md_files[0]
+            content = md_file.read_text(encoding="utf-8")
+
+            # Move to final location
+            final_path = out_dir / (src.stem + ".md")
+            final_path.parent.mkdir(parents=True, exist_ok=True)
+            final_path.write_text(content, encoding="utf-8")
 
             return {
-                "markdown_content": result.get("markdown", ""),
-                "page_count": result.get("page_count", 0),
-                "output_path": saved_path,
-                "pdf_path": str(pdf_file),
-            }
-        except httpx.HTTPStatusError as e:
-            logger.error("HTTP error parsing PDF: {}", e.response.status_code)
-            raise RuntimeError(
-                f"Failed to parse PDF: HTTP {e.response.status_code} - {e.response.text}"
-            )
-        except httpx.ConnectError as e:
-            logger.error("Connection error to mineru-open-api: {}", e)
-            raise RuntimeError(
-                f"Failed to connect to mineru-open-api at {self.api_url}. "
-                "Please ensure the service is running."
-            )
-        except httpx.TimeoutException:
-            logger.error("Timeout parsing PDF after {} seconds", self.timeout)
-            raise RuntimeError(
-                f"PDF parsing timeout after {self.timeout} seconds. "
-                "The file may be too large or the service may be overloaded."
-            )
-        except Exception as e:
-            logger.error("Failed to parse PDF {}: {}", pdf_file, e)
-            raise RuntimeError(f"Failed to parse PDF: {e}")
-
-    async def health_check(self) -> dict[str, Any]:
-        """Check if mineru-open-api service is available.
-
-        Returns:
-            Dictionary with:
-            - available: True if service is reachable
-            - url: API URL
-            - error: Error message if unavailable
-
-        Example:
-            >>> health = await health_check()
-            >>> if health["available"]:
-            ...     print("Service is ready")
-        """
-        try:
-            # Try to reach the service (many endpoints can be used for health check)
-            # Using a simple GET request to the base URL
-            response = await self.client.get(
-                self.api_url,
-                timeout=5.0  # Short timeout for health check
-            )
-            return {
-                "available": True,
-                "url": self.api_url,
-                "status": response.status_code,
-            }
-        except httpx.ConnectError:
-            return {
-                "available": False,
-                "url": self.api_url,
-                "error": "Connection refused - service may not be running",
-            }
-        except httpx.TimeoutException:
-            return {
-                "available": False,
-                "url": self.api_url,
-                "error": "Connection timeout - service may be overloaded",
-            }
-        except Exception as e:
-            return {
-                "available": False,
-                "url": self.api_url,
-                "error": str(e),
+                "source_path": str(src.relative_to(self.workspace)),
+                "output_path": str(final_path.relative_to(self.workspace)),
+                "content": content,
+                "size_bytes": len(content.encode("utf-8")),
             }
 
     async def check_and_warn(self) -> None:
-        """Check API availability and log warning if unavailable.
-
-        This is useful for startup validation where we want to warn
-        but not block application startup.
-        """
-        health = await self.health_check()
-        if not health["available"]:
+        """Check CLI availability and auth status, log warning if unusable."""
+        if not self.is_available():
             logger.warning(
-                "mineru-open-api unavailable at {}: {}",
-                health["url"],
-                health.get("error", "unknown error"),
+                "mineru-open-api is not installed. Document parsing will not work. "
+                "Install: https://github.com/opendatalab/MinerU"
             )
+            return
+
+        # Verify auth by running extract --help (lightweight check)
+        proc = await asyncio.create_subprocess_exec(
+            self._cli_name, "auth", "--verify",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+
+        if proc.returncode != 0:
             logger.warning(
-                "PDF parsing will not work until mineru-open-api is available. "
-                "Install and start with: pip install mineru-open-api && mineru-open-api"
+                "mineru-open-api is installed but not authenticated. "
+                "Run: mineru-open-api auth"
             )
         else:
-            logger.info("mineru-open-api is available at {}", health["url"])
-
-    async def __aenter__(self):
-        """Async context manager entry."""
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        await self.client.aclose()
-
-    async def close(self):
-        """Close the HTTP client."""
-        await self.client.aclose()
+            logger.info("mineru-open-api is available and authenticated")
