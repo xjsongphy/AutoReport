@@ -1,89 +1,62 @@
 # AutoReport Configuration
-# Based on DeepCode/nanobot patterns with adaptive token limits
+# Multi-provider support inspired by OpenClaw's plugin-based provider system
 
 agents:
   defaults:
     model: "anthropic/claude-sonnet-4.5"
     provider: "auto"
-
-    # Token configuration with adaptive policy
-    # Claude Sonnet 4.5: 8192 max output, 200K context
-    # For complex report writing, we use adaptive policy
-    max_tokens_policy: "adaptive"  # Options: "fixed", "adaptive"
-    base_max_tokens: 8192
-    retry_max_tokens: 16384  # Increase on retry for complex tasks
-
-    # Fallback to fixed value if adaptive policy not implemented
     max_tokens: 8192
-
     temperature: 0.1
     max_tool_iterations: 200
     timezone: "Asia/Shanghai"
     prompt_templates_dir: "templates/agents"
 
-    # Tool configuration (nanobot style)
-    max_tool_result_chars: 16384  # Max characters in tool result
-    context_window_tokens: 200000  # Claude Sonnet 4.5 context window
-    context_block_limit: 20  # Max code blocks in context
-
 providers:
-  # Anthropic Claude models
-  # Claude Sonnet 4.5: 8192 max completion, 200K context
   anthropic:
-    api_key: null  # Set via ANTHROPIC_API_KEY environment variable or here
+    api_key: null  # ANTHROPIC_API_KEY
     api_base: null
-    default_model: "claude-sonnet-4-20250514"  # Claude Sonnet 4.5
-    planning_model: "claude-sonnet-4-20250514"
-    max_tokens: 8192
+    enabled: true
+    default_model: "claude-sonnet-4-20250514"
 
-  # OpenAI models
-  # GPT-4o: 16384 max completion, 128K context
   openai:
-    api_key: null  # Set via OPENAI_API_KEY environment variable or here
+    api_key: null  # OPENAI_API_KEY
     api_base: null
+    enabled: true
     default_model: "gpt-4o"
-    planning_model: "gpt-4o"
-    max_tokens: 16384
 
-  # Google models
-  # Gemini Pro: 8192 max completion, ~1M context
   google:
-    api_key: null  # Set via GOOGLE_API_KEY environment variable or here
+    api_key: null  # GOOGLE_API_KEY
     api_base: null
+    enabled: false
     default_model: "gemini-2.0-flash-exp"
-    planning_model: "gemini-2.0-flash-exp"
-    max_tokens: 8192
 
-  # DeepSeek models
-  # DeepSeek-V3: 8K max completion, 64K context
   deepseek:
-    api_key: null  # Set via DEEPSEEK_API_KEY environment variable or here
+    api_key: null  # DEEPSEEK_API_KEY
     api_base: "https://api.deepseek.com/v1"
+    enabled: true
     default_model: "deepseek-chat"
-    planning_model: "deepseek-chat"
-    max_tokens: 8192
 
-# Model-specific limits (DeepCode style pattern)
-model_limits:
-  claude-sonnet-4:
-    max_completion_tokens: 8192
-    max_context_tokens: 200000
-  claude-opus-4:
-    max_completion_tokens: 8192
-    max_context_tokens: 200000
-  gpt-4o:
-    max_completion_tokens: 16384
-    max_context_tokens: 128000
-  gemini-2.0-flash-exp:
-    max_completion_tokens: 8192
-    max_context_tokens: 1000000
-  deepseek-chat:
-    max_completion_tokens: 8192
-    max_context_tokens: 64000
+  openrouter:
+    api_key: null  # OPENROUTER_API_KEY
+    api_base: "https://openrouter.ai/api/v1"
+    enabled: false
+    default_model: null
+
+  groq:
+    api_key: null  # GROQ_API_KEY
+    api_base: "https://api.groq.com/openai/v1"
+    enabled: false
+    default_model: "llama-3.3-70b-versatile"
+
+  custom:
+    api_key: null
+    api_base: "http://localhost:11434/v1"
+    enabled: false
+    default_model: null
 
 # MinerU API configuration for PDF parsing
 mineru_api:
   url: "http://localhost:9999"
   enabled: true
-  timeout: 300  # seconds (5 minutes)
-  validate_on_startup: true  # Soft warning if unavailable
+  timeout: 300
+  validate_on_startup: true
