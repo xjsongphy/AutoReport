@@ -2,14 +2,12 @@
 
 import asyncio
 import os
-import shutil
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
 from ..tools.registry import Tool
-
 
 # Dangerous commands that should be blocked
 DANGEROUS_COMMANDS = {

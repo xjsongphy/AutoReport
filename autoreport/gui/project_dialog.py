@@ -1,26 +1,22 @@
 """Project selection dialog for choosing or creating projects."""
 
 from pathlib import Path
-from typing import Any
 
+from loguru import logger
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog,
-    QVBoxLayout,
+    QFileDialog,
     QHBoxLayout,
-    QPushButton,
     QLabel,
     QListWidget,
     QListWidgetItem,
-    QFileDialog,
     QMessageBox,
-    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from loguru import logger
 
-from ...interfaces.types import AgentType
 from ...config import ConfigManager
-
 
 # Fixed directory structure for projects
 PROJECT_DIRECTORIES = ["data", "data/processed", "references", "theory", "code", "tex"]

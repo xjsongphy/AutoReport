@@ -1,11 +1,12 @@
 """Tests for checkpoint management."""
 
-import pytest
-from pathlib import Path
-import tempfile
 import shutil
+import tempfile
+from pathlib import Path
 
-from autoreport.core.checkpoints import CheckpointManager, FileState, CheckpointData
+import pytest
+
+from autoreport.core.checkpoints import CheckpointData, CheckpointManager, FileState
 
 
 @pytest.fixture

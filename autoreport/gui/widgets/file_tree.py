@@ -1,19 +1,16 @@
 """File tree widget for project directory structure."""
 
 from pathlib import Path
-from typing import Any
 
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
+    QLabel,
     QTreeWidget,
     QTreeWidgetItem,
-    QHeaderView,
-    QLabel,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QIcon, QDragEnterEvent, QDropEvent
-
 
 # Fixed directory structure
 FIXED_DIRECTORIES = ["data", "references", "theory", "code", "tex"]

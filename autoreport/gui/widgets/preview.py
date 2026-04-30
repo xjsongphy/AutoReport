@@ -1,18 +1,14 @@
 """Preview widget for displaying file contents."""
 
 from pathlib import Path
-from typing import Any
 
-from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QTabWidget,
-    QTextEdit,
-    QTableWidget,
-    QLabel,
-)
-from PyQt6.QtCore import Qt
 from loguru import logger
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
+    QLabel,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 class PreviewWidget(QWidget):

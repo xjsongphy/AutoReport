@@ -1,18 +1,17 @@
 """Configuration dialog for API keys."""
 
-from PyQt6.QtWidgets import (
-    QDialog,
-    QVBoxLayout,
-    QHBoxLayout,
-    QFormLayout,
-    QLineEdit,
-    QPushButton,
-    QLabel,
-    QMessageBox,
-    QComboBox,
-)
-from PyQt6.QtCore import Qt
 from loguru import logger
+from PyQt6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+)
 
 from ...config import ConfigManager
 

@@ -1,8 +1,8 @@
 """GUI widgets for AutoReport."""
 
+from .agent_panel import AgentPanel
 from .file_tree import FileTreeWidget
 from .preview import PreviewWidget
-from .agent_panel import AgentPanel
 
 __all__ = [
     "FileTreeWidget",

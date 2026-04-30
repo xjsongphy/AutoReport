@@ -1,17 +1,13 @@
 """Checkpoint management for rollback functionality."""
 
-import asyncio
 import hashlib
 import json
-import shutil
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from dataclasses import dataclass, asdict
 
 from loguru import logger
-
-from autoreport.interfaces.types import Checkpoint
 
 
 @dataclass

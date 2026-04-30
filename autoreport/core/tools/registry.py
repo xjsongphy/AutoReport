@@ -1,6 +1,7 @@
 """Tool registry for agent tools."""
 
-from typing import Any, Callable, Type
+from typing import Any
+
 from loguru import logger
 
 

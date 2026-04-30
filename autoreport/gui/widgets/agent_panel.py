@@ -3,19 +3,17 @@
 from datetime import datetime
 from typing import Any
 
+from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtGui import QTextCursor
 from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
     QHBoxLayout,
-    QTextEdit,
+    QLabel,
     QLineEdit,
     QPushButton,
-    QScrollArea,
-    QLabel,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QTextCursor
-from loguru import logger
 
 
 class AgentPanel(QWidget):
@@ -266,7 +264,7 @@ class AgentPanel(QWidget):
         """
         self._debug_button.setChecked(enabled)
 
-    def hide_debug_button(self) -> hide: bool = True:
+    def hide_debug_button(self, hide: bool = True) -> None:
         """Hide or show debug button.
 
         Args:

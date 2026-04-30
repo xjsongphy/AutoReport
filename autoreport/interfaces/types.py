@@ -1,11 +1,10 @@
 """Interface type definitions for GUI-backend communication."""
 
+from datetime import datetime
 from enum import Enum
 from typing import Any
-from dataclasses import dataclass
-from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class MessageType(str, Enum):
@@ -52,8 +51,7 @@ class Message(BaseModel):
     type: MessageType
     timestamp: datetime = Field(default_factory=datetime.now)
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class UserMessage(Message):

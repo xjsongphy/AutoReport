@@ -1,7 +1,7 @@
 """Core business logic for AutoReport."""
 
+from .loops import AgentLoop, LoopManager, MessageBus
 from .tools import ToolRegistry
-from .loops import MessageBus, AgentLoop, LoopManager
 
 __all__ = [
     "ToolRegistry",

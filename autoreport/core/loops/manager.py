@@ -2,27 +2,26 @@
 
 import asyncio
 from pathlib import Path
-from typing import Any
 
 from loguru import logger
 
 from ...config import ConfigManager
-from ...interfaces.types import AgentType, RestartRequest, Message, Checkpoint
+from ...core.providers import ProviderFactory, ProviderManager
 from ...interfaces.protocol import GUIAPI
-from ...core.providers import ProviderManager, ProviderFactory, ProviderType
+from ...interfaces.types import AgentType, Message, RestartRequest
 from ..checkpoints import CheckpointManager
-from ..tools.registry import ToolRegistry
 from ..tools import (
+    EditFileTool,
+    ExecTool,
+    ListDirTool,
+    PDFParseTool,
+    PythonExecTool,
     ReadFileTool,
     WriteFileTool,
-    EditFileTool,
-    ListDirTool,
-    ExecTool,
-    PythonExecTool,
-    PDFParseTool,
 )
-from .bus import MessageBus
+from ..tools.registry import ToolRegistry
 from .agent_loop import AgentLoop
+from .bus import MessageBus
 
 
 class LoopManager:

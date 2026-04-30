@@ -1,16 +1,16 @@
 """Tests for file tools."""
 
-import pytest
-import asyncio
-from pathlib import Path
-import tempfile
 import shutil
+import tempfile
+from pathlib import Path
+
+import pytest
 
 from autoreport.core.tools.file_tools import (
-    ReadFileTool,
-    WriteFileTool,
     EditFileTool,
     ListDirTool,
+    ReadFileTool,
+    WriteFileTool,
 )
 
 
@@ -32,7 +32,7 @@ async def test_read_file(temp_workspace):
     tool = ReadFileTool(workspace=temp_workspace)
     result = await tool(path="test.txt")
 
-    assert result["path"] == str(test_file)
+    assert Path(result["path"]) == test_file.resolve()
     assert result["content"] == "Hello, World!"
     assert result["line_count"] == 1
     assert result["lines_read"] == 1
@@ -100,7 +100,7 @@ async def test_edit_file(temp_workspace):
         new_text="Universe",
     )
 
-    assert result["path"] == str(test_file)
+    assert Path(result["path"]) == test_file.resolve()
     assert result["replacements_made"] == 1
     assert test_file.read_text(encoding="utf-8") == "Hello Universe"
 
@@ -119,7 +119,7 @@ async def test_list_dir(temp_workspace):
     # Test non-recursive
     result = await tool(path=".", recursive=False)
 
-    assert result["path"] == str(temp_workspace)
+    assert Path(result["path"]) == temp_workspace.resolve()
     assert set(result["directories"]) == {"dir1", "dir2"}
     assert set(result["files"]) == {"file1.txt"}
 

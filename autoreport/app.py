@@ -4,14 +4,14 @@ import asyncio
 import sys
 from pathlib import Path
 
-from PyQt6.QtWidgets import QApplication, QDialog
 from loguru import logger
+from PyQt6.QtWidgets import QApplication, QDialog
 
 from .config import ConfigManager
-from .core.loops import MessageBus, LoopManager
-from .interfaces.protocol import BackendAPI
+from .core.loops import LoopManager, MessageBus
 from .gui import MainWindow
-from .utils import setup_logging, setup_exception_handler, log_exception
+from .interfaces.protocol import BackendAPI
+from .utils import log_exception, setup_exception_handler, setup_logging
 
 
 class AutoReportApp:
@@ -265,7 +265,7 @@ def main():
     is_valid, _ = app.config_manager.validate_api_keys()
 
     # Create Qt application first (needed for dialogs)
-    qt_app = QApplication(sys.argv)
+    _ = QApplication(sys.argv)  # noqa: F841
 
     if not is_valid:
         # Show config dialog

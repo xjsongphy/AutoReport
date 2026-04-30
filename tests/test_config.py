@@ -1,11 +1,11 @@
 """Tests for configuration management."""
 
-import pytest
-from pathlib import Path
 import tempfile
-import yaml
+from pathlib import Path
 
-from autoreport.config import ConfigManager, Settings, AppConfig
+import pytest
+
+from autoreport.config import AppConfig, ConfigManager, Settings
 
 
 @pytest.fixture

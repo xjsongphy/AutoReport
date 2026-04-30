@@ -1,21 +1,21 @@
 """Interface layer for GUI-backend communication."""
 
+from .protocol import GUIAPI, BackendAPI, MessageChannel
 from .types import (
-    MessageType,
-    AgentType,
-    AgentStatus,
-    Message,
-    UserMessage,
     AgentResponse,
+    AgentStatus,
+    AgentType,
+    Checkpoint,
+    ConfigChange,
+    Error,
+    Message,
+    MessageType,
+    RestartRequest,
+    StatusChange,
     ToolCall,
     ToolResult,
-    StatusChange,
-    ConfigChange,
-    RestartRequest,
-    Checkpoint,
-    Error,
+    UserMessage,
 )
-from .protocol import MessageChannel, BackendAPI, GUIAPI
 
 __all__ = [
     "MessageType",

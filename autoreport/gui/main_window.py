@@ -3,21 +3,28 @@
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtWidgets import (
-    QMainWindow,
-    QWidget,
-    QSplitter,
-    QHBoxLayout,
-    QVBoxLayout,
-)
-from PyQt6.QtCore import Qt, QTimer
 from loguru import logger
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
+    QHBoxLayout,
+    QMainWindow,
+    QSplitter,
+    QWidget,
+)
 
-from ...interfaces.types import Message
-from ...interfaces.protocol import BackendAPI, GUIAPI
+from ...interfaces.protocol import GUIAPI, BackendAPI
+from ...interfaces.types import (
+    AgentResponse,
+    Checkpoint,
+    Error,
+    Message,
+    StatusChange,
+    ToolCall,
+    ToolResult,
+)
+from .widgets.agent_panel import AgentPanel
 from .widgets.file_tree import FileTreeWidget
 from .widgets.preview import PreviewWidget
-from .widgets.agent_panel import AgentPanel
 
 
 class MainWindow(QMainWindow, GUIAPI):
@@ -148,11 +155,11 @@ class MainWindow(QMainWindow, GUIAPI):
         """
         from ...interfaces.types import (
             AgentResponse,
+            Checkpoint,
+            Error,
+            StatusChange,
             ToolCall,
             ToolResult,
-            StatusChange,
-            Error,
-            Checkpoint,
         )
 
         if isinstance(message, AgentResponse):

@@ -2,10 +2,10 @@
 
 from typing import Any
 
-from openai import AsyncOpenAI
 from loguru import logger
+from openai import AsyncOpenAI
 
-from .base import LLMProvider, Message, ToolCall, ToolResult, LLMResponse
+from .base import LLMProvider, LLMResponse, Message, ToolCall, ToolResult
 
 
 class OpenAIProvider(LLMProvider):
@@ -106,7 +106,6 @@ class OpenAIProvider(LLMProvider):
     ) -> LLMResponse:
         """Send chat completion with tool results."""
         openai_messages = []
-        tool_results_map = {r.tool_call_id: r for r in tool_results}
 
         for msg in messages:
             openai_messages.append({

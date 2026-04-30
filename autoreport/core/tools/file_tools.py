@@ -1,7 +1,6 @@
 """File operation tools."""
 
 import asyncio
-import hashlib
 from pathlib import Path
 from typing import Any
 

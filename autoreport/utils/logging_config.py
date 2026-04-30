@@ -1,9 +1,10 @@
 """Logging configuration for AutoReport."""
 
 import sys
-from pathlib import Path
-from loguru import logger
 import traceback
+from pathlib import Path
+
+from loguru import logger
 
 
 def setup_logging(

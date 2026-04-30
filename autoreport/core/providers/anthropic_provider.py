@@ -1,12 +1,11 @@
 """Anthropic Claude provider."""
 
-import asyncio
 from typing import Any
 
 from anthropic import AsyncAnthropic
 from loguru import logger
 
-from .base import LLMProvider, Message, ToolCall, ToolResult, LLMResponse
+from .base import LLMProvider, LLMResponse, Message, ToolCall, ToolResult
 
 
 class AnthropicProvider(LLMProvider):
@@ -130,7 +129,6 @@ class AnthropicProvider(LLMProvider):
                 })
 
         # Add tool results
-        tool_results_map = {r.tool_call_id: r for r in tool_results}
         for msg in anthropic_messages:
             if msg["role"] == "assistant":
                 # Find tool calls in this message

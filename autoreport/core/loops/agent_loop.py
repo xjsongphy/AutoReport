@@ -7,19 +7,16 @@ from typing import Any
 from loguru import logger
 
 from ...config.schema import AgentDefaults
-from ...interfaces.types import (
-    AgentType,
-    AgentStatus,
-    UserMessage,
-    AgentResponse,
-    ToolCall,
-    ToolResult,
-    StatusChange,
-    Error,
-    Message,
-)
+from ...core.providers.base import LLMProvider
+from ...core.providers.base import Message as LLMMessage
+from ...core.providers.base import ToolResult as LLMToolResult
 from ...interfaces.protocol import GUIAPI
-from ...core.providers.base import LLMProvider, Message as LLMMessage, ToolResult as LLMToolResult
+from ...interfaces.types import (
+    AgentStatus,
+    AgentType,
+    Message,
+    UserMessage,
+)
 from ..tools.registry import ToolRegistry
 from .bus import MessageBus
 

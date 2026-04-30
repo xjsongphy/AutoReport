@@ -1,7 +1,7 @@
 """Configuration management for AutoReport."""
 
-from .schema import AppConfig, AgentDefaults, ProviderConfig, ProvidersConfig, Settings
 from .manager import ConfigManager
+from .schema import AgentDefaults, AppConfig, ProviderConfig, ProvidersConfig, Settings
 
 __all__ = [
     "AppConfig",

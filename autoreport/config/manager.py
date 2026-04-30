@@ -1,9 +1,10 @@
 """Configuration manager for AutoReport."""
 
 from pathlib import Path
+
 from loguru import logger
 
-from .schema import Settings, AppConfig
+from .schema import AppConfig, Settings
 
 
 class ConfigManager:

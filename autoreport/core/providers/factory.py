@@ -4,11 +4,10 @@ from typing import Literal
 
 from loguru import logger
 
-from .base import LLMProvider
 from .anthropic_provider import AnthropicProvider
-from .openai_provider import OpenAIProvider
+from .base import LLMProvider
 from .deepseek_provider import DeepSeekProvider
-
+from .openai_provider import OpenAIProvider
 
 ProviderType = Literal["anthropic", "openai", "deepseek"]
 

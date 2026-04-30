@@ -1,12 +1,12 @@
 """Tests for tool registry."""
 
-import pytest
-from pathlib import Path
 import tempfile
-import shutil
+from pathlib import Path
 
-from autoreport.core.tools.registry import ToolRegistry, Tool
+import pytest
+
 from autoreport.core.tools.file_tools import ReadFileTool, WriteFileTool
+from autoreport.core.tools.registry import Tool, ToolRegistry
 
 
 class DummyTool(Tool):
