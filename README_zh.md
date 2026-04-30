@@ -167,18 +167,28 @@ mineru_api:
 
 ### Provider 配置
 
+支持多 API 配置，预设模板来自 [cc-switch](https://github.com/farion1231/cc-switch)（50+ 服务商，包括 Anthropic、DeepSeek、OpenRouter、智谱等）。
+
 ```yaml
 providers:
-  anthropic:
-    api_key: null  # 通过 ANTHROPIC_API_KEY 环境变量设置
-    api_base: null
-  openai:
-    api_key: null  # 通过 OPENAI_API_KEY 环境变量设置
-    api_base: null
-  deepseek:
-    api_key: null  # 通过 DEEPSEEK_API_KEY 环境变量设置
-    api_base: "https://api.deepseek.com/v1"
+  active: "anthropic-default"  # 活跃配置 ID
+  configurations:
+    - name: "Anthropic (Official)"
+      provider: "anthropic"
+      api_key: null       # 通过 ANTHROPIC_API_KEY 环境变量设置
+      api_base: null
+      default_model: "claude-sonnet-4-20250514"
+      enabled: true
+
+    - name: "DeepSeek"
+      provider: "deepseek"
+      api_key: null       # 通过 DEEPSEEK_API_KEY 环境变量设置
+      api_base: "https://api.deepseek.com"
+      default_model: "deepseek-chat"
+      enabled: true
 ```
+
+首次启动会弹出 GUI 配置对话框，可选择预设模板。也可通过环境变量设置 API Key。
 
 ## 调试模式
 
@@ -246,34 +256,26 @@ AutoReport 使用渐进式加载系统管理 Agent 提示词：
 
 **优先级**：用户模板 > 内置模板 > 标准 LaTeX
 
-## MinerU Open API 集成
+## MinerU 集成
 
-AutoReport 使用 [mineru-open-api](https://github.com/opendatalab/MinerU) 进行 PDF 解析。
+AutoReport 使用 [mineru-open-api](https://github.com/opendatalab/MinerU) CLI 进行 PDF 解析。
 
 ### 设置
 
-1. 安装并启动 mineru-open-api 服务：
+1. 安装并认证 mineru-open-api：
 ```bash
 pip install mineru-open-api
-mineru-open-api --port 9999
+mineru-open-api auth
 ```
 
-2. 在 `autoreport.config.yaml` 中配置：
-```yaml
-mineru_api:
-  url: "http://localhost:9999"
-  enabled: true
-  timeout: 300
-```
-
-3. 启动时如果 API 不可用，系统会显示软警告，但仍允许应用运行。
+2. 启动时系统会自动检测可用性，未安装时显示警告。
 
 ### 功能
 
-- 将 PDF 参考资料转换为 Markdown
-- 提取文本、图片和表格
-- 支持多页文档
-- 异步处理，5 分钟超时
+- 将 PDF、图片、DOCX、PPTX、XLSX 转换为 Markdown
+- 提取文本、图片、表格和公式
+- 支持批量处理（单文件最大 200MB、600 页）
+- 基于 CLI 调用，无需本地服务器
 
 ## 参与贡献
 

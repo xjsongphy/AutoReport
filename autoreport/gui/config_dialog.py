@@ -259,14 +259,33 @@ class PresetSelectorDialog(QDialog):
         scroll.setWidget(scroll_content)
         layout.addWidget(scroll, 1)
 
-        # Cancel button
-        cancel_btn = QPushButton("取消（手动输入）")
+        # Bottom buttons: blank config + cancel
+        bottom_row = QHBoxLayout()
+        bottom_row.setSpacing(8)
+
+        blank_btn = QPushButton("空白自定义配置")
+        blank_btn.setObjectName("blankBtn")
+        blank_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        blank_btn.clicked.connect(self._select_blank)
+        bottom_row.addWidget(blank_btn)
+
+        bottom_row.addStretch()
+
+        cancel_btn = QPushButton("取消")
         cancel_btn.setObjectName("cancelBtn")
         cancel_btn.clicked.connect(self.reject)
-        layout.addWidget(cancel_btn)
+        bottom_row.addWidget(cancel_btn)
+
+        layout.addLayout(bottom_row)
 
     def _select(self, preset: ProviderPreset) -> None:
         self._selected_preset = preset
+        self._is_blank = False
+        self.accept()
+
+    def _select_blank(self) -> None:
+        self._selected_preset = None
+        self._is_blank = True
         self.accept()
 
 
@@ -314,6 +333,14 @@ class ConfigDialog(QDialog):
         subtitle.setWordWrap(True)
         header_layout.addWidget(subtitle)
 
+        warning = QLabel(
+            "⚠ 部分订阅服务商（如智谱）不允许第三方工具调用 API，"
+            "使用前请自行确认服务条款。"
+        )
+        warning.setObjectName("apiWarning")
+        warning.setWordWrap(True)
+        header_layout.addWidget(warning)
+
         # Active config switcher
         active_row = QHBoxLayout()
         active_row.setSpacing(8)
@@ -349,7 +376,7 @@ class ConfigDialog(QDialog):
         # Add config button
         add_row = QHBoxLayout()
         add_row.setContentsMargins(20, 4, 20, 4)
-        add_btn = QPushButton("+ 添加配置（从预设）")
+        add_btn = QPushButton("+ 添加配置")
         add_btn.setObjectName("addBtn")
         add_btn.clicked.connect(self._add_config)
         add_row.addWidget(add_btn)
@@ -385,7 +412,7 @@ class ConfigDialog(QDialog):
 
     def _refresh_active_combo(self) -> None:
         self.active_combo.clear()
-        configs = self._config_manager.config.providers.configurations
+        configs = [c.get_config() for c in self._cards] if self._cards else []
         active_id = self._config_manager.config.providers.active
 
         for cfg in configs:
@@ -408,32 +435,36 @@ class ConfigDialog(QDialog):
             self._cards.append(card)
 
     def _remove_card(self, card: ConfigCard) -> None:
-        if len(self._cards) <= 1:
-            QMessageBox.warning(self, "无法删除", "至少需要保留一个配置。")
-            return
         self._cards.remove(card)
         self.scroll_layout.removeWidget(card)
         card.deleteLater()
+        self._refresh_active_combo()
+
+    def _add_card(self, cfg: ApiConfig) -> None:
+        card = ConfigCard(cfg)
+        card.delete_btn.clicked.connect(lambda checked, c=card: self._remove_card(c))
+        self.scroll_layout.insertWidget(self.scroll_layout.count() - 1, card)
+        self._cards.append(card)
+        self._refresh_active_combo()
 
     def _add_config(self) -> None:
         dlg = PresetSelectorDialog(self)
         result = dlg.exec()
 
-        if result == QDialog.DialogCode.Accepted and dlg.selected_preset:
+        if result != QDialog.DialogCode.Accepted:
+            return
+
+        if getattr(dlg, "_is_blank", False):
+            self._add_card(ApiConfig(name="新配置", provider="custom", enabled=True))
+        elif dlg.selected_preset:
             preset = dlg.selected_preset
-            new_cfg = ApiConfig(
+            self._add_card(ApiConfig(
                 name=preset.name,
                 provider=preset.provider,
                 api_base=preset.base_url if preset.base_url else None,
                 default_model=preset.default_model if preset.default_model else None,
                 enabled=True,
-            )
-            card = ConfigCard(new_cfg)
-            card.delete_btn.clicked.connect(lambda checked, c=card: self._remove_card(c))
-            self.scroll_layout.insertWidget(
-                self.scroll_layout.count() - 1, card
-            )
-            self._cards.append(card)
+            ))
 
     def _sync_presets(self) -> None:
         self.sync_btn.setEnabled(False)
@@ -552,6 +583,9 @@ class ConfigDialog(QDialog):
             "inputDisabledBg": "#2c2c2e" if dark else "#f1f5f9",
             "inputDisabledFg": "#636366" if dark else "#94a3b8",
             "checkFg": "#e5e5e7" if dark else "#374151",
+            "warningFg": "#ff453a" if dark else "#dc2626",
+            "warningBg": "#3a1a1a" if dark else "#fef2f2",
+            "warningBorder": "#6b2121" if dark else "#fecaca",
             "bodyBg": "#1c1c1e" if dark else "#ffffff",
             "categoryFg": "#98989d" if dark else "#64748b",
             "presetBtnBg": "#323234" if dark else "#f8fafc",
@@ -583,6 +617,15 @@ class ConfigDialog(QDialog):
                 font-size: 13px;
                 color: {c["subtitleFg"]};
                 margin-top: 4px;
+            }}
+            #apiWarning {{
+                font-size: 12px;
+                color: {c["warningFg"]};
+                padding: 6px 10px;
+                background-color: {c["warningBg"]};
+                border: 1px solid {c["warningBorder"]};
+                border-radius: 6px;
+                margin-top: 8px;
             }}
             #activeLabel {{
                 font-size: 13px;
@@ -690,6 +733,18 @@ class ConfigDialog(QDialog):
                 text-align: left;
             }}
             #presetBtn:hover {{ background-color: {c["presetBtnHoverBg"]}; }}
+            #blankBtn {{
+                background-color: transparent;
+                color: {c["subtitleFg"]};
+                border: 1px dashed {c["inputBorder"]};
+                border-radius: 4px;
+                padding: 6px 14px;
+                font-size: 12px;
+            }}
+            #blankBtn:hover {{
+                color: {c["primaryBtnBg"]};
+                border-color: {c["primaryBtnBg"]};
+            }}
             QLineEdit {{
                 border: 1px solid {c["inputBorder"]};
                 border-radius: 4px;
@@ -718,14 +773,19 @@ class ConfigDialog(QDialog):
                 subcontrol-position: top right;
                 width: 24px;
                 border: none;
+                border-left: 1px solid {c["inputBorder"]};
                 background: transparent;
             }}
             QComboBox::down-arrow {{
                 width: 8px;
                 height: 8px;
+                image: none;
                 border-left: 4px solid transparent;
                 border-right: 4px solid transparent;
-                border-top: 5px solid {c["inputBorder"]};
+                border-top: 5px solid {c["subtitleFg"]};
+            }}
+            QComboBox::down-arrow:hover {{
+                border-top-color: {c["inputFg"]};
             }}
             QComboBox QAbstractItemView {{
                 border: 1px solid {c["inputBorder"]};

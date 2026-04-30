@@ -339,6 +339,12 @@ def main():
     qt_app = QApplication(sys.argv)
     assert QApplication.instance() is not None, "QApplication creation failed"
 
+    # Set application icon
+    from PyQt6.QtGui import QIcon
+    icon_path = Path(__file__).parent / "resources" / "icon.png"
+    if icon_path.exists():
+        qt_app.setWindowIcon(QIcon(str(icon_path)))
+
     # Now safe to setup logging and exception handling
     setup_logging(log_level="INFO", log_to_file=True)
     setup_exception_handler()

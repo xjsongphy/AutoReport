@@ -156,30 +156,30 @@ agents:
     context_window_tokens: 200000
 ```
 
-### MinerU API Configuration
-
-```yaml
-mineru_api:
-  url: "http://localhost:9999"
-  enabled: true
-  timeout: 300
-  validate_on_startup: true  # Soft warning if unavailable
-```
-
 ### Provider Configuration
+
+Supports multiple API configurations with preset templates from [cc-switch](https://github.com/farion1231/cc-switch) (50+ providers including Anthropic, DeepSeek, OpenRouter, ZhiPu, etc.).
 
 ```yaml
 providers:
-  anthropic:
-    api_key: null  # Set via ANTHROPIC_API_KEY env var
-    api_base: null
-  openai:
-    api_key: null  # Set via OPENAI_API_KEY env var
-    api_base: null
-  deepseek:
-    api_key: null  # Set via DEEPSEEK_API_KEY env var
-    api_base: "https://api.deepseek.com/v1"
+  active: "anthropic-default"  # Active config ID
+  configurations:
+    - name: "Anthropic (Official)"
+      provider: "anthropic"
+      api_key: null       # Set via ANTHROPIC_API_KEY env var
+      api_base: null
+      default_model: "claude-sonnet-4-20250514"
+      enabled: true
+
+    - name: "DeepSeek"
+      provider: "deepseek"
+      api_key: null       # Set via DEEPSEEK_API_KEY env var
+      api_base: "https://api.deepseek.com"
+      default_model: "deepseek-chat"
+      enabled: true
 ```
+
+First launch opens a GUI config dialog with preset templates. You can also use environment variables for API keys.
 
 ## Debug Mode
 
@@ -191,12 +191,12 @@ Sub-agents support standalone debug mode for isolated testing of individual agen
 |----------|--------|------------|
 | Main Agent coordination | Accepted | **Ignored** |
 | Direct user input | Accepted | Accepted |
-| Status reporting | Normal | Shows "调试模式" (Debug Mode) |
-| Message context | Normal | `[调试模式]` prefix injected |
+| Status reporting | Normal | Shows "Debug Mode" indicator |
+| Message context | Normal | `[Debug Mode]` prefix injected |
 
 ### Usage
 
-**GUI**: Click the "调试模式" button in the sub-agent panel. The button turns red when active.
+**GUI**: Click the "Debug Mode" button in the sub-agent panel. The button turns red when active.
 
 **CLI**: Start with `--debug-agent` (repeatable):
 
@@ -215,10 +215,10 @@ Valid agent names: `data_analysis`, `plotting`, `theory`, `report`
 With Data Analysis agent in debug mode, the first message receives context:
 
 ```
-[调试模式] 此 Agent 处于独立调试模式，不与其他 Agent 通信。
-你可以直接测试此 Agent 的工具和输出。
+[Debug Mode] This agent is in standalone debug mode, not communicating with other agents.
+You can directly test this agent's tools and output.
 
-请分析 data/experiment_1.csv 中的数据
+Please analyze data/experiment_1.csv
 ```
 
 ## Agent Prompts
@@ -247,34 +247,26 @@ Users can override built-in templates by placing custom templates in `project/re
 
 **Priority**: User templates > Built-in templates > Standard LaTeX
 
-## MinerU Open API Integration
+## MinerU Integration
 
-AutoReport uses [mineru-open-api](https://github.com/opendatalab/MinerU) for PDF parsing.
+AutoReport uses [mineru-open-api](https://github.com/opendatalab/MinerU) CLI for PDF parsing.
 
 ### Setup
 
-1. Install and start mineru-open-api service:
+1. Install and authenticate mineru-open-api:
 ```bash
 pip install mineru-open-api
-mineru-open-api --port 9999
+mineru-open-api auth
 ```
 
-2. Configure in `autoreport.config.yaml`:
-```yaml
-mineru_api:
-  url: "http://localhost:9999"
-  enabled: true
-  timeout: 300
-```
-
-3. The system will show a soft warning on startup if the API is unavailable, but will still allow the application to run.
+2. The system will check availability on startup and show a warning if not installed.
 
 ### Features
 
-- Converts PDF reference materials to Markdown
-- Extracts text, images, and tables
-- Supports multi-page documents
-- Asynchronous processing with 5-minute timeout
+- Converts PDF, images, DOCX, PPTX, XLSX to Markdown
+- Extracts text, images, tables, and formulas
+- Supports batch processing (up to 200MB, 600 pages per file)
+- CLI-based, no local server required
 
 ## Contributing
 
