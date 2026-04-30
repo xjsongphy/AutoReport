@@ -92,6 +92,11 @@ class ConfigDialog(QDialog):
         button_layout = QHBoxLayout()
         layout.addLayout(button_layout)
 
+        reset_button = QPushButton("重置配置")
+        reset_button.setStyleSheet("color: red;")
+        reset_button.clicked.connect(self._reset_config)
+        button_layout.addWidget(reset_button)
+
         test_button = QPushButton("测试连接")
         test_button.clicked.connect(self._test_connection)
         button_layout.addWidget(test_button)
@@ -139,8 +144,40 @@ class ConfigDialog(QDialog):
         # Update model
         self.config_manager.config.agents.defaults.model = self.model_combo.currentText()
 
-        # TODO: Save to file
+        # Save to file
+        self.config_manager.save_config()
+
         logger.info("Configuration saved")
 
         QMessageBox.information(self, "保存成功", "配置已保存。")
         self.accept()
+
+    def _reset_config(self) -> None:
+        """Reset configuration to defaults."""
+        reply = QMessageBox.question(
+            self,
+            "确认重置",
+            "确定要重置所有配置吗？这将清除所有 API 密钥并恢复默认设置。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # Reset configuration
+            self.config_manager.reset_config()
+
+            # Clear input fields
+            self.anthropic_key.clear()
+            self.openai_key.clear()
+            self.deepseek_key.clear()
+
+            # Reset model selection
+            self.model_combo.setCurrentIndex(0)
+
+            logger.info("Configuration reset to defaults")
+
+            QMessageBox.information(
+                self,
+                "重置完成",
+                "配置已重置为默认值。请重新配置 API 密钥。"
+            )

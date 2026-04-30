@@ -84,3 +84,24 @@ class ConfigManager:
             "api_base": provider_config.api_base,
             "extra_headers": provider_config.extra_headers,
         }
+
+    def save_config(self) -> None:
+        """Save configuration to file."""
+        import yaml
+
+        config_path = self._settings.config_path
+
+        # Convert config to dict
+        config_dict = self.config.model_dump(mode="json", exclude_none=True)
+
+        # Write to file
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(config_dict, f, default_flow_style=False, allow_unicode=True)
+
+        logger.info("Configuration saved to {}", config_path)
+
+    def reset_config(self) -> None:
+        """Reset configuration to defaults."""
+        # Create new default config
+        self._config = AppConfig()
+        logger.info("Configuration reset to defaults")

@@ -9,6 +9,7 @@ from loguru import logger
 from ...config import ConfigManager
 from ...interfaces.types import AgentType, RestartRequest, Message
 from ...interfaces.protocol import GUIAPI
+from ...core.providers import ProviderManager, ProviderFactory, ProviderType
 from ..tools.registry import ToolRegistry
 from ..tools import (
     ReadFileTool,
@@ -48,6 +49,7 @@ class LoopManager:
 
         self._loops: dict[AgentType, AgentLoop] = {}
         self._running = False
+        self._provider_manager = ProviderManager()
 
         # Subscribe to restart requests
         self.bus.subscribe(RestartRequest, self._handle_restart_request)
@@ -66,11 +68,54 @@ class LoopManager:
         self._running = True
         logger.info("Starting loop manager for workspace: {}", self.workspace)
 
+        # Initialize providers
+        await self._initialize_providers()
+
+        # Create loops
         await self._create_loops()
 
         for agent_type, loop in self._loops.items():
             await loop.start()
             logger.info("Started loop for agent: {}", agent_type)
+
+    async def _initialize_providers(self) -> None:
+        """Initialize LLM providers from configuration."""
+        config = self.config_manager.config
+
+        # Initialize Anthropic
+        if config.providers.anthropic.api_key:
+            provider = ProviderFactory.create_provider(
+                "anthropic",
+                config.providers.anthropic.api_key,
+                config.providers.anthropic.api_base,
+            )
+            self._provider_manager.register_provider("anthropic", provider)
+            logger.info("Initialized Anthropic provider")
+
+        # Initialize OpenAI
+        if config.providers.openai.api_key:
+            provider = ProviderFactory.create_provider(
+                "openai",
+                config.providers.openai.api_key,
+                config.providers.openai.api_base,
+            )
+            self._provider_manager.register_provider("openai", provider)
+            logger.info("Initialized OpenAI provider")
+
+        # Initialize DeepSeek
+        if config.providers.deepseek.api_key:
+            provider = ProviderFactory.create_provider(
+                "deepseek",
+                config.providers.deepseek.api_key,
+                config.providers.deepseek.api_base,
+            )
+            self._provider_manager.register_provider("deepseek", provider)
+            logger.info("Initialized DeepSeek provider")
+
+        # Set active provider
+        active_provider = self._provider_manager.get_available_providers()[0]
+        self._provider_manager.set_active_provider(active_provider)
+        logger.info("Active provider: {}", active_provider)
 
     async def stop(self) -> None:
         """Stop all agent loops."""
@@ -102,6 +147,7 @@ class LoopManager:
     async def _create_loops(self) -> None:
         """Create agent loops for all agent types."""
         config = self.config_manager.config.agents.defaults
+        llm_provider = self._provider_manager.get_active_provider()
 
         # Create tools for each agent type
         for agent_type in AgentType:
@@ -114,6 +160,7 @@ class LoopManager:
                 bus=self.bus,
                 gui=self.gui,
                 config=config,
+                llm_provider=llm_provider,
             )
             self._loops[agent_type] = loop
 

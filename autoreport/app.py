@@ -11,6 +11,7 @@ from .config import ConfigManager
 from .core.loops import MessageBus, LoopManager
 from .interfaces.protocol import BackendAPI
 from .gui import MainWindow
+from .utils import setup_logging, setup_exception_handler, log_exception
 
 
 class AutoReportApp:
@@ -153,13 +154,13 @@ class BackendAPIImpl(BackendAPI):
 
 def main():
     """Main entry point."""
-    # Configure logger
-    logger.remove()
-    logger.add(
-        sys.stderr,
-        level="INFO",
-        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
-    )
+    # Setup logging
+    setup_logging(log_level="INFO", log_to_file=True)
+
+    # Setup global exception handler
+    setup_exception_handler()
+
+    logger.info("AutoReport starting...")
 
     app = AutoReportApp()
 
@@ -195,7 +196,7 @@ def main():
             logger.error("Failed to start application")
             sys.exit(1)
     except Exception as e:
-        logger.exception("Error during startup: {}", e)
+        log_exception("Error during startup", e)
         sys.exit(1)
 
     # Run GUI
@@ -205,7 +206,7 @@ def main():
     try:
         loop.run_until_complete(app.shutdown())
     except Exception as e:
-        logger.exception("Error during shutdown: {}", e)
+        log_exception("Error during shutdown", e)
 
 
 if __name__ == "__main__":
