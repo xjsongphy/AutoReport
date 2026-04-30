@@ -28,8 +28,11 @@ class AutoReportApp:
         self.loop_manager: LoopManager | None = None
         self.main_window: MainWindow | None = None
 
-    async def startup(self) -> bool:
+    async def startup(self, workspace: Path) -> bool:
         """Startup application. Returns True if successful.
+
+        Args:
+            workspace: Project workspace path.
 
         Returns:
             True if startup successful, False otherwise.
@@ -37,16 +40,53 @@ class AutoReportApp:
         # Validate API keys
         is_valid, available = self.config_manager.validate_api_keys()
         if not is_valid:
-            logger.warning("No API keys configured. Showing config dialog.")
-            # Config dialog will be shown in GUI context
+            logger.warning("No API keys configured.")
             return False
 
         logger.info("Available providers: {}", available)
 
-        # TODO: Show project selection dialog
-        # For now, use default workspace
-        workspace = Path.cwd() / "workspace"
-        workspace.mkdir(parents=True, exist_ok=True)
+        # Use provided workspace
+        workspace = Path(workspace).resolve()
+
+        # Create project structure if needed
+        self._ensure_project_structure(workspace)
+
+        # Create loop manager
+        self.loop_manager = LoopManager(
+            workspace=workspace,
+            config_manager=self.config_manager,
+            bus=self.bus,
+            gui=self.backend,
+        )
+
+        # Start message bus processing
+        asyncio.create_task(self.bus.process_queue())
+
+        # Start agent loops
+        await self.loop_manager.start()
+
+        logger.info("Application started successfully with workspace: {}", workspace)
+        return True
+
+    def _ensure_project_structure(self, workspace: Path) -> None:
+        """Ensure project directory structure exists.
+
+        Args:
+            workspace: Project workspace path.
+        """
+        project_dirs = [
+            workspace / "data",
+            workspace / "data" / "processed",
+            workspace / "references",
+            workspace / "theory",
+            workspace / "code",
+            workspace / "tex",
+        ]
+
+        for dir_path in project_dirs:
+            dir_path.mkdir(parents=True, exist_ok=True)
+
+        logger.debug("Ensured project structure in: {}", workspace)
 
         # Create loop manager
         self.loop_manager = LoopManager(
@@ -75,9 +115,45 @@ class AutoReportApp:
         """Run GUI application."""
         app = QApplication(sys.argv)
 
-        # Create main window
-        # TODO: Use workspace from project selection
-        workspace = Path.cwd() / "workspace"
+        # Show project selection dialog first
+        from .gui.project_dialog import ProjectDialog
+
+        project_dialog = ProjectDialog(self.config_manager)
+
+        # Store workspace path
+        workspace: Path | None = None
+
+        def on_project_selected(path: Path):
+            nonlocal workspace
+            workspace = path
+
+        project_dialog.project_selected.connect(on_project_selected)
+
+        # Show project dialog
+        result = project_dialog.exec()
+
+        if result != QDialog.DialogCode.Accepted:
+            logger.info("Project selection cancelled")
+            sys.exit(0)
+
+        if workspace is None:
+            logger.error("No workspace selected")
+            sys.exit(1)
+
+        # Now startup with selected workspace
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            success = loop.run_until_complete(self.startup(workspace))
+            if not success:
+                logger.error("Failed to start application")
+                sys.exit(1)
+        except Exception as e:
+            log_exception("Error during startup", e)
+            sys.exit(1)
+
+        # Create main window with selected workspace
         self.main_window = MainWindow(
             backend=self.backend,
             workspace=workspace,
@@ -186,24 +262,12 @@ def main():
             logger.error("Still no valid API keys after configuration")
             sys.exit(1)
 
-    # Run async startup
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    try:
-        success = loop.run_until_complete(app.startup())
-        if not success:
-            logger.error("Failed to start application")
-            sys.exit(1)
-    except Exception as e:
-        log_exception("Error during startup", e)
-        sys.exit(1)
-
-    # Run GUI
+    # Run GUI (includes project selection and startup)
     app.run_gui()
 
     # Shutdown
     try:
+        loop = asyncio.get_event_loop()
         loop.run_until_complete(app.shutdown())
     except Exception as e:
         log_exception("Error during shutdown", e)
