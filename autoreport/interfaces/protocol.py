@@ -51,6 +51,10 @@ class BackendAPI(ABC):
         """Rollback to a specific checkpoint."""
 
     @abstractmethod
+    def set_agent_debug_mode(self, agent_type: str, enabled: bool) -> None:
+        """Enable or disable debug mode for an agent."""
+
+    @abstractmethod
     def subscribe_to_messages(
         self,
         callback: Callable[[Message], Awaitable[None]]

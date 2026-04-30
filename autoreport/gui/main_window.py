@@ -90,6 +90,10 @@ class MainWindow(QMainWindow, GUIAPI):
         # Connect signals
         self.main_agent_panel.message_sent.connect(self._on_main_agent_message)
         self.sub_agent_panel.message_sent.connect(self._on_sub_agent_message)
+        self.sub_agent_panel.debug_mode_toggled.connect(self._on_debug_mode_toggled)
+
+        # Hide debug button on main agent panel (debug mode is for sub-agents only)
+        self.main_agent_panel.hide_debug_button(hide=True)
 
     def _on_directory_selected(self, directory: str) -> None:
         """Handle directory selection.
@@ -126,6 +130,15 @@ class MainWindow(QMainWindow, GUIAPI):
         """
         agent_type = self.sub_agent_panel.agent_type
         await self.backend.send_user_message(content, agent_type)
+
+    def _on_debug_mode_toggled(self, enabled: bool) -> None:
+        """Handle debug mode toggle.
+
+        Args:
+            enabled: Whether debug mode is enabled.
+        """
+        agent_type = self.sub_agent_panel.agent_type
+        self.backend.set_agent_debug_mode(agent_type, enabled)
 
     async def _handle_backend_message(self, message: Message) -> None:
         """Handle message from backend.

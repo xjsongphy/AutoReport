@@ -233,6 +233,13 @@ class BackendAPIImpl(BackendAPI):
 
         await self.loop_manager.rollback_to_checkpoint(checkpoint_id)
 
+    def set_agent_debug_mode(self, agent_type: str, enabled: bool) -> None:
+        """Enable or disable debug mode for an agent."""
+        if self.loop_manager is None:
+            raise RuntimeError("Loop manager not initialized")
+
+        self.loop_manager.set_agent_debug_mode(agent_type, enabled)
+
     def subscribe_to_messages(
         self,
         callback

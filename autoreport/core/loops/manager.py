@@ -264,3 +264,37 @@ class LoopManager:
             return
 
         await self.restart(reason=message.reason)
+
+    def set_agent_debug_mode(self, agent_type: str, enabled: bool) -> None:
+        """Enable or disable debug mode for an agent.
+
+        Args:
+            agent_type: Agent type (data_analysis, plotting, theory, report).
+            enabled: Whether debug mode is enabled.
+        """
+        # Convert string to AgentType
+        agent_enum = AgentType(agent_type)
+
+        if agent_enum in self._loops:
+            self._loops[agent_enum].set_debug_mode(enabled)
+            logger.info(
+                "Debug mode {} for agent: {}",
+                "enabled" if enabled else "disabled",
+                agent_type,
+            )
+
+    def get_agent_debug_mode(self, agent_type: str) -> bool:
+        """Check if debug mode is enabled for an agent.
+
+        Args:
+            agent_type: Agent type.
+
+        Returns:
+            True if debug mode is enabled.
+        """
+        agent_enum = AgentType(agent_type)
+
+        if agent_enum in self._loops:
+            return self._loops[agent_enum].debug_mode
+
+        return False

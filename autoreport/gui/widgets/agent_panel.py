@@ -22,6 +22,7 @@ class AgentPanel(QWidget):
     """Agent panel with timeline and chat input."""
 
     message_sent = pyqtSignal(str)
+    debug_mode_toggled = pyqtSignal(bool)  # Signal for debug mode toggle
 
     def __init__(self, panel_id: str, title: str):
         """Initialize agent panel.
@@ -49,6 +50,17 @@ class AgentPanel(QWidget):
         self._status_label = QLabel("状态: 空闲")
         self._status_label.setStyleSheet("color: gray;")
         layout.addWidget(self._status_label)
+
+        # Debug mode button (for sub-agents only)
+        debug_layout = QHBoxLayout()
+        layout.addLayout(debug_layout)
+
+        debug_layout.addStretch()
+
+        self._debug_button = QPushButton("调试模式")
+        self._debug_button.setCheckable(True)
+        self._debug_button.clicked.connect(self._on_debug_toggled)
+        debug_layout.addWidget(self._debug_button)
 
         # Timeline/messages area
         self._messages_area = QTextEdit()
@@ -231,3 +243,33 @@ class AgentPanel(QWidget):
         self._input_field.clear()
         self.add_message("user", content)
         self.message_sent.emit(content)
+
+    def _on_debug_toggled(self) -> None:
+        """Handle debug mode toggle."""
+        enabled = self._debug_button.isChecked()
+
+        if enabled:
+            self._debug_button.setStyleSheet("background-color: #ffcccc;")
+            self.add_message("system", "调试模式已启用")
+        else:
+            self._debug_button.setStyleSheet("")
+            self.add_message("system", "调试模式已禁用")
+
+        # Emit signal
+        self.debug_mode_toggled.emit(enabled)
+
+    def set_debug_mode(self, enabled: bool) -> None:
+        """Set debug mode state (from external source).
+
+        Args:
+            enabled: Whether debug mode is enabled.
+        """
+        self._debug_button.setChecked(enabled)
+
+    def hide_debug_button(self) -> hide: bool = True:
+        """Hide or show debug button.
+
+        Args:
+            hide: Whether to hide the button (True for main agent panel).
+        """
+        self._debug_button.setHidden(hide)

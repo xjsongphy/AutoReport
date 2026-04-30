@@ -120,6 +120,9 @@ Focus on producing a well-structured, professional report.""",
         self._current_message: UserMessage | None = None
         self._conversation_history: list[LLMMessage] = []
 
+        # Debug mode
+        self._debug_mode = False
+
         # Subscribe to user messages for this agent type
         self.bus.subscribe(UserMessage, self._handle_user_message)
 
@@ -366,7 +369,33 @@ Focus on producing a well-structured, professional report.""",
             status: New agent status.
         """
         self._status = status
+
+        # In debug mode, use DEBUG_MODE status
+        display_status = AgentStatus.DEBUG_MODE if self._debug_mode else status
+
         await self.gui.update_agent_status(
             agent_type=str(self.agent_type),
-            status=str(status),
+            status=str(display_status),
         )
+
+    def set_debug_mode(self, enabled: bool) -> None:
+        """Enable or disable debug mode.
+
+        Args:
+            enabled: Whether debug mode is enabled.
+        """
+        self._debug_mode = enabled
+
+        if enabled:
+            logger.info("Debug mode enabled for agent: {}", self.agent_type)
+        else:
+            logger.info("Debug mode disabled for agent: {}", self.agent_type)
+
+    @property
+    def debug_mode(self) -> bool:
+        """Check if debug mode is enabled.
+
+        Returns:
+            True if debug mode is enabled.
+        """
+        return self._debug_mode
