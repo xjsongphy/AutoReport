@@ -822,10 +822,27 @@ class ConfigDialog(QDialog):
             QComboBox {{
                 border: 1px solid {c["inputBorder"]};
                 border-radius: 4px;
-                padding: 6px 10px;
+                padding: 6px 28px 6px 10px;
                 font-size: 13px;
                 background-color: {c["inputBg"]};
                 color: {c["inputFg"]};
+            }}
+            QComboBox::drop-down {{
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 26px;
+                border: none;
+                background: {c["inputBg"]};
+            }}
+            QComboBox::down-arrow {{
+                image: none;
+                width: 14px;
+                height: 14px;
+                margin-top: 3px;
+                margin-right: 4px;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 7px solid {c["subtitleFg"]};
             }}
             QComboBox QAbstractItemView {{
                 border: 1px solid {c["inputBorder"]};

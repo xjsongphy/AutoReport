@@ -304,7 +304,7 @@ def get_presets_by_category() -> dict[str, list[ProviderPreset]]:
     """Group presets by category for UI display."""
     presets = load_presets()
     groups: dict[str, list[ProviderPreset]] = {}
-    order = ["official", "cn_official", "aggregator", "third_party", "cloud_provider", "custom", "builtin"]
+    order = ["custom", "official", "cn_official", "aggregator", "third_party", "cloud_provider", "builtin"]
 
     for p in presets:
         cat = p.category if p.category in order else "builtin"
