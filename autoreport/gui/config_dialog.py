@@ -99,6 +99,7 @@ class ConfigCard(QFrame):
         idx = self.provider_combo.findData(self.config.provider)
         if idx >= 0:
             self.provider_combo.setCurrentIndex(idx)
+        self.provider_combo.currentIndexChanged.connect(self._on_provider_changed)
         row2.addWidget(self.provider_combo, 1)
 
         self.enabled_check = QCheckBox("启用")
@@ -122,10 +123,10 @@ class ConfigCard(QFrame):
         self.key_input.setPlaceholderText("sk-...")
         row3.addWidget(self.key_input, 1)
 
-        self.show_key_btn = QPushButton("👁")
+        self.show_key_btn = QPushButton("◉")
         self.show_key_btn.setFixedWidth(32)
         self.show_key_btn.setCheckable(True)
-        self.show_key_btn.setToolTip("显示/隐藏 API Key")
+        self.show_key_btn.setToolTip("显示 API Key")
         self.show_key_btn.toggled.connect(self._toggle_key_visibility)
         row3.addWidget(self.show_key_btn)
 
@@ -167,8 +168,42 @@ class ConfigCard(QFrame):
         layout.addLayout(row5)
 
     def _toggle_key_visibility(self, checked: bool) -> None:
-        mode = QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password
-        self.key_input.setEchoMode(mode)
+        if checked:
+            self.key_input.setEchoMode(QLineEdit.EchoMode.Normal)
+            self.show_key_btn.setText("◎")
+            self.show_key_btn.setToolTip("隐藏 API Key")
+        else:
+            self.key_input.setEchoMode(QLineEdit.EchoMode.Password)
+            self.show_key_btn.setText("◉")
+            self.show_key_btn.setToolTip("显示 API Key")
+
+    _DEFAULT_BASES: dict[str, str] = {
+        "deepseek": "https://api.deepseek.com",
+        "openrouter": "https://openrouter.ai/api/v1",
+        "groq": "https://api.groq.com/openai/v1",
+        "google": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "openai": "https://api.openai.com/v1",
+    }
+    _DEFAULT_MODELS: dict[str, str] = {
+        "deepseek": "deepseek-chat",
+        "openrouter": "openai/gpt-4o",
+        "groq": "llama-3.3-70b-versatile",
+        "google": "gemini-2.0-flash",
+        "openai": "gpt-4o",
+    }
+
+    def _on_provider_changed(self) -> None:
+        provider = self.provider_combo.currentData()
+        if provider == "anthropic":
+            self.base_url_input.setPlaceholderText("https://api.anthropic.com")
+        else:
+            default_base = self._DEFAULT_BASES.get(provider, "")
+            default_model = self._DEFAULT_MODELS.get(provider, "")
+            self.base_url_input.setPlaceholderText(default_base or "https://api.example.com")
+            if not self.base_url_input.text().strip() and default_base:
+                self.base_url_input.setText(default_base)
+            if not self.model_input.text().strip() and default_model:
+                self.model_input.setText(default_model)
 
     def _on_enabled_toggled(self, enabled: bool) -> None:
         for w in (self.name_input, self.key_input, self.base_url_input,
@@ -788,7 +823,7 @@ class ConfigDialog(QDialog):
                 border: 1px solid {c["inputBorder"]};
                 border-radius: 4px;
                 padding: 6px 10px;
-                padding-right: 28px;
+                padding-right: 24px;
                 font-size: 13px;
                 background-color: {c["inputBg"]};
                 color: {c["inputFg"]};
@@ -796,20 +831,17 @@ class ConfigDialog(QDialog):
             QComboBox::drop-down {{
                 subcontrol-origin: padding;
                 subcontrol-position: top right;
-                width: 24px;
+                width: 20px;
                 border: none;
-                background: transparent;
+                background-color: {c["inputBg"]};
             }}
             QComboBox::down-arrow {{
-                width: 8px;
-                height: 8px;
+                width: 10px;
+                height: 10px;
                 image: none;
                 border-left: 4px solid transparent;
                 border-right: 4px solid transparent;
-                border-top: 5px solid {c["subtitleFg"]};
-            }}
-            QComboBox::down-arrow:hover {{
-                border-top-color: {c["inputFg"]};
+                border-top: 6px solid {c["inputBorder"]};
             }}
             QComboBox QAbstractItemView {{
                 border: 1px solid {c["inputBorder"]};
