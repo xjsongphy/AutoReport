@@ -160,16 +160,29 @@ class PDFParseTool(Tool):
             md_file = md_files[0]
             content = md_file.read_text(encoding="utf-8")
 
-            # Move to final location
-            final_path = out_dir / (src.stem + ".md")
-            final_path.parent.mkdir(parents=True, exist_ok=True)
-            final_path.write_text(content, encoding="utf-8")
+            # Move md + images/ to final location
+            final_md = out_dir / (src.stem + ".md")
+            final_md.parent.mkdir(parents=True, exist_ok=True)
+            final_md.write_text(content, encoding="utf-8")
+
+            # Copy images directory if present (extract mode generates them)
+            src_images = tmp_dir / "images"
+            image_count = 0
+            if src_images.is_dir():
+                dst_images = out_dir / "images"
+                dst_images.mkdir(parents=True, exist_ok=True)
+                for img in src_images.iterdir():
+                    if img.is_file():
+                        dst = dst_images / img.name
+                        dst.write_bytes(img.read_bytes())
+                        image_count += 1
 
             return {
                 "source_path": str(src.relative_to(self.workspace)),
-                "output_path": str(final_path.relative_to(self.workspace)),
+                "output_path": str(final_md.relative_to(self.workspace)),
                 "content": content,
                 "size_bytes": len(content.encode("utf-8")),
+                "image_count": image_count,
             }
 
     async def check_and_warn(self) -> None:
