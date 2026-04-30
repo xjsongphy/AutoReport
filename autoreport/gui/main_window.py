@@ -69,6 +69,7 @@ class MainWindow(QMainWindow, GUIAPI):
         self.file_tree.setMinimumWidth(200)
         self.file_tree.setMaximumWidth(400)
         self.file_tree.directory_selected.connect(self._on_directory_selected)
+        self.file_tree.file_selected.connect(self._on_file_selected)
         main_splitter.addWidget(self.file_tree)
 
         # Center section: Preview
@@ -81,12 +82,12 @@ class MainWindow(QMainWindow, GUIAPI):
         main_splitter.addWidget(right_splitter)
 
         # Top-right: Main agent panel
-        self.main_agent_panel = AgentPanel("main", "Main Agent")
+        self.main_agent_panel = AgentPanel("main", "Main Agent", self.workspace)
         self.main_agent_panel.setMinimumHeight(300)
         right_splitter.addWidget(self.main_agent_panel)
 
         # Bottom-right: Sub-agent panel
-        self.sub_agent_panel = AgentPanel("sub", "Sub Agent")
+        self.sub_agent_panel = AgentPanel("sub", "Sub Agent", self.workspace)
         self.sub_agent_panel.setMinimumHeight(300)
         right_splitter.addWidget(self.sub_agent_panel)
 
@@ -98,6 +99,9 @@ class MainWindow(QMainWindow, GUIAPI):
         self.main_agent_panel.message_sent.connect(self._on_main_agent_message)
         self.sub_agent_panel.message_sent.connect(self._on_sub_agent_message)
         self.sub_agent_panel.debug_mode_toggled.connect(self._on_debug_mode_toggled)
+
+        # Connect preview selection to sub-agent panel context
+        self.preview.selection_changed.connect(self._on_preview_selection_changed)
 
         # Hide debug button on main agent panel (debug mode is for sub-agents only)
         self.main_agent_panel.hide_debug_button(hide=True)
@@ -120,6 +124,28 @@ class MainWindow(QMainWindow, GUIAPI):
         }
         agent_type = agent_map.get(directory, "sub")
         self.sub_agent_panel.set_agent_type(agent_type)
+
+    def _on_preview_selection_changed(self, file_path: str, selected_text: str, start_line: int, end_line: int) -> None:
+        """Handle preview text selection.
+
+        Args:
+            file_path: Relative file path.
+            selected_text: Selected text content.
+            start_line: Start line number.
+            end_line: End line number.
+        """
+        # Forward selection context to sub-agent panel
+        self.sub_agent_panel.set_preview_context(file_path, selected_text, start_line, end_line)
+
+    def _on_file_selected(self, file_path: Path) -> None:
+        """Handle file selection from file tree.
+
+        Args:
+            file_path: Selected file path.
+        """
+        # Load file in preview
+        self.preview.load_file(file_path)
+        logger.debug("File selected: {}", file_path)
 
     def _on_main_agent_message(self, content: str) -> None:
         """Handle main agent message send.

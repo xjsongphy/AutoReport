@@ -1,38 +1,52 @@
-"""Agent panel widget for timeline and chat."""
+"""Agent panel widget for timeline and chat with file references."""
 
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import pyqtSignal
+from loguru import logger
+from PyQt6.QtCore import QPoint, pyqtSignal
 from PyQt6.QtGui import QTextCursor
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPushButton,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
+from autoreport.core.file_search import FileSearchManager
+from autoreport.gui.widgets.chat_input import ChatInput
+from autoreport.gui.widgets.file_search_popup import FileSearchPopup
+
 
 class AgentPanel(QWidget):
-    """Agent panel with timeline and chat input."""
+    """Enhanced agent panel with timeline, chat input, and @ file references."""
 
     message_sent = pyqtSignal(str)
     debug_mode_toggled = pyqtSignal(bool)  # Signal for debug mode toggle
 
-    def __init__(self, panel_id: str, title: str):
+    def __init__(self, panel_id: str, title: str, workspace: Path | None = None):
         """Initialize agent panel.
 
         Args:
             panel_id: Panel identifier.
             title: Panel title.
+            workspace: Project workspace directory (for file search).
         """
         super().__init__()
         self.panel_id = panel_id
         self._agent_type = "sub"
+        self._workspace = Path(workspace).resolve() if workspace else Path.cwd()
+        self._preview_context: tuple[str, str, int, int] | None = None
+
+        # File search components
+        self._file_search_manager = FileSearchManager(self._workspace)
+        self._file_search_popup: FileSearchPopup | None = None
+
         self._setup_ui(title)
+        self._setup_file_search()
 
     def _setup_ui(self, title: str) -> None:
         """Setup user interface."""
@@ -66,18 +80,102 @@ class AgentPanel(QWidget):
         self._messages_area.setMinimumHeight(200)
         layout.addWidget(self._messages_area)
 
-        # Input area
+        # Input area - use ChatInput for @ file reference support
         input_layout = QHBoxLayout()
         layout.addLayout(input_layout)
 
-        self._input_field = QLineEdit()
-        self._input_field.setPlaceholderText("输入消息...")
-        self._input_field.returnPressed.connect(self._on_send)
+        self._input_field = ChatInput()
+        self._input_field.setPlaceholderText("输入消息... (@ 引用文件)")
+        self._input_field.send_message.connect(self._on_send)
+        self._input_field.file_reference_requested.connect(self._on_file_reference_requested)
         input_layout.addWidget(self._input_field)
 
+        # Send button (optional, since Enter works)
         send_button = QPushButton("发送")
         send_button.clicked.connect(self._on_send)
         input_layout.addWidget(send_button)
+
+    def _setup_file_search(self) -> None:
+        """Setup file search popup and manager."""
+        self._file_search_popup = FileSearchPopup(self)
+        self._file_search_popup.file_selected.connect(self._on_file_selected)
+        self._file_search_popup.cancelled.connect(self._on_file_search_cancelled)
+
+    def _on_file_reference_requested(self, query: str, position: QPoint) -> None:
+        """Handle @ file reference request.
+
+        Args:
+            query: Search query (text after @).
+            position: Global position for popup.
+        """
+        if not self._file_search_popup:
+            return
+
+        # Position and show popup
+        self._file_search_popup.move(position)
+        self._file_search_popup.set_query(query, waiting=True)
+        self._file_search_popup.show()
+        self._file_search_popup.raise_()
+        self._file_search_popup.setFocus()
+
+        # Update input state
+        self._input_field.set_popup_active(True)
+
+        # Trigger search
+        async def on_results(matches):
+            # Check if popup still active
+            if self._file_search_popup and self._file_search_popup.isVisible():
+                self._file_search_popup.set_matches(matches)
+
+        import asyncio
+        asyncio.create_task(self._file_search_manager.search(query, on_results))
+
+    def _on_file_selected(self, file_path: Path) -> None:
+        """Handle file selected from popup.
+
+        Args:
+            file_path: Selected file path.
+        """
+        self._file_search_popup.hide()
+        self._input_field.set_popup_active(False)
+        self._input_field.setFocus()
+
+        # Insert file reference markdown link
+        self._input_field.insert_file_reference(file_path)
+
+        logger.debug("File reference inserted: {}", file_path)
+
+    def _on_file_search_cancelled(self) -> None:
+        """Handle file search cancelled."""
+        self._file_search_popup.hide()
+        self._input_field.set_popup_active(False)
+        self._input_field.setFocus()
+
+    def set_preview_context(self, file_path: str, selected_text: str, start_line: int, end_line: int) -> None:
+        """Store preview selection context for next message.
+
+        Args:
+            file_path: Relative file path.
+            selected_text: Selected text content.
+            start_line: Start line number.
+            end_line: End line number.
+        """
+        self._preview_context = (file_path, selected_text, start_line, end_line)
+        logger.debug(
+            "Preview context set: {} (lines {}-{})",
+            file_path,
+            start_line,
+            end_line
+        )
+
+    def set_workspace(self, workspace: Path) -> None:
+        """Update workspace directory.
+
+        Args:
+            workspace: New workspace directory.
+        """
+        self._workspace = Path(workspace).resolve()
+        self._file_search_manager = FileSearchManager(self._workspace)
 
     def set_agent_type(self, agent_type: str) -> None:
         """Set agent type for this panel.
@@ -234,13 +332,23 @@ class AgentPanel(QWidget):
 
     def _on_send(self) -> None:
         """Handle send button click."""
-        content = self._input_field.text().strip()
+        content = self._input_field.get_plain_text().strip()
         if not content:
             return
 
-        self._input_field.clear()
-        self.add_message("user", content)
-        self.message_sent.emit(content)
+        # Append preview context if available
+        final_message = content
+        if self._preview_context:
+            file_path, selected_text, start_line, end_line = self._preview_context
+            context_block = f"\n\n<!-- 上下文引用 -->\n**文件**: {file_path} (行 {start_line}-{end_line})\n```\n{selected_text}\n```\n"
+            final_message = content + context_block
+
+            # Clear context after use
+            self._preview_context = None
+
+        self._input_field.clear_text()
+        self.add_message("user", final_message)
+        self.message_sent.emit(final_message)
 
     def _on_debug_toggled(self) -> None:
         """Handle debug mode toggle."""
