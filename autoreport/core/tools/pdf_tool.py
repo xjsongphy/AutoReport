@@ -160,16 +160,18 @@ class PDFParseTool(Tool):
             md_file = md_files[0]
             content = md_file.read_text(encoding="utf-8")
 
-            # Move md + images/ to final location
-            final_md = out_dir / (src.stem + ".md")
-            final_md.parent.mkdir(parents=True, exist_ok=True)
+            # Create per-file subdirectory: <parent>/<stem>/<stem>.md + images/
+            file_out_dir = out_dir / src.stem
+            file_out_dir.mkdir(parents=True, exist_ok=True)
+
+            final_md = file_out_dir / (src.stem + ".md")
             final_md.write_text(content, encoding="utf-8")
 
             # Copy images directory if present (extract mode generates them)
             src_images = tmp_dir / "images"
             image_count = 0
             if src_images.is_dir():
-                dst_images = out_dir / "images"
+                dst_images = file_out_dir / "images"
                 dst_images.mkdir(parents=True, exist_ok=True)
                 for img in src_images.iterdir():
                     if img.is_file():
