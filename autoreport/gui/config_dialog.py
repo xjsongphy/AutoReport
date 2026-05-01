@@ -1,8 +1,8 @@
 """Configuration dialog with multi-provider support and cc-switch presets."""
 
 from loguru import logger
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QPainter, QPen
+from PyQt6.QtCore import QPointF, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -86,6 +86,7 @@ class ConfigCard(QFrame):
     def __init__(self, config: ApiConfig, parent=None):
         super().__init__(parent)
         self.config = config
+        self._eye_icons = self._create_eye_icons()
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -152,8 +153,10 @@ class ConfigCard(QFrame):
         self.key_input.setPlaceholderText("sk-...")
         row3.addWidget(self.key_input, 1)
 
-        self.show_key_btn = QPushButton("◉")
-        self.show_key_btn.setFixedWidth(32)
+        self.show_key_btn = QPushButton()
+        self.show_key_btn.setIcon(self._eye_icons["eye"])
+        self.show_key_btn.setIconSize(QSize(16, 16))
+        self.show_key_btn.setFixedSize(32, 28)
         self.show_key_btn.setCheckable(True)
         self.show_key_btn.setToolTip("显示 API Key")
         self.show_key_btn.toggled.connect(self._toggle_key_visibility)
@@ -199,12 +202,57 @@ class ConfigCard(QFrame):
     def _toggle_key_visibility(self, checked: bool) -> None:
         if checked:
             self.key_input.setEchoMode(QLineEdit.EchoMode.Normal)
-            self.show_key_btn.setText("🙈")
+            self.show_key_btn.setIcon(self._eye_icons["eye_off"])
             self.show_key_btn.setToolTip("隐藏 API Key")
         else:
             self.key_input.setEchoMode(QLineEdit.EchoMode.Password)
-            self.show_key_btn.setText("👁")
+            self.show_key_btn.setIcon(self._eye_icons["eye"])
             self.show_key_btn.setToolTip("显示 API Key")
+
+    @staticmethod
+    def _create_eye_icons() -> dict[str, QIcon]:
+        """Create Eye (open) and EyeOff (slashed) icons via QPainter.
+
+        Matches the lucide Eye / EyeOff style used in cc-switch.
+        """
+        size = 64  # Render at 64px for crisp scaling
+        half = size // 2
+
+        # --- Eye open icon ---
+        eye_pixmap = QPixmap(size, size)
+        eye_pixmap.fill(Qt.GlobalColor.transparent)
+        p = QPainter(eye_pixmap)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor("#888"), 3.5)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        p.setPen(pen)
+        # Eye outline: two bezier curves forming an almond/eye shape
+        path = QPainterPath()
+        path.moveTo(6, half)
+        path.cubicTo(16, 12, size - 16, 12, size - 6, half)
+        path.cubicTo(size - 16, size - 12, 16, size - 12, 6, half)
+        p.drawPath(path)
+        # Pupil circle
+        p.setBrush(QColor("#888"))
+        p.drawEllipse(QPointF(half, half), 8, 8)
+        p.end()
+
+        # --- Eye-off icon (eye with diagonal slash) ---
+        off_pixmap = QPixmap(size, size)
+        off_pixmap.fill(Qt.GlobalColor.transparent)
+        p = QPainter(off_pixmap)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(pen)
+        p.drawPath(path)
+        # Diagonal slash line
+        p.drawLine(10, 10, size - 10, size - 10)
+        p.end()
+
+        return {
+            "eye": QIcon(eye_pixmap),
+            "eye_off": QIcon(off_pixmap),
+        }
 
     _DEFAULT_BASES: dict[str, str] = {
         "deepseek": "https://api.deepseek.com",
@@ -223,16 +271,20 @@ class ConfigCard(QFrame):
 
     def _on_provider_changed(self) -> None:
         provider = self.provider_combo.currentData()
+        default_base = self._DEFAULT_BASES.get(provider, "")
+        default_model = self._DEFAULT_MODELS.get(provider, "")
+
         if provider == "anthropic":
-            self.base_url_input.setPlaceholderText("https://api.anthropic.com")
+            placeholder = "https://api.anthropic.com"
         else:
-            default_base = self._DEFAULT_BASES.get(provider, "")
-            default_model = self._DEFAULT_MODELS.get(provider, "")
-            self.base_url_input.setPlaceholderText(default_base or "https://api.example.com")
-            if not self.base_url_input.text().strip() and default_base:
-                self.base_url_input.setText(default_base)
-            if not self.model_input.text().strip() and default_model:
-                self.model_input.setText(default_model)
+            placeholder = default_base or "https://api.example.com"
+
+        self.base_url_input.setPlaceholderText(placeholder)
+        # Always update base URL and model when provider type changes
+        if default_base:
+            self.base_url_input.setText(default_base)
+        if default_model:
+            self.model_input.setText(default_model)
 
     def _on_enabled_toggled(self, enabled: bool) -> None:
         for w in (self.name_input, self.key_input, self.base_url_input,

@@ -57,7 +57,6 @@ class AutoReportApp:
             workspace=workspace,
             config_manager=self.config_manager,
             bus=self.bus,
-            gui=self.backend,
         )
 
         # Set loop manager in backend (for rollback functionality)

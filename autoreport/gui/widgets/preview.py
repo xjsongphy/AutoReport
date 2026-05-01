@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from loguru import logger
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QTextCursor
 from PyQt6.QtWidgets import (
     QLabel,
@@ -20,11 +20,6 @@ class PreviewWidget(QWidget):
     selection_changed = pyqtSignal(str, str, int, int)
 
     def __init__(self, workspace: Path):
-        """Initialize preview widget.
-
-        Args:
-            workspace: Project workspace directory.
-        """
         super().__init__()
         self.workspace = Path(workspace).resolve()
         self._current_directory = "data"
@@ -32,36 +27,82 @@ class PreviewWidget(QWidget):
         self._setup_ui()
 
     def _setup_ui(self) -> None:
-        """Setup user interface."""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        # Title
-        title = QLabel("预览")
-        title.setStyleSheet("font-weight: bold;")
-        layout.addWidget(title)
+        # Tab bar header (VSCode editor tab style)
+        header = QWidget()
+        header.setObjectName("previewHeader")
+        header_layout = QVBoxLayout(header)
+        header_layout.setContentsMargins(12, 6, 12, 4)
 
-        # File label
+        self._title_label = QLabel("预览")
+        self._title_label.setObjectName("previewTitle")
+        header_layout.addWidget(self._title_label)
+
         self._file_label = QLabel()
-        self._file_label.setStyleSheet("color: gray; font-size: 11px;")
+        self._file_label.setObjectName("previewFile")
         self._file_label.setVisible(False)
-        layout.addWidget(self._file_label)
+        header_layout.addWidget(self._file_label)
 
-        # Text editor for content
+        layout.addWidget(header)
+
+        # Editor
         self._editor = QPlainTextEdit()
         self._editor.setReadOnly(True)
         self._editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self._editor.setObjectName("previewEditor")
         self._editor.selectionChanged.connect(self._on_selection_changed)
-        self._editor.setStyleSheet("""
-            QPlainTextEdit {
-                background-color: #f9f9f9;
-                border: 1px solid #ddd;
-                border-radius: 4px;
+        layout.addWidget(self._editor, 1)
+
+        self._apply_style()
+
+    def _apply_style(self) -> None:
+        from PyQt6.QtWidgets import QApplication
+        hints = QApplication.styleHints()
+        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
+
+        c = {
+            "bg": "#1e1e1e" if dark else "#ffffff",
+            "header": "#252526" if dark else "#f3f3f3",
+            "border": "#3c3c3c" if dark else "#e0e0e0",
+            "title": "#ffffff" if dark else "#1a1a1a",
+            "file": "#858585" if dark else "#888888",
+            "fg": "#d4d4d4" if dark else "#333333",
+            "sel_bg": "#264f78" if dark else "#add6ff",
+            "sel_fg": "#ffffff" if dark else "#000000",
+        }
+
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {c["bg"]};
+            }}
+            #previewHeader {{
+                background-color: {c["header"]};
+                border-bottom: 1px solid {c["border"]};
+            }}
+            #previewTitle {{
+                font-size: 13px;
+                font-weight: 600;
+                color: {c["title"]};
+            }}
+            #previewFile {{
+                font-size: 11px;
+                color: {c["file"]};
                 font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
-                font-size: 12px;
-            }
+            }}
+            #previewEditor {{
+                background-color: {c["bg"]};
+                border: none;
+                color: {c["fg"]};
+                font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
+                font-size: 13px;
+                padding: 8px;
+                selection-background-color: {c["sel_bg"]};
+                selection-color: {c["sel_fg"]};
+            }}
         """)
-        layout.addWidget(self._editor)
 
     def set_directory(self, directory: str) -> None:
         """Set current directory to preview.

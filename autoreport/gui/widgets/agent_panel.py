@@ -1,12 +1,11 @@
-"""Agent panel widget for timeline and chat with file references."""
+"""Agent panel with chat-style messages, input, and @ file references."""
 
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from loguru import logger
-from PyQt6.QtCore import QPoint, pyqtSignal
-from PyQt6.QtGui import QTextCursor
+from PyQt6.QtCore import QPoint, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -22,108 +21,177 @@ from autoreport.gui.widgets.file_search_popup import FileSearchPopup
 
 
 class AgentPanel(QWidget):
-    """Enhanced agent panel with timeline, chat input, and @ file references."""
+    """Chat-style agent panel with messages, status, and @ file references."""
 
     message_sent = pyqtSignal(str)
-    debug_mode_toggled = pyqtSignal(bool)  # Signal for debug mode toggle
+    debug_mode_toggled = pyqtSignal(bool)
 
     def __init__(self, panel_id: str, title: str, workspace: Path | None = None):
-        """Initialize agent panel.
-
-        Args:
-            panel_id: Panel identifier.
-            title: Panel title.
-            workspace: Project workspace directory (for file search).
-        """
         super().__init__()
         self.panel_id = panel_id
         self._agent_type = "sub"
         self._workspace = Path(workspace).resolve() if workspace else Path.cwd()
         self._preview_context: tuple[str, str, int, int] | None = None
 
-        # File search components
         self._file_search_manager = FileSearchManager(self._workspace)
         self._file_search_popup: FileSearchPopup | None = None
 
         self._setup_ui(title)
+        self._apply_style()
         self._setup_file_search()
 
     def _setup_ui(self, title: str) -> None:
-        """Setup user interface."""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        # Title
-        title_label = QLabel(title)
-        title_label.setStyleSheet("font-weight: bold;")
-        layout.addWidget(title_label)
+        # ---- Header bar ----
+        header = QWidget()
+        header.setObjectName("panelHeader")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(10, 6, 10, 6)
 
-        # Status
-        self._status_label = QLabel("状态: 空闲")
-        self._status_label.setStyleSheet("color: gray;")
-        layout.addWidget(self._status_label)
+        self._title_label = QLabel(title)
+        self._title_label.setObjectName("panelTitle")
+        header_layout.addWidget(self._title_label)
 
-        # Debug mode button (for sub-agents only)
-        debug_layout = QHBoxLayout()
-        layout.addLayout(debug_layout)
+        self._status_label = QLabel("空闲")
+        self._status_label.setObjectName("panelStatus")
+        header_layout.addWidget(self._status_label)
 
-        debug_layout.addStretch()
+        header_layout.addStretch()
 
-        self._debug_button = QPushButton("调试模式")
+        self._debug_button = QPushButton("调试")
+        self._debug_button.setObjectName("debugBtn")
         self._debug_button.setCheckable(True)
+        self._debug_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self._debug_button.clicked.connect(self._on_debug_toggled)
-        debug_layout.addWidget(self._debug_button)
+        header_layout.addWidget(self._debug_button)
 
-        # Timeline/messages area
+        layout.addWidget(header)
+
+        # ---- Messages area ----
         self._messages_area = QTextEdit()
         self._messages_area.setReadOnly(True)
-        self._messages_area.setMinimumHeight(200)
-        layout.addWidget(self._messages_area)
+        self._messages_area.setObjectName("messagesArea")
+        layout.addWidget(self._messages_area, 1)
 
-        # Input area - use ChatInput for @ file reference support
-        input_layout = QHBoxLayout()
-        layout.addLayout(input_layout)
+        # ---- Input bar ----
+        input_bar = QWidget()
+        input_bar.setObjectName("inputBar")
+        input_layout = QHBoxLayout(input_bar)
+        input_layout.setContentsMargins(8, 6, 8, 6)
+        input_layout.setSpacing(6)
 
         self._input_field = ChatInput()
-        self._input_field.setPlaceholderText("输入消息... (@ 引用文件)")
+        self._input_field.setPlaceholderText("输入消息… (@ 引用文件, Enter 发送)")
         self._input_field.send_message.connect(self._on_send)
         self._input_field.file_reference_requested.connect(self._on_file_reference_requested)
-        input_layout.addWidget(self._input_field)
+        input_layout.addWidget(self._input_field, 1)
 
-        # Send button (optional, since Enter works)
-        send_button = QPushButton("发送")
-        send_button.clicked.connect(self._on_send)
-        input_layout.addWidget(send_button)
+        send_btn = QPushButton("发送")
+        send_btn.setObjectName("sendBtn")
+        send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        send_btn.clicked.connect(self._on_send)
+        input_layout.addWidget(send_btn)
+
+        layout.addWidget(input_bar)
+
+    def _apply_style(self) -> None:
+        from PyQt6.QtWidgets import QApplication
+        hints = QApplication.styleHints()
+        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
+
+        c = {
+            "headerBg": "#2b2b2b" if dark else "#f0f0f0",
+            "headerBorder": "#3c3c3c" if dark else "#ddd",
+            "titleFg": "#e0e0e0" if dark else "#1a1a1a",
+            "statusIdle": "#888" if dark else "#888",
+            "statusThink": "#4fc3f7" if dark else "#1565c0",
+            "statusTool": "#ffb74d" if dark else "#e65100",
+            "statusError": "#ef5350" if dark else "#c62828",
+            "statusDebug": "#ce93d8" if dark else "#7b1fa2",
+            "msgBg": "#1e1e1e" if dark else "#fff",
+            "userBubble": "#264f78" if dark else "#dcf8c6",
+            "userFg": "#e0e0e0" if dark else "#1a1a1a",
+            "agentBubble": "#2d2d2d" if dark else "#f0f0f0",
+            "agentFg": "#e0e0e0" if dark else "#1a1a1a",
+            "toolFg": "#888" if dark else "#666",
+            "inputBg": "#2b2b2b" if dark else "#fff",
+            "inputBorder": "#3c3c3c" if dark else "#ccc",
+            "inputFocusBorder": "#4fc3f7" if dark else "#0078d4",
+            "sendBg": "#0e639c" if dark else "#0078d4",
+            "sendFg": "#fff",
+            "sendHover": "#1177bb" if dark else "#106ebe",
+            "debugFg": "#888" if dark else "#888",
+            "debugActiveBg": "#5c1a1a" if dark else "#ffcdd2",
+            "debugActiveFg": "#ef5350" if dark else "#c62828",
+        }
+        self._colors = c
+
+        self.setStyleSheet(f"""
+            #panelHeader {{
+                background-color: {c["headerBg"]};
+                border-bottom: 1px solid {c["headerBorder"]};
+            }}
+            #panelTitle {{
+                font-size: 13px;
+                font-weight: 600;
+                color: {c["titleFg"]};
+            }}
+            #panelStatus {{
+                font-size: 11px;
+                color: {c["statusIdle"]};
+                margin-left: 8px;
+            }}
+            #messagesArea {{
+                background-color: {c["msgBg"]};
+                border: none;
+                padding: 8px;
+                font-size: 13px;
+            }}
+            #inputBar {{
+                background-color: {c["headerBg"]};
+                border-top: 1px solid {c["headerBorder"]};
+            }}
+            #sendBtn {{
+                background-color: {c["sendBg"]};
+                color: {c["sendFg"]};
+                border: none;
+                border-radius: 4px;
+                padding: 6px 16px;
+                font-size: 12px;
+                font-weight: 600;
+            }}
+            #sendBtn:hover {{ background-color: {c["sendHover"]}; }}
+            #debugBtn {{
+                background-color: transparent;
+                color: {c["debugFg"]};
+                border: 1px solid {c["headerBorder"]};
+                border-radius: 3px;
+                padding: 2px 8px;
+                font-size: 11px;
+            }}
+        """)
 
     def _setup_file_search(self) -> None:
-        """Setup file search popup and manager."""
         self._file_search_popup = FileSearchPopup(self)
         self._file_search_popup.file_selected.connect(self._on_file_selected)
         self._file_search_popup.cancelled.connect(self._on_file_search_cancelled)
 
-    def _on_file_reference_requested(self, query: str, position: QPoint) -> None:
-        """Handle @ file reference request.
+    # ---- File reference handling ----
 
-        Args:
-            query: Search query (text after @).
-            position: Global position for popup.
-        """
+    def _on_file_reference_requested(self, query: str, position: QPoint) -> None:
         if not self._file_search_popup:
             return
-
-        # Position and show popup
         self._file_search_popup.move(position)
         self._file_search_popup.set_query(query, waiting=True)
         self._file_search_popup.show()
         self._file_search_popup.raise_()
         self._file_search_popup.setFocus()
-
-        # Update input state
         self._input_field.set_popup_active(True)
 
-        # Trigger search
         async def on_results(matches):
-            # Check if popup still active
             if self._file_search_popup and self._file_search_popup.isVisible():
                 self._file_search_popup.set_matches(matches)
 
@@ -131,61 +199,27 @@ class AgentPanel(QWidget):
         asyncio.create_task(self._file_search_manager.search(query, on_results))
 
     def _on_file_selected(self, file_path: Path) -> None:
-        """Handle file selected from popup.
-
-        Args:
-            file_path: Selected file path.
-        """
         self._file_search_popup.hide()
         self._input_field.set_popup_active(False)
         self._input_field.setFocus()
-
-        # Insert file reference markdown link
         self._input_field.insert_file_reference(file_path)
 
-        logger.debug("File reference inserted: {}", file_path)
-
     def _on_file_search_cancelled(self) -> None:
-        """Handle file search cancelled."""
         self._file_search_popup.hide()
         self._input_field.set_popup_active(False)
         self._input_field.setFocus()
 
-    def set_preview_context(self, file_path: str, selected_text: str, start_line: int, end_line: int) -> None:
-        """Store preview selection context for next message.
+    # ---- Public API ----
 
-        Args:
-            file_path: Relative file path.
-            selected_text: Selected text content.
-            start_line: Start line number.
-            end_line: End line number.
-        """
+    def set_preview_context(self, file_path: str, selected_text: str, start_line: int, end_line: int) -> None:
         self._preview_context = (file_path, selected_text, start_line, end_line)
-        logger.debug(
-            "Preview context set: {} (lines {}-{})",
-            file_path,
-            start_line,
-            end_line
-        )
 
     def set_workspace(self, workspace: Path) -> None:
-        """Update workspace directory.
-
-        Args:
-            workspace: New workspace directory.
-        """
         self._workspace = Path(workspace).resolve()
         self._file_search_manager = FileSearchManager(self._workspace)
 
     def set_agent_type(self, agent_type: str) -> None:
-        """Set agent type for this panel.
-
-        Args:
-            agent_type: Agent type (data_analysis, plotting, theory, report).
-        """
         self._agent_type = agent_type
-
-        # Update title
         titles = {
             "data_analysis": "数据分析 Agent",
             "plotting": "图像绘制 Agent",
@@ -194,188 +228,168 @@ class AgentPanel(QWidget):
             "main": "主 Agent",
             "sub": "子 Agent",
         }
-        title = titles.get(agent_type, "Agent")
-
-        # Find title label and update
-        for child in self.children():
-            if isinstance(child, QLabel) and "Agent" in child.text():
-                child.setText(title)
-                break
+        self._title_label.setText(titles.get(agent_type, "Agent"))
 
     @property
     def agent_type(self) -> str:
-        """Get current agent type."""
         return self._agent_type
 
-    def add_message(self, role: str, content: str) -> None:
-        """Add a message to the timeline.
+    # ---- Messages ----
 
-        Args:
-            role: Message role (user, agent).
-            content: Message content.
-        """
+    def add_message(self, role: str, content: str) -> None:
         cursor = self._messages_area.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
 
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        role_label = "用户" if role == "user" else "Agent"
+        ts = datetime.now().strftime("%H:%M")
 
-        cursor.insertText(f"\n[{timestamp}] {role_label}:\n")
-        cursor.insertText(content)
-        cursor.insertText("\n" + "-" * 50 + "\n")
+        if role == "user":
+            label_fmt = QTextCharFormat()
+            label_fmt.setFontWeight(QFont.Weight.Bold)
+            label_fmt.setForeground(QColor(self._colors["userFg"]))
+            bubble_fmt = QTextCharFormat()
+            bubble_fmt.setBackground(QColor(self._colors["userBubble"]))
+            bubble_fmt.setForeground(QColor(self._colors["userFg"]))
+
+            cursor.insertText(f"\n{ts}  ", self._default_fmt(cursor))
+            cursor.insertText("你\n", label_fmt)
+            cursor.insertText(content + "\n", bubble_fmt)
+        else:
+            label_fmt = QTextCharFormat()
+            label_fmt.setFontWeight(QFont.Weight.Bold)
+            label_fmt.setForeground(QColor(self._colors["agentFg"]))
+            bubble_fmt = QTextCharFormat()
+            bubble_fmt.setBackground(QColor(self._colors["agentBubble"]))
+            bubble_fmt.setForeground(QColor(self._colors["agentFg"]))
+
+            cursor.insertText(f"\n{ts}  ", self._default_fmt(cursor))
+            cursor.insertText("Agent\n", label_fmt)
+            cursor.insertText(content + "\n", bubble_fmt)
 
         self._messages_area.setTextCursor(cursor)
         self._messages_area.ensureCursorVisible()
 
-    def add_tool_call(self, tool_name: str, arguments: dict) -> None:
-        """Add a tool call to the timeline.
+    def _default_fmt(self, cursor) -> QTextCharFormat:
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor(self._colors["agentFg"]))
+        return fmt
 
-        Args:
-            tool_name: Name of tool being called.
-            arguments: Tool arguments.
-        """
+    def add_tool_call(self, tool_name: str, arguments: dict) -> None:
         cursor = self._messages_area.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
 
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        cursor.insertText(f"\n[{timestamp}] 🔧 调用工具: {tool_name}\n")
+        ts = datetime.now().strftime("%H:%M")
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor(self._colors["toolFg"]))
+        fmt.setFontItalic(True)
 
-        # Add arguments (simplified)
         args_str = ", ".join(f"{k}={v}" for k, v in arguments.items())
-        cursor.insertText(f"参数: {args_str}\n")
+        cursor.insertText(f"\n{ts}  ✎ {tool_name}({args_str})\n", fmt)
 
         self._messages_area.setTextCursor(cursor)
         self._messages_area.ensureCursorVisible()
 
     def add_tool_result(self, tool_name: str, result: Any, error: str | None = None) -> None:
-        """Add a tool result to the timeline.
-
-        Args:
-            tool_name: Name of tool.
-            result: Tool result.
-            error: Error message if any.
-        """
         cursor = self._messages_area.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
 
-        timestamp = datetime.now().strftime("%H:%M:%S")
+        ts = datetime.now().strftime("%H:%M")
+        fmt = QTextCharFormat()
+        fmt.setFontItalic(True)
 
         if error:
-            cursor.insertText(f"\n[{timestamp}] ❌ 工具错误 ({tool_name}): {error}\n")
+            fmt.setForeground(QColor(self._colors["statusError"]))
+            cursor.insertText(f"{ts}  ✗ {tool_name}: {error}\n", fmt)
         else:
-            cursor.insertText(f"\n[{timestamp}] ✅ 工具完成: {tool_name}\n")
+            fmt.setForeground(QColor(self._colors["toolFg"]))
+            cursor.insertText(f"{ts}  ✓ {tool_name}\n", fmt)
 
         self._messages_area.setTextCursor(cursor)
         self._messages_area.ensureCursorVisible()
 
-    def set_status(self, status: str, extra: dict | None = None) -> None:
-        """Set agent status display.
-
-        Args:
-            status: Agent status (idle, thinking, running_tool, error).
-            extra: Extra information.
-        """
-        status_labels = {
-            "idle": "空闲",
-            "thinking": "思考中...",
-            "running_tool": "执行工具...",
-            "error": "错误",
-            "debug_mode": "调试模式",
-        }
-
-        label = status_labels.get(status, status)
-        self._status_label.setText(f"状态: {label}")
-
-        # Update color
-        colors = {
-            "idle": "gray",
-            "thinking": "blue",
-            "running_tool": "orange",
-            "error": "red",
-            "debug_mode": "purple",
-        }
-        color = colors.get(status, "black")
-        self._status_label.setStyleSheet(f"color: {color};")
-
     def add_error(self, source: str, message: str) -> None:
-        """Add an error to the timeline.
-
-        Args:
-            source: Error source.
-            message: Error message.
-        """
         cursor = self._messages_area.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
 
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        cursor.insertText(f"\n[{timestamp}] ❌ 错误 ({source}): {message}\n")
+        ts = datetime.now().strftime("%H:%M")
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor(self._colors["statusError"]))
+        fmt.setFontWeight(QFont.Weight.Bold)
+        cursor.insertText(f"\n{ts}  ✗ {source}: {message}\n", fmt)
 
         self._messages_area.setTextCursor(cursor)
         self._messages_area.ensureCursorVisible()
 
     def add_checkpoint(self, checkpoint_id: str, description: str) -> None:
-        """Add a checkpoint to the timeline.
-
-        Args:
-            checkpoint_id: Checkpoint ID.
-            description: Checkpoint description.
-        """
         cursor = self._messages_area.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
 
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        cursor.insertText(f"\n[{timestamp}] 📍 检查点: {description}\n")
-        cursor.insertText(f"   ID: {checkpoint_id}\n")
+        ts = datetime.now().strftime("%H:%M")
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor("#4fc3f7"))
+        cursor.insertText(f"\n{ts}  ⚑ {description}\n", fmt)
 
         self._messages_area.setTextCursor(cursor)
         self._messages_area.ensureCursorVisible()
 
+    # ---- Status ----
+
+    def set_status(self, status: str, extra: dict | None = None) -> None:
+        labels = {
+            "idle": "空闲",
+            "thinking": "思考中…",
+            "running_tool": "执行工具…",
+            "error": "错误",
+            "debug_mode": "调试模式",
+        }
+        color_map = {
+            "idle": "statusIdle",
+            "thinking": "statusThink",
+            "running_tool": "statusTool",
+            "error": "statusError",
+            "debug_mode": "statusDebug",
+        }
+        label = labels.get(status, status)
+        color_key = color_map.get(status, "statusIdle")
+        color = self._colors.get(color_key, "#888")
+        self._status_label.setText(label)
+        self._status_label.setStyleSheet(f"color: {color}; font-size: 11px; margin-left: 8px;")
+
+    # ---- Actions ----
+
     def _on_send(self) -> None:
-        """Handle send button click."""
         content = self._input_field.get_plain_text().strip()
         if not content:
             return
 
-        # Append preview context if available
         final_message = content
         if self._preview_context:
             file_path, selected_text, start_line, end_line = self._preview_context
-            context_block = f"\n\n<!-- 上下文引用 -->\n**文件**: {file_path} (行 {start_line}-{end_line})\n```\n{selected_text}\n```\n"
+            context_block = (
+                f"\n\n<!-- 上下文引用 -->\n"
+                f"**文件**: {file_path} (行 {start_line}-{end_line})\n"
+                f"```\n{selected_text}\n```\n"
+            )
             final_message = content + context_block
-
-            # Clear context after use
             self._preview_context = None
 
         self._input_field.clear_text()
-        self.add_message("user", final_message)
+        self.add_message("user", content)
         self.message_sent.emit(final_message)
 
     def _on_debug_toggled(self) -> None:
-        """Handle debug mode toggle."""
         enabled = self._debug_button.isChecked()
-
         if enabled:
-            self._debug_button.setStyleSheet("background-color: #ffcccc;")
-            self.add_message("system", "调试模式已启用")
+            self._debug_button.setStyleSheet(
+                f"background-color: {self._colors['debugActiveBg']}; "
+                f"color: {self._colors['debugActiveFg']}; "
+                "border: 1px solid transparent; border-radius: 3px; padding: 2px 8px; font-size: 11px;"
+            )
         else:
             self._debug_button.setStyleSheet("")
-            self.add_message("system", "调试模式已禁用")
-
-        # Emit signal
         self.debug_mode_toggled.emit(enabled)
 
     def set_debug_mode(self, enabled: bool) -> None:
-        """Set debug mode state (from external source).
-
-        Args:
-            enabled: Whether debug mode is enabled.
-        """
         self._debug_button.setChecked(enabled)
 
     def hide_debug_button(self, hide: bool = True) -> None:
-        """Hide or show debug button.
-
-        Args:
-            hide: Whether to hide the button (True for main agent panel).
-        """
         self._debug_button.setHidden(hide)

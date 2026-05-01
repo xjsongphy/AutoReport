@@ -7,7 +7,6 @@ from loguru import logger
 
 from ...config import ConfigManager
 from ...core.providers import ProviderFactory, ProviderManager
-from ...interfaces.protocol import GUIAPI
 from ...interfaces.types import AgentType, Message, RestartRequest
 from ..checkpoints import CheckpointManager
 from ..tools import (
@@ -32,7 +31,6 @@ class LoopManager:
         workspace: Path,
         config_manager: ConfigManager,
         bus: MessageBus,
-        gui: GUIAPI,
     ):
         """Initialize loop manager.
 
@@ -40,12 +38,10 @@ class LoopManager:
             workspace: Project workspace directory.
             config_manager: Configuration manager.
             bus: Message bus for communication.
-            gui: GUI API.
         """
         self.workspace = Path(workspace).resolve()
         self.config_manager = config_manager
         self.bus = bus
-        self.gui = gui
 
         self._loops: dict[AgentType, AgentLoop] = {}
         self._running = False
@@ -157,7 +153,6 @@ class LoopManager:
                 workspace=self.workspace,
                 tools=tools,
                 bus=self.bus,
-                gui=self.gui,
                 config=config,
                 llm_provider=llm_provider,
             )

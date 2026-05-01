@@ -10,19 +10,31 @@ from ...config.schema import AgentDefaults
 from ...core.prompts import PromptLoader
 from ...core.providers.base import LLMProvider
 from ...core.providers.base import Message as LLMMessage
-from ...interfaces.protocol import GUIAPI
 from ...interfaces.types import (
+    AgentResponse,
     AgentStatus,
     AgentType,
+    Error,
     Message,
+    StatusChange,
     UserMessage,
+)
+from ...interfaces.types import (
+    ToolCall as ToolCallMsg,
+)
+from ...interfaces.types import (
+    ToolResult as ToolResultMsg,
 )
 from ..tools.registry import ToolRegistry
 from .bus import MessageBus
 
 
 class AgentLoop:
-    """Agent loop for processing user messages and generating responses."""
+    """Agent loop for processing user messages and generating responses.
+
+    All GUI communication goes through the MessageBus as typed messages.
+    The GUI subscribes to the bus and handles them.
+    """
 
     def __init__(
         self,
@@ -30,7 +42,6 @@ class AgentLoop:
         workspace: Path,
         tools: ToolRegistry,
         bus: MessageBus,
-        gui: GUIAPI,
         config: AgentDefaults,
         llm_provider: LLMProvider,
         prompt_loader: PromptLoader | None = None,
@@ -42,7 +53,6 @@ class AgentLoop:
             workspace: Project workspace directory.
             tools: Tool registry for this agent.
             bus: Message bus for communication.
-            gui: GUI API for sending messages.
             config: Agent configuration.
             llm_provider: LLM provider for generating responses.
             prompt_loader: Optional custom PromptLoader instance.
@@ -51,7 +61,6 @@ class AgentLoop:
         self.workspace = Path(workspace).resolve()
         self.tools = tools
         self.bus = bus
-        self.gui = gui
         self.config = config
         self.llm_provider = llm_provider
 
@@ -109,10 +118,10 @@ class AgentLoop:
 
             except Exception as e:
                 logger.error("Error in agent loop for {}: {}", self.agent_type, e)
-                await self.gui.show_error(
+                await self.bus.publish(Error(
                     source=str(self.agent_type),
                     message=str(e),
-                )
+                ))
 
     async def _handle_user_message(self, message: Message) -> None:
         """Handle user message from bus.
@@ -192,21 +201,21 @@ class AgentLoop:
                     LLMMessage(role="assistant", content=response.content)
                 )
 
-                await self.gui.display_agent_message(
-                    agent_type=str(self.agent_type),
+                await self.bus.publish(AgentResponse(
+                    agent_type=self.agent_type,
                     content=response.content,
                     message_id=message.message_id,
-                )
+                ))
 
             await self._set_status(AgentStatus.IDLE)
 
         except Exception as e:
             logger.error("Error processing message in {}: {}", self.agent_type, e)
             await self._set_status(AgentStatus.ERROR)
-            await self.gui.show_error(
+            await self.bus.publish(Error(
                 source=str(self.agent_type),
                 message=str(e),
-            )
+            ))
 
     async def _handle_tool_calls(
         self,
@@ -243,11 +252,11 @@ class AgentLoop:
             for tool_call in response.tool_calls:
                 await self._set_status(AgentStatus.RUNNING_TOOL)
 
-                await self.gui.show_tool_call(
-                    agent_type=str(self.agent_type),
+                await self.bus.publish(ToolCallMsg(
+                    agent_type=self.agent_type,
                     tool_name=tool_call.name,
                     arguments=tool_call.arguments,
-                )
+                ))
 
                 try:
                     tool = self.tools.get(tool_call.name)
@@ -256,11 +265,11 @@ class AgentLoop:
 
                     result = await tool(**tool_call.arguments)
 
-                    await self.gui.show_tool_result(
-                        agent_type=str(self.agent_type),
+                    await self.bus.publish(ToolResultMsg(
+                        agent_type=self.agent_type,
                         tool_name=tool_call.name,
                         result=result,
-                    )
+                    ))
 
                     result_str = self._format_tool_result(result)
 
@@ -268,12 +277,12 @@ class AgentLoop:
                     logger.error("Tool execution error: {}", e)
                     error_msg = f"Error executing {tool_call.name}: {str(e)}"
 
-                    await self.gui.show_tool_result(
-                        agent_type=str(self.agent_type),
+                    await self.bus.publish(ToolResultMsg(
+                        agent_type=self.agent_type,
                         tool_name=tool_call.name,
                         result=None,
                         error=error_msg,
-                    )
+                    ))
                     result_str = error_msg
 
                 # Add tool result as structured message
@@ -325,7 +334,7 @@ class AgentLoop:
             return str(result)
 
     async def _set_status(self, status: AgentStatus) -> None:
-        """Set agent status and notify GUI.
+        """Set agent status and notify GUI via bus.
 
         Args:
             status: New agent status.
@@ -335,10 +344,10 @@ class AgentLoop:
         # In debug mode, use DEBUG_MODE status
         display_status = AgentStatus.DEBUG_MODE if self._debug_mode else status
 
-        await self.gui.update_agent_status(
-            agent_type=str(self.agent_type),
-            status=str(display_status),
-        )
+        await self.bus.publish(StatusChange(
+            agent_type=self.agent_type,
+            status=display_status,
+        ))
 
     def set_debug_mode(self, enabled: bool) -> None:
         """Enable or disable debug mode.

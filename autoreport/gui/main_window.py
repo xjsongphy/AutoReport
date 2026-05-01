@@ -2,10 +2,9 @@
 
 import asyncio
 from pathlib import Path
-from typing import Any
 
 from loguru import logger
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QMainWindow,
@@ -35,6 +34,9 @@ class MainWindow(QMainWindow):
     inheritance with QMainWindow because of metaclass conflict).
     """
 
+    # Signal for thread-safe message delivery from async bus to Qt thread
+    _message_signal = pyqtSignal(object)
+
     def __init__(self, backend: BackendAPI, workspace: Path):
         """Initialize main window.
 
@@ -50,13 +52,95 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("AutoReport - 物理实验报告撰写系统")
         self.resize(1400, 900)
 
+        # Apply VSCode-inspired global theme
+        self._apply_theme()
+
         # Setup UI
         self._setup_ui()
 
-        # Subscribe to backend messages
-        self.backend.subscribe_to_messages(self._handle_backend_message)
+        # Connect signal for thread-safe message delivery
+        self._message_signal.connect(self._dispatch_backend_message)
+
+        # Subscribe to backend messages via signal bridge
+        self.backend.subscribe_to_messages(self._on_bus_message)
 
         logger.info("Main window initialized for workspace: {}", self.workspace)
+
+    def _apply_theme(self) -> None:
+        """Apply VSCode-inspired global theme."""
+        from PyQt6.QtWidgets import QApplication
+        hints = QApplication.styleHints()
+        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
+
+        c = {
+            "bg": "#1e1e1e" if dark else "#ffffff",
+            "border": "#3c3c3c" if dark else "#e0e0e0",
+            "fg": "#cccccc" if dark else "#333333",
+            "fg_dim": "#858585" if dark else "#888888",
+            "hover": "#2a2d2e" if dark else "#e8e8e8",
+            "scroll": "#424242" if dark else "#c1c1c1",
+            "title": "#323233" if dark else "#ebebeb",
+            "splitter": "#3c3c3c" if dark else "#e0e0e0",
+        }
+
+        self.setStyleSheet(f"""
+            QMainWindow {{
+                background-color: {c["bg"]};
+                color: {c["fg"]};
+            }}
+            QWidget {{
+                color: {c["fg"]};
+            }}
+            QSplitter::handle {{
+                background-color: {c["splitter"]};
+            }}
+            QSplitter::handle:horizontal {{
+                width: 1px;
+            }}
+            QSplitter::handle:vertical {{
+                height: 1px;
+            }}
+            QScrollBar:vertical {{
+                background-color: {c["bg"]};
+                width: 10px;
+                border: none;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {c["scroll"]};
+                min-height: 30px;
+                border-radius: 5px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background-color: {c["fg_dim"]};
+            }}
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+            QScrollBar:horizontal {{
+                background-color: {c["bg"]};
+                height: 10px;
+                border: none;
+            }}
+            QScrollBar::handle:horizontal {{
+                background-color: {c["scroll"]};
+                min-width: 30px;
+                border-radius: 5px;
+            }}
+            QToolBar {{
+                background-color: {c["title"]};
+                border-bottom: 1px solid {c["border"]};
+                spacing: 4px;
+                padding: 2px;
+            }}
+            QToolTip {{
+                background-color: {c["title"]};
+                color: {c["fg"]};
+                border: 1px solid {c["border"]};
+                padding: 4px;
+                font-size: 12px;
+            }}
+        """)
 
     def _setup_ui(self) -> None:
         """Setup user interface."""
@@ -189,8 +273,16 @@ class MainWindow(QMainWindow):
         agent_type = self.sub_agent_panel.agent_type
         self.backend.set_agent_debug_mode(agent_type, enabled)
 
-    async def _handle_backend_message(self, message: Message) -> None:
-        """Handle message from backend.
+    def _on_bus_message(self, message: Message) -> None:
+        """Bus callback — emits signal to marshal message to Qt thread.
+
+        This is called from the async event loop thread, so we must NOT
+        touch Qt widgets directly. Instead, emit a signal.
+        """
+        self._message_signal.emit(message)
+
+    def _dispatch_backend_message(self, message: Message) -> None:
+        """Handle message in the Qt thread (triggered by signal).
 
         Args:
             message: Message from backend.
@@ -205,143 +297,49 @@ class MainWindow(QMainWindow):
         )
 
         if isinstance(message, AgentResponse):
-            await self._handle_agent_response(message)
+            self._handle_agent_response(message)
         elif isinstance(message, ToolCall):
-            await self._handle_tool_call(message)
+            self._handle_tool_call(message)
         elif isinstance(message, ToolResult):
-            await self._handle_tool_result(message)
+            self._handle_tool_result(message)
         elif isinstance(message, StatusChange):
-            await self._handle_status_change(message)
+            self._handle_status_change(message)
         elif isinstance(message, Error):
-            await self._handle_error(message)
+            self._handle_error(message)
         elif isinstance(message, Checkpoint):
-            await self._handle_checkpoint(message)
+            self._handle_checkpoint(message)
 
-    async def _handle_agent_response(self, message: AgentResponse) -> None:
-        """Handle agent response.
-
-        Args:
-            message: Agent response message.
-        """
+    def _handle_agent_response(self, message: AgentResponse) -> None:
+        """Handle agent response."""
         panel = self._get_panel_for_agent(message.agent_type)
         panel.add_message("agent", message.content)
 
-    async def _handle_tool_call(self, message: ToolCall) -> None:
-        """Handle tool call.
-
-        Args:
-            message: Tool call message.
-        """
+    def _handle_tool_call(self, message: ToolCall) -> None:
+        """Handle tool call."""
         panel = self._get_panel_for_agent(message.agent_type)
         panel.add_tool_call(message.tool_name, message.arguments)
 
-    async def _handle_tool_result(self, message: ToolResult) -> None:
-        """Handle tool result.
-
-        Args:
-            message: Tool result message.
-        """
+    def _handle_tool_result(self, message: ToolResult) -> None:
+        """Handle tool result."""
         panel = self._get_panel_for_agent(message.agent_type)
         panel.add_tool_result(message.tool_name, message.result, message.error)
 
-    async def _handle_status_change(self, message: StatusChange) -> None:
-        """Handle status change.
-
-        Args:
-            message: Status change message.
-        """
+    def _handle_status_change(self, message: StatusChange) -> None:
+        """Handle status change."""
         panel = self._get_panel_for_agent(message.agent_type)
         panel.set_status(message.status, message.extra)
 
-    async def _handle_error(self, message: Error) -> None:
-        """Handle error.
+    def _handle_error(self, message: Error) -> None:
+        """Handle error."""
+        self.main_agent_panel.add_error(message.source, message.message)
 
-        Args:
-            message: Error message.
-        """
-        # Show error in relevant panel or main panel
-        panel = self.main_agent_panel
-        panel.add_error(message.source, message.message)
-
-    async def _handle_checkpoint(self, message: Checkpoint) -> None:
-        """Handle checkpoint.
-
-        Args:
-            message: Checkpoint message.
-        """
+    def _handle_checkpoint(self, message: Checkpoint) -> None:
+        """Handle checkpoint."""
         self.main_agent_panel.add_checkpoint(message.checkpoint_id, message.description)
 
     def _get_panel_for_agent(self, agent_type: str) -> AgentPanel:
-        """Get agent panel for agent type.
-
-        Args:
-            agent_type: Agent type string.
-
-        Returns:
-            Corresponding agent panel.
-        """
+        """Get agent panel for agent type."""
         if agent_type == "main":
             return self.main_agent_panel
         else:
             return self.sub_agent_panel
-
-    # GUIAPI implementation
-
-    async def display_agent_message(
-        self,
-        agent_type: str,
-        content: str,
-        message_id: str | None = None
-    ) -> None:
-        """Display an agent message in GUI."""
-        panel = self._get_panel_for_agent(agent_type)
-        panel.add_message("agent", content)
-
-    async def show_tool_call(
-        self,
-        agent_type: str,
-        tool_name: str,
-        arguments: dict
-    ) -> None:
-        """Show a tool being executed."""
-        panel = self._get_panel_for_agent(agent_type)
-        panel.add_tool_call(tool_name, arguments)
-
-    async def show_tool_result(
-        self,
-        agent_type: str,
-        tool_name: str,
-        result: Any,
-        error: str | None = None
-    ) -> None:
-        """Show a tool result."""
-        panel = self._get_panel_for_agent(agent_type)
-        panel.add_tool_result(tool_name, result, error)
-
-    async def update_agent_status(
-        self,
-        agent_type: str,
-        status: str,
-        extra: dict | None = None
-    ) -> None:
-        """Update agent status display."""
-        panel = self._get_panel_for_agent(agent_type)
-        panel.set_status(status, extra or {})
-
-    async def show_error(
-        self,
-        source: str,
-        message: str,
-        details: dict | None = None
-    ) -> None:
-        """Show an error in GUI."""
-        self.main_agent_panel.add_error(source, message)
-
-    async def add_checkpoint(
-        self,
-        checkpoint_id: str,
-        description: str,
-        file_states: dict
-    ) -> None:
-        """Add a checkpoint to the timeline."""
-        self.main_agent_panel.add_checkpoint(checkpoint_id, description)

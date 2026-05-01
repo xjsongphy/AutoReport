@@ -33,21 +33,30 @@ class ChatInput(QPlainTextEdit):
 
     def _setup_ui(self) -> None:
         """Setup user interface."""
-        self.setPlaceholderText("输入消息... (@ 引用文件)")
-        self.setMinimumHeight(60)
-        self.setMaximumHeight(150)
+        self.setPlaceholderText("输入消息… (@ 引用文件, Enter 发送)")
+        self.setMinimumHeight(40)
+        self.setMaximumHeight(120)
 
-        # Style
-        self.setStyleSheet("""
-            QPlainTextEdit {
-                border: 1px solid #ccc;
+        from PyQt6.QtWidgets import QApplication
+        hints = QApplication.styleHints()
+        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
+        border = "#3c3c3c" if dark else "#ccc"
+        focus = "#4fc3f7" if dark else "#0078d4"
+        bg = "#2b2b2b" if dark else "#fff"
+        fg = "#e0e0e0" if dark else "#1a1a1a"
+
+        self.setStyleSheet(f"""
+            QPlainTextEdit {{
+                border: 1px solid {border};
                 border-radius: 4px;
-                padding: 8px;
-                background-color: #fff;
-            }
-            QPlainTextEdit:focus {
-                border: 1px solid #6699ff;
-            }
+                padding: 6px 8px;
+                background-color: {bg};
+                color: {fg};
+                font-size: 13px;
+            }}
+            QPlainTextEdit:focus {{
+                border-color: {focus};
+            }}
         """)
 
     @override
