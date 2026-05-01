@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import QPoint, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor
+from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -18,7 +18,12 @@ from PyQt6.QtWidgets import (
 
 from autoreport.core.file_search import FileSearchManager
 from autoreport.gui.widgets.chat_input import ChatInput
+from autoreport.gui.widgets.debug_panel import DebugPanel
 from autoreport.gui.widgets.file_search_popup import FileSearchPopup
+from autoreport.gui.widgets.message_row import MessageRow
+from autoreport.gui.widgets.messages_area import MessagesArea
+from autoreport.gui.widgets.tool_call_group import ToolCallGroup
+from autoreport.interfaces.types import ApiDebugMessage
 
 
 class AgentPanel(QWidget):
@@ -35,6 +40,7 @@ class AgentPanel(QWidget):
         self._preview_context: tuple[str, str, int, int] | None = None
         self._opened_file: str | None = None  # file opened but no selection
         self._context_enabled: bool = True  # eye toggle state
+        self._current_tool_group = None  # Track current tool call group
 
         self._file_search_manager = FileSearchManager(self._workspace)
         self._file_search_popup: FileSearchPopup | None = None
@@ -73,11 +79,22 @@ class AgentPanel(QWidget):
 
         layout.addWidget(header)
 
+        # ---- Main content area (messages + debug) ----
+        content_splitter = QWidget()
+        content_layout = QVBoxLayout(content_splitter)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+
         # ---- Messages area ----
-        self._messages_area = QTextEdit()
-        self._messages_area.setReadOnly(True)
-        self._messages_area.setObjectName("messagesArea")
-        layout.addWidget(self._messages_area, 1)
+        self._messages_area = MessagesArea()
+        content_layout.addWidget(self._messages_area, 1)
+
+        # ---- Debug panel (hidden by default) ----
+        self._debug_panel = DebugPanel()
+        self._debug_panel.setVisible(False)
+        content_layout.addWidget(self._debug_panel)
+
+        layout.addWidget(content_splitter, 1)
 
         # ---- Context chip bar ----
         self._context_bar = QWidget()
@@ -148,16 +165,6 @@ class AgentPanel(QWidget):
             "statusTool": "#ffb74d" if dark else "#e65100",
             "statusError": "#f14c4c" if dark else "#c62828",
             "statusDebug": "#ce93d8" if dark else "#7b1fa2",
-            # Messages area - VSCode editor background
-            "msgBg": "#1e1e1e" if dark else "#ffffff",
-            "userBubble": "#0e639c" if dark else "#e1f5fe",
-            "userFg": "#ffffff" if dark else "#1a1a1a",
-            "agentBubble": "#2d2d2d" if dark else "#f3f3f3",
-            "agentFg": "#cccccc" if dark else "#1a1a1a",
-            # Tool output - white background with border
-            "toolBg": "#252526" if dark else "#ffffff",
-            "toolBorder": "#3c3c3c" if dark else "#e0e0e0",
-            "toolFg": "#858585" if dark else "#666666",
             # Input - Claude Code style white background with orange focus
             "inputBg": "#3c3c3c" if dark else "#ffffff",
             "inputBorder": "#3c3c3c" if dark else "#e0e0e0",
@@ -193,12 +200,6 @@ class AgentPanel(QWidget):
                 font-size: 11px;
                 color: {c["statusIdle"]};
                 margin-left: 8px;
-            }}
-            #messagesArea {{
-                background-color: {c["msgBg"]};
-                border: none;
-                padding: 8px;
-                font-size: 13px;
             }}
             #inputBar {{
                 background-color: {c["headerBg"]};
@@ -242,6 +243,9 @@ class AgentPanel(QWidget):
             }}
             #contextEye:hover {{ background-color: rgba(128,128,128,0.15); }}
         """)
+
+        # Initialize tool group tracking
+        self._current_tool_group = None
 
     def _setup_file_search(self) -> None:
         self._file_search_popup = FileSearchPopup(self)
@@ -357,9 +361,7 @@ class AgentPanel(QWidget):
         coordination: bool = False,
         streaming: bool = False,
     ) -> None:
-        """Add a message to the display.
-
-        Codex-style: Clear bubble formatting with timestamps and role labels.
+        """Add a message to the display using MessageRow widget.
 
         Args:
             role: Message role ("user" or "agent").
@@ -368,182 +370,102 @@ class AgentPanel(QWidget):
             coordination: Whether this is a coordination message.
             streaming: If True, append to last agent message instead of creating new.
         """
-        cursor = self._messages_area.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-
-        # For streaming agent messages, append to existing content
+        # For streaming agent messages, we need to append to the last message
         if streaming and role == "agent" and not content:
             # Empty content signals completion - just ensure visible
-            self._messages_area.ensureCursorVisible()
             return
 
         if streaming and role == "agent":
             # Append to last agent message
-            # Move cursor to end of last line
-            cursor.movePosition(QTextCursor.MoveOperation.End)
-            # Append new content
-            content_fmt = QTextCharFormat()
-            content_fmt.setForeground(QColor(self._colors["agentFg"]))
-            cursor.insertText(content, content_fmt)
-            self._messages_area.setTextCursor(cursor)
-            self._messages_area.ensureCursorVisible()
+            # Find the last MessageRow and append to it
+            rows = self._messages_area.get_message_rows()
+            if rows and rows[-1]._role == "agent":
+                # Append content to the last message
+                last_row = rows[-1]
+                last_row._content += content
+                # Update the content label
+                # Find the content label (second child)
+                if last_row.layout().count() > 1:
+                    content_label = last_row.layout().itemAt(1).widget()
+                    if content_label:
+                        content_label.setText(last_row._content)
             return
 
-        # Add spacing before each message
-        cursor.insertText("\n")
-
+        # Add new message row
         ts = datetime.now().strftime("%H:%M")
-
-        if role == "user":
-            # Role label with timestamp
-            label_fmt = QTextCharFormat()
-            label_fmt.setFontWeight(QFont.Weight.Bold)
-            label_fmt.setForeground(QColor(self._colors["userFg"]))
-
-            # Coordination indicator (orange)
-            if coordination or source == "main_agent":
-                coord_fmt = QTextCharFormat()
-                coord_fmt.setForeground(QColor("#d97757"))  # Claude orange
-                coord_fmt.setFontWeight(QFont.Weight.Bold)
-                cursor.insertText(f"{ts} ", self._default_fmt(cursor))
-                cursor.insertText("[主 Agent 协调] ", coord_fmt)
-                cursor.insertText("你\n", label_fmt)
-            else:
-                cursor.insertText(f"{ts} ", self._default_fmt(cursor))
-                cursor.insertText("你\n", label_fmt)
-
-            # Message content with bubble background
-            bubble_fmt = QTextCharFormat()
-            bubble_fmt.setBackground(QColor(self._colors["userBubble"]))
-            if not coordination:
-                bubble_fmt.setForeground(QColor(self._colors["userFg"]))
-            else:
-                bubble_fmt.setForeground(QColor("#d97757"))  # Orange for coordination
-
-            # Content as block
-            lines = content.split("\n")
-            for line in lines:
-                cursor.insertText("  " + line + "\n", bubble_fmt)
-
-        else:
-            # Agent response
-            label_fmt = QTextCharFormat()
-            label_fmt.setFontWeight(QFont.Weight.Bold)
-            label_fmt.setForeground(QColor(self._colors["agentFg"]))
-
-            cursor.insertText(f"{ts} ", self._default_fmt(cursor))
-            cursor.insertText("Agent\n", label_fmt)
-
-            # Message content
-            content_fmt = QTextCharFormat()
-            content_fmt.setForeground(QColor(self._colors["agentFg"]))
-
-            lines = content.split("\n")
-            for line in lines:
-                cursor.insertText("  " + line + "\n", content_fmt)
-
-        self._messages_area.setTextCursor(cursor)
-        self._messages_area.ensureCursorVisible()
-
-    def _default_fmt(self, cursor) -> QTextCharFormat:
-        fmt = QTextCharFormat()
-        fmt.setForeground(QColor(self._colors["agentFg"]))
-        return fmt
+        self._messages_area.add_message_row(
+            role=role,
+            content=content,
+            timestamp=ts,
+            is_coordination=coordination or source == "main_agent",
+        )
 
     def add_tool_call(self, tool_name: str, arguments: dict) -> None:
-        """Add a tool call entry (Codex-style: inline with monospace).
+        """Add a tool call entry using ToolCallGroup.
 
         Args:
             tool_name: Name of the tool being called.
             arguments: Tool arguments.
         """
-        cursor = self._messages_area.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
+        # Get or create the current tool group
+        groups = self._messages_area.get_tool_groups()
 
-        cursor.insertText("\n  ")  # Indent
-
-        # Tool name in monospace with icon
-        name_fmt = QTextCharFormat()
-        name_fmt.setFontFamily("Consolas, Monaco, monospace")
-        name_fmt.setForeground(QColor(self._colors["statusTool"]))
-
-        cursor.insertText("✎ ", name_fmt)
-        cursor.insertText(tool_name, name_fmt)
-
-        # Arguments in monospace
-        if arguments:
-            args_fmt = QTextCharFormat()
-            args_fmt.setFontFamily("Consolas, Monaco, monospace")
-            args_fmt.setForeground(QColor(self._colors["toolFg"]))
-
-            cursor.insertText("(", args_fmt)
-            arg_items = []
-            for k, v in arguments.items():
-                arg_str = f"{k}={repr(v)[:50]}"  # Limit long values
-                arg_items.append(arg_str)
-            cursor.insertText(", ".join(arg_items), args_fmt)
-            cursor.insertText(")", args_fmt)
-
-        cursor.insertText("\n")
-
-        self._messages_area.setTextCursor(cursor)
-        self._messages_area.ensureCursorVisible()
+        # If there's no recent group or the last group is "done", create a new one
+        if not groups:
+            group = self._messages_area.add_tool_group()
+            self._current_tool_group = group
+        else:
+            # Use the last group
+            self._current_tool_group = groups[-1]
 
     def add_tool_result(self, tool_name: str, result: Any, error: str | None = None) -> None:
-        """Add a tool result entry (Codex-style: compact status).
+        """Add a tool result entry to the current ToolCallGroup.
 
         Args:
             tool_name: Name of the tool.
             result: Tool result.
             error: Optional error message.
         """
-        cursor = self._messages_area.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
+        if hasattr(self, '_current_tool_group') and self._current_tool_group:
+            # Calculate duration (placeholder - would need actual timing)
+            duration_ms = 100  # Placeholder
 
-        cursor.insertText("  ")  # Indent
-
-        fmt = QTextCharFormat()
-        fmt.setFontFamily("Consolas, Monaco, monospace")
-
-        if error:
-            fmt.setForeground(QColor(self._colors["statusError"]))
-            cursor.insertText("✗ ", fmt)
-            fmt.setFontWeight(QFont.Weight.Bold)
-            cursor.insertText(f"{tool_name} failed: ", fmt)
-            fmt.setFontWeight(QFont.Weight.Normal)
-            cursor.insertText(f"{error}\n", fmt)
-        else:
-            fmt.setForeground(QColor(self._colors["toolFg"]))
-            cursor.insertText("✓ ", fmt)
-            cursor.insertText(f"{tool_name}\n", fmt)
-
-        self._messages_area.setTextCursor(cursor)
-        self._messages_area.ensureCursorVisible()
+            self._current_tool_group.add_tool_call(
+                name=tool_name,
+                arguments={},  # Arguments were already added in add_tool_call
+                success=error is None,
+                duration_ms=duration_ms,
+                result=result if error is None else None,
+                error=error,
+            )
 
     def add_error(self, source: str, message: str) -> None:
-        cursor = self._messages_area.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
+        """Add an error message to the display.
 
+        Args:
+            source: Error source.
+            message: Error message.
+        """
         ts = datetime.now().strftime("%H:%M")
-        fmt = QTextCharFormat()
-        fmt.setForeground(QColor(self._colors["statusError"]))
-        fmt.setFontWeight(QFont.Weight.Bold)
-        cursor.insertText(f"\n{ts}  ✗ {source}: {message}\n", fmt)
-
-        self._messages_area.setTextCursor(cursor)
-        self._messages_area.ensureCursorVisible()
+        self._messages_area.add_message_row(
+            role="agent",
+            content=f"✗ {source}: {message}",
+            timestamp=ts,
+        )
 
     def add_checkpoint(self, checkpoint_id: str, description: str) -> None:
-        cursor = self._messages_area.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
+        """Add a checkpoint notification to the display.
 
+        Args:
+            checkpoint_id: Checkpoint ID.
+            description: Checkpoint description.
+        """
         ts = datetime.now().strftime("%H:%M")
-        fmt = QTextCharFormat()
-        fmt.setForeground(QColor("#4fc3f7"))
-        cursor.insertText(f"\n{ts}  ⚑ {description}\n", fmt)
-
-        self._messages_area.setTextCursor(cursor)
-        self._messages_area.ensureCursorVisible()
+        self._messages_area.add_message_row(
+            role="agent",
+            content=f"⚑ {description}",
+            timestamp=ts,
+        )
 
     # ---- Status ----
 
@@ -609,9 +531,33 @@ class AgentPanel(QWidget):
                 f"color: {self._colors['debugActiveFg']}; "
                 "border: 1px solid transparent; border-radius: 3px; padding: 2px 8px; font-size: 11px;"
             )
+            # Show debug panel
+            self._debug_panel.setVisible(True)
         else:
             self._debug_button.setStyleSheet("")
+            # Hide debug panel
+            self._debug_panel.setVisible(False)
         self.debug_mode_toggled.emit(enabled)
+
+    def subscribe_to_debug_messages(self, bus) -> None:
+        """Subscribe to ApiDebugMessage from the message bus.
+
+        Args:
+            bus: MessageBus instance to subscribe to.
+        """
+        async def on_debug_message(msg):
+            if isinstance(msg, ApiDebugMessage):
+                self._debug_panel.add_entry(
+                    timestamp=msg.timestamp,
+                    model=msg.model,
+                    tokens_in=msg.tokens_in,
+                    tokens_out=msg.tokens_out,
+                    duration_ms=msg.duration_ms,
+                    status=msg.status,
+                    error=msg.error,
+                )
+
+        bus.subscribe(ApiDebugMessage, on_debug_message)
 
     def set_debug_mode(self, enabled: bool) -> None:
         self._debug_button.setChecked(enabled)
