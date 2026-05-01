@@ -4,14 +4,29 @@
 
 ## 功能特性
 
+### 核心能力
 - **多 Agent 协作** — 主 Agent 调度，数据分析、图像绘制、理论推导、报告撰写四个子 Agent 各司其职
-- **多 Provider 支持** — Anthropic、OpenAI、DeepSeek 等，运行时可切换模型，切换 Provider 支持 Restart
 - **目录权限隔离** — 每个 Agent 只能写入指定目录，防止交叉污染
 - **检查点回滚** — 关键节点自动创建检查点，可回滚到任意历史状态
+- **交互式调整** — 用户可随时向任意 Agent 发送消息进行干预和优化
+
+### UI/UX（VSCode/Claude Code 风格）
+- **流式传输** — 实时显示 Agent 输出，逐字流式呈现
+- **最近项目缓存** — VSCode 风格的最近项目列表，缓存于 `~/.autoreport/recent_projects.json`
+- **资源管理器** — VSCode 风格文件树，22px 行高、16px 图标，简洁标签（Data、References、Theory、Code、Tex）
+- **上下文引用栏** — 文件/行选择的可视化指示器，可切换是否包含在消息中
+- **对话界面** — Codex 风格的对话显示，正确的 Markdown 渲染
+
+### 开发工具
 - **@ 文件引用** — 在聊天输入中输入 `@` 触发模糊文件搜索，选择文件后插入 Markdown 引用链接
 - **选中行上下文** — 在预览面板中选中文本后，上下文自动附加到 Agent 消息中
 - **子 Agent 调试模式** — 断开与主 Agent 的通道，独立测试单个 Agent
-- **交互式调整** — 用户可随时向任意 Agent 发送消息进行干预和优化
+- **Ctrl+C 退出** — 支持优雅关闭
+
+### LLM 集成
+- **多 Provider 支持** — Anthropic、OpenAI、DeepSeek 等，运行时切换模型
+- **Provider 预设** — 来自 [cc-switch](https://github.com/farion1231/cc-switch) 的 50+ 服务商预设
+- **渐进式提示词加载** — 启动时加载身份，首次激活时加载完整指令（快速启动、丰富上下文）
 
 ## 快速开始
 
@@ -19,7 +34,7 @@
 
 - Python >= 3.12
 - [uv](https://docs.astral.sh/uv/) 包管理器
-- TeX 发行版（如 TeX Live 或 MiKTeX，用于编译 LaTeX）
+- TeX 发行版（TeX Live 或 MiKTeX，用于编译 LaTeX）
 - 至少一个 LLM Provider 的 API Key
 
 ### 安装
@@ -37,35 +52,16 @@ uv sync --all-extras
 autoreport
 ```
 
-> 如果提示 `autoreport` 命令未找到，请使用 `uv run autoreport` 代替，或先激活虚拟环境：`.\.venv\Scripts\Activate.ps1`。
+> 如果提示 `autoreport` 命令未找到，请使用 `uv run autoreport` 代替。
 >
-> **自动激活（可选）**：在 Shell 配置文件中添加以下内容，进入项目目录时自动激活 `.venv`：
+> 首次启动会提示配置 API 密钥。也可通过环境变量预配置：
 >
-> **PowerShell**（`$PROFILE`）：
-> ```powershell
-> Remove-Item Alias:cd -ErrorAction SilentlyContinue
-> function cd($path) {
->     Set-Location $path
->     $a = ".\.venv\Scripts\Activate.ps1"
->     if (Test-Path $a) { . $a }
-> }
-> $initialActivate = ".\.venv\Scripts\Activate.ps1"
-> if (Test-Path $initialActivate) { . $initialActivate }
-> ```
->
-> **Bash/Zsh**（`~/.bashrc` / `~/.zshrc`）：
 > ```bash
-> cd() { builtin cd "$@" && [ -f .venv/bin/activate ] && . .venv/bin/activate; }
+> export ANTHROPIC_API_KEY="sk-ant-..."
+> export OPENAI_API_KEY="sk-..."
+> export DEEPSEEK_API_KEY="sk-..."
+> autoreport
 > ```
-
-首次启动会提示配置 API 密钥。也可通过环境变量预配置：
-
-```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
-export OPENAI_API_KEY="sk-..."
-export DEEPSEEK_API_KEY="sk-..."
-autoreport
-```
 
 ## 项目结构
 
@@ -74,50 +70,55 @@ autoreport
 ```
 my_experiment/
 ├── data/            # 原始实验数据（用户放入）+ 分析结果
-│   └── processed/   # 数据分析 Agent 输出
+│   └── processed/   # 数据分析 Agent 仅可写入此目录
 ├── references/      # 参考资料（PDF、图片）、自定义模板
-├── theory/          # 理论推导 Agent 输出
-├── code/            # 图像绘制 Agent 的代码和图片
-└── tex/             # 报告 Agent 的 LaTeX 源码和编译产物
+├── theory/          # 理论推导 Agent 仅可写入此目录
+├── code/            # 图像绘制 Agent 仅可写入此目录
+└── tex/             # 报告 Agent 仅可写入此目录
 ```
 
 ### Agent 权限
 
 | Agent | 写入目录 | 读取范围 |
-|-------|---------|---------|
-| 数据分析 | `data/processed/` | 全部 |
-| 图像绘制 | `code/` | 全部 |
-| 理论推导 | `theory/` | 全部 |
-| 报告撰写 | `tex/` | 全部 |
-| 用户 | `data/`、`references/` | 全部 |
+|-------|----------------|------------|
+| 主 Agent | 仅协调 | 全部目录 |
+| 数据分析 | 仅 `data/processed/` | 全部目录 |
+| 图像绘制 | 仅 `code/` | 全部目录 |
+| 理论推导 | 仅 `theory/` | 全部目录 |
+| 报告撰写 | 仅 `tex/` | 全部目录 |
+| 用户 | `data/`、`references/` | 全部目录 |
+
+**工具隔离**：每个子 Agent 收到与其写入权限匹配的受限工具子集。Agent 不能修改其指定目录之外的文件。
 
 ## 架构
 
 ```
 autoreport/
-├── config/          # 配置管理（Pydantic Settings + YAML）
+├── app.py                 # 入口点：CLI 解析、LoopManager 启动
+├── config/                # 基于 Pydantic 的配置（YAML 加载、API 密钥验证）
 ├── core/
-│   ├── loops/       # Agent Loop、消息总线、Agent 管理器
-│   ├── providers/   # LLM Provider 抽象层（Anthropic/OpenAI/DeepSeek）
-│   ├── prompts/     # Agent 提示词模板（支持渐进式加载）
-│   └── tools/       # 工具集（文件操作、Shell 执行、PDF 解析）
-├── gui/             # PyQt6 界面（主窗口、项目对话框、配置对话框）
-│   └── widgets/     # 可复用组件（文件树、预览、Agent 面板）
-├── interfaces/      # GUI-后台通信协议（Protocol + 消息类型）
-├── utils/           # 日志配置（loguru）
-├── templates/       # 内置模板（Agent 提示词、报告模板）
-└── app.py           # 入口点
+│   ├── loops/            # Agent 运行时：LoopManager、AgentLoop、MessageBus
+│   ├── providers/        # LLM Provider 抽象层（工厂、基类）
+│   ├── prompts/          # 渐进式提示词加载（身份 → 完整指令）
+│   └── tools/            # 工具系统（注册表、文件工具、执行工具、PDF 工具）
+├── gui/                  # PyQt6 界面（主窗口、对话框、小部件）
+│   └── widgets/          # 可复用组件（文件树、预览、Agent 面板）
+├── interfaces/           # GUI-后台协议（Protocol 定义、消息类型）
+├── templates/            # 内置模板（Agent 提示词、报告模板）
+└── utils/                # 日志配置（loguru）
 ```
 
-GUI 与后台通过 `interfaces` 层解耦：定义了 `GUIAPI` / `BackendAPI` Protocol 和消息类型，双方通过异步消息总线通信。
+### 核心模式
+
+**AgentLoop**：每个 Agent 运行自己的异步循环。通过 LLM 聊天处理消息（带工具定义），然后在最大迭代循环中执行工具调用。
+
+**MessageBus**：异步发布/订阅系统。主 Agent 向子 Agent 发送协调消息；子 Agent 报告问题。用户可以直接向任何 Agent 发送消息。
+
+**调试模式**：子 Agent 断开与主 Agent 消息通道的连接，仅接受直接用户输入。通过 GUI 切换或 `--debug-agent` CLI 参数激活。
+
+**渐进式提示词加载**：Agent 在启动时加载轻量级身份提示词，然后在第一条消息时加载完整指令。之后缓存。
 
 ## 开发
-
-首先确保已安装开发依赖：
-
-```bash
-uv sync --all-extras
-```
 
 ### 运行测试
 
@@ -129,29 +130,14 @@ uv run pytest -v
 
 ```bash
 uv run ruff check autoreport tests
-uv run ruff check --fix autoreport tests   # 自动修复
+uv run ruff check --fix autoreport tests
 ```
 
 ### 运行单个测试
 
 ```bash
-uv run pytest tests/test_config.py -v
-uv run pytest tests/test_file_tools.py::test_read_file -v
+uv run pytest tests/test_agent_loop.py -v
 ```
-
-## 技术栈
-
-| 层 | 技术 |
-|----|------|
-| 语言 | Python 3.12 |
-| 包管理 | uv + hatchling |
-| GUI | PyQt6 |
-| LLM | 原生 SDK（anthropic / openai） |
-| 配置 | pydantic-settings + YAML |
-| 日志 | loguru |
-| 数据处理 | pandas, matplotlib |
-| LaTeX 编译 | xelatex / lualatex（系统安装） |
-| PDF 解析 | mineru-open-api（外部服务） |
 
 ## 配置
 
@@ -166,152 +152,71 @@ agents:
     provider: "auto"
     max_tokens_policy: "adaptive"
     base_max_tokens: 8192
-    retry_max_tokens: 16384  # 复杂任务重试时增大输出
+    retry_max_tokens: 16384
     temperature: 0.1
     max_tool_iterations: 200
-    timezone: "Asia/Shanghai"
-    prompt_templates_dir: "templates/agents"
-    context_window_tokens: 200000
-```
-
-### MinerU API 配置
-
-```yaml
-mineru_api:
-  url: "http://localhost:9999"
-  enabled: true
-  timeout: 300
-  validate_on_startup: true  # 不可用时显示软警告
 ```
 
 ### Provider 配置
 
-支持多 API 配置，预设模板来自 [cc-switch](https://github.com/farion1231/cc-switch)（50+ 服务商，包括 Anthropic、DeepSeek、OpenRouter、智谱等）。
+通过 [cc-switch](https://github.com/farion1231/cc-switch) 预设支持 50+ 服务商：
 
 ```yaml
 providers:
-  active: "anthropic-default"  # 活跃配置 ID
+  active: "anthropic-default"
   configurations:
     - name: "Anthropic (Official)"
       provider: "anthropic"
       api_key: null       # 通过 ANTHROPIC_API_KEY 环境变量设置
-      api_base: null
       default_model: "claude-sonnet-4-20250514"
       enabled: true
-
-    - name: "DeepSeek"
-      provider: "deepseek"
-      api_key: null       # 通过 DEEPSEEK_API_KEY 环境变量设置
-      api_base: "https://api.deepseek.com"
-      default_model: "deepseek-chat"
-      enabled: true
 ```
-
-首次启动会弹出 GUI 配置对话框，可选择预设模板。也可通过环境变量设置 API Key。
 
 ## 调试模式
 
-子 Agent 支持独立调试模式，可以隔离测试单个 Agent 的工具和输出。
-
-### 调试模式行为
-
-| 行为 | 正常模式 | 调试模式 |
-|------|---------|---------|
-| 主 Agent 协调命令 | 接受 | **忽略** |
-| 用户直接输入 | 接受 | 接受 |
-| 状态显示 | 正常 | 显示"调试模式"（紫色） |
-| 消息上下文 | 正常 | 注入 `[调试模式]` 前缀 |
+子 Agent 支持独立调试模式，可隔离测试单个 Agent。
 
 ### 使用方式
 
-**GUI**: 点击子 Agent 面板中的"调试模式"按钮，按钮变红即启用。
+**GUI**：点击子 Agent 面板中的"调试模式"按钮。
 
-**CLI**: 启动时使用 `--debug-agent` 参数（可重复使用）：
+**CLI**：启动时使用 `--debug-agent` 参数：
 
 ```bash
-# 以调试模式启动数据分析 Agent
 autoreport --debug-agent data_analysis
-
-# 以调试模式启动多个 Agent
 autoreport --debug-agent data_analysis --debug-agent plotting
 ```
 
-可选 Agent 名称：`data_analysis`（数据分析）、`plotting`（图像绘制）、`theory`（理论推导）、`report`（报告撰写）
-
-### 示例
-
-数据分析 Agent 处于调试模式时，首条消息会收到上下文提示：
-
-```
-[调试模式] 此 Agent 处于独立调试模式，不与其他 Agent 通信。
-你可以直接测试此 Agent 的工具和输出。
-
-请分析 data/experiment_1.csv 中的数据
-```
+可选 Agent：`data_analysis`（数据分析）、`plotting`（图像绘制）、`theory`（理论推导）、`report`（报告撰写）
 
 ## Agent 提示词
 
-AutoReport 使用渐进式加载系统管理 Agent 提示词：
+位于 `autoreport/templates/agents/`：
 
-- **Identity**（启动时加载）：简要角色定义（约 100-200 词）
-- **Full Instructions**（首次激活时加载）：详细工作流程、参考资料处理、叙述风格、输出格式
-
-提示词模板位于 `autoreport/templates/agents/`：
-- `main_agent.md` - 主协调 Agent
-- `data_analysis_agent.md` - 数据处理和分析
-- `plotting_agent.md` - 数据可视化
-- `theory_agent.md` - 理论推导
-- `report_agent.md` - LaTeX 报告撰写
-
-## 报告模板
-
-内置报告模板位于 `autoreport/templates/reports/`：
-
-- `default_experiment_report.tex` - 标准物理实验报告模板
-- `requirements.md` - 叙述风格和格式指南
-- `README.md` - 模板文档
-
-用户可以通过在 `project/references/` 中放置自定义模板来覆盖内置模板。
-
-**优先级**：用户模板 > 内置模板 > 标准 LaTeX
+- `main_agent.md` — 动态调度、质量审查清单
+- `data_analysis_agent.md` — 数据注释模板、理论对比
+- `plotting_agent.md` — 图像注释模板、自验证
+- `theory_agent.md` — 公式元数据模板
+- `report_agent.md` — 完整性检查、模板优先级
 
 ## MinerU 集成
 
-AutoReport 使用 [mineru-open-api](https://github.com/opendatalab/MinerU) CLI 进行 PDF 解析。
+[MinerU](https://mineru.net/) CLI 用于 PDF 解析。
 
 ### 设置
 
-1. 安装 mineru-open-api：
 ```bash
 curl -fsSL https://cdn-mineru.openxlab.org.cn/open-api-cli/install.sh | sh
-```
-详见 [mineru-open-api 文档](https://mineru.net/ecosystem?tab=cli)。
-
-2. 在 [MinerU](https://mineru.net/apiManage/token) 注册账号并获取 API Key，然后通过 CLI 认证：
-```bash
 mineru-open-api auth
 ```
 
-3. 启动时系统会自动检测可用性，未安装时显示警告。
-
-### 功能
-
-- 将 PDF、图片、DOCX、PPTX、XLSX 转换为 Markdown
-- 提取文本、图片、表格和公式
-- 支持批量处理（单文件最大 200MB、600 页）
-- 基于 CLI 调用，无需本地服务器
-
-## 参与贡献
-
-欢迎贡献！请随时提交问题或拉取请求。
-
 ## 参考项目
 
-- [cc-switch](https://github.com/farion1231/cc-switch) — Provider 预设模板（50+ 服务商）、多配置切换、分类预设选择器，本项目预设数据来源于此
-- [OpenClaw](../openclaw) — 插件式多 Provider 系统（50+ LLM Provider）、模型目录管理、Provider 配置模式
-- [DeepCode](../DeepCode) — API 配置方式（YAML secrets + 环境变量回退）、多 provider 支持、错误处理和重试机制、循环检测
-- [nanobot](../nanobot) — AgentLoop 核心架构、工具定义、多 provider 原生 SDK 调用、compact/命令系统、Pydantic 配置 schema
+- [cc-switch](https://github.com/farion1231/cc-switch) — Provider 预设（50+ 服务商）
+- [DeepCode](../DeepCode) — API 配置、多 provider 支持、错误处理
+- [nanobot](../nanobot) — AgentLoop 架构、工具定义
+- [codex](../codex) — UI 设计模式、流式传输实现
 
 ## 许可证
 
-MIT License - 详见 LICENSE 文件
+MIT License

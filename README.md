@@ -2,18 +2,33 @@
 
 [中文](README_zh.md)
 
-An automated physics experiment report writing system based on multi-agent collaboration. Users provide experimental data and reference materials, then agents collaboratively generate LaTeX reports through theoretical derivation, data analysis, visualization, and typesetting.
+A multi-agent collaborative automated physics experiment report writing system. Users provide experimental data and reference materials, then agents collaboratively generate LaTeX reports through theoretical derivation, data analysis, visualization, and typesetting.
 
 ## Features
 
-- **Multi-Agent Collaboration** — Main Agent orchestrates, with four sub-agents (data analysis, plotting, theory, report) each specializing in their domain
-- **Multi-Provider Support** — Anthropic, OpenAI, DeepSeek, etc. Runtime model switching, provider switch requires restart
+### Core Capabilities
+- **Multi-Agent Collaboration** — Main Agent orchestrates, with four sub-agents (Data Analysis, Plotting, Theory, Report) each specializing in their domain
 - **Directory Permission Isolation** — Each agent can only write to designated directories, preventing cross-contamination
 - **Checkpoint Rollback** — Automatically creates checkpoints at key nodes, can rollback to any historical state
-- **@ File References** — Type `@` in chat to fuzzy-search and insert file references as markdown links
-- **Selected Line Context** — Text selections in the preview pane are automatically appended to agent messages
-- **Sub-Agent Debug Mode** — Disconnect from Main Agent channel, test individual agents independently
 - **Interactive Adjustment** — Users can send messages to any agent at any time for intervention and optimization
+
+### UI/UX (VSCode/Claude Code Style)
+- **Streaming Responses** — Real-time agent output display, word-by-word streaming
+- **Recent Projects Cache** — VSCode-style recent projects list, cached in `~/.autoreport/recent_projects.json`
+- **File Explorer** — VSCode-style resource manager with 22px row height, 16px icons, concise labels (Data, References, Theory, Code, Tex)
+- **Context Chip Bar** — Visual indicator for file/line selections with toggle to include/exclude from messages
+- **Chat Interface** — Codex-style conversation display with proper markdown rendering
+
+### Developer Tools
+- **@ File References** — Type `@` in chat to fuzzy-search and insert file references as markdown links
+- **Selected Line Context** — Text selections in preview pane are automatically appended to agent messages
+- **Sub-Agent Debug Mode** — Disconnect from Main Agent channel, test individual agents independently
+- **Ctrl+C Exit** — Graceful shutdown support
+
+### LLM Integration
+- **Multi-Provider Support** — Anthropic, OpenAI, DeepSeek, etc. Runtime model switching
+- **Provider Presets** — 50+ provider templates from [cc-switch](https://github.com/farion1231/cc-switch)
+- **Progressive Prompt Loading** — Identity at startup, full instructions on first activation (fast startup, rich context)
 
 ## Quick Start
 
@@ -39,28 +54,9 @@ uv sync --all-extras
 autoreport
 ```
 
-> If `autoreport` command is not found, use `uv run autoreport` instead, or activate the virtual environment first: `source .venv/bin/activate` (Linux/macOS) or `.\.venv\Scripts\Activate.ps1` (Windows).
->
-> **Auto-activation (optional)**: Add the following to your shell profile to automatically activate `.venv` when entering the project directory:
->
-> **PowerShell** (`$PROFILE`):
-> ```powershell
-> Remove-Item Alias:cd -ErrorAction SilentlyContinue
-> function cd($path) {
->     Set-Location $path
->     $a = ".\.venv\Scripts\Activate.ps1"
->     if (Test-Path $a) { . $a }
-> }
-> $initialActivate = ".\.venv\Scripts\Activate.ps1"
-> if (Test-Path $initialActivate) { . $initialActivate }
-> ```
->
-> **Bash/Zsh** (`~/.bashrc` / `~/.zshrc`):
-> ```bash
-> cd() { builtin cd "$@" && [ -f .venv/bin/activate ] && . .venv/bin/activate; }
-> ```
+> If `autoreport` command is not found, use `uv run autoreport` instead, or activate the virtual environment first.
 
-On first launch, you'll be prompted to configure API keys. You can also pre-configure via environment variables:
+First launch prompts for API configuration. You can also pre-configure via environment variables:
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
@@ -76,49 +72,55 @@ Each experiment report corresponds to a project folder with a fixed directory st
 ```
 my_experiment/
 ├── data/            # Raw experimental data (user input) + analysis results
-│   └── processed/   # Data Analysis Agent output
+│   └── processed/   # Data Analysis Agent output only
 ├── references/      # Reference materials (PDF, images), custom templates
-├── theory/          # Theory Agent output
-├── code/            # Plotting Agent code and generated images
-└── tex/             # Report Agent LaTeX source and compiled output
+├── theory/          # Theory Agent output only
+├── code/            # Plotting Agent code and generated images only
+└── tex/             # Report Agent LaTeX source and compiled output only
 ```
 
 ### Agent Permissions
 
 | Agent | Write Directory | Read Scope |
 |-------|----------------|------------|
-| Data Analysis | `data/processed/` | All |
-| Plotting | `code/` | All |
-| Theory | `theory/` | All |
-| Report | `tex/` | All |
-| User | `data/`, `references/` | All |
+| Main Agent | coordinates only | All directories |
+| Data Analysis | `data/processed/` only | All directories |
+| Plotting | `code/` only | All directories |
+| Theory | `theory/` only | All directories |
+| Report | `tex/` only | All directories |
+| User | `data/`, `references/` | All directories |
+
+**Tool Isolation**: Each sub-agent receives a restricted tool subset matching their write permissions. Agents cannot modify files outside their designated directory.
 
 ## Architecture
 
 ```
 autoreport/
-├── config/          # Configuration management (Pydantic Settings + YAML)
+├── app.py                 # Entry point: CLI parsing, LoopManager startup
+├── config/                # Pydantic-based config (YAML loading, API key validation)
 ├── core/
-│   ├── loops/       # Agent Loop, message bus, agent manager
-│   ├── providers/   # LLM Provider abstraction layer
-│   ├── prompts/     # Agent prompt templates with progressive loading
-│   └── tools/       # Tool set (file operations, shell execution, PDF parsing)
-├── gui/             # PyQt6 interface (main window, dialogs, widgets)
-├── interfaces/      # GUI-backend communication protocol
-├── utils/           # Logging configuration (loguru)
-├── templates/       # Built-in templates (agent prompts, report templates)
-└── app.py           # Entry point
+│   ├── loops/            # Agent runtime: LoopManager, AgentLoop, MessageBus
+│   ├── providers/        # LLM provider abstraction (factory, base classes)
+│   ├── prompts/          # Progressive prompt loading (identity → full instructions)
+│   └── tools/            # Tool system (registry, file tools, exec tools, PDF tool)
+├── gui/                  # PyQt6 interface (main window, dialogs, widgets)
+│   └── widgets/          # Reusable components (file tree, preview, agent panel)
+├── interfaces/           # GUI-backend protocol (Protocol definitions, message types)
+├── templates/            # Built-in templates (agent prompts, report templates)
+└── utils/                # Logging configuration (loguru)
 ```
 
-GUI and backend are decoupled through the `interfaces` layer: defining `GUIAPI`/`BackendAPI` protocols and message types, communicating via an asynchronous message bus.
+### Key Patterns
+
+**AgentLoop**: Each agent runs its own async loop. Processes messages through LLM chat with tool definitions, then executes tool calls in a max-iteration loop.
+
+**MessageBus**: Async pub/sub system. Main Agent sends coordination messages to sub-agents; sub-agents report issues back. Users can message any agent directly.
+
+**Debug Mode**: Sub-agents disconnect from Main Agent message channel, accept only direct user input. Activated via GUI toggle or `--debug-agent` CLI argument.
+
+**Progressive Prompt Loading**: Agents load a lightweight identity prompt at startup, then load full instructions on first message. Cached afterward.
 
 ## Development
-
-First, ensure development dependencies are installed:
-
-```bash
-uv sync --all-extras
-```
 
 ### Run Tests
 
@@ -130,29 +132,14 @@ uv run pytest -v
 
 ```bash
 uv run ruff check autoreport tests
-uv run ruff check --fix autoreport tests   # Auto-fix
+uv run ruff check --fix autoreport tests
 ```
 
 ### Run Single Test
 
 ```bash
-uv run pytest tests/test_config.py -v
-uv run pytest tests/test_file_tools.py::test_read_file -v
+uv run pytest tests/test_agent_loop.py -v
 ```
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|------------|
-| Language | Python 3.12 |
-| Package Management | uv + hatchling |
-| GUI | PyQt6 |
-| LLM | Native SDK (anthropic / openai) |
-| Configuration | pydantic-settings + YAML |
-| Logging | loguru |
-| Data Processing | pandas, matplotlib |
-| LaTeX Compilation | xelatex / lualatex (system installed) |
-| PDF Parsing | mineru-open-api (external service) |
 
 ## Configuration
 
@@ -167,142 +154,71 @@ agents:
     provider: "auto"
     max_tokens_policy: "adaptive"
     base_max_tokens: 8192
-    retry_max_tokens: 16384  # Increase on retry for complex tasks
+    retry_max_tokens: 16384
     temperature: 0.1
     max_tool_iterations: 200
-    timezone: "Asia/Shanghai"
-    prompt_templates_dir: "templates/agents"
-    context_window_tokens: 200000
 ```
 
 ### Provider Configuration
 
-Supports multiple API configurations with preset templates from [cc-switch](https://github.com/farion1231/cc-switch) (50+ providers including Anthropic, DeepSeek, OpenRouter, ZhiPu, etc.).
+Supports 50+ providers via [cc-switch](https://github.com/farion1231/cc-switch) presets:
 
 ```yaml
 providers:
-  active: "anthropic-default"  # Active config ID
+  active: "anthropic-default"
   configurations:
     - name: "Anthropic (Official)"
       provider: "anthropic"
       api_key: null       # Set via ANTHROPIC_API_KEY env var
-      api_base: null
       default_model: "claude-sonnet-4-20250514"
       enabled: true
-
-    - name: "DeepSeek"
-      provider: "deepseek"
-      api_key: null       # Set via DEEPSEEK_API_KEY env var
-      api_base: "https://api.deepseek.com"
-      default_model: "deepseek-chat"
-      enabled: true
 ```
-
-First launch opens a GUI config dialog with preset templates. You can also use environment variables for API keys.
 
 ## Debug Mode
 
-Sub-agents support standalone debug mode for isolated testing of individual agent tools and outputs.
-
-### What Debug Mode Does
-
-| Behavior | Normal | Debug Mode |
-|----------|--------|------------|
-| Main Agent coordination | Accepted | **Ignored** |
-| Direct user input | Accepted | Accepted |
-| Status reporting | Normal | Shows "Debug Mode" indicator |
-| Message context | Normal | `[Debug Mode]` prefix injected |
+Sub-agents support standalone debug mode for isolated testing.
 
 ### Usage
 
-**GUI**: Click the "Debug Mode" button in the sub-agent panel. The button turns red when active.
+**GUI**: Click the "Debug Mode" button in the sub-agent panel.
 
-**CLI**: Start with `--debug-agent` (repeatable):
+**CLI**: Start with `--debug-agent`:
 
 ```bash
-# Start with Data Analysis agent in debug mode
 autoreport --debug-agent data_analysis
-
-# Start with multiple agents in debug mode
 autoreport --debug-agent data_analysis --debug-agent plotting
 ```
 
-Valid agent names: `data_analysis`, `plotting`, `theory`, `report`
-
-### Example
-
-With Data Analysis agent in debug mode, the first message receives context:
-
-```
-[Debug Mode] This agent is in standalone debug mode, not communicating with other agents.
-You can directly test this agent's tools and output.
-
-Please analyze data/experiment_1.csv
-```
+Valid agents: `data_analysis`, `plotting`, `theory`, `report`
 
 ## Agent Prompts
 
-AutoReport uses a progressive loading system for agent prompts:
+Located in `autoreport/templates/agents/`:
 
-- **Identity** (loaded at startup): Brief role definition (~100-200 words)
-- **Full Instructions** (loaded on first activation): Detailed workflow, reference handling, narrative style, output format
-
-Prompt templates are located in `autoreport/templates/agents/`:
-- `main_agent.md` - Main coordination agent
-- `data_analysis_agent.md` - Data processing and analysis
-- `plotting_agent.md` - Data visualization
-- `theory_agent.md` - Theoretical derivation
-- `report_agent.md` - LaTeX report writing
-
-## Report Templates
-
-Built-in report templates are in `autoreport/templates/reports/`:
-
-- `default_experiment_report.tex` - Standard physics experiment report template
-- `requirements.md` - Narrative style and formatting guidelines
-- `README.md` - Template documentation
-
-Users can override built-in templates by placing custom templates in `project/references/`.
-
-**Priority**: User templates > Built-in templates > Standard LaTeX
+- `main_agent.md` — Dynamic scheduling, quality review checklist
+- `data_analysis_agent.md` — Data annotation template, theory comparison
+- `plotting_agent.md` — Figure annotation template, self-verification
+- `theory_agent.md` — Formula metadata template
+- `report_agent.md` — Completeness check, template priority
 
 ## MinerU Integration
 
-AutoReport uses [MinerU](https://mineru.net/) CLI for PDF parsing.
+[MinerU](https://mineru.net/) CLI for PDF parsing.
 
 ### Setup
 
-1. Install and authenticate mineru-open-api:
 ```bash
 curl -fsSL https://cdn-mineru.openxlab.org.cn/open-api-cli/install.sh | sh
-```
-For more details, see the [mineru-open-api documentation](https://mineru.net/ecosystem?tab=cli).
-
-2. Create an account on [MinerU](https://mineru.net/apiManage/token) and obtain an API key. Then authenticate via CLI:
-```bash
 mineru-open-api auth
 ```
 
-3. The system will check availability on startup and show a warning if not installed.
-
-### Features
-
-- Converts PDF, images, DOCX, PPTX, XLSX to Markdown
-- Extracts text, images, tables, and formulas
-- Supports batch processing (up to 200MB, 600 pages per file)
-- CLI-based, no local server required
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit issues or pull requests.
-
 ## Reference Projects
 
-- [cc-switch](https://github.com/farion1231/cc-switch) — Provider preset templates (50+ providers), multi-configuration switching, category-based preset selector
-- [OpenClaw](../openclaw) — Plugin-based multi-provider system (50+ LLM providers), model catalog management, provider configuration patterns
-- [DeepCode](../DeepCode) — API configuration (YAML secrets + env fallback), multi-provider support, error handling, loop detection
-- [nanobot](../nanobot) — AgentLoop core architecture, tool definitions, multi-provider native SDK, compact/command system, Pydantic config schema
+- [cc-switch](https://github.com/farion1231/cc-switch) — Provider presets (50+ providers)
+- [DeepCode](../DeepCode) — API config, multi-provider support, error handling
+- [nanobot](../nanobot) — AgentLoop architecture, tool definitions
+- [codex](../codex) — UI design patterns, streaming implementation
 
 ## License
 
-MIT License - see LICENSE file for details
+MIT License
