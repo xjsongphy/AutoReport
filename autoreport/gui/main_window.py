@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from ..core.conversations import ConversationStore
 from ..interfaces.protocol import BackendAPI
 from ..interfaces.types import (
     AgentResponse,
@@ -52,11 +53,17 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("AutoReport - 物理实验报告撰写系统")
         self.resize(1400, 900)
 
+        # Conversation persistence
+        self._conv_store = ConversationStore(workspace)
+
         # Apply VSCode-inspired global theme
         self._apply_theme()
 
         # Setup UI
         self._setup_ui()
+
+        # Load previous conversations
+        self._load_conversations()
 
         # Connect signal for thread-safe message delivery
         self._message_signal.connect(self._dispatch_backend_message)
@@ -237,6 +244,31 @@ class MainWindow(QMainWindow):
         self.preview.load_file(file_path)
         logger.debug("File selected: {}", file_path)
 
+    def _load_conversations(self) -> None:
+        """Load previous conversations from disk into agent panels."""
+        for agent_type in self._conv_store.get_agent_types_with_history():
+            records = self._conv_store.load_messages(agent_type)
+            if not records:
+                continue
+
+            panel = self._get_panel_for_agent(agent_type)
+            for rec in records:
+                role = rec.get("role", "")
+                content = rec.get("content", "")
+                if role == "user":
+                    panel.add_message("user", content)
+                elif role == "agent":
+                    panel.add_message("agent", content)
+                elif role == "tool_call":
+                    panel.add_tool_call(content, rec.get("arguments", {}))
+                elif role == "tool_result":
+                    panel.add_tool_result(content, rec.get("result"), rec.get("error"))
+                elif role == "error":
+                    panel.add_error(rec.get("source", ""), content)
+
+            n = len(records)
+            logger.info("Loaded {} messages for agent {}", n, agent_type)
+
     def set_async_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Set the async event loop for thread-safe coroutine dispatch.
 
@@ -257,11 +289,13 @@ class MainWindow(QMainWindow):
 
     def _on_main_agent_message(self, content: str) -> None:
         """Handle main agent message send."""
+        self._conv_store.append_message("main", "user", content)
         self._submit_coroutine(self.backend.send_user_message(content, "main"))
 
     def _on_sub_agent_message(self, content: str) -> None:
         """Handle sub-agent message send."""
         agent_type = self.sub_agent_panel.agent_type
+        self._conv_store.append_message(agent_type, "user", content)
         self._submit_coroutine(self.backend.send_user_message(content, agent_type))
 
     def _on_debug_mode_toggled(self, enabled: bool) -> None:
@@ -311,18 +345,25 @@ class MainWindow(QMainWindow):
 
     def _handle_agent_response(self, message: AgentResponse) -> None:
         """Handle agent response."""
-        panel = self._get_panel_for_agent(message.agent_type)
+        agent_str = str(message.agent_type)
+        panel = self._get_panel_for_agent(agent_str)
         panel.add_message("agent", message.content)
+        self._conv_store.append_message(agent_str, "agent", message.content)
 
     def _handle_tool_call(self, message: ToolCall) -> None:
         """Handle tool call."""
-        panel = self._get_panel_for_agent(message.agent_type)
+        agent_str = str(message.agent_type)
+        panel = self._get_panel_for_agent(agent_str)
         panel.add_tool_call(message.tool_name, message.arguments)
+        self._conv_store.append_tool_call(agent_str, message.tool_name, message.arguments)
 
     def _handle_tool_result(self, message: ToolResult) -> None:
         """Handle tool result."""
-        panel = self._get_panel_for_agent(message.agent_type)
+        agent_str = str(message.agent_type)
+        panel = self._get_panel_for_agent(agent_str)
+        result_str = str(message.result) if message.result else None
         panel.add_tool_result(message.tool_name, message.result, message.error)
+        self._conv_store.append_tool_result(agent_str, message.tool_name, result_str, message.error)
 
     def _handle_status_change(self, message: StatusChange) -> None:
         """Handle status change."""

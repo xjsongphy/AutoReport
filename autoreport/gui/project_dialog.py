@@ -211,24 +211,24 @@ class ProjectDialog(QDialog):
         dark = self._get_dark_mode()
 
         c = {
-            "bg": "#1e1e1e" if dark else "#ffffff",
+            "bg": "#1e1e1e" if dark else "#f3f3f3",
             "headerBg": "#252526" if dark else "#f3f3f3",
             "titleFg": "#e0e0e0" if dark else "#1a1a1a",
             "subtitleFg": "#999" if dark else "#666",
             "sectionFg": "#ccc" if dark else "#555",
             "primaryBg": "#0e639c" if dark else "#0078d4",
-            "primaryFg": "#fff",
+            "primaryFg": "#ffffff",
             "primaryHover": "#1177bb" if dark else "#106ebe",
             "secondaryBorder": "#555" if dark else "#ccc",
-            "secondaryFg": "#ddd" if dark else "#333",
+            "secondaryFg": "#ddd" if dark else "#333333",
             "secondaryHoverBg": "#333" if dark else "#e9e9e9",
-            "itemBg": "#2d2d2d" if dark else "#f9f9f9",
-            "itemHoverBg": "#3d3d3d" if dark else "#e8e8e8",
+            "itemBg": "#2d2d2d" if dark else "#eaeaea",
+            "itemHoverBg": "#3d3d3d" if dark else "#e0e0e0",
             "itemName": "#e0e0e0" if dark else "#1a1a1a",
-            "itemPath": "#888" if dark else "#888",
+            "itemPath": "#888" if dark else "#888888",
             "sepColor": "#333" if dark else "#ddd",
-            "cancelFg": "#999" if dark else "#888",
-            "cancelHoverFg": "#ccc" if dark else "#333",
+            "cancelFg": "#999" if dark else "#888888",
+            "cancelHoverFg": "#ccc" if dark else "#333333",
         }
 
         self.setStyleSheet(f"""
