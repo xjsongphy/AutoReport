@@ -1,18 +1,19 @@
-这是一个基于Agent的自动化物理实验报告撰写系统。用户提供实验数据和实验讲义/参考资料/针对某个实验的特殊要求，智能体基于实验讲义/参考资料，以及内置的报告要求和报告模板进行理论推导，数据分析，图像绘制，最终撰写出完整的实验报告。同时支持对理论推导，数据分析，图像绘制以及最终的报告等过程进行对话交互式的调整和优化。
+这是一个基于 Agent 的自动化物理实验报告撰写系统。用户提供实验数据和实验讲义/参考资料/针对某个实验的特殊要求，智能体基于实验讲义/参考资料，以及内置的报告要求和报告模板进行理论推导，数据分析，图像绘制，最终撰写出完整的实验报告。同时支持对理论推导，数据分析，图像绘制以及最终的报告等过程进行对话交互式的调整和优化。
 
 ## 技术栈
 
-- Python 3.12，使用 uv 进行包管理
-- PyQt 图形界面
-- LLM API 直接调用（参考 nanobot 的多 provider 支持模式，原生 SDK，支持 anthropic/openai/deepseek 等多家厂商）
-- LaTeX 编译（用户自行安装 TeX 发行版）
-- mineru-open-api 处理 PDF 参考资料（通过调用 mineru-open-api 服务解析，用户需自行安装配置）
+- Python 3.12，使用 `uv` 进行包管理，`hatchling` 构建
+- PyQt6 图形界面，VSCode 风格主题，支持系统深色/浅色模式自适应
+- Pydantic / pydantic-settings 配置 schema
+- LLM API 直接调用（原生 SDK，支持 anthropic/openai/google/deepseek/openrouter/groq/custom 等 7 种 Provider）
+- LaTeX 编译（用户自行安装 TeX 发行版，启动时自动检测 xelatex/lualatex 可用性）
+- mineru-open-api 处理 PDF 参考资料（CLI 方式调用，用户需自行安装配置，启动时自动检测可用性）
 
 ## 架构设计
 
 ### GUI 与后台解耦
 
-图形界面（PyQt）与后台 Agent 系统通过清晰的接口层通信，实现解耦设计：
+图形界面（PyQt6）与后台 Agent 系统通过清晰的接口层通信，实现解耦设计：
 
 - **接口层**：定义 GUI 与后台之间的通信协议（消息格式、事件类型、数据结构）
 - **优势**：
@@ -20,6 +21,7 @@
   - 便于替换 GUI 实现方式
   - 便于单元测试和调试（可 Mock 接口进行独立测试）
   - 降低代码复杂度，提高可维护性
+- **线程安全**：后台异步事件循环运行在独立线程，GUI 更新通过 `pyqtSignal` 桥接实现线程安全
 
 ### 代码组织原则
 
@@ -33,7 +35,7 @@
 
 ## 项目结构
 
-一个项目 = 一份实验报告 = 一个文件夹。启动时进入项目选择界面，可选择已有项目或新建项目（选择文件夹位置），类似 VS Code 的项目打开方式。
+一个项目 = 一份实验报告 = 一个文件夹。启动时进入项目选择界面（VSCode 风格卡片列表、居中布局），可选择已有项目或新建项目（选择文件夹位置），类似 VS Code 的项目打开方式。
 
 项目文件夹内固定目录结构，用户不可调整目录结构，但可在各目录内增删文件、拖入文件：
 
@@ -47,10 +49,15 @@ project/
 └── tex/             # 报告撰写 Agent 的 tex 源码和编译产物（PDF 等）
 ```
 
+此外，系统在项目目录下自动创建隐藏目录存储运行时数据：
+- `.checkpoints/` — 检查点文件状态快照（JSON 格式）
+- `.autoreport/conversations/` — 按 Agent 分离的对话历史（JSONL 格式，持久化存储）
+
 ### 目录与 Agent 映射
 
 | Agent | 写入目录 | 读取范围 |
 |-------|---------|---------|
+| 主 Agent | 仅协调，不直接写文件 | 全部目录 |
 | 数据分析 | `data/processed/` | 全部 |
 | 图像绘制 | `code/` | 全部 |
 | 理论推导 | `theory/` | 全部 |
@@ -78,64 +85,85 @@ project/
 - 所有子 Agent 常驻，从项目打开到关闭
 - 各子 Agent 拥有独立的 Agent Loop
 - 各子 Agent 将结果保存在本地文件，供其他 Agent 查阅
+- **对话持久化**：每个 Agent 的对话历史以 JSONL 格式按项目独立存储，重新打开项目时自动加载历史对话
 - 支持 Restart：重启整个 Agent 系统（保留项目文件和上下文），用于切换 API 配置或用户主动重启
 - Restart 过程中 GUI 保持运行，Agent 系统重新初始化
 
 ### API 配置与模型切换
 
 - 启动时自动检测 API 配置状态；API 未配置或配置无效时，仅显示配置界面，不允许进入项目选择
-- 支持同时配置多个 API Provider（如 Anthropic、OpenAI、DeepSeek 等）
-- 提供图形化配置界面，方便用户管理 API 密钥和 Provider 设置（配置方式和流程参考 DeepCode 和 nanobot）
-- 运行中可随时切换模型，无需重启
-- 切换 API Provider 需要执行 Restart（因为不同 Provider 的 SDK 连接状态不同）
+- **多配置列表架构**：支持同时配置多个 API Provider 实例（如多个 Anthropic 账号、不同 Provider 混用），每个配置独立管理
+- **预设模板系统**：内置 Provider 预设（Anthropic、OpenAI、Google 等 7 种），支持从 cc-switch 运行时同步最新预设
+- 提供图形化配置界面（卡片式 UI），方便用户管理 API 密钥和 Provider 设置
+- 运行中可随时切换模型和活跃配置，无需重启
+- 配置存储在 `autoreport.config.yaml`，环境变量可覆盖 API 密钥
 
 ### 消息模型
 
+- **MessageBus**：异步发布/订阅消息总线，基于 `asyncio.Queue`，线程安全
 - 主 Agent 可向子 Agent 发送消息（指令、上下文、中间结果）
 - 用户可直接向任意子 Agent 或主 Agent 发送消息
 - 子 Agent 区分消息来源（主 Agent 调度 vs 用户直接介入），以决定执行策略
 - 用户直接介入子 Agent 时，主 Agent 应感知到该交互（避免主 Agent 同时发出冲突指令）
 - 子 Agent 发现其他 Agent 的输出有问题时，通过消息向主 Agent 反馈
+- Agent 通过 MessageBus 发布类型化消息，GUI 通过 pyqtSignal 桥接实现线程安全的界面更新
+
+### 渐进式提示词加载
+
+- **身份提示**：Agent 启动时加载简短身份描述（~100-200 词），定义核心角色
+- **完整指令**：首次收到消息时加载详细指令，之后缓存复用
+- 提示词模板文件包含 `## Identity` 和 `## Full Instructions` 两个分区
+- 模板存储在 `autoreport/templates/agents/`
 
 ### 对话命令
 
 所有 Agent（主和子）均支持以下命令，主 Agent 和用户均可使用：
 - `/compact` — 压缩上下文
-- `/new` — 新建对话
+- `/new` — 新对话
 - `/init` — 重置
 
-### 工具集
+### 工具系统
 
-所有 Agent（主和子）共享同一套工具，不按 Agent 类型区分，保持代码简洁：
+LoopManager 为每个 Agent 创建独立的 `ToolRegistry` 实例，根据 Agent 角色分配不同的工具子集：
 
-- 文件读写（read_file, write_file, edit_file）
-- Shell 命令执行（含 LaTeX 编译）
-- Python 代码执行（数据分析、图像绘制）
-- PDF 解析（通过 mineru-open-api）
+**通用工具**（所有 Agent）：
+- `read_file` — 文件读取（支持行范围）
+- `list_dir` — 目录列表
 
-工具权限通过目录写入隔离实现（见"目录与 Agent 映射"），而非通过工具子集分配。
+**按角色分配的专用工具**：
+- 数据分析 Agent：`write_file`、`exec`（Shell）、`python_exec`（Python）、`pdf_parse`
+- 图像绘制 Agent：`write_file`、`exec`（Shell）、`python_exec`（matplotlib）
+- 理论推导 Agent：`write_file`、`pdf_parse`
+- 报告撰写 Agent：`write_file`、`exec`（含 LaTeX 编译）、`pdf_parse`
+- 主 Agent：`exec`（Shell）、`python_exec`（Python）、`pdf_parse`
+
+**工具权限通过目录写入隔离实现**（见"目录与 Agent 映射"），write_file 仅允许写入 Agent 管辖目录。
+
+**安全机制**：Shell 执行（`exec`）使用白名单/黑名单模式，危险操作被显式阻止。
 
 ### 调试模式
 
 - 子 Agent 支持独立调试模式：断开与主 Agent 的消息通道，仅接受用户直接输入，不向主 Agent 报告状态
 - 调试模式下用户可直接与单个子 Agent 交互，测试其工具调用和输出，不受主 Agent 调度干扰
-- 通过 GUI 的子 Agent 面板或命令行参数启动调试模式
+- 通过 GUI 的子 Agent 面板开关或 `-v`/`--verbose` CLI 参数控制
 
 ### 回滚机制
 
-- 基于检查点的回滚：主 Agent 在关键节点（调用子 Agent 前后、用户确认修改后）自动创建检查点
+- **基于文件快照的检查点**：主 Agent 在关键节点（调用子 Agent 前后、用户确认修改后）自动创建检查点
+- 检查点捕获文件内容快照（SHA256 哈希 + 完整内容），存储在 `.checkpoints/` 目录（JSON 格式）
 - 回滚时恢复到某个检查点的完整文件状态
 - 用户直接给子 Agent 发消息产生的变更，同样被主 Agent 的下一个检查点捕获
 - 回滚仅通过主 Agent 执行，确保一致性
 
 ## 测试
 
-- 每个工具配备独立的测试文件，确保工具功能的正确性和稳定性
+- 每个工具和核心模块配备独立的测试文件，覆盖所有 core 逻辑模块
 - 各工具应有完善的错误捕捉机制，确保单个工具的异常不会导致整个系统崩溃
+- 使用 `pytest` 运行测试，`ruff` 进行 lint 和格式化
 
 ## GUI 布局
 
-交互界面参考 nanobot 的 WebUI 布局，使用 PyQt 原生实现。代码组织方式和工具实现参考 nanobot 和 DeepCode。
+交互界面使用 PyQt6 原生实现，采用 VSCode 风格全局主题（滚动条、分割线、侧边栏、编辑器配色统一）。
 
 ```
 ┌────────────┬──────────────────────┬─────────────────────────┐
@@ -155,17 +183,20 @@ project/
 └────────────┴──────────────────────┴─────────────────────────┘
 ```
 
-- **左侧**：文件管理树，固定五个目录，可切换文件夹
+- **左侧**：文件管理树，固定五个目录，可切换文件夹（使用 QPainter 绘制文件夹/文件图标）
 - **中间**：当前目录对应的预览/编辑窗口，切换文件夹时内容跟随变化
 - **右上**：主 Agent 面板（时间轴 + 对话输入），固定不变。点击主 Agent 内容可直接切换中间窗口和右下的子 Agent
 - **右下**：子 Agent 面板（时间轴 + 对话输入），随左侧文件夹切换对应不同的子 Agent
 - **各区域宽度可调**
+- **深色/浅色模式**：自动适配系统主题（Qt 6.5+ colorScheme API）
 
 ### Agent 面板
 
-每个 Agent 面板（主或子）包含：
-- **时间轴**：竖向排列，显示该 Agent 的运行历史和当前任务（类似主流 AI 聊天界面）
-- **对话输入栏**：底部输入框，用户可随时发送消息
+每个 Agent 面板（主或子）采用聊天风格设计：
+- **气泡消息**：用户消息和 Agent 消息分别用不同颜色气泡显示
+- **工具调用**：以斜体样式显示，附带时间戳
+- **状态指示**：显示 Agent 当前状态（空闲、思考中、工具执行中、错误、调试模式）
+- **对话输入栏**：底部输入框，支持 `@` 触发模糊文件搜索和引用插入
 
 ### 时间轴功能
 
@@ -177,7 +208,7 @@ project/
 
 - 可直接读取的实验数据文件（CSV、Excel 等）
 - 简单的数据描述（帮助数据分析 Agent 理解数据含义）
-- PDF 参考资料（通过 mineru-open-api 解析）
+- PDF 参考资料（通过 mineru-open-api CLI 解析，支持批量处理，输出包含 Markdown 和图片）
 - 仪器图片等非数据绘图需用户手动提供（放入 `references/` 或 `code/`）
 
 ## 输出
@@ -189,3 +220,4 @@ project/
 
 - [DeepCode](../DeepCode) — API 配置方式（YAML secrets + 环境变量回退）、多 provider 支持、错误处理和重试机制、循环检测
 - [nanobot](../nanobot) — AgentLoop 核心架构、工具定义、多 provider 原生 SDK 调用、compact/命令系统、Pydantic 配置 schema
+- [cc-switch](../cc-switch) — Provider 预设模板源，运行时同步最新预设配置
