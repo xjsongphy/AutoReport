@@ -258,6 +258,8 @@ class AgentPanel(QWidget):
     ) -> None:
         """Add a message to the display.
 
+        Codex-style: Clear bubble formatting with timestamps and role labels.
+
         Args:
             role: Message role ("user" or "agent").
             content: Message content.
@@ -267,38 +269,58 @@ class AgentPanel(QWidget):
         cursor = self._messages_area.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
 
+        # Add spacing before each message
+        cursor.insertText("\n")
+
         ts = datetime.now().strftime("%H:%M")
 
         if role == "user":
+            # Role label with timestamp
             label_fmt = QTextCharFormat()
             label_fmt.setFontWeight(QFont.Weight.Bold)
             label_fmt.setForeground(QColor(self._colors["userFg"]))
-            bubble_fmt = QTextCharFormat()
-            bubble_fmt.setBackground(QColor(self._colors["userBubble"]))
-            bubble_fmt.setForeground(QColor(self._colors["userFg"]))
 
-            cursor.insertText(f"\n{ts}  ", self._default_fmt(cursor))
-
-            # Show coordination indicator
+            # Coordination indicator (orange)
             if coordination or source == "main_agent":
                 coord_fmt = QTextCharFormat()
                 coord_fmt.setForeground(QColor("#d97757"))  # Claude orange
                 coord_fmt.setFontWeight(QFont.Weight.Bold)
+                cursor.insertText(f"{ts} ", self._default_fmt(cursor))
                 cursor.insertText("[主 Agent 协调] ", coord_fmt)
+                cursor.insertText("你\n", label_fmt)
+            else:
+                cursor.insertText(f"{ts} ", self._default_fmt(cursor))
+                cursor.insertText("你\n", label_fmt)
 
-            cursor.insertText("你\n", label_fmt)
-            cursor.insertText(content + "\n", bubble_fmt)
+            # Message content with bubble background
+            bubble_fmt = QTextCharFormat()
+            bubble_fmt.setBackground(QColor(self._colors["userBubble"]))
+            if not coordination:
+                bubble_fmt.setForeground(QColor(self._colors["userFg"]))
+            else:
+                bubble_fmt.setForeground(QColor("#d97757"))  # Orange for coordination
+
+            # Content as block
+            lines = content.split("\n")
+            for line in lines:
+                cursor.insertText("  " + line + "\n", bubble_fmt)
+
         else:
+            # Agent response
             label_fmt = QTextCharFormat()
             label_fmt.setFontWeight(QFont.Weight.Bold)
             label_fmt.setForeground(QColor(self._colors["agentFg"]))
-            bubble_fmt = QTextCharFormat()
-            bubble_fmt.setBackground(QColor(self._colors["agentBubble"]))
-            bubble_fmt.setForeground(QColor(self._colors["agentFg"]))
 
-            cursor.insertText(f"\n{ts}  ", self._default_fmt(cursor))
+            cursor.insertText(f"{ts} ", self._default_fmt(cursor))
             cursor.insertText("Agent\n", label_fmt)
-            cursor.insertText(content + "\n", bubble_fmt)
+
+            # Message content
+            content_fmt = QTextCharFormat()
+            content_fmt.setForeground(QColor(self._colors["agentFg"]))
+
+            lines = content.split("\n")
+            for line in lines:
+                cursor.insertText("  " + line + "\n", content_fmt)
 
         self._messages_area.setTextCursor(cursor)
         self._messages_area.ensureCursorVisible()
@@ -309,34 +331,71 @@ class AgentPanel(QWidget):
         return fmt
 
     def add_tool_call(self, tool_name: str, arguments: dict) -> None:
+        """Add a tool call entry (Codex-style: inline with monospace).
+
+        Args:
+            tool_name: Name of the tool being called.
+            arguments: Tool arguments.
+        """
         cursor = self._messages_area.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
 
-        ts = datetime.now().strftime("%H:%M")
-        fmt = QTextCharFormat()
-        fmt.setForeground(QColor(self._colors["toolFg"]))
-        fmt.setFontItalic(True)
+        cursor.insertText("\n  ")  # Indent
 
-        args_str = ", ".join(f"{k}={v}" for k, v in arguments.items())
-        cursor.insertText(f"\n{ts}  ✎ {tool_name}({args_str})\n", fmt)
+        # Tool name in monospace with icon
+        name_fmt = QTextCharFormat()
+        name_fmt.setFontFamily("Consolas, Monaco, monospace")
+        name_fmt.setForeground(QColor(self._colors["statusTool"]))
+
+        cursor.insertText("✎ ", name_fmt)
+        cursor.insertText(tool_name, name_fmt)
+
+        # Arguments in monospace
+        if arguments:
+            args_fmt = QTextCharFormat()
+            args_fmt.setFontFamily("Consolas, Monaco, monospace")
+            args_fmt.setForeground(QColor(self._colors["toolFg"]))
+
+            cursor.insertText("(", args_fmt)
+            arg_items = []
+            for k, v in arguments.items():
+                arg_str = f"{k}={repr(v)[:50]}"  # Limit long values
+                arg_items.append(arg_str)
+            cursor.insertText(", ".join(arg_items), args_fmt)
+            cursor.insertText(")", args_fmt)
+
+        cursor.insertText("\n")
 
         self._messages_area.setTextCursor(cursor)
         self._messages_area.ensureCursorVisible()
 
     def add_tool_result(self, tool_name: str, result: Any, error: str | None = None) -> None:
+        """Add a tool result entry (Codex-style: compact status).
+
+        Args:
+            tool_name: Name of the tool.
+            result: Tool result.
+            error: Optional error message.
+        """
         cursor = self._messages_area.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
 
-        ts = datetime.now().strftime("%H:%M")
+        cursor.insertText("  ")  # Indent
+
         fmt = QTextCharFormat()
-        fmt.setFontItalic(True)
+        fmt.setFontFamily("Consolas, Monaco, monospace")
 
         if error:
             fmt.setForeground(QColor(self._colors["statusError"]))
-            cursor.insertText(f"{ts}  ✗ {tool_name}: {error}\n", fmt)
+            cursor.insertText("✗ ", fmt)
+            fmt.setFontWeight(QFont.Weight.Bold)
+            cursor.insertText(f"{tool_name} failed: ", fmt)
+            fmt.setFontWeight(QFont.Weight.Normal)
+            cursor.insertText(f"{error}\n", fmt)
         else:
             fmt.setForeground(QColor(self._colors["toolFg"]))
-            cursor.insertText(f"{ts}  ✓ {tool_name}\n", fmt)
+            cursor.insertText("✓ ", fmt)
+            cursor.insertText(f"{tool_name}\n", fmt)
 
         self._messages_area.setTextCursor(cursor)
         self._messages_area.ensureCursorVisible()
