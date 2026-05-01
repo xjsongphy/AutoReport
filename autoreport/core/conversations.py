@@ -169,13 +169,16 @@ class ConversationStore:
                 except OSError:
                     pass
 
-        # Clear the session from all agent tracking
+        # Clear the session from all agent tracking — share one new session
+        new_sid = None
         for agent_type in self._current_session_ids:
             if self._current_session_ids[agent_type] == session_id:
                 if sessions:
                     self._current_session_ids[agent_type] = sessions[0]["id"]
                 else:
-                    self._current_session_ids[agent_type] = self._create_new_session()
+                    if new_sid is None:
+                        new_sid = self._create_new_session()
+                    self._current_session_ids[agent_type] = new_sid
         return True
 
     def update_session_preview(self, agent_type: str, content: str) -> None:

@@ -162,3 +162,43 @@ def test_clear_messages(agent_panel):
     agent_panel._messages_area.clear()
 
     assert agent_panel._messages_area.message_count() == 0
+
+
+# ---- Conversation history / new conversation buttons ----
+
+
+def test_history_button_exists(agent_panel):
+    """AgentPanel header should have a history button."""
+    assert hasattr(agent_panel, "_history_btn")
+    assert agent_panel._history_btn.objectName() == "historyBtn"
+    assert not agent_panel._history_btn.isHidden()
+
+
+def test_new_conv_button_exists(agent_panel):
+    """AgentPanel header should have a new conversation button."""
+    assert hasattr(agent_panel, "_new_conv_btn")
+    assert agent_panel._new_conv_btn.objectName() == "newConvBtn"
+    assert not agent_panel._new_conv_btn.isHidden()
+
+
+def test_history_requested_signal(qtbot, agent_panel):
+    """Clicking history button should emit history_requested."""
+    with qtbot.waitSignal(agent_panel.history_requested, timeout=1000):
+        agent_panel._on_history()
+
+
+def test_new_conversation_requested_signal(qtbot, agent_panel):
+    """Clicking new conversation button should emit new_conversation_requested."""
+    with qtbot.waitSignal(agent_panel.new_conversation_requested, timeout=1000):
+        agent_panel._on_new_conversation()
+
+
+def test_hide_conv_buttons(agent_panel):
+    """hide_conv_buttons should hide both history and new-conv buttons."""
+    agent_panel.hide_conv_buttons(True)
+    assert agent_panel._history_btn.isHidden()
+    assert agent_panel._new_conv_btn.isHidden()
+
+    agent_panel.hide_conv_buttons(False)
+    assert not agent_panel._history_btn.isHidden()
+    assert not agent_panel._new_conv_btn.isHidden()
