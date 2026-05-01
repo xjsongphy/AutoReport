@@ -103,8 +103,8 @@ class AgentPanel(QWidget):
         dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
 
         c = {
-            "headerBg": "#2b2b2b" if dark else "#f0f0f0",
-            "headerBorder": "#3c3c3c" if dark else "#ddd",
+            "headerBg": "#2b2b2b" if dark else "#f3f3f3",
+            "headerBorder": "#3c3c3c" if dark else "#e0e0e0",
             "titleFg": "#e0e0e0" if dark else "#1a1a1a",
             "statusIdle": "#888" if dark else "#888",
             "statusThink": "#4fc3f7" if dark else "#1565c0",
@@ -114,7 +114,7 @@ class AgentPanel(QWidget):
             "msgBg": "#1e1e1e" if dark else "#fff",
             "userBubble": "#264f78" if dark else "#dcf8c6",
             "userFg": "#e0e0e0" if dark else "#1a1a1a",
-            "agentBubble": "#2d2d2d" if dark else "#f0f0f0",
+            "agentBubble": "#2d2d2d" if dark else "#f3f3f3",
             "agentFg": "#e0e0e0" if dark else "#1a1a1a",
             "toolFg": "#888" if dark else "#666",
             "inputBg": "#2b2b2b" if dark else "#fff",

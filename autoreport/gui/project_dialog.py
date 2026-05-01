@@ -164,12 +164,6 @@ class ProjectDialog(QDialog):
 
         root.addWidget(actions)
 
-        # ---- Separator ----
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setObjectName("separator")
-        root.addWidget(sep)
-
         # ---- Recent projects ----
         recent_header = QWidget()
         recent_header_layout = QHBoxLayout(recent_header)
@@ -215,6 +209,7 @@ class ProjectDialog(QDialog):
             "headerBg": "#252526" if dark else "#f3f3f3",
             "titleFg": "#e0e0e0" if dark else "#1a1a1a",
             "subtitleFg": "#999" if dark else "#666",
+            "border": "#3c3c3c" if dark else "#e0e0e0",
             "sectionFg": "#ccc" if dark else "#555",
             "primaryBg": "#0e639c" if dark else "#0078d4",
             "primaryFg": "#ffffff",
@@ -223,10 +218,9 @@ class ProjectDialog(QDialog):
             "secondaryFg": "#ddd" if dark else "#333333",
             "secondaryHoverBg": "#333" if dark else "#e9e9e9",
             "itemBg": "#2d2d2d" if dark else "#eaeaea",
-            "itemHoverBg": "#3d3d3d" if dark else "#e0e0e0",
+            "itemHoverBg": "#3d3d3d" if dark else "#ddd",
             "itemName": "#e0e0e0" if dark else "#1a1a1a",
             "itemPath": "#888" if dark else "#888888",
-            "sepColor": "#333" if dark else "#ddd",
             "cancelFg": "#999" if dark else "#888888",
             "cancelHoverFg": "#ccc" if dark else "#333333",
         }
@@ -269,10 +263,6 @@ class ProjectDialog(QDialog):
             #secondaryBtn:hover {{
                 background-color: {c["secondaryHoverBg"]};
             }}
-            #separator {{
-                color: {c["sepColor"]};
-                max-height: 1px;
-            }}
             #sectionLabel {{
                 font-size: 12px;
                 font-weight: 600;
@@ -291,7 +281,7 @@ class ProjectDialog(QDialog):
             }}
             #projectItem:hover {{
                 background-color: {c["itemHoverBg"]};
-                border-color: {c["sepColor"]};
+                border-color: {c["border"]};
             }}
             #projectName {{
                 font-size: 13px;

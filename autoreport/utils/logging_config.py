@@ -22,7 +22,7 @@ def setup_logging(
     # Remove default handler
     logger.remove()
 
-    # Console handler with colors
+    # Console handler — static format string (no {exception}, no blank lines)
     logger.add(
         sys.stderr,
         level=log_level,
@@ -40,22 +40,22 @@ def setup_logging(
 
         log_dir.mkdir(parents=True, exist_ok=True)
 
-        # Main log file (rotation at 100 MB, keep 10 backups)
+        # Main log file — callable format appends traceback only when present
         logger.add(
             log_dir / "autoreport_{time:YYYY-MM-DD}.log",
             level="DEBUG",
-            format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} | {message}",
+            format=_file_format,
             rotation="100 MB",
             retention="10 days",
             compression="zip",
             encoding="utf-8",
         )
 
-        # Error log file (only errors and above)
+        # Error log file — same callable format with backtrace/diagnose
         logger.add(
             log_dir / "errors_{time:YYYY-MM-DD}.log",
             level="ERROR",
-            format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} | {message}\n{exception}",
+            format=_file_format,
             rotation="50 MB",
             retention="30 days",
             compression="zip",
@@ -65,6 +65,22 @@ def setup_logging(
         )
 
     logger.info("Logging configured: level={}, log_to_file={}", log_level, log_to_file)
+
+
+def _file_format(record):
+    """Format for file output — appends traceback only when exception is present."""
+    base = (
+        f"{record['time']:YYYY-MM-DD HH:mm:ss} | "
+        f"{record['level'].name: <8} | "
+        f"{record['name']}:{record['function']}:{record['line']} | "
+        f"{record['message']}"
+    )
+    exc = record.get("exception")
+    if exc and exc.value is not None:
+        tb = "".join(traceback.format_exception(exc.type, exc.value, exc.traceback))
+        if tb:
+            return base + "\n" + tb + "\n"
+    return base + "\n"
 
 
 def log_exception(
@@ -107,9 +123,11 @@ def setup_exception_handler() -> None:
             sys.__excepthook__(exc_type, exc_value, exc_traceback)
             return
 
-        logger.error(
-            "Uncaught exception",
-            exc_info=(exc_type, exc_value, exc_traceback),
-        )
+        # Also print to stderr directly so it's always visible
+        traceback.print_exception(exc_type, exc_value, exc_traceback, file=sys.stderr)
+
+        # Log with full traceback in message
+        tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+        logger.error("Uncaught exception\n{}", tb_str)
 
     sys.excepthook = handle_exception
