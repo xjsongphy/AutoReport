@@ -24,6 +24,7 @@ class MessageType(str, Enum):
     STATUS_CHANGE = "status_change"
     ERROR = "error"
     CHECKPOINT = "checkpoint"
+    API_DEBUG = "api_debug"  # API call debugging information
 
 
 class AgentType(str, Enum):
@@ -153,3 +154,20 @@ class Error(Message):
     source: str  # "agent", "tool", "system"
     message: str
     details: dict[str, Any] = Field(default_factory=dict)
+
+
+class ApiDebugMessage(Message):
+    """API debug information for monitoring LLM calls.
+
+    Published by AgentLoop when making LLM API calls, allowing
+    GUI components to display timing, token usage, and error information.
+    """
+
+    type: MessageType = MessageType.API_DEBUG
+    timestamp: datetime = Field(default_factory=datetime.now)
+    model: str  # Model name (e.g., "claude-sonnet-4-20250514")
+    tokens_in: int  # Input tokens
+    tokens_out: int  # Output tokens
+    duration_ms: int  # Duration in milliseconds
+    status: str  # "success" or "error"
+    error: str | None = None  # Error message if status is "error"
