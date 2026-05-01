@@ -271,15 +271,14 @@ class ProjectDialog(QDialog):
             }}
             #configBtn {{
                 background-color: transparent;
-                color: {c["subtitleFg"]};
-                border: none;
+                color: {c["secondaryFg"]};
+                border: 1px solid {c["secondaryBorder"]};
                 border-radius: 4px;
-                padding: 8px 16px;
+                padding: 8px 20px;
                 font-size: 13px;
             }}
             #configBtn:hover {{
                 background-color: {c["secondaryHoverBg"]};
-                color: {c["secondaryFg"]};
             }}
             #sectionLabel {{
                 font-size: 12px;
