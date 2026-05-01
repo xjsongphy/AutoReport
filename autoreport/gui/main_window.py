@@ -380,8 +380,10 @@ class MainWindow(QMainWindow):
         """Handle agent response."""
         agent_str = str(message.agent_type)
         panel = self._get_panel_for_agent(agent_str)
-        panel.add_message("agent", message.content)
-        self._conv_store.append_message(agent_str, "agent", message.content)
+        panel.add_message("agent", message.content, streaming=message.streaming)
+        # Only store in conversation history when stream is complete
+        if not message.streaming or message.content == "":
+            self._conv_store.append_message(agent_str, "agent", message.content)
 
     def _handle_user_message(self, message: UserMessage) -> None:
         """Handle user message (including coordination from main agent).

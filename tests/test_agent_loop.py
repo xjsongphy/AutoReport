@@ -26,6 +26,14 @@ def mock_provider():
         tool_calls=[],
         usage={"input_tokens": 10, "output_tokens": 5},
     )
+
+    # Add streaming support mock (async generator that yields chunks then done)
+    async def mock_chat_stream(*args, **kwargs):
+        from autoreport.core.providers.base import LLMStreamChunk
+        yield LLMStreamChunk(delta="I will help you.")
+        yield LLMStreamChunk(delta=None, done=True)
+
+    provider.chat_stream = mock_chat_stream
     return provider
 
 
@@ -129,7 +137,6 @@ async def test_process_message(agent_loop, mock_provider, mock_gui):
     msg = UserMessage(content="Hello", agent_type=AgentType.MAIN)
     await agent_loop._process_message(msg)
 
-    mock_provider.chat.assert_called_once()
     # Agent publishes AgentResponse to bus (not GUI call)
     assert agent_loop.status == AgentStatus.IDLE
 
@@ -137,29 +144,42 @@ async def test_process_message(agent_loop, mock_provider, mock_gui):
 @pytest.mark.asyncio
 async def test_process_message_with_tool_calls(agent_loop, mock_provider, mock_gui):
     tc = ToolCall(id="call_1", name="read_file", arguments={"path": "test.txt"})
-    mock_provider.chat.return_value = LLMResponse(
-        content="",
-        tool_calls=[tc],
-    )
 
-    # Second call returns final response
-    mock_provider.chat.side_effect = [
-        LLMResponse(content="", tool_calls=[tc]),
-        LLMResponse(content="Done!", tool_calls=[]),
-    ]
+    # Mock streaming: first yields chunks, then tool calls at end
+    async def mock_chat_stream_with_tools(*args, **kwargs):
+        from autoreport.core.providers.base import LLMStreamChunk
+        yield LLMStreamChunk(delta="Reading file...")
+        # At end, yield tool calls
+        yield LLMStreamChunk(delta=None, tool_calls=[tc], done=True)
 
-    mock_tool = AsyncMock(return_value={"content": "file data"})
-    agent_loop.tools.get.return_value = mock_tool
+    mock_provider.chat_stream = mock_chat_stream_with_tools
+
+    # Second call (after tool execution) returns final response
+    mock_provider.chat.return_value = LLMResponse(content="Done!", tool_calls=[])
+
+    tool_called = []
+    async def mock_tool(**kwargs):
+        tool_called.append(kwargs)
+        return {"content": "file data"}
+
+    agent_loop.tools.get = lambda name: mock_tool if name == "read_file" else None
 
     msg = UserMessage(content="Read file", agent_type=AgentType.MAIN)
     await agent_loop._process_message(msg)
 
-    assert mock_provider.chat.call_count == 2
+    # Tool was executed with correct arguments
+    assert len(tool_called) == 1
+    assert tool_called[0] == {"path": "test.txt"}
 
 
 @pytest.mark.asyncio
 async def test_process_message_error(agent_loop, mock_provider, mock_gui):
-    mock_provider.chat.side_effect = RuntimeError("API error")
+    # Make chat_stream raise an error
+    async def mock_chat_stream_error(*args, **kwargs):
+        raise RuntimeError("API error")
+        yield  # Never reached, but makes this an async generator
+
+    mock_provider.chat_stream = mock_chat_stream_error
 
     msg = UserMessage(content="Hello", agent_type=AgentType.MAIN)
     await agent_loop._process_message(msg)

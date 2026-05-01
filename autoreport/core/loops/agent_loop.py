@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -197,29 +198,57 @@ class AgentLoop:
             # Get tool definitions
             tool_definitions = self.tools.get_definitions()
 
-            # Call LLM
-            response = await self.llm_provider.chat(
+            # Call LLM with streaming (default)
+            accumulated_content = ""
+            accumulated_tool_calls = []
+
+            async for chunk in self.llm_provider.chat_stream(
                 messages=messages,
                 tools=tool_definitions if tool_definitions else None,
                 temperature=self.config.temperature,
                 max_tokens=self.config.max_tokens,
-            )
+            ):
+                if chunk.delta:
+                    accumulated_content += chunk.delta
+                    # Stream chunk to UI
+                    await self.bus.publish(AgentResponse(
+                        agent_type=self.agent_type,
+                        content=chunk.delta,
+                        message_id=message.message_id,
+                        streaming=True,
+                    ))
+
+                if chunk.tool_calls:
+                    accumulated_tool_calls = chunk.tool_calls
+
+                if chunk.done:
+                    # Stream complete
+                    if accumulated_content:
+                        self._conversation_history.append(
+                            LLMMessage(role="assistant", content=accumulated_content)
+                        )
+                    break
 
             # Handle tool calls if present
-            if response.tool_calls:
+            if accumulated_tool_calls:
+                @dataclass
+                class StreamResponse:
+                    content: str
+                    tool_calls: list
+
+                response = StreamResponse(
+                    content=accumulated_content,
+                    tool_calls=accumulated_tool_calls,
+                )
                 await self._handle_tool_calls(response, message.message_id)
 
-            # Handle text response
-            if response.content:
-                self._conversation_history.append(
-                    LLMMessage(role="assistant", content=response.content)
-                )
-
-                await self.bus.publish(AgentResponse(
-                    agent_type=self.agent_type,
-                    content=response.content,
-                    message_id=message.message_id,
-                ))
+            # Send final completion signal (empty content, streaming=False)
+            await self.bus.publish(AgentResponse(
+                agent_type=self.agent_type,
+                content="",  # Empty to signal completion
+                message_id=message.message_id,
+                streaming=False,  # Final message
+            ))
 
             await self._set_status(AgentStatus.IDLE)
 

@@ -150,6 +150,52 @@ class AnthropicProvider(LLMProvider):
             },
         )
 
+    async def chat_stream(
+        self,
+        messages: list[Message],
+        tools: list[dict] | None = None,
+        temperature: float = 0.1,
+        max_tokens: int = 8192,
+    ):
+        """Send streaming chat completion request.
+
+        Yields LLMStreamChunk objects as text arrives.
+        """
+        from .base import LLMStreamChunk
+
+        system_message, anthropic_messages = self._convert_messages(messages)
+
+        params: dict[str, Any] = {
+            "model": self.model,
+            "messages": anthropic_messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,  # Enable streaming
+        }
+
+        if system_message:
+            params["system"] = system_message
+
+        if tools:
+            params["tools"] = self._convert_tools(tools)
+
+        logger.debug("Sending Anthropic streaming request: model={}, messages={}", self.model, len(messages))
+
+        async with self.client.messages.stream(**params) as stream:
+            final_tool_calls = []
+            async for event in stream:
+                if event.type == "content_block_start":
+                    # New content block starting
+                    if hasattr(event, 'content_block') and event.content_block.type == "tool_use":
+                        # tool_use block starts - collect tool call info
+                        pass
+                elif event.type == "content_block_delta":
+                    if event.delta.type == "text_delta":
+                        yield LLMStreamChunk(delta=event.delta.text)
+                elif event.type == "message_stop":
+                    # Stream complete
+                    yield LLMStreamChunk(done=True, tool_calls=final_tool_calls if final_tool_calls else None)
+
     def _convert_tools(self, tools: list[dict]) -> list[dict]:
         """Convert tools to Anthropic format."""
         return [

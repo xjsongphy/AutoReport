@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import signal
 import sys
 from pathlib import Path
 
@@ -28,6 +29,8 @@ class AutoReportApp:
         )
         self.loop_manager: LoopManager | None = None
         self.main_window: MainWindow | None = None
+        self._qt_app: QApplication | None = None
+        self._interrupted = False
 
     async def startup(self, workspace: Path) -> bool:
         """Startup application. Returns True if successful.
@@ -110,9 +113,28 @@ class AutoReportApp:
 
         logger.info("Application shut down")
 
-    def run_gui(self) -> None:
+    def run_gui(self, qt_app: QApplication) -> None:
         """Run GUI application."""
         import threading
+
+        self._qt_app = qt_app
+
+        # Setup signal handler for Ctrl+C
+        def _handle_interrupt(*_):
+            logger.info("Interrupt received, shutting down...")
+            self._interrupted = True
+            qt_app.quit()
+
+        signal.signal(signal.SIGINT, _handle_interrupt)
+        # Windows also supports SIGBREAK
+        if hasattr(signal, 'SIGBREAK'):
+            signal.signal(signal.SIGBREAK, _handle_interrupt)
+
+        # Timer to check for interrupts periodically (Qt event loop blocks signals)
+        from PyQt6.QtCore import QTimer
+        self._interrupt_timer = QTimer()
+        self._interrupt_timer.timeout.connect(lambda: None)
+        self._interrupt_timer.start(100)  # Check every 100ms
 
         # QApplication already created in main(), get the instance
         app = QApplication.instance()
@@ -435,7 +457,7 @@ def main():
             sys.exit(1)
 
     # Run GUI (includes project selection and startup)
-    app.run_gui()
+    app.run_gui(qt_app)
 
     # Shutdown (keep qt_app alive until exit)
     try:

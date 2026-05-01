@@ -355,6 +355,7 @@ class AgentPanel(QWidget):
         content: str,
         source: str = "user",
         coordination: bool = False,
+        streaming: bool = False,
     ) -> None:
         """Add a message to the display.
 
@@ -365,9 +366,28 @@ class AgentPanel(QWidget):
             content: Message content.
             source: Message source ("user" or "main_agent").
             coordination: Whether this is a coordination message.
+            streaming: If True, append to last agent message instead of creating new.
         """
         cursor = self._messages_area.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
+
+        # For streaming agent messages, append to existing content
+        if streaming and role == "agent" and not content:
+            # Empty content signals completion - just ensure visible
+            self._messages_area.ensureCursorVisible()
+            return
+
+        if streaming and role == "agent":
+            # Append to last agent message
+            # Move cursor to end of last line
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            # Append new content
+            content_fmt = QTextCharFormat()
+            content_fmt.setForeground(QColor(self._colors["agentFg"]))
+            cursor.insertText(content, content_fmt)
+            self._messages_area.setTextCursor(cursor)
+            self._messages_area.ensureCursorVisible()
+            return
 
         # Add spacing before each message
         cursor.insertText("\n")

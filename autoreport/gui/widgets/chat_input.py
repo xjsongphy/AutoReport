@@ -68,50 +68,40 @@ class ChatInput(QPlainTextEdit):
         Args:
             event: Key event.
         """
-        # If popup is active, intercept navigation keys
-        if self._popup_active:
-            match event.key():
-                case Qt.Key.Key_Up | Qt.Key.Key_Down | Qt.Key.Key_Enter | Qt.Key.Key_Return | Qt.Key.Key_Escape:
-                    # Don't insert these characters, let parent handle them
-                    # for popup navigation
-                    super().keyPressEvent(event)
-                    return
+        key = event.key()
+        modifiers = event.modifiers()
 
-        # Handle Enter to send (Ctrl+Enter for newline)
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key.Enter):
-            modifiers = event.modifiers()
-            if modifiers == Qt.KeyboardModifier.NoModifier:
-                # Enter sends message
-                self.send_message.emit()
+        # If popup is active, let popup handle navigation keys
+        if self._popup_active:
+            if key in (Qt.Key.Key_Up, Qt.Key.Key_Down, Qt.Key.Key_Escape, Qt.Key.Key_Enter, Qt.Key.Key_Return):
+                super().keyPressEvent(event)
                 return
-            elif modifiers == Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier:
-                # Ctrl+Shift+Enter for newline
+
+        # Handle Enter/Return keys
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if modifiers == Qt.KeyboardModifier.ShiftModifier:
+                # Shift+Enter for newline (like most chat apps)
                 cursor = self.textCursor()
                 cursor.insertText("\n")
                 return
-
-        # Handle backspace to clear @ token
-        if event.key() == Qt.Key.Key_Backspace:
-            cursor = self.textCursor()
-            if cursor.hasSelection():
-                super().keyPressEvent(event)
-                self._check_for_at_token()
+            elif modifiers == Qt.KeyboardModifier.NoModifier:
+                # Plain Enter sends message
+                self.send_message.emit()
                 return
-            else:
-                # Check if we're deleting the @ symbol
-                cursor.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor)
-                char = cursor.selectedText()
-                if char == "@":
-                    # Clear the token tracking
-                    self._on_popup_closed()
-                super().keyPressEvent(event)
-                self._check_for_at_token()
-                return
+            # Other combinations (Ctrl+Enter, etc.) fall through to default
 
-        # Default handling
+        # Handle backspace/delete for @ token tracking
+        if key == Qt.Key.Key_Backspace or key == Qt.Key.Key_Delete:
+            # Let default handling happen first
+            super().keyPressEvent(event)
+            # Then check for @ token state
+            self._check_for_at_token()
+            return
+
+        # Default handling for other keys
         super().keyPressEvent(event)
 
-        # Check for @ token after character insertion
+        # Check for @ token after text insertion
         if event.text():
             self._check_for_at_token()
 

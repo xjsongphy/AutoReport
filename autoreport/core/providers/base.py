@@ -47,6 +47,16 @@ class LLMResponse:
     content: str | None
     tool_calls: list[ToolCall] = field(default_factory=list)
     usage: dict[str, int] | None = None
+    streaming: bool = False  # Whether this is a streaming chunk
+
+
+@dataclass
+class LLMStreamChunk:
+    """Single chunk from streaming LLM response."""
+
+    delta: str | None  # Text content delta (None if no new text)
+    tool_calls: list[ToolCall] | None = None  # Final tool calls at end
+    done: bool = False  # Whether stream is complete
 
 
 class LLMProvider(ABC):
@@ -88,3 +98,25 @@ class LLMProvider(ABC):
         Returns:
             LLM response with content and/or tool calls.
         """
+
+    async def chat_stream(
+        self,
+        messages: list[Message],
+        tools: list[dict] | None = None,
+        temperature: float = 0.1,
+        max_tokens: int = 8192,
+    ):
+        """Send streaming chat completion request.
+
+        Yields LLMStreamChunk objects as text arrives.
+
+        Args:
+            messages: List of chat messages.
+            tools: Optional list of tool definitions.
+            temperature: Sampling temperature.
+            max_tokens: Maximum tokens to generate.
+
+        Yields:
+            LLMStreamChunk with delta content for each chunk.
+        """
+        raise NotImplementedError(f"Streaming not implemented for {self.__class__.__name__}")
