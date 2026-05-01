@@ -79,16 +79,17 @@ class ChatInput(QPlainTextEdit):
 
         # Handle Enter/Return keys
         if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            if modifiers == Qt.KeyboardModifier.ShiftModifier:
-                # Shift+Enter for newline (like most chat apps)
+            # Check for Shift modifier (including Ctrl+Shift, etc.)
+            if modifiers & Qt.KeyboardModifier.ShiftModifier:
+                # Shift+Enter (or Ctrl+Shift+Enter): insert newline
                 cursor = self.textCursor()
                 cursor.insertText("\n")
                 return
             elif modifiers == Qt.KeyboardModifier.NoModifier:
-                # Plain Enter sends message
+                # Plain Enter: send message
                 self.send_message.emit()
                 return
-            # Other combinations (Ctrl+Enter, etc.) fall through to default
+            # Other combinations fall through to default
 
         # Handle backspace/delete for @ token tracking
         if key == Qt.Key.Key_Backspace or key == Qt.Key.Key_Delete:
