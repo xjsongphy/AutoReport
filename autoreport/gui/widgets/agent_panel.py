@@ -28,6 +28,7 @@ class AgentPanel(QWidget):
 
     message_sent = pyqtSignal(str)
     debug_mode_toggled = pyqtSignal(bool)
+    _debug_msg_signal = pyqtSignal(object)
     history_requested = pyqtSignal()
     new_conversation_requested = pyqtSignal()
     session_selected_from_dropdown = pyqtSignal(str)
@@ -50,6 +51,9 @@ class AgentPanel(QWidget):
         self._setup_ui(title)
         self._apply_style()
         self._setup_file_search()
+
+        # Bridge debug messages from async bus to Qt thread
+        self._debug_msg_signal.connect(self._handle_debug_msg)
 
     def _setup_ui(self, title: str) -> None:
         layout = QVBoxLayout(self)
@@ -626,22 +630,28 @@ class AgentPanel(QWidget):
     def subscribe_to_debug_messages(self, bus) -> None:
         """Subscribe to ApiDebugMessage from the message bus.
 
+        Uses signal bridge to safely update Qt widgets from async thread.
+
         Args:
             bus: MessageBus instance to subscribe to.
         """
         async def on_debug_message(msg):
             if isinstance(msg, ApiDebugMessage):
-                self._debug_panel.add_entry(
-                    timestamp=msg.timestamp,
-                    model=msg.model,
-                    tokens_in=msg.tokens_in,
-                    tokens_out=msg.tokens_out,
-                    duration_ms=msg.duration_ms,
-                    status=msg.status,
-                    error=msg.error,
-                )
+                self._debug_msg_signal.emit(msg)
 
         bus.subscribe(ApiDebugMessage, on_debug_message)
+
+    def _handle_debug_msg(self, msg) -> None:
+        """Handle debug message in Qt thread (triggered by signal)."""
+        self._debug_panel.add_entry(
+            timestamp=msg.timestamp,
+            model=msg.model,
+            tokens_in=msg.tokens_in,
+            tokens_out=msg.tokens_out,
+            duration_ms=msg.duration_ms,
+            status=msg.status,
+            error=msg.error,
+        )
 
     def set_debug_mode(self, enabled: bool) -> None:
         self._debug_button.setChecked(enabled)

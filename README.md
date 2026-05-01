@@ -125,7 +125,29 @@ autoreport/
 ### Run Tests
 
 ```bash
+# All unit tests (no API key required)
+uv run pytest -v -m "not integration"
+
+# All tests including integration (requires API key in autoreport.config.yaml)
 uv run pytest -v
+
+# Integration tests only (requires API key)
+uv run pytest tests/test_agent_integration.py -v -m integration
+
+# Tool tests (file tools, exec tools, registry — no API key)
+uv run pytest tests/test_agent_tools.py -v
+
+# Conversation store tests (multi-session, migration — no API key)
+uv run pytest tests/test_conversations.py -v
+
+# CLI tests (typer argument parsing — no API key)
+uv run pytest tests/test_cli.py -v
+
+# GUI widget tests (requires Qt/PyQt6 display)
+uv run pytest tests/gui/ -v
+
+# Run with coverage report
+uv run pytest --cov=autoreport --cov-report=html -m "not integration"
 ```
 
 ### Code Linting
@@ -138,7 +160,7 @@ uv run ruff check --fix autoreport tests
 ### Run Single Test
 
 ```bash
-uv run pytest tests/test_agent_loop.py -v
+uv run pytest tests/test_agent_tools.py::TestReadFile::test_read_existing_file -v
 ```
 
 ## Configuration

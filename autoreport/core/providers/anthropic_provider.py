@@ -181,19 +181,22 @@ class AnthropicProvider(LLMProvider):
         logger.debug("Sending Anthropic streaming request: model={}, messages={}", self.model, len(messages))
 
         async with self.client.messages.stream(**params) as stream:
+            # Stream text deltas for real-time display
+            async for text in stream.text_stream:
+                yield LLMStreamChunk(delta=text)
+
+            # After streaming completes, extract tool calls from final message
+            final_message = await stream.get_final_message()
             final_tool_calls = []
-            async for event in stream:
-                if event.type == "content_block_start":
-                    # New content block starting
-                    if hasattr(event, 'content_block') and event.content_block.type == "tool_use":
-                        # tool_use block starts - collect tool call info
-                        pass
-                elif event.type == "content_block_delta":
-                    if event.delta.type == "text_delta":
-                        yield LLMStreamChunk(delta=event.delta.text)
-                elif event.type == "message_stop":
-                    # Stream complete
-                    yield LLMStreamChunk(done=True, tool_calls=final_tool_calls if final_tool_calls else None)
+            for block in final_message.content:
+                if block.type == "tool_use":
+                    final_tool_calls.append(ToolCall(
+                        id=block.id,
+                        name=block.name,
+                        arguments=block.input,
+                    ))
+
+            yield LLMStreamChunk(delta=None, done=True, tool_calls=final_tool_calls or None)
 
     def _convert_tools(self, tools: list[dict]) -> list[dict]:
         """Convert tools to Anthropic format."""

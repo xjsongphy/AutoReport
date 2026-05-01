@@ -28,21 +28,15 @@ from .headless import HeadlessBackend, MessageCollector
 pytestmark = pytest.mark.integration
 
 
-@pytest.fixture
-def workspace(tmp_path: Path) -> Path:
-    """Create a project workspace with sample data."""
-    ws = tmp_path / "test_project"
-    ws.mkdir()
+def _workspace():
+    """Create a temp workspace (avoid tmp_path to sidestep pytest-qt permission issue)."""
+    tmpdir = tempfile.mkdtemp()
+    ws = Path(tmpdir) / "test_project"
+    ws.mkdir(parents=True)
 
-    # Create project structure
-    (ws / "data").mkdir()
-    (ws / "data" / "processed").mkdir()
-    (ws / "references").mkdir()
-    (ws / "theory").mkdir()
-    (ws / "code").mkdir()
-    (ws / "tex").mkdir()
+    for d in ["data", "data/processed", "references", "theory", "code", "tex"]:
+        (ws / d).mkdir(parents=True, exist_ok=True)
 
-    # Sample data file
     (ws / "data" / "experiment.csv").write_text(
         "time,voltage,current\n"
         "0.0,1.0,0.5\n"
@@ -54,19 +48,13 @@ def workspace(tmp_path: Path) -> Path:
     return ws
 
 
-@pytest.fixture
-def backend(workspace: Path) -> HeadlessBackend:
-    """Create a HeadlessBackend (not started — use as context manager)."""
-    return HeadlessBackend(workspace)
-
-
 class TestMainAgentBasic:
     """Basic main agent interaction."""
 
     @pytest.mark.asyncio
-    async def test_main_agent_responds(self, workspace: Path):
+    async def test_main_agent_responds(self):
         """Main agent should respond to a simple user message."""
-        async with HeadlessBackend(workspace) as b:
+        async with HeadlessBackend(_workspace()) as b:
             collector = MessageCollector(b.bus)
             collector.start()
 
@@ -78,9 +66,9 @@ class TestMainAgentBasic:
             assert len(text) > 0
 
     @pytest.mark.asyncio
-    async def test_status_transitions(self, workspace: Path):
+    async def test_status_transitions(self):
         """Agent should transition through idle → thinking → idle."""
-        async with HeadlessBackend(workspace) as b:
+        async with HeadlessBackend(_workspace()) as b:
             collector = MessageCollector(b.bus)
             collector.start()
 
@@ -93,9 +81,9 @@ class TestMainAgentBasic:
             assert "thinking" in status_values
 
     @pytest.mark.asyncio
-    async def test_no_errors_on_simple_message(self, workspace: Path):
+    async def test_no_errors_on_simple_message(self):
         """Simple message should not produce errors."""
-        async with HeadlessBackend(workspace) as b:
+        async with HeadlessBackend(_workspace()) as b:
             collector = MessageCollector(b.bus)
             collector.start()
 
@@ -109,12 +97,12 @@ class TestMainAgentTools:
     """Main agent tool usage."""
 
     @pytest.mark.asyncio
-    async def test_read_file_tool(self, workspace: Path):
+    async def test_read_file_tool(self):
         """Main agent should be able to read files via tool calls."""
-        # Create a readable file
-        (workspace / "data" / "test.txt").write_text("Hello from test file", encoding="utf-8")
+        ws = _workspace()
+        (ws / "data" / "test.txt").write_text("Hello from test file", encoding="utf-8")
 
-        async with HeadlessBackend(workspace) as b:
+        async with HeadlessBackend(ws) as b:
             collector = MessageCollector(b.bus)
             collector.start()
 
@@ -132,9 +120,9 @@ class TestMainAgentTools:
             assert len(collector.tool_results) >= 1
 
     @pytest.mark.asyncio
-    async def test_list_directory_tool(self, workspace: Path):
+    async def test_list_directory_tool(self):
         """Main agent should be able to list directories."""
-        async with HeadlessBackend(workspace) as b:
+        async with HeadlessBackend(_workspace()) as b:
             collector = MessageCollector(b.bus)
             collector.start()
 
@@ -150,9 +138,9 @@ class TestSubAgentInteraction:
     """Sub-agent (data analysis) interaction."""
 
     @pytest.mark.asyncio
-    async def test_data_analysis_agent_responds(self, workspace: Path):
+    async def test_data_analysis_agent_responds(self):
         """Data analysis agent should respond to direct messages."""
-        async with HeadlessBackend(workspace) as b:
+        async with HeadlessBackend(_workspace()) as b:
             collector = MessageCollector(b.bus)
             collector.start()
 
@@ -164,9 +152,9 @@ class TestSubAgentInteraction:
             assert len(text) > 0
 
     @pytest.mark.asyncio
-    async def test_data_analysis_reads_csv(self, workspace: Path):
+    async def test_data_analysis_reads_csv(self):
         """Data analysis agent should be able to read and analyze CSV files."""
-        async with HeadlessBackend(workspace) as b:
+        async with HeadlessBackend(_workspace()) as b:
             collector = MessageCollector(b.bus)
             collector.start()
 
@@ -189,9 +177,9 @@ class TestAgentCoordination:
     """Main agent coordinating with sub-agents."""
 
     @pytest.mark.asyncio
-    async def test_main_agent_can_delegate(self, workspace: Path):
+    async def test_main_agent_can_delegate(self):
         """Main agent should be able to delegate tasks to sub-agents."""
-        async with HeadlessBackend(workspace) as b:
+        async with HeadlessBackend(_workspace()) as b:
             collector = MessageCollector(b.bus)
             collector.start()
 
@@ -211,9 +199,9 @@ class TestErrorHandling:
     """Error handling in agent execution."""
 
     @pytest.mark.asyncio
-    async def test_read_nonexistent_file(self, workspace: Path):
+    async def test_read_nonexistent_file(self):
         """Reading a nonexistent file should produce an error or graceful handling."""
-        async with HeadlessBackend(workspace) as b:
+        async with HeadlessBackend(_workspace()) as b:
             collector = MessageCollector(b.bus)
             collector.start()
 

@@ -54,7 +54,7 @@ class LLMResponse:
 class LLMStreamChunk:
     """Single chunk from streaming LLM response."""
 
-    delta: str | None  # Text content delta (None if no new text)
+    delta: str | None = None  # Text content delta (None if no new text)
     tool_calls: list[ToolCall] | None = None  # Final tool calls at end
     done: bool = False  # Whether stream is complete
 
