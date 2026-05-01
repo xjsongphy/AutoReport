@@ -242,7 +242,8 @@ class MainWindow(QMainWindow):
             start_line: Start line number.
             end_line: End line number.
         """
-        # Forward selection context to sub-agent panel
+        # Forward selection context to both main and sub-agent panels
+        self.main_agent_panel.set_preview_context(file_path, selected_text, start_line, end_line)
         self.sub_agent_panel.set_preview_context(file_path, selected_text, start_line, end_line)
 
     def _on_file_selected(self, file_path: Path) -> None:
@@ -253,7 +254,25 @@ class MainWindow(QMainWindow):
         """
         # Load file in preview
         self.preview.load_file(file_path)
+        # Set file-only context on both panels (no selection yet)
+        rel_path = self._relative_path(file_path)
+        self.main_agent_panel.set_opened_file(rel_path)
+        self.sub_agent_panel.set_opened_file(rel_path)
         logger.debug("File selected: {}", file_path)
+
+    def _relative_path(self, file_path: Path) -> str:
+        """Get relative path from workspace.
+
+        Args:
+            file_path: Absolute file path.
+
+        Returns:
+            Relative path as string.
+        """
+        try:
+            return file_path.relative_to(self.workspace).as_posix()
+        except ValueError:
+            return file_path.as_posix()
 
     def _load_conversations(self) -> None:
         """Load previous conversations from disk into agent panels."""

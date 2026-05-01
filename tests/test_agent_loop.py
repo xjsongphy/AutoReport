@@ -1,15 +1,14 @@
 """Tests for agent loop processing engine."""
 
-import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from autoreport.config.schema import AgentDefaults
 from autoreport.core.loops.agent_loop import AgentLoop
 from autoreport.core.loops.bus import MessageBus
-from autoreport.core.providers.base import LLMResponse, Message as LLMMessage, ToolCall
+from autoreport.core.providers.base import LLMResponse, ToolCall
 from autoreport.interfaces.types import AgentStatus, AgentType, UserMessage
 
 
@@ -121,7 +120,7 @@ async def test_progressive_prompt_second_call(agent_loop, mock_prompt_loader):
 async def test_progressive_prompt_cached(agent_loop, mock_prompt_loader):
     await agent_loop._get_system_prompt()  # identity
     await agent_loop._get_system_prompt()  # full
-    prompt = await agent_loop._get_system_prompt()  # cached
+    await agent_loop._get_system_prompt()  # cached
     assert mock_prompt_loader.load_full.call_count == 1  # Not called again
 
 

@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -32,6 +33,8 @@ class AgentPanel(QWidget):
         self._agent_type = "sub"
         self._workspace = Path(workspace).resolve() if workspace else Path.cwd()
         self._preview_context: tuple[str, str, int, int] | None = None
+        self._opened_file: str | None = None  # file opened but no selection
+        self._context_enabled: bool = True  # eye toggle state
 
         self._file_search_manager = FileSearchManager(self._workspace)
         self._file_search_popup: FileSearchPopup | None = None
@@ -75,6 +78,35 @@ class AgentPanel(QWidget):
         self._messages_area.setReadOnly(True)
         self._messages_area.setObjectName("messagesArea")
         layout.addWidget(self._messages_area, 1)
+
+        # ---- Context chip bar ----
+        self._context_bar = QWidget()
+        self._context_bar.setObjectName("contextBar")
+        self._context_bar.setVisible(False)
+        context_layout = QHBoxLayout(self._context_bar)
+        context_layout.setContentsMargins(8, 2, 8, 2)
+        context_layout.setSpacing(4)
+
+        file_icon = QLabel("\U0001F4C4")
+        file_icon.setObjectName("contextIcon")
+        context_layout.addWidget(file_icon)
+
+        self._context_label = QLabel()
+        self._context_label.setObjectName("contextLabel")
+        self._context_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        context_layout.addWidget(self._context_label, 1)
+
+        self._context_eye = QPushButton("\U0001F441")  # eye open
+        self._context_eye.setObjectName("contextEye")
+        self._context_eye.setCheckable(True)
+        self._context_eye.setChecked(True)
+        self._context_eye.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._context_eye.setToolTip("发送时包含上下文引用 (点击切换)")
+        self._context_eye.clicked.connect(self._on_eye_toggled)
+        self._context_eye.setFixedSize(24, 24)
+        context_layout.addWidget(self._context_eye)
+
+        layout.addWidget(self._context_bar)
 
         # ---- Input bar ----
         input_bar = QWidget()
@@ -130,7 +162,7 @@ class AgentPanel(QWidget):
             "inputBg": "#3c3c3c" if dark else "#ffffff",
             "inputBorder": "#3c3c3c" if dark else "#e0e0e0",
             "inputFocusBorder": claude_orange,
-            "inputFocusRing": f"rgba(217, 119, 87, 0.12)",  # 12% opacity
+            "inputFocusRing": "rgba(217, 119, 87, 0.12)",  # 12% opacity
             # Send button
             "sendBg": "#0e639c" if dark else claude_orange,
             "sendFg": "#ffffff",
@@ -139,6 +171,11 @@ class AgentPanel(QWidget):
             "debugFg": "#858585" if dark else "#858585",
             "debugActiveBg": "#5c1a1a" if dark else "#ffcdd2",
             "debugActiveFg": "#f14c4c" if dark else "#c62828",
+            # Context bar
+            "contextBg": "#2d2d2d" if dark else "#e8f0fe",
+            "contextBorder": claude_orange,
+            "contextFg": "#cccccc" if dark else "#333333",
+            "contextIconFg": claude_orange,
         }
         self._colors = c
 
@@ -185,6 +222,25 @@ class AgentPanel(QWidget):
                 padding: 2px 8px;
                 font-size: 11px;
             }}
+            #contextBar {{
+                background-color: {c["contextBg"]};
+                border-left: 2px solid {c["contextBorder"]};
+                border-bottom: 1px solid {c["headerBorder"]};
+            }}
+            #contextLabel {{
+                font-size: 11px;
+                color: {c["contextFg"]};
+            }}
+            #contextIcon, #contextEye {{
+                font-size: 13px;
+                color: {c["contextIconFg"]};
+            }}
+            #contextEye {{
+                background-color: transparent;
+                border: none;
+                border-radius: 2px;
+            }}
+            #contextEye:hover {{ background-color: rgba(128,128,128,0.15); }}
         """)
 
     def _setup_file_search(self) -> None:
@@ -224,8 +280,52 @@ class AgentPanel(QWidget):
 
     # ---- Public API ----
 
+    def set_opened_file(self, file_path: str) -> None:
+        """Set context for a file that was opened but no text selected.
+
+        Chip shows filename; on send, includes the file path for agent to read.
+
+        Args:
+            file_path: Relative file path.
+        """
+        self._opened_file = file_path
+        self._preview_context = None
+        self._context_enabled = True
+        self._context_eye.setChecked(True)
+        self._context_eye.setText("\U0001F441")  # eye open
+        fname = Path(file_path).name
+        self._context_label.setText(fname)
+        self._context_bar.setVisible(True)
+
     def set_preview_context(self, file_path: str, selected_text: str, start_line: int, end_line: int) -> None:
+        """Set context for selected text in preview.
+
+        Chip shows line count; on send, includes filename, line range, and content.
+
+        Args:
+            file_path: Relative file path.
+            selected_text: Selected text content.
+            start_line: Start line number (1-indexed).
+            end_line: End line number (1-indexed).
+        """
         self._preview_context = (file_path, selected_text, start_line, end_line)
+        self._opened_file = None
+        self._context_enabled = True
+        self._context_eye.setChecked(True)
+        self._context_eye.setText("\U0001F441")  # eye open
+        line_count = end_line - start_line + 1
+        label = f"{line_count} line selected" if line_count == 1 else f"{line_count} lines selected"
+        self._context_label.setText(label)
+        self._context_bar.setVisible(True)
+
+    def _on_eye_toggled(self) -> None:
+        self._context_enabled = self._context_eye.isChecked()
+        if self._context_enabled:
+            self._context_eye.setText("\U0001F441")  # eye open
+            self._context_eye.setToolTip("发送时包含上下文引用 (点击切换)")
+        else:
+            self._context_eye.setText("\U0001F576")  # crossed-out / hidden
+            self._context_eye.setToolTip("上下文已隐藏，不会发送给 Agent (点击恢复)")
 
     def set_workspace(self, workspace: Path) -> None:
         self._workspace = Path(workspace).resolve()
@@ -456,19 +556,30 @@ class AgentPanel(QWidget):
             return
 
         final_message = content
-        if self._preview_context:
-            file_path, selected_text, start_line, end_line = self._preview_context
-            context_block = (
-                f"\n\n<!-- 上下文引用 -->\n"
-                f"**文件**: {file_path} (行 {start_line}-{end_line})\n"
-                f"```\n{selected_text}\n```\n"
-            )
-            final_message = content + context_block
-            self._preview_context = None
+        if self._context_enabled:
+            if self._preview_context:
+                file_path, selected_text, start_line, end_line = self._preview_context
+                context_block = (
+                    f"\n\n<!-- 上下文引用 -->\n"
+                    f"**文件**: {file_path} (行 {start_line}-{end_line})\n"
+                    f"```\n{selected_text}\n```\n"
+                )
+                final_message = content + context_block
+            elif self._opened_file:
+                context_block = (
+                    f"\n\n<!-- 上下文引用 -->\n"
+                    f"**文件**: {self._opened_file}\n"
+                )
+                final_message = content + context_block
 
         self._input_field.clear_text()
         self.add_message("user", content)
         self.message_sent.emit(final_message)
+
+        # Clear context bar after sending
+        self._preview_context = None
+        self._opened_file = None
+        self._context_bar.setVisible(False)
 
     def _on_debug_toggled(self) -> None:
         enabled = self._debug_button.isChecked()

@@ -32,6 +32,9 @@ async def test_config_manager_validate_api_keys():
     """Test API key validation."""
     config_manager = ConfigManager()
 
+    # Clear existing provider configs (may be populated from user config file)
+    config_manager.config.providers.configurations.clear()
+
     # No API keys configured
     is_valid, available = config_manager.validate_api_keys()
     assert is_valid is False

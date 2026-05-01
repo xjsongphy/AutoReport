@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from autoreport.config.schema import AgentDefaults, AgentsConfig, ApiConfig, AppConfig
+from autoreport.config.schema import ApiConfig, AppConfig
 from autoreport.core.loops.bus import MessageBus
 from autoreport.core.loops.manager import LoopManager
 from autoreport.interfaces.types import AgentType

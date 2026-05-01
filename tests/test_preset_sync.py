@@ -28,8 +28,8 @@ def test_sync_error_is_exception():
 
 def test_sync_presets_success():
     """Test successful preset sync with mocked HTTP responses."""
-    import tempfile
     import shutil
+    import tempfile
     cache_dir = Path(tempfile.mkdtemp())
     try:
         mock_response = MagicMock()
@@ -52,8 +52,8 @@ def test_sync_presets_success():
 
 def test_sync_presets_partial_failure():
     """Some files fail, some succeed — should return partial count."""
-    import tempfile
     import shutil
+    import tempfile
     cache_dir = Path(tempfile.mkdtemp())
     try:
         call_count = 0

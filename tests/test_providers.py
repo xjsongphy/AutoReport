@@ -1,17 +1,16 @@
 """Tests for LLM provider base classes, conversion, and factory."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from autoreport.core.providers.base import LLMProvider, LLMResponse, Message, ToolCall
 from autoreport.core.providers.factory import (
+    _DEFAULT_MODELS,
     ProviderFactory,
     ProviderManager,
-    _DEFAULT_MODELS,
 )
 from autoreport.core.providers.openai_provider import OpenAICompatProvider
-
 
 # ── Base dataclass tests ────────────────────────────────────────────────
 

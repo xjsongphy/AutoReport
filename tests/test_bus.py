@@ -1,18 +1,14 @@
 """Tests for async message bus."""
 
-import asyncio
 
 import pytest
 
+from autoreport.core.loops.bus import MessageBus
 from autoreport.interfaces.types import (
     AgentResponse,
-    AgentType,
-    Error,
     Message,
-    MessageType,
     UserMessage,
 )
-from autoreport.core.loops.bus import MessageBus
 
 
 @pytest.fixture

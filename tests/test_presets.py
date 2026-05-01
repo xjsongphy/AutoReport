@@ -1,7 +1,6 @@
 """Tests for provider preset parsing."""
 
 from pathlib import Path
-from unittest.mock import patch
 
 from autoreport.config.presets import (
     ProviderPreset,
@@ -79,8 +78,8 @@ def test_parse_claude_presets_missing_file():
 
 
 def test_parse_claude_presets_basic():
-    import tempfile
     import shutil
+    import tempfile
     tmp = Path(tempfile.mkdtemp())
     try:
         ts_content = """

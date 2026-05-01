@@ -46,7 +46,6 @@ class ChatInput(QPlainTextEdit):
         border = "#3c3c3c" if dark else "#e0e0e0"
         bg = "#252526" if dark else "#ffffff"
         fg = "#cccccc" if dark else "#1a1a1a"
-        placeholder = "#858585" if dark else "#858585"
 
         self.setStyleSheet(f"""
             QPlainTextEdit {{

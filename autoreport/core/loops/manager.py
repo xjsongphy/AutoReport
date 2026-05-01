@@ -315,3 +315,31 @@ class LoopManager:
             return self._loops[agent_enum].debug_mode
 
         return False
+
+    def get_agent_status(self, agent_type: str) -> str | None:
+        """Query current status of an agent.
+
+        Args:
+            agent_type: Agent type string (e.g. "data_analysis").
+
+        Returns:
+            Agent status string ("idle", "thinking", "running_tool", "error",
+            "debug_mode"), or None if agent not found.
+        """
+        agent_enum = AgentType(agent_type)
+
+        if agent_enum in self._loops:
+            return self._loops[agent_enum].status.value
+
+        return None
+
+    def get_all_agent_statuses(self) -> dict[str, str]:
+        """Query status of all agents.
+
+        Returns:
+            Dict mapping agent type string to status string.
+        """
+        return {
+            agent_type.value: loop.status.value
+            for agent_type, loop in self._loops.items()
+        }

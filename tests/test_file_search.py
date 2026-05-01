@@ -7,7 +7,6 @@ import pytest
 
 from autoreport.core.file_search import FileMatch, FileSearchManager, FuzzyMatcher
 
-
 # ── FuzzyMatcher tests ──────────────────────────────────────────────────
 
 

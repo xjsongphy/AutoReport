@@ -82,7 +82,8 @@ def test_extract_section_not_found(agents_dir):
     loader = PromptLoader(agents_dir=agents_dir)
     content = "No sections here"
     section = loader._extract_section(content, "identity")
-    assert section == ""
+    # Fallback: when section not found, return full content
+    assert section == "No sections here"
 
 
 def test_get_filename_mapping(agents_dir):

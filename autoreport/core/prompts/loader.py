@@ -109,7 +109,7 @@ class PromptLoader:
 
         # Read and parse file
         content = filepath.read_text(encoding="utf-8")
-        section_content = self._extract_section(content, section)
+        section_content = self._extract_section(content, section, filepath)
 
         # Cache result
         if agent_type not in self._cache:
@@ -141,12 +141,13 @@ class PromptLoader:
 
         return mapping.get(normalized, f"{normalized}_agent.md")
 
-    def _extract_section(self, content: str, section: str) -> str:
+    def _extract_section(self, content: str, section: str, filepath: Path | None = None) -> str:
         """Extract a section from markdown content.
 
         Args:
             content: Full markdown content.
             section: Section name to extract.
+            filepath: Optional file path for logging.
 
         Returns:
             Section content without the header.
@@ -175,9 +176,9 @@ class PromptLoader:
                 break
 
         if start_idx == -1:
-            # Section not found, return empty
-            logger.debug("Section '{}' not found in prompt", section)
-            return ""
+            # Section not found — return full file content as fallback
+            logger.debug("Section '{}' not found in '{}', using full content", section, filepath)
+            return content.strip()
 
         # Find next major section header (## level, not ###)
         # Use regex to find "## " patterns (not "###")

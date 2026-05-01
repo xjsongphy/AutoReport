@@ -1,8 +1,13 @@
 """Agent Loop - core agent processing engine."""
 
+from __future__ import annotations
+
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .manager import LoopManager
 
 from loguru import logger
 
@@ -46,7 +51,7 @@ class AgentLoop:
         config: AgentDefaults,
         llm_provider: LLMProvider,
         prompt_loader: PromptLoader | None = None,
-        loop_manager: "LoopManager | None" = None,
+        loop_manager: LoopManager | None = None,
     ):
         """Initialize agent loop.
 
@@ -425,9 +430,43 @@ class AgentLoop:
             content=content,
             agent_type=agent_type,
             message_id=message_id,
-            source="main_agent",  # 标记为主 Agent 协调
+            source="main_agent",
         ))
         logger.info("Main agent sent coordination message to {}", agent_type)
+
+    async def send_feedback(
+        self,
+        content: str,
+        feedback_type: str = "issue_report",
+    ) -> None:
+        """Send structured feedback from sub-agent to main agent.
+
+        Sub-agents use this to report issues, completion status, or queries
+        that require main agent intervention. Only sub-agents can send
+        feedback.
+
+        Args:
+            content: Feedback message content.
+            feedback_type: Type of feedback — "issue_report", "completion",
+                or "query".
+
+        Raises:
+            RuntimeError: If called from the main agent.
+        """
+        if self.agent_type == AgentType.MAIN:
+            raise RuntimeError("Main agent cannot send feedback to itself")
+
+        await self.bus.publish(AgentFeedback(
+            agent_type=self.agent_type,
+            content=content,
+            feedback_type=feedback_type,
+        ))
+        logger.info(
+            "{} sent feedback to main agent (type={}): {}",
+            self.agent_type,
+            feedback_type,
+            content[:80],
+        )
 
     async def _get_system_prompt(self) -> str:
         """Get system prompt with progressive loading.

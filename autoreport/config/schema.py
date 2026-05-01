@@ -1,10 +1,9 @@
 """Configuration schema using Pydantic."""
 
 from pathlib import Path
-from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -122,7 +121,7 @@ class Settings(BaseSettings):
 
     def _migrate_providers(self, old_providers: dict) -> dict:
         """Migrate old fixed-slot provider format to list-based format."""
-        _NAMES = {
+        _names = {
             "anthropic": "Anthropic",
             "openai": "OpenAI",
             "google": "Google Gemini",
@@ -132,12 +131,12 @@ class Settings(BaseSettings):
             "custom": "Custom",
         }
         configurations = []
-        for name in _NAMES:
+        for name in _names:
             data = old_providers.get(name, {})
             if isinstance(data, dict):
                 configurations.append({
                     "id": f"{name}-default",
-                    "name": _NAMES[name],
+                    "name": _names[name],
                     "provider": name,
                     "api_key": data.get("api_key"),
                     "api_base": data.get("api_base"),
