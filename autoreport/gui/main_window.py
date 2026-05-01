@@ -72,6 +72,9 @@ class MainWindow(QMainWindow):
         # Subscribe to backend messages via signal bridge
         self.backend.subscribe_to_messages(self._on_bus_message)
 
+        # Subscribe agent panels to ApiDebugMessage
+        self._subscribe_to_debug_messages()
+
         logger.info("Main window initialized for workspace: {}", self.workspace)
 
     def _apply_theme(self) -> None:
@@ -464,3 +467,9 @@ class MainWindow(QMainWindow):
             return self.main_agent_panel
         else:
             return self.sub_agent_panel
+
+    def _subscribe_to_debug_messages(self) -> None:
+        """Subscribe agent panels to ApiDebugMessage via MessageBus."""
+        # Subscribe both main and sub-agent panels to debug messages
+        self.main_agent_panel.subscribe_to_debug_messages(self.backend.bus)
+        self.sub_agent_panel.subscribe_to_debug_messages(self.backend.bus)

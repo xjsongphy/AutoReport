@@ -69,6 +69,7 @@ class MessageRow(QWidget):
 
     def _apply_style(self) -> None:
         from PyQt6.QtWidgets import QApplication
+
         hints = QApplication.styleHints()
         dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
 

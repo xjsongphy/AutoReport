@@ -45,5 +45,10 @@ ignore = ["E501"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
+[dependency-groups]
+dev = [
+    "pytest-qt>=4.5.0",
+]
+
 [project.scripts]
 autoreport = "autoreport.__main__:main"
