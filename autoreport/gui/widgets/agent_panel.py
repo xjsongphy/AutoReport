@@ -102,30 +102,43 @@ class AgentPanel(QWidget):
         hints = QApplication.styleHints()
         dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
 
+        # Claude Code theme colors
+        claude_orange = "#d97757"
+
         c = {
-            "headerBg": "#2b2b2b" if dark else "#f3f3f3",
+            # Header - VSCode sidebar background
+            "headerBg": "#252526" if dark else "#f3f3f3",
             "headerBorder": "#3c3c3c" if dark else "#e0e0e0",
-            "titleFg": "#e0e0e0" if dark else "#1a1a1a",
-            "statusIdle": "#888" if dark else "#888",
-            "statusThink": "#4fc3f7" if dark else "#1565c0",
+            "titleFg": "#cccccc" if dark else "#1a1a1a",
+            # Status colors
+            "statusIdle": "#858585" if dark else "#858585",
+            "statusThink": "#4fc3f7" if dark else "#0066bf",
             "statusTool": "#ffb74d" if dark else "#e65100",
-            "statusError": "#ef5350" if dark else "#c62828",
+            "statusError": "#f14c4c" if dark else "#c62828",
             "statusDebug": "#ce93d8" if dark else "#7b1fa2",
-            "msgBg": "#1e1e1e" if dark else "#fff",
-            "userBubble": "#264f78" if dark else "#dcf8c6",
-            "userFg": "#e0e0e0" if dark else "#1a1a1a",
+            # Messages area - VSCode editor background
+            "msgBg": "#1e1e1e" if dark else "#ffffff",
+            "userBubble": "#0e639c" if dark else "#e1f5fe",
+            "userFg": "#ffffff" if dark else "#1a1a1a",
             "agentBubble": "#2d2d2d" if dark else "#f3f3f3",
-            "agentFg": "#e0e0e0" if dark else "#1a1a1a",
-            "toolFg": "#888" if dark else "#666",
-            "inputBg": "#2b2b2b" if dark else "#fff",
-            "inputBorder": "#3c3c3c" if dark else "#ccc",
-            "inputFocusBorder": "#4fc3f7" if dark else "#0078d4",
-            "sendBg": "#0e639c" if dark else "#0078d4",
-            "sendFg": "#fff",
-            "sendHover": "#1177bb" if dark else "#106ebe",
-            "debugFg": "#888" if dark else "#888",
+            "agentFg": "#cccccc" if dark else "#1a1a1a",
+            # Tool output - white background with border
+            "toolBg": "#252526" if dark else "#ffffff",
+            "toolBorder": "#3c3c3c" if dark else "#e0e0e0",
+            "toolFg": "#858585" if dark else "#666666",
+            # Input - Claude Code style white background with orange focus
+            "inputBg": "#3c3c3c" if dark else "#ffffff",
+            "inputBorder": "#3c3c3c" if dark else "#e0e0e0",
+            "inputFocusBorder": claude_orange,
+            "inputFocusRing": f"rgba(217, 119, 87, 0.12)",  # 12% opacity
+            # Send button
+            "sendBg": "#0e639c" if dark else claude_orange,
+            "sendFg": "#ffffff",
+            "sendHover": "#1177bb" if dark else "#c6613f",
+            # Debug button
+            "debugFg": "#858585" if dark else "#858585",
             "debugActiveBg": "#5c1a1a" if dark else "#ffcdd2",
-            "debugActiveFg": "#ef5350" if dark else "#c62828",
+            "debugActiveFg": "#f14c4c" if dark else "#c62828",
         }
         self._colors = c
 

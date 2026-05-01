@@ -75,20 +75,30 @@ class MainWindow(QMainWindow):
         logger.info("Main window initialized for workspace: {}", self.workspace)
 
     def _apply_theme(self) -> None:
-        """Apply VSCode-inspired global theme."""
+        """Apply VSCode-inspired global theme (Claude Code style)."""
         from PyQt6.QtWidgets import QApplication
         hints = QApplication.styleHints()
         dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
 
         c = {
+            # VSCode editor background
             "bg": "#1e1e1e" if dark else "#ffffff",
+            # VSCode border color
             "border": "#3c3c3c" if dark else "#e0e0e0",
+            # VSCode foreground
             "fg": "#cccccc" if dark else "#333333",
+            # VSCode dimmed foreground
             "fg_dim": "#858585" if dark else "#888888",
+            # VSCode hover background
             "hover": "#2a2d2e" if dark else "#e8e8e8",
+            # VSCode scrollbar
             "scroll": "#424242" if dark else "#c1c1c1",
+            # VSCode title bar
             "title": "#323233" if dark else "#ebebeb",
+            # VSCode splitter
             "splitter": "#3c3c3c" if dark else "#e0e0e0",
+            # Claude Code orange accent
+            "accent": "#d97757",
         }
 
         self.setStyleSheet(f"""

@@ -40,22 +40,25 @@ class ChatInput(QPlainTextEdit):
         from PyQt6.QtWidgets import QApplication
         hints = QApplication.styleHints()
         dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
-        border = "#3c3c3c" if dark else "#ccc"
-        focus = "#4fc3f7" if dark else "#0078d4"
-        bg = "#2b2b2b" if dark else "#fff"
-        fg = "#e0e0e0" if dark else "#1a1a1a"
+
+        # Claude Code theme colors
+        claude_orange = "#d97757"
+        border = "#3c3c3c" if dark else "#e0e0e0"
+        bg = "#252526" if dark else "#ffffff"
+        fg = "#cccccc" if dark else "#1a1a1a"
+        placeholder = "#858585" if dark else "#858585"
 
         self.setStyleSheet(f"""
             QPlainTextEdit {{
                 border: 1px solid {border};
-                border-radius: 4px;
-                padding: 6px 8px;
+                border-radius: 8px;
+                padding: 8px 10px;
                 background-color: {bg};
                 color: {fg};
                 font-size: 13px;
             }}
             QPlainTextEdit:focus {{
-                border-color: {focus};
+                border: 1px solid {claude_orange};
             }}
         """)
 
