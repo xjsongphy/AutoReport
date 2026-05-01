@@ -25,6 +25,7 @@ from ..interfaces.types import (
     UserMessage,
 )
 from .widgets.agent_panel import AgentPanel
+from .widgets.conversation_history import ConversationHistoryDialog
 from .widgets.file_tree import FileTreeWidget
 from .widgets.preview import PreviewWidget
 
@@ -78,42 +79,87 @@ class MainWindow(QMainWindow):
         logger.info("Main window initialized for workspace: {}", self.workspace)
 
     def _apply_theme(self) -> None:
-        """Apply VSCode-inspired global theme (Claude Code style)."""
+        """Apply VSCode-inspired global theme matching Cline's exact color tokens.
+
+        Cline maps to --vscode-* CSS custom properties. We replicate those
+        values for dark/light themes since PyQt6 QSS has no CSS-variable support.
+        """
         from PyQt6.QtWidgets import QApplication
         hints = QApplication.styleHints()
         dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
 
-        c = {
-            # VSCode editor background
-            "bg": "#1e1e1e" if dark else "#ffffff",
-            # VSCode border color
-            "border": "#3c3c3c" if dark else "#e0e0e0",
-            # VSCode foreground
-            "fg": "#cccccc" if dark else "#333333",
-            # VSCode dimmed foreground
-            "fg_dim": "#858585" if dark else "#888888",
-            # VSCode hover background
-            "hover": "#2a2d2e" if dark else "#e8e8e8",
-            # VSCode scrollbar
-            "scroll": "#424242" if dark else "#c1c1c1",
-            # VSCode title bar
-            "title": "#323233" if dark else "#ebebeb",
-            # VSCode splitter
-            "splitter": "#3c3c3c" if dark else "#e0e0e0",
-            # Claude Code orange accent
-            "accent": "#d97757",
-        }
+        if dark:
+            c = {
+                "editor_bg": "#1e1e1e",
+                "sidebar_bg": "#252526",
+                "fg": "#cccccc",
+                "muted": "#8b949e",
+                "border": "#3c3c3c",
+                "focus": "#007acc",
+                "input_bg": "#3c3c3c",
+                "input_fg": "#cccccc",
+                "input_border": "#3c3c3c",
+                "input_placeholder": "#8b949e",
+                "badge_bg": "#4d4d4d",
+                "badge_fg": "#ffffff",
+                "button_bg": "#0e639c",
+                "button_fg": "#ffffff",
+                "button_hover": "#1177bb",
+                "error": "#f14c4c",
+                "success": "#4ec9b0",
+                "warning": "#cca700",
+                "link": "#3794ff",
+                "code_bg": "#1e1e1e",
+                "scrollbar": "#424242",
+                "scrollbar_hover": "#686868",
+                "titlebar_bg": "#323233",
+                "hover": "#2a2d2e",
+                "selection": "#264f78",
+                "shadow": "rgba(0,0,0,0.36)",
+            }
+        else:
+            c = {
+                "editor_bg": "#ffffff",
+                "sidebar_bg": "#f3f3f3",
+                "fg": "#333333",
+                "muted": "#8b949e",
+                "border": "#e0e0e0",
+                "focus": "#007acc",
+                "input_bg": "#ffffff",
+                "input_fg": "#333333",
+                "input_border": "#e0e0e0",
+                "input_placeholder": "#8b949e",
+                "badge_bg": "#e8e8e8",
+                "badge_fg": "#333333",
+                "button_bg": "#0e639c",
+                "button_fg": "#ffffff",
+                "button_hover": "#1177bb",
+                "error": "#c62828",
+                "success": "#2e7d32",
+                "warning": "#e65100",
+                "link": "#007acc",
+                "code_bg": "#f8f8f8",
+                "scrollbar": "#c1c1c1",
+                "scrollbar_hover": "#a1a1a1",
+                "titlebar_bg": "#ebebeb",
+                "hover": "#e8e8e8",
+                "selection": "#add6ff",
+                "shadow": "rgba(0,0,0,0.12)",
+            }
+
+        self._theme_colors = c
 
         self.setStyleSheet(f"""
             QMainWindow {{
-                background-color: {c["bg"]};
+                background-color: {c["sidebar_bg"]};
                 color: {c["fg"]};
             }}
             QWidget {{
                 color: {c["fg"]};
+                font-size: 14px;
             }}
             QSplitter::handle {{
-                background-color: {c["splitter"]};
+                background-color: {c["border"]};
             }}
             QSplitter::handle:horizontal {{
                 width: 1px;
@@ -122,44 +168,72 @@ class MainWindow(QMainWindow):
                 height: 1px;
             }}
             QScrollBar:vertical {{
-                background-color: {c["bg"]};
+                background-color: transparent;
                 width: 10px;
                 border: none;
             }}
             QScrollBar::handle:vertical {{
-                background-color: {c["scroll"]};
+                background-color: {c["scrollbar"]};
                 min-height: 30px;
                 border-radius: 5px;
             }}
             QScrollBar::handle:vertical:hover {{
-                background-color: {c["fg_dim"]};
+                background-color: {c["scrollbar_hover"]};
             }}
             QScrollBar::add-line:vertical,
             QScrollBar::sub-line:vertical {{
                 height: 0px;
             }}
             QScrollBar:horizontal {{
-                background-color: {c["bg"]};
+                background-color: transparent;
                 height: 10px;
                 border: none;
             }}
             QScrollBar::handle:horizontal {{
-                background-color: {c["scroll"]};
+                background-color: {c["scrollbar"]};
                 min-width: 30px;
                 border-radius: 5px;
             }}
             QToolBar {{
-                background-color: {c["title"]};
+                background-color: {c["titlebar_bg"]};
                 border-bottom: 1px solid {c["border"]};
                 spacing: 4px;
                 padding: 2px;
             }}
             QToolTip {{
-                background-color: {c["title"]};
+                background-color: {c["titlebar_bg"]};
                 color: {c["fg"]};
                 border: 1px solid {c["border"]};
                 padding: 4px;
                 font-size: 12px;
+            }}
+            /* MessageRow — Cline flat timeline style */
+            QLabel#msgTimestamp {{
+                font-size: 11px;
+                color: {c["muted"]};
+            }}
+            QLabel#msgRole {{
+                font-size: 11px;
+                font-weight: 600;
+                color: {c["fg"]};
+            }}
+            QLabel#msgCoordination {{
+                font-size: 11px;
+                color: {c["muted"]};
+            }}
+            QWidget#userMessageBubble {{
+                background-color: {c["badge_bg"]};
+                border-radius: 2px;
+                margin: 4px 0px;
+            }}
+            QLabel#userMessageText {{
+                color: {c["badge_fg"]};
+                font-size: 13px;
+            }}
+            QLabel#agentMessageText {{
+                color: {c["fg"]};
+                font-size: 13px;
+                background-color: transparent;
             }}
         """)
 
@@ -210,6 +284,12 @@ class MainWindow(QMainWindow):
         self.main_agent_panel.message_sent.connect(self._on_main_agent_message)
         self.sub_agent_panel.message_sent.connect(self._on_sub_agent_message)
         self.sub_agent_panel.debug_mode_toggled.connect(self._on_debug_mode_toggled)
+
+        # Connect conversation history signals (both panels)
+        self.main_agent_panel.history_requested.connect(self._on_history_requested)
+        self.main_agent_panel.new_conversation_requested.connect(self._on_new_conversation_requested)
+        self.sub_agent_panel.history_requested.connect(self._on_history_requested)
+        self.sub_agent_panel.new_conversation_requested.connect(self._on_new_conversation_requested)
 
         # Connect preview selection to sub-agent panel context
         self.preview.selection_changed.connect(self._on_preview_selection_changed)
@@ -467,6 +547,52 @@ class MainWindow(QMainWindow):
             return self.main_agent_panel
         else:
             return self.sub_agent_panel
+
+    # ---- Conversation History ----
+
+    def _on_history_requested(self) -> None:
+        """Show conversation history dialog."""
+        sessions = self._conv_store.get_sessions()
+        current_id = self._conv_store.get_current_session_id()
+
+        dialog = ConversationHistoryDialog(sessions, current_id, parent=self)
+        dialog.session_selected.connect(self._on_session_selected)
+        dialog.new_conversation_requested.connect(self._on_new_conversation_requested)
+        dialog.delete_session_requested.connect(self._on_delete_session)
+        dialog.rename_session_requested.connect(self._on_rename_session)
+
+        dialog.exec()
+
+    def _on_new_conversation_requested(self) -> None:
+        """Create a new conversation session and clear the UI."""
+        self._conv_store.new_session()
+        self._clear_all_panels()
+        logger.info("New conversation session created: {}", self._conv_store.get_current_session_id())
+
+    def _on_session_selected(self, session_id: str) -> None:
+        """Switch to a different conversation session."""
+        if self._conv_store.switch_session(session_id):
+            self._clear_all_panels()
+            self._load_conversations()
+            logger.info("Switched to session: {}", session_id)
+
+    def _on_delete_session(self, session_id: str) -> None:
+        """Delete a conversation session."""
+        self._conv_store.delete_session(session_id)
+        # Reload the current session (might have changed)
+        self._clear_all_panels()
+        self._load_conversations()
+        logger.info("Deleted session: {}", session_id)
+
+    def _on_rename_session(self, session_id: str, new_name: str) -> None:
+        """Rename a conversation session."""
+        self._conv_store.rename_session(session_id, new_name)
+        logger.info("Renamed session {} to {}", session_id, new_name)
+
+    def _clear_all_panels(self) -> None:
+        """Clear messages from all agent panels."""
+        self.main_agent_panel._messages_area.clear()
+        self.sub_agent_panel._messages_area.clear()
 
     def _subscribe_to_debug_messages(self) -> None:
         """Subscribe agent panels to ApiDebugMessage via MessageBus."""

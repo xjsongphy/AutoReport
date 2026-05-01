@@ -1,18 +1,21 @@
 """Per-project conversation persistence using JSONL.
 
 Stores agent conversations under ``workspace/.autoreport/conversations/``
-with one JSONL file per agent type. Each line is a JSON object representing
-a single message or event, enabling append-only writes and easy replay.
+with subdirectories per agent type and one JSONL file per session.
+Supports multiple conversation sessions (Cline-style) with session metadata.
 
 Inspired by Codex's rollout JSONL and nanobot's session manager.
 """
 
 import json
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
+
+_AGENT_TYPES = ["main", "data_analysis", "plotting", "theory", "report"]
 
 
 class ConversationStore:
@@ -22,34 +25,174 @@ class ConversationStore:
 
         workspace/.autoreport/
         └── conversations/
-            ├── main.jsonl
-            ├── data_analysis.jsonl
-            ├── plotting.jsonl
-            ├── theory.jsonl
-            └── report.jsonl
+            ├── sessions.json          # Session metadata
+            ├── main/
+            │   ├── {session_id}.jsonl
+            │   └── ...
+            ├── data_analysis/
+            │   └── ...
+            └── ...
     """
 
     def __init__(self, workspace: Path):
         self._dir = Path(workspace).resolve() / ".autoreport" / "conversations"
         self._dir.mkdir(parents=True, exist_ok=True)
+        self._sessions_file = self._dir / "sessions.json"
+        self._current_session_id: str | None = None
+        self._migrate_old_files()
+        self._load_or_create_session()
+
+    # ---- Migration ----
+
+    def _migrate_old_files(self) -> None:
+        """Migrate old flat .jsonl files into session-based subdirectories."""
+        old_files = [self._dir / f"{t}.jsonl" for t in _AGENT_TYPES]
+        existing = [f for f in old_files if f.exists()]
+        if not existing:
+            return
+
+        # Check if sessions.json already exists (already migrated)
+        if self._sessions_file.exists():
+            return
+
+        # Create a session for the old content
+        session_id = str(uuid.uuid4())
+        timestamp = datetime.now().isoformat(timespec="seconds")
+
+        for old_file in existing:
+            agent_type = old_file.stem
+            agent_dir = self._dir / agent_type
+            agent_dir.mkdir(parents=True, exist_ok=True)
+            new_file = agent_dir / f"{session_id}.jsonl"
+            old_file.rename(new_file)
+            logger.info("Migrated {} -> {}", old_file.name, new_file)
+
+        sessions = [{"id": session_id, "name": "历史对话", "timestamp": timestamp, "preview": ""}]
+        self._save_sessions_metadata(sessions)
+
+    # ---- Session Management ----
+
+    def _load_or_create_session(self) -> None:
+        sessions = self._load_sessions_metadata()
+        if not sessions:
+            self._current_session_id = self._create_new_session("新对话")
+        else:
+            self._current_session_id = sessions[0]["id"]
+
+    def _load_sessions_metadata(self) -> list[dict]:
+        if not self._sessions_file.exists():
+            return []
+        try:
+            with open(self._sessions_file, "r", encoding="utf-8") as f:
+                sessions = json.load(f)
+            sessions.sort(key=lambda s: s.get("timestamp", ""), reverse=True)
+            return sessions
+        except (json.JSONDecodeError, OSError):
+            return []
+
+    def _save_sessions_metadata(self, sessions: list[dict]) -> None:
+        try:
+            with open(self._sessions_file, "w", encoding="utf-8") as f:
+                json.dump(sessions, f, ensure_ascii=False, indent=2)
+        except OSError as e:
+            logger.warning("Failed to save sessions metadata: {}", e)
+
+    def _create_new_session(self, name: str = "新对话") -> str:
+        session_id = str(uuid.uuid4())
+        timestamp = datetime.now().isoformat(timespec="seconds")
+        sessions = self._load_sessions_metadata()
+        sessions.insert(0, {"id": session_id, "name": name, "timestamp": timestamp, "preview": ""})
+        self._save_sessions_metadata(sessions)
+        return session_id
+
+    def _get_session_file_path(self, agent_type: str) -> Path:
+        session_id = self.get_current_session_id()
+        agent_dir = self._dir / agent_type
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        return agent_dir / f"{session_id}.jsonl"
+
+    def get_sessions(self) -> list[dict]:
+        return self._load_sessions_metadata()
+
+    def get_current_session_id(self) -> str:
+        if not self._current_session_id:
+            self._current_session_id = self._create_new_session()
+        return self._current_session_id
+
+    def switch_session(self, session_id: str) -> bool:
+        sessions = self._load_sessions_metadata()
+        for s in sessions:
+            if s["id"] == session_id:
+                self._current_session_id = session_id
+                return True
+        return False
+
+    def new_session(self, name: str = "新对话") -> str:
+        session_id = self._create_new_session(name)
+        self._current_session_id = session_id
+        return session_id
+
+    def rename_session(self, session_id: str, new_name: str) -> bool:
+        sessions = self._load_sessions_metadata()
+        for s in sessions:
+            if s["id"] == session_id:
+                s["name"] = new_name
+                self._save_sessions_metadata(sessions)
+                return True
+        return False
+
+    def delete_session(self, session_id: str) -> bool:
+        sessions = self._load_sessions_metadata()
+        sessions = [s for s in sessions if s["id"] != session_id]
+        self._save_sessions_metadata(sessions)
+
+        for agent_type in _AGENT_TYPES:
+            f = self._dir / agent_type / f"{session_id}.jsonl"
+            if f.exists():
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
+
+        if self._current_session_id == session_id:
+            if sessions:
+                self._current_session_id = sessions[0]["id"]
+            else:
+                self._current_session_id = self._create_new_session()
+        return True
+
+    def update_session_preview(self, agent_type: str, content: str) -> None:
+        if agent_type != "main":
+            return
+        session_id = self.get_current_session_id()
+        sessions = self._load_sessions_metadata()
+        for s in sessions:
+            if s["id"] == session_id:
+                preview = content.split("\n")[0][:100]
+                s["preview"] = preview
+                self._save_sessions_metadata(sessions)
+                break
+
+    def rename_current_session_from_first_message(self, agent_type: str, content: str) -> None:
+        """Auto-name the session from the first user message (max 30 chars)."""
+        if agent_type != "main":
+            return
+        session_id = self.get_current_session_id()
+        sessions = self._load_sessions_metadata()
+        for s in sessions:
+            if s["id"] == session_id and s["name"] in ("新对话", "未命名对话"):
+                name = content.strip()[:30]
+                if name:
+                    s["name"] = name
+                    self._save_sessions_metadata(sessions)
+                break
 
     # ---- Write ----
 
     def append_message(
-        self,
-        agent_type: str,
-        role: str,
-        content: str,
+        self, agent_type: str, role: str, content: str,
         extra: dict[str, Any] | None = None,
     ) -> None:
-        """Append a message to an agent's conversation file.
-
-        Args:
-            agent_type: Agent identifier (main, data_analysis, etc.).
-            role: Message role (user, agent, tool_call, tool_result, error).
-            content: Message content.
-            extra: Optional extra fields.
-        """
         record: dict[str, Any] = {
             "ts": datetime.now().isoformat(timespec="seconds"),
             "role": role,
@@ -58,62 +201,38 @@ class ConversationStore:
         if extra:
             record.update(extra)
 
-        path = self._dir / f"{agent_type}.jsonl"
+        # Auto-name session from first user message to main agent
+        if agent_type == "main" and role == "user":
+            self.rename_current_session_from_first_message(agent_type, content)
+            self.update_session_preview(agent_type, content)
+
+        path = self._get_session_file_path(agent_type)
         try:
             with open(path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
         except OSError as e:
             logger.warning("Failed to append conversation: {}", e)
 
-    def append_tool_call(
-        self,
-        agent_type: str,
-        tool_name: str,
-        arguments: dict,
-    ) -> None:
-        """Append a tool call record."""
-        self.append_message(
-            agent_type,
-            "tool_call",
-            tool_name,
-            {"arguments": arguments},
-        )
+    def append_tool_call(self, agent_type: str, tool_name: str, arguments: dict) -> None:
+        self.append_message(agent_type, "tool_call", tool_name, {"arguments": arguments})
 
     def append_tool_result(
-        self,
-        agent_type: str,
-        tool_name: str,
-        result: str | None = None,
-        error: str | None = None,
+        self, agent_type: str, tool_name: str,
+        result: str | None = None, error: str | None = None,
     ) -> None:
-        """Append a tool result record."""
         extra: dict[str, Any] = {"tool": tool_name}
         if error:
             extra["error"] = error
         elif result:
-            extra["result"] = result[:2000]  # Truncate large results
+            extra["result"] = result[:2000]
         self.append_message(agent_type, "tool_result", tool_name, extra)
 
     # ---- Read ----
 
-    def load_messages(
-        self,
-        agent_type: str,
-        limit: int = 500,
-    ) -> list[dict[str, Any]]:
-        """Load conversation history for an agent.
-
-        Args:
-            agent_type: Agent identifier.
-            limit: Maximum number of records to return (most recent).
-
-        Returns:
-            List of message dicts, oldest first.
-        """
-        path = self._dir / f"{agent_type}.jsonl"
+    def load_messages(self, agent_type: str, limit: int = 500) -> list[dict[str, Any]]:
+        path = self._get_session_file_path(agent_type)
         if not path.exists():
             return []
-
         records: list[dict[str, Any]] = []
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -128,14 +247,11 @@ class ConversationStore:
         except OSError as e:
             logger.warning("Failed to load conversation: {}", e)
             return []
-
-        # Return most recent records
         if len(records) > limit:
             records = records[-limit:]
         return records
 
     def get_last_user_message(self, agent_type: str) -> str | None:
-        """Get the last user message for an agent (for preview)."""
         records = self.load_messages(agent_type, limit=20)
         for rec in reversed(records):
             if rec.get("role") == "user":
@@ -144,19 +260,25 @@ class ConversationStore:
 
     # ---- Lifecycle ----
 
+    def clear_current_session(self) -> None:
+        """Clear message files for the current session across all agent types."""
+        session_id = self.get_current_session_id()
+        for agent_type in _AGENT_TYPES:
+            f = self._dir / agent_type / f"{session_id}.jsonl"
+            if f.exists():
+                f.unlink()
+
     def clear(self, agent_type: str) -> None:
-        """Clear conversation history for an agent."""
-        path = self._dir / f"{agent_type}.jsonl"
+        path = self._get_session_file_path(agent_type)
         if path.exists():
             path.unlink()
             logger.debug("Cleared conversation for {}", agent_type)
 
     def get_agent_types_with_history(self) -> list[str]:
-        """List agent types that have conversation files."""
-        if not self._dir.exists():
-            return []
-        return [
-            p.stem
-            for p in self._dir.glob("*.jsonl")
-            if p.stem != ""
-        ]
+        result = []
+        session_id = self.get_current_session_id()
+        for agent_type in _AGENT_TYPES:
+            f = self._dir / agent_type / f"{session_id}.jsonl"
+            if f.exists():
+                result.append(agent_type)
+        return result

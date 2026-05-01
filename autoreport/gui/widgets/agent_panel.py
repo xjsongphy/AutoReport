@@ -5,13 +5,11 @@ from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import QPoint, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
     QSizePolicy,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -20,9 +18,7 @@ from autoreport.core.file_search import FileSearchManager
 from autoreport.gui.widgets.chat_input import ChatInput
 from autoreport.gui.widgets.debug_panel import DebugPanel
 from autoreport.gui.widgets.file_search_popup import FileSearchPopup
-from autoreport.gui.widgets.message_row import MessageRow
 from autoreport.gui.widgets.messages_area import MessagesArea
-from autoreport.gui.widgets.tool_call_group import ToolCallGroup
 from autoreport.interfaces.types import ApiDebugMessage
 
 
@@ -31,6 +27,8 @@ class AgentPanel(QWidget):
 
     message_sent = pyqtSignal(str)
     debug_mode_toggled = pyqtSignal(bool)
+    history_requested = pyqtSignal()
+    new_conversation_requested = pyqtSignal()
 
     def __init__(self, panel_id: str, title: str, workspace: Path | None = None):
         super().__init__()
@@ -69,6 +67,24 @@ class AgentPanel(QWidget):
         header_layout.addWidget(self._status_label)
 
         header_layout.addStretch()
+
+        # New conversation button (Cline-style)
+        self._new_conv_btn = QPushButton("+")
+        self._new_conv_btn.setObjectName("newConvBtn")
+        self._new_conv_btn.setToolTip("新建对话")
+        self._new_conv_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._new_conv_btn.clicked.connect(self._on_new_conversation)
+        self._new_conv_btn.setFixedSize(24, 24)
+        header_layout.addWidget(self._new_conv_btn)
+
+        # History button (Cline-style)
+        self._history_btn = QPushButton("☰")
+        self._history_btn.setObjectName("historyBtn")
+        self._history_btn.setToolTip("对话历史")
+        self._history_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._history_btn.clicked.connect(self._on_history)
+        self._history_btn.setFixedSize(24, 24)
+        header_layout.addWidget(self._history_btn)
 
         self._debug_button = QPushButton("调试")
         self._debug_button.setObjectName("debugBtn")
@@ -216,6 +232,20 @@ class AgentPanel(QWidget):
                 font-weight: 600;
             }}
             #sendBtn:hover {{ background-color: {c["sendHover"]}; }}
+            #historyBtn, #newConvBtn {{
+                background-color: transparent;
+                color: {c["debugFg"]};
+                border: 1px solid {c["headerBorder"]};
+                border-radius: 3px;
+                font-size: 12px;
+                padding: 0px;
+            }}
+            #historyBtn:hover, #newConvBtn:hover {{ background-color: rgba(128,128,128,0.15); }}
+            #newConvBtn {{
+                color: {c["titleFg"]};
+                font-size: 14px;
+                font-weight: bold;
+            }}
             #debugBtn {{
                 background-color: transparent;
                 color: {c["debugFg"]};
@@ -525,6 +555,14 @@ class AgentPanel(QWidget):
         self._opened_file = None
         self._context_bar.setVisible(False)
 
+    def _on_history(self) -> None:
+        """Handle history button click."""
+        self.history_requested.emit()
+
+    def _on_new_conversation(self) -> None:
+        """Handle new conversation button click."""
+        self.new_conversation_requested.emit()
+
     def _on_debug_toggled(self) -> None:
         enabled = self._debug_button.isChecked()
         if enabled:
@@ -566,3 +604,7 @@ class AgentPanel(QWidget):
 
     def hide_debug_button(self, hide: bool = True) -> None:
         self._debug_button.setHidden(hide)
+
+    def hide_conv_buttons(self, hide: bool = True) -> None:
+        self._history_btn.setHidden(hide)
+        self._new_conv_btn.setHidden(hide)
