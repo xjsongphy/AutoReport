@@ -160,6 +160,12 @@ class ProjectDialog(QDialog):
         new_btn.clicked.connect(self._on_new_project)
         actions_layout.addWidget(new_btn)
 
+        config_btn = QPushButton("API 配置")
+        config_btn.setObjectName("configBtn")
+        config_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        config_btn.clicked.connect(self._on_config)
+        actions_layout.addWidget(config_btn)
+
         actions_layout.addStretch()
 
         root.addWidget(actions)
@@ -263,6 +269,18 @@ class ProjectDialog(QDialog):
             #secondaryBtn:hover {{
                 background-color: {c["secondaryHoverBg"]};
             }}
+            #configBtn {{
+                background-color: transparent;
+                color: {c["subtitleFg"]};
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-size: 13px;
+            }}
+            #configBtn:hover {{
+                background-color: {c["secondaryHoverBg"]};
+                color: {c["secondaryFg"]};
+            }}
             #sectionLabel {{
                 font-size: 12px;
                 font-weight: 600;
@@ -348,6 +366,12 @@ class ProjectDialog(QDialog):
         logger.info("Selected project: {}", path)
         self.project_selected.emit(path)
         self.accept()
+
+    def _on_config(self) -> None:
+        from .config_dialog import ConfigDialog
+
+        dialog = ConfigDialog(self.config_manager, parent=self)
+        dialog.exec()
 
     def _on_new_project(self) -> None:
         dialog = QFileDialog(self)
