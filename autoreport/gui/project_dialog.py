@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..config import ConfigManager
+from ..core.recent_projects import RecentProjects
 
 PROJECT_DIRECTORIES = ["data", "data/processed", "references", "theory", "code", "tex"]
 
@@ -106,6 +107,7 @@ class ProjectDialog(QDialog):
         super().__init__(parent)
         self.config_manager = config_manager
         self._selected_project: Path | None = None
+        self._recent = RecentProjects()
 
         self._setup_ui()
         self._apply_style()
@@ -335,10 +337,9 @@ class ProjectDialog(QDialog):
     # ---- Data loading ----
 
     def _load_recent_projects(self) -> None:
-        current_dir = Path.cwd()
-        for item in current_dir.iterdir():
-            if item.is_dir() and self._is_valid_project(item):
-                self._add_project(item)
+        # Load from recent projects cache
+        for path in self._recent.get_all():
+            self._add_project(path)
 
     def _is_valid_project(self, path: Path) -> bool:
         for dir_name in ["data", "references", "theory", "code", "tex"]:
@@ -362,6 +363,8 @@ class ProjectDialog(QDialog):
 
     def _select_project(self, path: Path) -> None:
         self._selected_project = path
+        # Add to recent projects cache
+        self._recent.add(path)
         logger.info("Selected project: {}", path)
         self.project_selected.emit(path)
         self.accept()
@@ -396,6 +399,7 @@ class ProjectDialog(QDialog):
                 QMessageBox.critical(self, "创建失败", f"无法创建项目结构：\n{e}")
                 return
 
+            self._recent.add(path)
             self._add_project(path)
             self._select_project(path)
 
@@ -421,9 +425,12 @@ class ProjectDialog(QDialog):
                         logger.error("Failed to create project: {}", e)
                         QMessageBox.critical(self, "创建失败", f"无法创建项目结构：\n{e}")
                         return
+                    self._recent.add(path)
                     self._add_project(path)
                 else:
                     return
+            else:
+                self._recent.add(path)
 
             self._select_project(path)
 

@@ -24,14 +24,14 @@ from PyQt6.QtWidgets import (
 # Fixed directory structure
 FIXED_DIRECTORIES = ["data", "references", "theory", "code", "tex"]
 
-# Directory display labels (VSCode style: concise without translation)
+# Directory display labels (VSCode style: concise, title case)
 DIR_LABELS = {
-    "data": "data",
-    "references": "references",
-    "theory": "theory",
-    "code": "code",
-    "tex": "tex",
-    "processed": "processed",
+    "data": "Data",
+    "references": "References",
+    "theory": "Theory",
+    "code": "Code",
+    "tex": "Tex",
+    "processed": "Processed",
 }
 
 # Directory descriptions (for tooltips)
