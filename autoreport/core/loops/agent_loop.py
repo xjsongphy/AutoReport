@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -21,6 +22,7 @@ from ...interfaces.types import (
     AgentResponse,
     AgentStatus,
     AgentType,
+    ApiDebugMessage,
     Error,
     Message,
     StatusChange,
@@ -199,35 +201,64 @@ class AgentLoop:
             tool_definitions = self.tools.get_definitions()
 
             # Call LLM with streaming (default)
+            start_time = time.time()
+
             accumulated_content = ""
             accumulated_tool_calls = []
+            last_error = None
 
-            async for chunk in self.llm_provider.chat_stream(
-                messages=messages,
-                tools=tool_definitions if tool_definitions else None,
-                temperature=self.config.temperature,
-                max_tokens=self.config.max_tokens,
-            ):
-                if chunk.delta:
-                    accumulated_content += chunk.delta
-                    # Stream chunk to UI
-                    await self.bus.publish(AgentResponse(
-                        agent_type=self.agent_type,
-                        content=chunk.delta,
-                        message_id=message.message_id,
-                        streaming=True,
-                    ))
+            try:
+                async for chunk in self.llm_provider.chat_stream(
+                    messages=messages,
+                    tools=tool_definitions if tool_definitions else None,
+                    temperature=self.config.temperature,
+                    max_tokens=self.config.max_tokens,
+                ):
+                    if chunk.delta:
+                        accumulated_content += chunk.delta
+                        # Stream chunk to UI
+                        await self.bus.publish(AgentResponse(
+                            agent_type=self.agent_type,
+                            content=chunk.delta,
+                            message_id=message.message_id,
+                            streaming=True,
+                        ))
 
-                if chunk.tool_calls:
-                    accumulated_tool_calls = chunk.tool_calls
+                    if chunk.tool_calls:
+                        accumulated_tool_calls = chunk.tool_calls
 
-                if chunk.done:
-                    # Stream complete
-                    if accumulated_content:
-                        self._conversation_history.append(
-                            LLMMessage(role="assistant", content=accumulated_content)
-                        )
-                    break
+                    if chunk.done:
+                        # Stream complete
+                        if accumulated_content:
+                            self._conversation_history.append(
+                                LLMMessage(role="assistant", content=accumulated_content)
+                            )
+                        break
+            except Exception as e:
+                last_error = str(e)
+                raise
+
+            finally:
+                # Calculate duration and publish debug info
+                duration_ms = int((time.time() - start_time) * 1000)
+
+                # Extract token usage if available
+                tokens_in = 0
+                tokens_out = 0
+
+                # TODO: Extract usage from provider response
+                # For now, estimate from message length
+                tokens_in = sum(len(m.content) // 4 for m in messages)
+                tokens_out = len(accumulated_content) // 4
+
+                await self.bus.publish(ApiDebugMessage(
+                    model=self.llm_provider.model or "unknown",
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
+                    duration_ms=duration_ms,
+                    status="success" if last_error is None else "error",
+                    error=last_error,
+                ))
 
             # Handle tool calls if present
             if accumulated_tool_calls:
@@ -341,12 +372,36 @@ class AgentLoop:
 
             tool_definitions = self.tools.get_definitions()
 
-            response = await self.llm_provider.chat(
-                messages=current_messages,
-                tools=tool_definitions,
-                temperature=self.config.temperature,
-                max_tokens=self.config.max_tokens,
-            )
+            # Time the API call
+            start_time = time.time()
+            last_error = None
+
+            try:
+                response = await self.llm_provider.chat(
+                    messages=current_messages,
+                    tools=tool_definitions,
+                    temperature=self.config.temperature,
+                    max_tokens=self.config.max_tokens,
+                )
+            except Exception as e:
+                last_error = str(e)
+                raise
+            finally:
+                # Calculate duration and publish debug info
+                duration_ms = int((time.time() - start_time) * 1000)
+
+                # Estimate token usage
+                tokens_in = sum(len(m.content) // 4 for m in current_messages)
+                tokens_out = len(response.content) // 4 if response.content else 0
+
+                await self.bus.publish(ApiDebugMessage(
+                    model=self.llm_provider.model or "unknown",
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
+                    duration_ms=duration_ms,
+                    status="success" if last_error is None else "error",
+                    error=last_error,
+                ))
 
         # Update conversation history with final response
         if response.content:
