@@ -516,7 +516,8 @@ class AgentPanel(QWidget):
                 final_message = content + context_block
 
         self._input_field.clear_text()
-        self.add_message("user", content)
+        # Don't display user message here - backend will send UserMessage back
+        # which will be displayed by _handle_user_message in main_window.py
         self.message_sent.emit(final_message)
 
         # Clear context bar after sending

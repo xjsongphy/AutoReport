@@ -54,14 +54,13 @@ class ChatInput(QPlainTextEdit):
             QPlainTextEdit {{
                 border: 1px solid {border};
                 border-radius: 12px;
-                padding: 8px 10px;
+                padding: 10px 12px;
                 background-color: {bg};
                 color: {fg};
                 font-size: 13px;
             }}
             QPlainTextEdit:focus {{
-                border: 1px solid {claude_orange};
-                box-shadow: 0 0 0 3px {shadow_color};
+                border: 2px solid {claude_orange};
             }}
         """)
 

@@ -170,7 +170,6 @@ class AnthropicProvider(LLMProvider):
             "messages": anthropic_messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
-            "stream": True,  # Enable streaming
         }
 
         if system_message:

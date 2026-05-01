@@ -135,13 +135,14 @@ class MessagesArea(QScrollArea):
         Returns:
             The created MessageRow widget.
         """
-        # Insert before the stretch spacer
+        # Create row without parent to avoid thread issues
+        # Qt will handle parent-child when added to layout
         row = MessageRow(
             role=role,
             content=content,
             timestamp=timestamp,
             is_coordination=is_coordination,
-            parent=self._container,
+            parent=None,  # Let layout handle parent
         )
 
         # Find the stretch item and insert before it
