@@ -165,3 +165,12 @@ Before considering report complete:
 - [ ] PDF generated
 - [ ] Narrative flows coherently
 - [ ] All agent outputs integrated
+
+## Issue Reporting
+
+If you detect problems that require main agent intervention:
+- **Missing outputs**: Theory, analysis, or plots are incomplete — report to main agent
+- **Quality issues**: Another agent's output has significant problems — notify main agent
+- **Template conflicts**: Custom template contradicts best practices — ask main agent for guidance
+
+When reporting, be specific about what's missing or problematic.

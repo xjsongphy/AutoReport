@@ -22,6 +22,7 @@ from ..interfaces.types import (
     StatusChange,
     ToolCall,
     ToolResult,
+    UserMessage,
 )
 from .widgets.agent_panel import AgentPanel
 from .widgets.file_tree import FileTreeWidget
@@ -328,10 +329,13 @@ class MainWindow(QMainWindow):
             StatusChange,
             ToolCall,
             ToolResult,
+            UserMessage,
         )
 
         if isinstance(message, AgentResponse):
             self._handle_agent_response(message)
+        elif isinstance(message, UserMessage):
+            self._handle_user_message(message)
         elif isinstance(message, ToolCall):
             self._handle_tool_call(message)
         elif isinstance(message, ToolResult):
@@ -349,6 +353,51 @@ class MainWindow(QMainWindow):
         panel = self._get_panel_for_agent(agent_str)
         panel.add_message("agent", message.content)
         self._conv_store.append_message(agent_str, "agent", message.content)
+
+    def _handle_user_message(self, message: UserMessage) -> None:
+        """Handle user message (including coordination from main agent).
+
+        Coordination messages (source="main_agent") are displayed in both
+        the main agent panel and the target sub-agent panel.
+        """
+        agent_str = str(message.agent_type)
+        is_coordination = message.source == "main_agent"
+
+        # Display in the target agent's panel
+        target_panel = self._get_panel_for_agent(agent_str)
+        target_panel.add_message(
+            "user",
+            message.content,
+            source=message.source,
+            coordination=is_coordination,
+        )
+
+        # For coordination messages, also display in main agent panel
+        if is_coordination:
+            self.main_agent_panel.add_message(
+                "user",
+                f"[发送给 {self._get_agent_display_name(agent_str)}] {message.content}",
+                source="main_agent",
+                coordination=True,
+            )
+
+        # Store in conversation with source
+        self._conv_store.append_message(
+            agent_str,
+            "user",
+            message.content,
+            extra={"source": message.source},
+        )
+
+    def _get_agent_display_name(self, agent_type: str) -> str:
+        """Get display name for agent type."""
+        names = {
+            "data_analysis": "数据分析 Agent",
+            "plotting": "图像绘制 Agent",
+            "theory": "理论推导 Agent",
+            "report": "报告撰写 Agent",
+        }
+        return names.get(agent_type, agent_type)
 
     def _handle_tool_call(self, message: ToolCall) -> None:
         """Handle tool call."""

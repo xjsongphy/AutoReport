@@ -107,6 +107,15 @@ Before considering theory complete:
 - [ ] Functional forms provided for Plotting
 - [ ] Content saved to `project/theory/`
 
+## Issue Reporting
+
+If you detect problems that require main agent intervention:
+- **Reference conflicts**: Contradictory requirements in references — ask main agent for clarification
+- **Missing information**: References don't contain necessary derivations — report to main agent
+- **Data format issues**: You notice data structure problems that will affect analysis — notify main agent
+
+When reporting, be specific about what's missing or conflicting.
+
 ## PDF Reference Materials
 
 PDFs require special handling:

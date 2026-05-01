@@ -155,8 +155,20 @@ class LoopManager:
                 bus=self.bus,
                 config=config,
                 llm_provider=llm_provider,
+                loop_manager=self,  # Pass loop_manager for coordination
             )
             self._loops[agent_type] = loop
+
+    def get_loop(self, agent_type: AgentType) -> "AgentLoop | None":
+        """Get agent loop by type.
+
+        Args:
+            agent_type: Agent type to retrieve.
+
+        Returns:
+            AgentLoop instance or None if not found.
+        """
+        return self._loops.get(agent_type)
 
     def _create_tools_for_agent(self, agent_type: AgentType) -> ToolRegistry:
         """Create tool registry for an agent type.

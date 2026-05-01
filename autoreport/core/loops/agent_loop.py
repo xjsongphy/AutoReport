@@ -11,6 +11,7 @@ from ...core.prompts import PromptLoader
 from ...core.providers.base import LLMProvider
 from ...core.providers.base import Message as LLMMessage
 from ...interfaces.types import (
+    AgentFeedback,
     AgentResponse,
     AgentStatus,
     AgentType,
@@ -45,6 +46,7 @@ class AgentLoop:
         config: AgentDefaults,
         llm_provider: LLMProvider,
         prompt_loader: PromptLoader | None = None,
+        loop_manager: "LoopManager | None" = None,
     ):
         """Initialize agent loop.
 
@@ -56,6 +58,7 @@ class AgentLoop:
             config: Agent configuration.
             llm_provider: LLM provider for generating responses.
             prompt_loader: Optional custom PromptLoader instance.
+            loop_manager: Optional LoopManager reference for coordination.
         """
         self.agent_type = agent_type
         self.workspace = Path(workspace).resolve()
@@ -63,6 +66,7 @@ class AgentLoop:
         self.bus = bus
         self.config = config
         self.llm_provider = llm_provider
+        self._loop_manager = loop_manager
 
         self._prompt_loader = prompt_loader or PromptLoader()
         self._identity_prompt: str | None = None
@@ -381,6 +385,49 @@ class AgentLoop:
             True if debug mode is enabled.
         """
         return self._debug_mode
+
+    async def send_to_sub_agent(
+        self,
+        agent_type: AgentType,
+        content: str,
+        message_id: str | None = None,
+    ) -> None:
+        """Send coordination message from main agent to sub-agent.
+
+        Only main agent can send coordination messages. Target agents in
+        debug mode will not receive coordination messages.
+
+        Args:
+            agent_type: Target sub-agent type.
+            content: Message content to send.
+            message_id: Optional message ID for tracking.
+
+        Raises:
+            RuntimeError: If called from a non-main agent.
+        """
+        if self.agent_type != AgentType.MAIN:
+            raise RuntimeError("Only main agent can send coordination messages")
+
+        if self._loop_manager is None:
+            logger.warning("Loop manager not available, cannot send coordination message")
+            return
+
+        # Check if target agent is in debug mode
+        target_loop = self._loop_manager.get_loop(agent_type)
+        if target_loop and target_loop.debug_mode:
+            logger.debug(
+                "Target agent {} is in debug mode, skipping coordination",
+                agent_type,
+            )
+            return
+
+        await self.bus.publish(UserMessage(
+            content=content,
+            agent_type=agent_type,
+            message_id=message_id,
+            source="main_agent",  # 标记为主 Agent 协调
+        ))
+        logger.info("Main agent sent coordination message to {}", agent_type)
 
     async def _get_system_prompt(self) -> str:
         """Get system prompt with progressive loading.

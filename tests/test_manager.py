@@ -50,7 +50,6 @@ def manager(workspace, config_manager, gui):
         workspace=workspace,
         config_manager=config_manager,
         bus=bus,
-        gui=gui,
     )
 
 

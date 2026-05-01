@@ -114,3 +114,12 @@ Before considering plotting complete:
 - [ ] Colorblind-friendly colors
 - [ ] Code saved for reproducibility
 - [ ] Documentation explains each plot
+
+## Issue Reporting
+
+If you detect problems that require main agent intervention:
+- **Data issues**: Analysis results are missing or in wrong format — report to main agent
+- **Theory problems**: Functional forms are unclear or missing — notify main agent
+- **Reference conflicts**: Plotting specifications contradict best practices — ask main agent
+
+When reporting, specify what information you need to proceed.

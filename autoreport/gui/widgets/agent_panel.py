@@ -236,7 +236,21 @@ class AgentPanel(QWidget):
 
     # ---- Messages ----
 
-    def add_message(self, role: str, content: str) -> None:
+    def add_message(
+        self,
+        role: str,
+        content: str,
+        source: str = "user",
+        coordination: bool = False,
+    ) -> None:
+        """Add a message to the display.
+
+        Args:
+            role: Message role ("user" or "agent").
+            content: Message content.
+            source: Message source ("user" or "main_agent").
+            coordination: Whether this is a coordination message.
+        """
         cursor = self._messages_area.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
 
@@ -251,6 +265,14 @@ class AgentPanel(QWidget):
             bubble_fmt.setForeground(QColor(self._colors["userFg"]))
 
             cursor.insertText(f"\n{ts}  ", self._default_fmt(cursor))
+
+            # Show coordination indicator
+            if coordination or source == "main_agent":
+                coord_fmt = QTextCharFormat()
+                coord_fmt.setForeground(QColor("#d97757"))  # Claude orange
+                coord_fmt.setFontWeight(QFont.Weight.Bold)
+                cursor.insertText("[主 Agent 协调] ", coord_fmt)
+
             cursor.insertText("你\n", label_fmt)
             cursor.insertText(content + "\n", bubble_fmt)
         else:

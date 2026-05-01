@@ -18,6 +18,7 @@ class MessageType(str, Enum):
 
     # Backend → GUI
     AGENT_RESPONSE = "agent_response"
+    AGENT_FEEDBACK = "agent_feedback"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
     STATUS_CHANGE = "status_change"
@@ -76,6 +77,19 @@ class AgentResponse(Message):
     agent_type: AgentType
     content: str
     message_id: str | None = None
+
+
+class AgentFeedback(Message):
+    """Sub-agent feedback to main agent for coordination.
+
+    Sub-agents send this when they detect issues that require
+    main agent intervention (e.g., other agent's output is wrong).
+    """
+
+    type: MessageType = MessageType.AGENT_FEEDBACK
+    agent_type: AgentType
+    content: str
+    feedback_type: str = "issue_report"  # "issue_report", "completion", "query"
 
 
 class ToolCall(Message):

@@ -65,10 +65,10 @@ def agent_loop(workspace, config, mock_gui, mock_provider, mock_prompt_loader):
         workspace=workspace,
         tools=tools,
         bus=bus,
-        gui=mock_gui,
         config=config,
         llm_provider=mock_provider,
         prompt_loader=mock_prompt_loader,
+        loop_manager=None,  # Not needed for tests
     )
     return loop
 
@@ -131,7 +131,7 @@ async def test_process_message(agent_loop, mock_provider, mock_gui):
     await agent_loop._process_message(msg)
 
     mock_provider.chat.assert_called_once()
-    mock_gui.display_agent_message.assert_called_once()
+    # Agent publishes AgentResponse to bus (not GUI call)
     assert agent_loop.status == AgentStatus.IDLE
 
 
@@ -166,7 +166,7 @@ async def test_process_message_error(agent_loop, mock_provider, mock_gui):
     await agent_loop._process_message(msg)
 
     assert agent_loop.status == AgentStatus.ERROR
-    mock_gui.show_error.assert_called_once()
+    # Error is published to bus (not GUI call)
 
 
 @pytest.mark.asyncio
