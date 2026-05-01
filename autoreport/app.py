@@ -1,19 +1,29 @@
 """Main application entry point."""
 
-import argparse
 import asyncio
 import signal
 import sys
 from pathlib import Path
+from typing import Annotated
 
+import typer
 from loguru import logger
 from PyQt6.QtWidgets import QApplication, QDialog
+from rich.console import Console
 
 from .config import ConfigManager
 from .core.loops import LoopManager, MessageBus
 from .gui import MainWindow
 from .interfaces.protocol import BackendAPI
 from .utils import log_exception, setup_exception_handler, setup_logging
+
+console = Console()
+app = typer.Typer(
+    name="autoreport",
+    help="AutoReport - 物理实验报告自动撰写系统",
+    rich_markup_mode="rich",
+    no_args_is_help=True,
+)
 
 
 class AutoReportApp:
@@ -319,33 +329,6 @@ class BackendAPIImpl(BackendAPI):
         self.bus.subscribe(Message, callback)
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(
-        description="AutoReport - 物理实验报告自动撰写系统",
-    )
-    parser.add_argument(
-        "--debug-agent",
-        action="append",
-        default=[],
-        choices=["data_analysis", "plotting", "theory", "report"],
-        help="在调试模式下启动指定的 Agent（可重复使用）",
-    )
-    parser.add_argument(
-        "--sync-presets",
-        action="store_true",
-        default=False,
-        help="从 cc-switch 仓库同步最新预设模板并退出",
-    )
-    parser.add_argument(
-        "-v", "--verbose",
-        action="store_true",
-        default=False,
-        help="输出 DEBUG 级别调试信息",
-    )
-    return parser.parse_args(argv)
-
-
 def _try_sync_presets(silent: bool = False) -> bool:
     """Try to sync presets from cc-switch. Returns True on success."""
     from .core.preset_sync import is_cached, sync_presets
@@ -389,80 +372,100 @@ def _check_dependencies(config_manager: ConfigManager) -> None:
         )
 
 
-def main():
-    """Main entry point."""
-    # Parse arguments first (no GUI needed)
-    args = parse_args()
-
-    # Handle --sync-presets (CLI mode, no GUI)
-    if args.sync_presets:
+@app.command()
+def main(
+    debug_agent: Annotated[
+        list[str],
+        typer.Option(
+            "--debug-agent",
+            help="在调试模式下启动指定的 Agent（可重复使用）",
+        ),
+    ] = [],  # noqa: B006
+    sync_presets: Annotated[
+        bool,
+        typer.Option(
+            "--sync-presets",
+            help="从 cc-switch 仓库同步最新预设模板并退出",
+        ),
+    ] = False,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "-v", "--verbose",
+            help="输出 DEBUG 级别调试信息",
+        ),
+    ] = False,
+) -> None:
+    """AutoReport - 基于 Agent 的自动化物理实验报告撰写系统"""
+    # Handle --sync-presets (CLI mode, no GUI needed)
+    if sync_presets:
         setup_logging(log_level="INFO", log_to_file=True)
-        print("Syncing presets from cc-switch...")
+        console.print("[bold cyan]Syncing presets from cc-switch...[/bold cyan]")
         ok = _try_sync_presets(silent=False)
         if ok:
             from .config.presets import load_presets
-            presets = load_presets()
-            print(f"Sync complete. {len(presets)} presets available.")
-        else:
-            print("Sync failed. Check network/proxy settings.")
-        sys.exit(0 if ok else 1)
 
-    # Create Qt application BEFORE any other initialization.
-    # Must keep a strong reference to prevent garbage collection.
+            presets = load_presets()
+            console.print(f"[green]Sync complete. {len(presets)} presets available.[/green]")
+        else:
+            console.print("[red]Sync failed. Check network/proxy settings.[/red]")
+        raise typer.Exit(code=0 if ok else 1)
+
+    # Create Qt application BEFORE any other initialization
     qt_app = QApplication(sys.argv)
     assert QApplication.instance() is not None, "QApplication creation failed"
 
     # Set application icon
     from PyQt6.QtGui import QIcon
+
     icon_path = Path(__file__).parent / "resources" / "icon.png"
     if icon_path.exists():
         qt_app.setWindowIcon(QIcon(str(icon_path)))
 
-    # Now safe to setup logging and exception handling
-    log_level = "DEBUG" if args.verbose else "INFO"
+    # Setup logging and exception handling
+    log_level = "DEBUG" if verbose else "INFO"
     setup_logging(log_level=log_level, log_to_file=True)
     setup_exception_handler()
 
     logger.info("AutoReport starting...")
 
-    app = AutoReportApp()
+    app_inst = AutoReportApp()
 
     # Store debug agents for activation after loop manager starts
-    app._debug_agents_on_start = args.debug_agent
+    app_inst._debug_agents_on_start = debug_agent
 
     # Check optional dependencies
-    _check_dependencies(app.config_manager)
+    _check_dependencies(app_inst.config_manager)
 
     # Auto-sync presets on startup (failure is non-fatal)
     if not _try_sync_presets(silent=True):
         logger.info("Presets not synced — UI sync button available for retry")
 
     # Check API configuration first
-    is_valid, _ = app.config_manager.validate_api_keys()
+    is_valid, _ = app_inst.config_manager.validate_api_keys()
 
     if not is_valid:
-        # Show config dialog
         from .gui.config_dialog import ConfigDialog
-        dialog = ConfigDialog(app.config_manager)
+
+        dialog = ConfigDialog(app_inst.config_manager)
         result = dialog.exec()
 
         if result != QDialog.DialogCode.Accepted:
             logger.info("Configuration cancelled by user")
-            sys.exit(0)
+            raise typer.Exit(code=0)
 
-        # Re-validate after config
-        is_valid, available = app.config_manager.validate_api_keys()
+        is_valid, _ = app_inst.config_manager.validate_api_keys()
         if not is_valid:
             logger.error("Still no valid API keys after configuration")
-            sys.exit(1)
+            raise typer.Exit(code=1)
 
     # Run GUI (includes project selection and startup)
-    app.run_gui(qt_app)
+    app_inst.run_gui(qt_app)
 
-    # Shutdown (keep qt_app alive until exit)
+    # Shutdown
     try:
         loop = asyncio.get_event_loop()
-        loop.run_until_complete(app.shutdown())
+        loop.run_until_complete(app_inst.shutdown())
     except Exception as e:
         log_exception("Error during shutdown", e)
     finally:
@@ -470,4 +473,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    app()

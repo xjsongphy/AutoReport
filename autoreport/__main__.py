@@ -14,10 +14,6 @@ def main():
     for var in ("VIRTUAL_ENV", "CONDA_PREFIX", "CONDA_DEFAULT_ENV"):
         os.environ.pop(var, None)
 
-    from autoreport.app import main as app_main
+    from autoreport.app import app
 
-    app_main()
-
-
-if __name__ == "__main__":
-    main()
+    app()
