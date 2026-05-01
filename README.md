@@ -40,6 +40,25 @@ autoreport
 ```
 
 > If `autoreport` command is not found, use `uv run autoreport` instead, or activate the virtual environment first: `source .venv/bin/activate` (Linux/macOS) or `.\.venv\Scripts\Activate.ps1` (Windows).
+>
+> **Auto-activation (optional)**: Add the following to your shell profile to automatically activate `.venv` when entering the project directory:
+>
+> **PowerShell** (`$PROFILE`):
+> ```powershell
+> Remove-Item Alias:cd -ErrorAction SilentlyContinue
+> function cd($path) {
+>     Set-Location $path
+>     $a = ".\.venv\Scripts\Activate.ps1"
+>     if (Test-Path $a) { . $a }
+> }
+> $initialActivate = ".\.venv\Scripts\Activate.ps1"
+> if (Test-Path $initialActivate) { . $initialActivate }
+> ```
+>
+> **Bash/Zsh** (`~/.bashrc` / `~/.zshrc`):
+> ```bash
+> cd() { builtin cd "$@" && [ -f .venv/bin/activate ] && . .venv/bin/activate; }
+> ```
 
 On first launch, you'll be prompted to configure API keys. You can also pre-configure via environment variables:
 
@@ -249,17 +268,22 @@ Users can override built-in templates by placing custom templates in `project/re
 
 ## MinerU Integration
 
-AutoReport uses [mineru-open-api](https://github.com/opendatalab/MinerU) CLI for PDF parsing.
+AutoReport uses [MinerU](https://mineru.net/) CLI for PDF parsing.
 
 ### Setup
 
 1. Install and authenticate mineru-open-api:
 ```bash
-pip install mineru-open-api
+curl -fsSL https://cdn-mineru.openxlab.org.cn/open-api-cli/install.sh | sh
+```
+For more details, see the [mineru-open-api documentation](https://mineru.net/ecosystem?tab=cli).
+
+2. Create an account on [MinerU](https://mineru.net/apiManage/token) and obtain an API key. Then authenticate via CLI:
+```bash
 mineru-open-api auth
 ```
 
-2. The system will check availability on startup and show a warning if not installed.
+3. The system will check availability on startup and show a warning if not installed.
 
 ### Features
 

@@ -38,6 +38,25 @@ autoreport
 ```
 
 > 如果提示 `autoreport` 命令未找到，请使用 `uv run autoreport` 代替，或先激活虚拟环境：`.\.venv\Scripts\Activate.ps1`。
+>
+> **自动激活（可选）**：在 Shell 配置文件中添加以下内容，进入项目目录时自动激活 `.venv`：
+>
+> **PowerShell**（`$PROFILE`）：
+> ```powershell
+> Remove-Item Alias:cd -ErrorAction SilentlyContinue
+> function cd($path) {
+>     Set-Location $path
+>     $a = ".\.venv\Scripts\Activate.ps1"
+>     if (Test-Path $a) { . $a }
+> }
+> $initialActivate = ".\.venv\Scripts\Activate.ps1"
+> if (Test-Path $initialActivate) { . $initialActivate }
+> ```
+>
+> **Bash/Zsh**（`~/.bashrc` / `~/.zshrc`）：
+> ```bash
+> cd() { builtin cd "$@" && [ -f .venv/bin/activate ] && . .venv/bin/activate; }
+> ```
 
 首次启动会提示配置 API 密钥。也可通过环境变量预配置：
 
