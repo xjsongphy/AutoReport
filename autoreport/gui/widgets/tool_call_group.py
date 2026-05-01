@@ -1,10 +1,22 @@
-"""Collapsible tool call group component."""
+"""Collapsible tool call group — Cline code-block style with monospace and editor colors."""
 
 from dataclasses import dataclass
 from typing import Any
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout, QWidget
+
+# Cline/VSCode dark theme color tokens
+C = {
+    "code_bg": "#1e1e1e",
+    "code_fg": "#cccccc",
+    "border": "#3c3c3c",
+    "muted": "#8b949e",
+    "success": "#4ec9b0",
+    "error": "#f14c4c",
+    "hover": "#2a2d2e",
+    "focus": "#007acc",
+}
 
 
 @dataclass
@@ -20,44 +32,50 @@ class ToolCall:
 
 
 class ToolCallGroup(QWidget):
-    """Collapsible group of tool calls with status display.
+    """Collapsible group of tool calls — Cline code-block pattern.
 
-    Collapsed: "✓ 3 tools executed (2.3s) [▶]"
-    Expanded: Each tool with details
+    Collapsed: "✓ read_file (0.3s)  ▶"
+    Expanded:  Each tool with status, duration, result/error in monospace detail.
     """
 
     expanded_changed = pyqtSignal(bool)
 
     def __init__(self, parent: QWidget | None = None):
-        """Initialize tool call group."""
         super().__init__(parent)
         self._calls: list[ToolCall] = []
         self._expanded = False
 
         self._setup_ui()
+        self._apply_style()
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(2)
+        layout.setContentsMargins(16, 4, 16, 4)  # px-4 + inner padding
+        layout.setSpacing(0)
 
-        # Header/summary (always visible)
+        # Outer frame matching Cline code-block
+        self._frame = QFrame()
+        self._frame.setObjectName("toolCallFrame")
+        frame_layout = QVBoxLayout(self._frame)
+        frame_layout.setContentsMargins(10, 9, 10, 9)  # py-[9px] px-2.5
+        frame_layout.setSpacing(4)
+
+        # Header — clickable summary row
         self._header_btn = QPushButton()
         self._header_btn.setObjectName("toolCallHeader")
-        self._header_btn.setCheckable(True)
         self._header_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._header_btn.clicked.connect(self._on_toggle)
-        layout.addWidget(self._header_btn)
+        frame_layout.addWidget(self._header_btn)
 
-        # Details container (hidden when collapsed)
+        # Details panel — hidden when collapsed
         self._details_container = QWidget()
+        self._details_container.setObjectName("toolCallDetails")
         self._details_layout = QVBoxLayout(self._details_container)
-        self._details_layout.setContentsMargins(12, 4, 4, 4)
-        self._details_layout.setSpacing(2)
-        layout.addWidget(self._details_container)
+        self._details_layout.setContentsMargins(0, 6, 0, 0)
+        self._details_layout.setSpacing(3)
+        frame_layout.addWidget(self._details_container)
 
-        self._apply_style()
-        self._update_display()
+        layout.addWidget(self._frame)
 
     def add_tool_call(
         self,
@@ -68,16 +86,6 @@ class ToolCallGroup(QWidget):
         result: Any = None,
         error: str | None = None,
     ) -> None:
-        """Add a tool call to the group.
-
-        Args:
-            name: Tool name
-            arguments: Tool arguments
-            success: Whether tool call succeeded
-            duration_ms: Execution duration in milliseconds
-            result: Optional result
-            error: Optional error message
-        """
         call = ToolCall(
             name=name,
             arguments=arguments,
@@ -90,95 +98,89 @@ class ToolCallGroup(QWidget):
         self._update_display()
 
     def _on_toggle(self) -> None:
-        """Handle expand/collapse toggle."""
-        self._expanded = self._header_btn.isChecked()
+        self._expanded = not self._expanded
         self._details_container.setVisible(self._expanded)
         self.expanded_changed.emit(self._expanded)
         self._update_display()
 
     def _update_display(self) -> None:
-        """Update display based on current state."""
-        # Update header
         success_count = sum(1 for c in self._calls if c.success)
+        fail_count = len(self._calls) - success_count
         total_duration = sum(c.duration_ms for c in self._calls) / 1000.0
 
-        icon = "✓" if success_count == len(self._calls) else "✗"
-        arrow = "▼" if self._expanded else "▶"
+        # Status icon
+        icon = "✔" if fail_count == 0 else "✘"  # heavy check / ballot x
+        arrow = "▼" if self._expanded else "▶"  # down / right triangle
 
-        if len(self._calls) <= 3:
-            # Show all tool names in collapsed state
+        # Build header text
+        if len(self._calls) == 1:
+            c = self._calls[0]
+            header_text = f"  {icon} {c.name} ({c.duration_ms / 1000:.1f}s)  {arrow}"
+        elif len(self._calls) <= 3:
             names = ", ".join(c.name for c in self._calls)
-            header_text = f"  {icon} {names} ({total_duration:.1f}s) [{arrow}]"
+            header_text = f"  {icon} {names} ({total_duration:.1f}s)  {arrow}"
         else:
-            # Truncate with "+N more"
-            first_names = ", ".join(c.name for c in self._calls[:3])
-            header_text = f"  {icon} {first_names} +{len(self._calls) - 3} more ({total_duration:.1f}s) [{arrow}]"
+            shown = ", ".join(c.name for c in self._calls[:3])
+            header_text = f"  {icon} {shown} +{len(self._calls) - 3} more ({total_duration:.1f}s)  {arrow}"
 
         self._header_btn.setText(header_text)
 
-        # Update details
-        # Clear existing labels
+        # Rebuild details
         for i in reversed(range(self._details_layout.count())):
-            self._details_layout.itemAt(i).widget().setParent(None)
+            w = self._details_layout.itemAt(i).widget()
+            if w:
+                w.setParent(None)
 
-        # Add detail labels for each call
         for call in self._calls:
-            detail = QLabel()
-            detail.setObjectName("toolCallDetail")
-
-            call_icon = "✓" if call.success else "✗"
-            detail_text = f"    {call_icon} {call.name} ({call.duration_ms / 1000:.1f}s)"
+            call_icon = "✔" if call.success else "✘"
+            dur = f"{call.duration_ms / 1000:.1f}s"
 
             if call.error:
-                detail_text += f"\n      error: {call.error}"
-            elif call.result:
-                # Show abbreviated result
-                result_str = str(call.result)[:50]
-                detail_text += f"\n      result: {result_str}"
+                detail_text = f"  {call_icon} {call.name} ({dur})\n    error: {call.error}"
+            elif call.result is not None:
+                result_str = str(call.result)[:120]
+                detail_text = f"  {call_icon} {call.name} ({dur})\n    result: {result_str}"
+            else:
+                detail_text = f"  {call_icon} {call.name} ({dur})"
 
-            detail.setText(detail_text)
+            detail = QLabel(detail_text)
+            detail.setObjectName("toolCallDetail")
             detail.setWordWrap(True)
             self._details_layout.addWidget(detail)
 
         self._details_container.setVisible(self._expanded)
 
     def _apply_style(self) -> None:
-        from PyQt6.QtWidgets import QApplication
-
-        hints = QApplication.styleHints()
-        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
-
-        if dark:
-            header_fg = "#cccccc"
-            detail_bg = "#252526"
-        else:
-            header_fg = "#1a1a1a"
-            detail_bg = "#f5f5f5"
-
         self.setStyleSheet(f"""
+            QFrame#toolCallFrame {{
+                background-color: {C["code_bg"]};
+                border: 1px solid {C["border"]};
+                border-radius: 2px;
+            }}
             QPushButton#toolCallHeader {{
                 background-color: transparent;
                 border: none;
-                color: {header_fg};
-                font-family: "Consolas", "Monaco", monospace;
+                color: {C["code_fg"]};
+                font-family: "Consolas", "Monaco", "Courier New", monospace;
                 font-size: 12px;
                 text-align: left;
-                padding: 2px 4px;
+                padding: 0px;
+            }}
+            QPushButton#toolCallHeader:hover {{
+                color: {C["focus"]};
             }}
             QLabel#toolCallDetail {{
-                background-color: {detail_bg};
-                color: {header_fg};
-                font-family: "Consolas", "Monaco", monospace;
+                color: {C["code_fg"]};
+                font-family: "Consolas", "Monaco", "Courier New", monospace;
                 font-size: 11px;
                 padding: 4px 8px;
-                border-radius: 3px;
+                border-radius: 2px;
+                background-color: transparent;
             }}
         """)
 
     def is_expanded(self) -> bool:
-        """Return whether group is expanded."""
         return self._expanded
 
     def get_summary_text(self) -> str:
-        """Get summary text for testing."""
         return self._header_btn.text()

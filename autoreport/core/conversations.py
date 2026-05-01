@@ -38,9 +38,9 @@ class ConversationStore:
         self._dir = Path(workspace).resolve() / ".autoreport" / "conversations"
         self._dir.mkdir(parents=True, exist_ok=True)
         self._sessions_file = self._dir / "sessions.json"
-        self._current_session_id: str | None = None
+        self._current_session_ids: dict[str, str] = {}  # per-agent session tracking
         self._migrate_old_files()
-        self._load_or_create_session()
+        self._load_or_create_sessions()
 
     # ---- Migration ----
 
@@ -72,12 +72,27 @@ class ConversationStore:
 
     # ---- Session Management ----
 
-    def _load_or_create_session(self) -> None:
+    def _load_or_create_sessions(self) -> None:
+        """Initialize session IDs for all agent types independently."""
         sessions = self._load_sessions_metadata()
         if not sessions:
-            self._current_session_id = self._create_new_session("新对话")
+            # Create initial session for all agents
+            session_id = self._create_new_session("新对话")
+            for t in _AGENT_TYPES:
+                self._current_session_ids[t] = session_id
         else:
-            self._current_session_id = sessions[0]["id"]
+            # Each agent gets its own latest session (or first available)
+            for t in _AGENT_TYPES:
+                # Try to find an existing session file for this agent
+                agent_dir = self._dir / t
+                if agent_dir.exists():
+                    jsonl_files = sorted(agent_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+                    if jsonl_files:
+                        self._current_session_ids[t] = jsonl_files[0].stem
+                    else:
+                        self._current_session_ids[t] = sessions[0]["id"]
+                else:
+                    self._current_session_ids[t] = sessions[0]["id"]
 
     def _load_sessions_metadata(self) -> list[dict]:
         if not self._sessions_file.exists():
@@ -106,7 +121,7 @@ class ConversationStore:
         return session_id
 
     def _get_session_file_path(self, agent_type: str) -> Path:
-        session_id = self.get_current_session_id()
+        session_id = self.get_current_session_id(agent_type)
         agent_dir = self._dir / agent_type
         agent_dir.mkdir(parents=True, exist_ok=True)
         return agent_dir / f"{session_id}.jsonl"
@@ -114,22 +129,22 @@ class ConversationStore:
     def get_sessions(self) -> list[dict]:
         return self._load_sessions_metadata()
 
-    def get_current_session_id(self) -> str:
-        if not self._current_session_id:
-            self._current_session_id = self._create_new_session()
-        return self._current_session_id
+    def get_current_session_id(self, agent_type: str = "main") -> str:
+        if agent_type not in self._current_session_ids:
+            self._current_session_ids[agent_type] = self._create_new_session()
+        return self._current_session_ids[agent_type]
 
-    def switch_session(self, session_id: str) -> bool:
+    def switch_session(self, session_id: str, agent_type: str = "main") -> bool:
         sessions = self._load_sessions_metadata()
         for s in sessions:
             if s["id"] == session_id:
-                self._current_session_id = session_id
+                self._current_session_ids[agent_type] = session_id
                 return True
         return False
 
-    def new_session(self, name: str = "新对话") -> str:
+    def new_session(self, name: str = "新对话", agent_type: str = "main") -> str:
         session_id = self._create_new_session(name)
-        self._current_session_id = session_id
+        self._current_session_ids[agent_type] = session_id
         return session_id
 
     def rename_session(self, session_id: str, new_name: str) -> bool:
@@ -154,17 +169,17 @@ class ConversationStore:
                 except OSError:
                     pass
 
-        if self._current_session_id == session_id:
-            if sessions:
-                self._current_session_id = sessions[0]["id"]
-            else:
-                self._current_session_id = self._create_new_session()
+        # Clear the session from all agent tracking
+        for agent_type in self._current_session_ids:
+            if self._current_session_ids[agent_type] == session_id:
+                if sessions:
+                    self._current_session_ids[agent_type] = sessions[0]["id"]
+                else:
+                    self._current_session_ids[agent_type] = self._create_new_session()
         return True
 
     def update_session_preview(self, agent_type: str, content: str) -> None:
-        if agent_type != "main":
-            return
-        session_id = self.get_current_session_id()
+        session_id = self.get_current_session_id(agent_type)
         sessions = self._load_sessions_metadata()
         for s in sessions:
             if s["id"] == session_id:
@@ -175,9 +190,7 @@ class ConversationStore:
 
     def rename_current_session_from_first_message(self, agent_type: str, content: str) -> None:
         """Auto-name the session from the first user message (max 30 chars)."""
-        if agent_type != "main":
-            return
-        session_id = self.get_current_session_id()
+        session_id = self.get_current_session_id(agent_type)
         sessions = self._load_sessions_metadata()
         for s in sessions:
             if s["id"] == session_id and s["name"] in ("新对话", "未命名对话"):
@@ -261,12 +274,13 @@ class ConversationStore:
     # ---- Lifecycle ----
 
     def clear_current_session(self) -> None:
-        """Clear message files for the current session across all agent types."""
-        session_id = self.get_current_session_id()
+        """Clear message files for all current sessions across all agent types."""
         for agent_type in _AGENT_TYPES:
-            f = self._dir / agent_type / f"{session_id}.jsonl"
-            if f.exists():
-                f.unlink()
+            session_id = self._current_session_ids.get(agent_type)
+            if session_id:
+                f = self._dir / agent_type / f"{session_id}.jsonl"
+                if f.exists():
+                    f.unlink()
 
     def clear(self, agent_type: str) -> None:
         path = self._get_session_file_path(agent_type)
@@ -276,9 +290,10 @@ class ConversationStore:
 
     def get_agent_types_with_history(self) -> list[str]:
         result = []
-        session_id = self.get_current_session_id()
         for agent_type in _AGENT_TYPES:
-            f = self._dir / agent_type / f"{session_id}.jsonl"
-            if f.exists():
-                result.append(agent_type)
+            session_id = self._current_session_ids.get(agent_type)
+            if session_id:
+                f = self._dir / agent_type / f"{session_id}.jsonl"
+                if f.exists():
+                    result.append(agent_type)
         return result

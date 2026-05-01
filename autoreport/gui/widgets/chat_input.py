@@ -32,35 +32,32 @@ class ChatInput(QPlainTextEdit):
         self._setup_ui()
 
     def _setup_ui(self) -> None:
-        """Setup user interface."""
+        """Setup input matching Cline's ChatTextArea: 2px radius, focus-border blue."""
         self.setPlaceholderText("输入消息… (@ 引用文件, Enter 发送)")
-        self.setMinimumHeight(40)
-        self.setMaximumHeight(120)
+        self.setMinimumHeight(60)   # ~3 rows
+        self.setMaximumHeight(200)  # ~10 rows
 
         from PyQt6.QtWidgets import QApplication
         hints = QApplication.styleHints()
         dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
 
-        # Claude Code theme colors
-        claude_orange = "#d97757"
-        border = "#3c3c3c" if dark else "#e0e0e0"
-        bg = "#252526" if dark else "#ffffff"
-        fg = "#cccccc" if dark else "#1a1a1a"
-
-        # Add subtle shadow
-        shadow_color = "rgba(0, 0, 0, 0.1)" if not dark else "rgba(0, 0, 0, 0.3)"
+        # Cline color tokens
+        input_bg = "#3c3c3c" if dark else "#ffffff"
+        input_fg = "#cccccc" if dark else "#333333"
+        input_border = "#3c3c3c" if dark else "#e0e0e0"
+        focus_border = "#007acc"  # --vscode-focusBorder
 
         self.setStyleSheet(f"""
             QPlainTextEdit {{
-                border: 1px solid {border};
-                border-radius: 12px;
-                padding: 10px 12px;
-                background-color: {bg};
-                color: {fg};
+                border: 1px solid {input_border};
+                border-radius: 2px;
+                padding: 9px 28px 9px 9px;
+                background-color: {input_bg};
+                color: {input_fg};
                 font-size: 13px;
             }}
             QPlainTextEdit:focus {{
-                border: 2px solid {claude_orange};
+                border: 1.5px solid {focus_border};
             }}
         """)
 

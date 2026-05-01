@@ -22,16 +22,8 @@ def setup_logging(
     # Remove default handler
     logger.remove()
 
-    # Console handler — static format string (no {exception}, no blank lines)
-    logger.add(
-        sys.stderr,
-        level=log_level,
-        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-               "<level>{level: <8}</level> | "
-               "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
-               "<level>{message}</level>",
-        colorize=True,
-    )
+    # Console handler — RichHandler for beautiful terminal output
+    _add_console_handler(log_level)
 
     # File handler for all logs
     if log_to_file:
@@ -65,6 +57,45 @@ def setup_logging(
         )
 
     logger.info("Logging configured: level={}, log_to_file={}", log_level, log_to_file)
+
+
+def _add_console_handler(log_level: str) -> None:
+    """Add a rich-powered console handler for beautiful terminal output.
+
+    Uses rich.logging.RichHandler when available, falling back to a
+    colorized loguru format for environments without rich.
+    """
+    try:
+        from rich.logging import RichHandler
+
+        # RichHandler + loguru: use a format with just the message,
+        # since RichHandler renders time/level/path in its own markup.
+        logger.add(
+            RichHandler(
+                console=None,  # auto-detect
+                show_time=True,
+                show_level=True,
+                show_path=True,
+                markup=True,
+                rich_tracebacks=True,
+                log_time_format="%Y-%m-%d %H:%M:%S",
+            ),
+            level=log_level,
+            format="{message}",
+        )
+    except ImportError:
+        # Fallback: colorized loguru format
+        logger.add(
+            sys.stderr,
+            level=log_level,
+            format=(
+                "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+                "<level>{level: <8}</level> | "
+                "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
+                "<level>{message}</level>"
+            ),
+            colorize=True,
+        )
 
 
 def _file_format(record):

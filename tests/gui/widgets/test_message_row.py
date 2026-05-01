@@ -1,12 +1,12 @@
-"""Tests for MessageRow component."""
+"""Tests for MessageRow component — Cline-style flat timeline."""
 
 import pytest
 from PyQt6.QtWidgets import QApplication
 from autoreport.gui.widgets.message_row import MessageRow
 
 
-def test_user_message_renders_with_timestamp(qtbot):
-    """User message should show timestamp and content."""
+def test_user_message_renders_badge_style(qtbot):
+    """User message uses badge-background bubble, no timestamp header."""
     widget = MessageRow(
         role="user",
         content="Hello, agent!",
@@ -15,15 +15,13 @@ def test_user_message_renders_with_timestamp(qtbot):
     )
     qtbot.addWidget(widget)
 
-    # Check that timestamp is in display
     display_text = widget.get_display_text()
-    assert "14:32" in display_text
+    assert "You" in display_text
     assert "Hello, agent!" in display_text
-    assert "you" in display_text.lower() or "你" in display_text
 
 
-def test_agent_message_renders_correctly(qtbot):
-    """Agent message should show Agent role."""
+def test_agent_message_renders_inline(qtbot):
+    """Agent message is inline text with no background."""
     widget = MessageRow(
         role="agent",
         content="I will help you.",
@@ -33,12 +31,11 @@ def test_agent_message_renders_correctly(qtbot):
 
     display_text = widget.get_display_text()
     assert "Agent" in display_text
-    assert "14:33" in display_text
     assert "I will help you." in display_text
 
 
-def test_coordination_message_shows_indicator(qtbot):
-    """Coordination message should show [主 Agent 协调] indicator."""
+def test_coordination_message_shows_prefix(qtbot):
+    """Coordination message shows mute source label."""
     widget = MessageRow(
         role="user",
         content="Calling data analysis agent...",
@@ -48,12 +45,11 @@ def test_coordination_message_shows_indicator(qtbot):
     qtbot.addWidget(widget)
 
     display_text = widget.get_display_text()
-    assert "14:35" in display_text
     assert "Calling data analysis agent..." in display_text
 
 
-def test_empty_timestamp_defaults(qtbot):
-    """Empty timestamp should default to 00:00."""
+def test_empty_timestamp_is_handled(qtbot):
+    """Empty timestamp should not cause errors."""
     widget = MessageRow(
         role="user",
         content="Test message",
@@ -62,7 +58,7 @@ def test_empty_timestamp_defaults(qtbot):
     qtbot.addWidget(widget)
 
     display_text = widget.get_display_text()
-    assert "00:00" in display_text
+    assert "Test message" in display_text
 
 
 def test_multiline_content(qtbot):

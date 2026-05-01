@@ -1,17 +1,15 @@
-"""Single message row component for chat display."""
+"""Single message row component — Cline flat-timeline style (no bubble headers)."""
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 
 class MessageRow(QWidget):
-    """Render a single chat message (user or agent) with timestamp.
+    """Render a chat message in Cline's flat timeline style.
 
-    Visual format:
-        HH:MM  [Role]
-
-          Content line 1
-          Content line 2
+    - User messages: badge-background fill, 2px radius, no header (like Cline UserMessage)
+    - Agent messages: plain inline text, no background, no header
+    - Coordination messages: subtle muted prefix
     """
 
     def __init__(
@@ -22,86 +20,47 @@ class MessageRow(QWidget):
         is_coordination: bool = False,
         parent: QWidget | None = None,
     ):
-        """Initialize message row.
-
-        Args:
-            role: "user" or "agent"
-            content: Message content
-            timestamp: Time in HH:MM format
-            is_coordination: Whether this is a coordination message from main agent
-            parent: Parent widget
-        """
         super().__init__(parent)
         self._role = role
         self._content = content
-        self._timestamp = timestamp or "00:00"
+        self._timestamp = timestamp
         self._is_coordination = is_coordination
-
         self._setup_ui()
-        self._apply_style()
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 4, 8, 4)
-        layout.setSpacing(2)
+        layout.setContentsMargins(16, 6, 16, 2)  # px-4 py-1.5
+        layout.setSpacing(0)
 
-        # Header: timestamp + role
-        header = QLabel()
-        header.setObjectName("messageHeader")
+        if self._is_coordination:
+            # Coordination messages show a muted source label
+            prefix = QLabel("[主 Agent → 子 Agent]")
+            prefix.setObjectName("msgCoordination")
+            layout.addWidget(prefix)
+            layout.addSpacing(4)
 
         if self._role == "user":
-            role_text = "你"
-            if self._is_coordination:
-                header.setText(f"{self._timestamp}  [主 Agent 协调] {role_text}")
-            else:
-                header.setText(f"{self._timestamp}  {role_text}")
+            # Cline UserMessage: badge-bg wrapper, 2px radius, no header
+            wrapper = QWidget()
+            wrapper.setObjectName("userMessageBubble")
+            wl = QHBoxLayout(wrapper)
+            wl.setContentsMargins(10, 10, 4, 10)  # p-2.5 pr-1
+            wl.setSpacing(0)
+
+            text = QLabel(self._content)
+            text.setObjectName("userMessageText")
+            text.setWordWrap(True)
+            text.setTextFormat(Qt.TextFormat.PlainText)
+            wl.addWidget(text, 1)
+            layout.addWidget(wrapper)
         else:
-            header.setText(f"{self._timestamp}  Agent")
-
-        layout.addWidget(header)
-
-        # Content
-        content_label = QLabel(self._content)
-        content_label.setObjectName("messageContent")
-        content_label.setWordWrap(True)
-        content_label.setTextFormat(Qt.TextFormat.PlainText)
-        layout.addWidget(content_label)
-
-    def _apply_style(self) -> None:
-        from PyQt6.QtWidgets import QApplication
-
-        hints = QApplication.styleHints()
-        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
-
-        if dark:
-            header_fg = "#cccccc"
-            user_content_bg = "#0e639c"
-            user_content_fg = "#ffffff"
-            agent_content_bg = "#2d2d2d"
-            agent_content_fg = "#cccccc"
-        else:
-            header_fg = "#1a1a1a"
-            user_content_bg = "#e1f5fe"
-            user_content_fg = "#1a1a1a"
-            agent_content_bg = "#f3f3f3"
-            agent_content_fg = "#1a1a1a"
-
-        self.setStyleSheet(f"""
-            QLabel#messageHeader {{
-                font-size: 11px;
-                font-weight: 600;
-                color: {header_fg};
-            }}
-            QLabel#messageContent {{
-                font-size: 13px;
-                padding: 4px 8px;
-                border-radius: 4px;
-                background-color: {user_content_bg if self._role == "user" else agent_content_bg};
-                color: {user_content_fg if self._role == "user" else agent_content_fg};
-            }}
-        """)
+            # Cline MarkdownRow: just inline text, no background, no bubble
+            text = QLabel(self._content)
+            text.setObjectName("agentMessageText")
+            text.setWordWrap(True)
+            text.setTextFormat(Qt.TextFormat.PlainText)
+            layout.addWidget(text)
 
     def get_display_text(self) -> str:
-        """Get combined display text for testing."""
-        role_text = "你" if self._role == "user" else "Agent"
-        return f"{self._timestamp} {role_text} {self._content}"
+        role_text = "You" if self._role == "user" else "Agent"
+        return f"{role_text}: {self._content}"

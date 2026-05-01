@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
 
 from autoreport.core.file_search import FileSearchManager
 from autoreport.gui.widgets.chat_input import ChatInput
+from autoreport.gui.widgets.conversation_history import ConversationHistoryDropdown
 from autoreport.gui.widgets.debug_panel import DebugPanel
 from autoreport.gui.widgets.file_search_popup import FileSearchPopup
 from autoreport.gui.widgets.messages_area import MessagesArea
@@ -29,6 +30,9 @@ class AgentPanel(QWidget):
     debug_mode_toggled = pyqtSignal(bool)
     history_requested = pyqtSignal()
     new_conversation_requested = pyqtSignal()
+    session_selected_from_dropdown = pyqtSignal(str)
+    delete_session_requested = pyqtSignal(str)
+    rename_session_requested = pyqtSignal(str, str)
 
     def __init__(self, panel_id: str, title: str, workspace: Path | None = None):
         super().__init__()
@@ -94,6 +98,15 @@ class AgentPanel(QWidget):
         header_layout.addWidget(self._debug_button)
 
         layout.addWidget(header)
+
+        # ---- Inline history dropdown (hidden by default) ----
+        self._history_dropdown = ConversationHistoryDropdown()
+        self._history_dropdown.setVisible(False)
+        self._history_dropdown.session_selected.connect(self._on_history_session_selected)
+        self._history_dropdown.new_conversation_requested.connect(self._on_history_new_conversation)
+        self._history_dropdown.delete_session_requested.connect(self._on_history_delete)
+        self._history_dropdown.rename_session_requested.connect(self._on_history_rename)
+        layout.addWidget(self._history_dropdown)
 
         # ---- Main content area (messages + debug) ----
         content_splitter = QWidget()
@@ -168,39 +181,48 @@ class AgentPanel(QWidget):
         hints = QApplication.styleHints()
         dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
 
-        # Claude Code theme colors
-        claude_orange = "#d97757"
-
-        c = {
-            # Header - VSCode sidebar background
-            "headerBg": "#252526" if dark else "#f3f3f3",
-            "headerBorder": "#3c3c3c" if dark else "#e0e0e0",
-            "titleFg": "#cccccc" if dark else "#1a1a1a",
-            # Status colors
-            "statusIdle": "#858585" if dark else "#858585",
-            "statusThink": "#4fc3f7" if dark else "#0066bf",
-            "statusTool": "#ffb74d" if dark else "#e65100",
-            "statusError": "#f14c4c" if dark else "#c62828",
-            "statusDebug": "#ce93d8" if dark else "#7b1fa2",
-            # Input - Claude Code style white background with orange focus
-            "inputBg": "#3c3c3c" if dark else "#ffffff",
-            "inputBorder": "#3c3c3c" if dark else "#e0e0e0",
-            "inputFocusBorder": claude_orange,
-            "inputFocusRing": "rgba(217, 119, 87, 0.12)",  # 12% opacity
-            # Send button
-            "sendBg": "#0e639c" if dark else claude_orange,
-            "sendFg": "#ffffff",
-            "sendHover": "#1177bb" if dark else "#c6613f",
-            # Debug button
-            "debugFg": "#858585" if dark else "#858585",
-            "debugActiveBg": "#5c1a1a" if dark else "#ffcdd2",
-            "debugActiveFg": "#f14c4c" if dark else "#c62828",
-            # Context bar
-            "contextBg": "#2d2d2d" if dark else "#e8f0fe",
-            "contextBorder": claude_orange,
-            "contextFg": "#cccccc" if dark else "#333333",
-            "contextIconFg": claude_orange,
-        }
+        if dark:
+            c = {
+                "headerBg": "#252526",
+                "headerBorder": "#3c3c3c",
+                "titleFg": "#cccccc",
+                "statusIdle": "#8b949e",
+                "statusThink": "#4fc3f7",
+                "statusTool": "#ffb74d",
+                "statusError": "#f14c4c",
+                "statusDebug": "#ce93d8",
+                "sendBg": "#0e639c",
+                "sendFg": "#ffffff",
+                "sendHover": "#1177bb",
+                "debugFg": "#8b949e",
+                "debugActiveBg": "#5c1a1a",
+                "debugActiveFg": "#f14c4c",
+                "contextBg": "#2d2d2d",
+                "contextBorder": "#007acc",
+                "contextFg": "#cccccc",
+                "contextIconFg": "#007acc",
+            }
+        else:
+            c = {
+                "headerBg": "#f3f3f3",
+                "headerBorder": "#e0e0e0",
+                "titleFg": "#333333",
+                "statusIdle": "#8b949e",
+                "statusThink": "#0066bf",
+                "statusTool": "#e65100",
+                "statusError": "#c62828",
+                "statusDebug": "#7b1fa2",
+                "sendBg": "#0e639c",
+                "sendFg": "#ffffff",
+                "sendHover": "#1177bb",
+                "debugFg": "#8b949e",
+                "debugActiveBg": "#ffcdd2",
+                "debugActiveFg": "#c62828",
+                "contextBg": "#e8f0fe",
+                "contextBorder": "#007acc",
+                "contextFg": "#333333",
+                "contextIconFg": "#007acc",
+            }
         self._colors = c
 
         self.setStyleSheet(f"""
@@ -226,7 +248,7 @@ class AgentPanel(QWidget):
                 background-color: {c["sendBg"]};
                 color: {c["sendFg"]};
                 border: none;
-                border-radius: 18px;
+                border-radius: 2px;
                 padding: 0px;
                 font-size: 18px;
                 font-weight: 600;
@@ -236,7 +258,7 @@ class AgentPanel(QWidget):
                 background-color: transparent;
                 color: {c["debugFg"]};
                 border: 1px solid {c["headerBorder"]};
-                border-radius: 3px;
+                border-radius: 2px;
                 font-size: 12px;
                 padding: 0px;
             }}
@@ -250,7 +272,7 @@ class AgentPanel(QWidget):
                 background-color: transparent;
                 color: {c["debugFg"]};
                 border: 1px solid {c["headerBorder"]};
-                border-radius: 3px;
+                border-radius: 2px;
                 padding: 2px 8px;
                 font-size: 11px;
             }}
@@ -275,7 +297,6 @@ class AgentPanel(QWidget):
             #contextEye:hover {{ background-color: rgba(128,128,128,0.15); }}
         """)
 
-        # Initialize tool group tracking
         self._current_tool_group = None
 
     def _setup_file_search(self) -> None:
@@ -556,12 +577,35 @@ class AgentPanel(QWidget):
         self._context_bar.setVisible(False)
 
     def _on_history(self) -> None:
-        """Handle history button click."""
-        self.history_requested.emit()
+        """Toggle inline history dropdown."""
+        if self._history_dropdown.isVisible():
+            self._history_dropdown.setVisible(False)
+        else:
+            self.history_requested.emit()
 
     def _on_new_conversation(self) -> None:
         """Handle new conversation button click."""
         self.new_conversation_requested.emit()
+
+    def show_history_dropdown(self, sessions: list[dict], current_id: str | None = None) -> None:
+        """Populate and show the inline history dropdown."""
+        self._history_dropdown.populate(sessions, current_id)
+
+    def _on_history_session_selected(self, session_id: str) -> None:
+        """Handle session selected from dropdown."""
+        self.session_selected_from_dropdown.emit(session_id)
+
+    def _on_history_new_conversation(self) -> None:
+        """Handle new conversation from dropdown."""
+        self.new_conversation_requested.emit()
+
+    def _on_history_delete(self, session_id: str) -> None:
+        """Handle session deletion from dropdown."""
+        self.delete_session_requested.emit(session_id)
+
+    def _on_history_rename(self, session_id: str, new_name: str) -> None:
+        """Handle session rename from dropdown."""
+        self.rename_session_requested.emit(session_id, new_name)
 
     def _on_debug_toggled(self) -> None:
         enabled = self._debug_button.isChecked()

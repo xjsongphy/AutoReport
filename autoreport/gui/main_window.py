@@ -25,7 +25,6 @@ from ..interfaces.types import (
     UserMessage,
 )
 from .widgets.agent_panel import AgentPanel
-from .widgets.conversation_history import ConversationHistoryDialog
 from .widgets.file_tree import FileTreeWidget
 from .widgets.preview import PreviewWidget
 
@@ -285,11 +284,17 @@ class MainWindow(QMainWindow):
         self.sub_agent_panel.message_sent.connect(self._on_sub_agent_message)
         self.sub_agent_panel.debug_mode_toggled.connect(self._on_debug_mode_toggled)
 
-        # Connect conversation history signals (both panels)
-        self.main_agent_panel.history_requested.connect(self._on_history_requested)
-        self.main_agent_panel.new_conversation_requested.connect(self._on_new_conversation_requested)
-        self.sub_agent_panel.history_requested.connect(self._on_history_requested)
-        self.sub_agent_panel.new_conversation_requested.connect(self._on_new_conversation_requested)
+        # Connect conversation history signals (both panels, per-agent)
+        self.main_agent_panel.history_requested.connect(lambda: self._on_history_requested("main"))
+        self.main_agent_panel.new_conversation_requested.connect(lambda: self._on_new_conversation_requested("main"))
+        self.main_agent_panel.session_selected_from_dropdown.connect(lambda sid: self._on_session_selected(sid, "main"))
+        self.main_agent_panel.delete_session_requested.connect(self._on_delete_session)
+        self.main_agent_panel.rename_session_requested.connect(self._on_rename_session)
+        self.sub_agent_panel.history_requested.connect(lambda: self._on_history_requested(self.sub_agent_panel.agent_type))
+        self.sub_agent_panel.new_conversation_requested.connect(lambda: self._on_new_conversation_requested(self.sub_agent_panel.agent_type))
+        self.sub_agent_panel.session_selected_from_dropdown.connect(lambda sid: self._on_session_selected(sid, self.sub_agent_panel.agent_type))
+        self.sub_agent_panel.delete_session_requested.connect(self._on_delete_session)
+        self.sub_agent_panel.rename_session_requested.connect(self._on_rename_session)
 
         # Connect preview selection to sub-agent panel context
         self.preview.selection_changed.connect(self._on_preview_selection_changed)
@@ -381,6 +386,26 @@ class MainWindow(QMainWindow):
 
             n = len(records)
             logger.info("Loaded {} messages for agent {}", n, agent_type)
+
+    def _load_conversations_for_agent(self, agent_type: str, panel: AgentPanel) -> None:
+        """Load previous conversations for a specific agent into a panel."""
+        records = self._conv_store.load_messages(agent_type)
+        if not records:
+            return
+        for rec in records:
+            role = rec.get("role", "")
+            content = rec.get("content", "")
+            if role == "user":
+                panel.add_message("user", content)
+            elif role == "agent":
+                panel.add_message("agent", content)
+            elif role == "tool_call":
+                panel.add_tool_call(content, rec.get("arguments", {}))
+            elif role == "tool_result":
+                panel.add_tool_result(content, rec.get("result"), rec.get("error"))
+            elif role == "error":
+                panel.add_error(rec.get("source", ""), content)
+        logger.info("Loaded {} messages for agent {}", len(records), agent_type)
 
     def set_async_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Set the async event loop for thread-safe coroutine dispatch.
@@ -550,36 +575,32 @@ class MainWindow(QMainWindow):
 
     # ---- Conversation History ----
 
-    def _on_history_requested(self) -> None:
-        """Show conversation history dialog."""
+    def _on_history_requested(self, agent_type: str) -> None:
+        """Show inline conversation history dropdown for a specific agent type."""
         sessions = self._conv_store.get_sessions()
-        current_id = self._conv_store.get_current_session_id()
+        current_id = self._conv_store.get_current_session_id(agent_type)
+        panel = self._get_panel_for_agent(agent_type)
+        panel.show_history_dropdown(sessions, current_id)
 
-        dialog = ConversationHistoryDialog(sessions, current_id, parent=self)
-        dialog.session_selected.connect(self._on_session_selected)
-        dialog.new_conversation_requested.connect(self._on_new_conversation_requested)
-        dialog.delete_session_requested.connect(self._on_delete_session)
-        dialog.rename_session_requested.connect(self._on_rename_session)
+    def _on_new_conversation_requested(self, agent_type: str) -> None:
+        """Create a new conversation session for a specific agent and clear UI."""
+        self._conv_store.new_session(agent_type=agent_type)
+        panel = self._get_panel_for_agent(agent_type)
+        panel._messages_area.clear()
+        logger.info("New conversation session for {}: {}", agent_type,
+                     self._conv_store.get_current_session_id(agent_type))
 
-        dialog.exec()
-
-    def _on_new_conversation_requested(self) -> None:
-        """Create a new conversation session and clear the UI."""
-        self._conv_store.new_session()
-        self._clear_all_panels()
-        logger.info("New conversation session created: {}", self._conv_store.get_current_session_id())
-
-    def _on_session_selected(self, session_id: str) -> None:
-        """Switch to a different conversation session."""
-        if self._conv_store.switch_session(session_id):
-            self._clear_all_panels()
-            self._load_conversations()
-            logger.info("Switched to session: {}", session_id)
+    def _on_session_selected(self, session_id: str, agent_type: str) -> None:
+        """Switch to a different conversation session for a specific agent."""
+        if self._conv_store.switch_session(session_id, agent_type):
+            panel = self._get_panel_for_agent(agent_type)
+            panel._messages_area.clear()
+            self._load_conversations_for_agent(agent_type, panel)
+            logger.info("Switched {} to session: {}", agent_type, session_id)
 
     def _on_delete_session(self, session_id: str) -> None:
         """Delete a conversation session."""
         self._conv_store.delete_session(session_id)
-        # Reload the current session (might have changed)
         self._clear_all_panels()
         self._load_conversations()
         logger.info("Deleted session: {}", session_id)
