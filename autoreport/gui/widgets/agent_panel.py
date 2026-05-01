@@ -138,10 +138,11 @@ class AgentPanel(QWidget):
         self._input_field.file_reference_requested.connect(self._on_file_reference_requested)
         input_layout.addWidget(self._input_field, 1)
 
-        send_btn = QPushButton("发送")
+        send_btn = QPushButton("↑")
         send_btn.setObjectName("sendBtn")
         send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         send_btn.clicked.connect(self._on_send)
+        send_btn.setFixedSize(36, 36)
         input_layout.addWidget(send_btn)
 
         layout.addWidget(input_bar)
@@ -209,9 +210,9 @@ class AgentPanel(QWidget):
                 background-color: {c["sendBg"]};
                 color: {c["sendFg"]};
                 border: none;
-                border-radius: 4px;
-                padding: 6px 16px;
-                font-size: 12px;
+                border-radius: 18px;
+                padding: 0px;
+                font-size: 18px;
                 font-weight: 600;
             }}
             #sendBtn:hover {{ background-color: {c["sendHover"]}; }}

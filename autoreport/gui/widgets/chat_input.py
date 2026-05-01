@@ -47,10 +47,13 @@ class ChatInput(QPlainTextEdit):
         bg = "#252526" if dark else "#ffffff"
         fg = "#cccccc" if dark else "#1a1a1a"
 
+        # Add subtle shadow
+        shadow_color = "rgba(0, 0, 0, 0.1)" if not dark else "rgba(0, 0, 0, 0.3)"
+
         self.setStyleSheet(f"""
             QPlainTextEdit {{
                 border: 1px solid {border};
-                border-radius: 8px;
+                border-radius: 12px;
                 padding: 8px 10px;
                 background-color: {bg};
                 color: {fg};
@@ -58,6 +61,7 @@ class ChatInput(QPlainTextEdit):
             }}
             QPlainTextEdit:focus {{
                 border: 1px solid {claude_orange};
+                box-shadow: 0 0 0 3px {shadow_color};
             }}
         """)
 
