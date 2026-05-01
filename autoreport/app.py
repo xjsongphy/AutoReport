@@ -322,6 +322,32 @@ def _try_sync_presets(silent: bool = False) -> bool:
         return False
 
 
+def _check_dependencies(config_manager: ConfigManager) -> None:
+    """Check for optional tool dependencies and log warnings."""
+    import shutil
+
+    # LaTeX
+    if not shutil.which("xelatex") and not shutil.which("lualatex"):
+        logger.warning(
+            "LaTeX not found (xelatex/lualatex). "
+            "Report compilation will fail. "
+            "Install TeX Live or MiKTeX."
+        )
+
+    # MinerU
+    cfg = config_manager.config
+    check_mineru = (
+        hasattr(cfg, "mineru_api")
+        and cfg.mineru_api.enabled
+        and cfg.mineru_api.validate_on_startup
+    )
+    if check_mineru and not shutil.which("mineru-open-api"):
+        logger.warning(
+            "mineru-open-api not found. PDF parsing will be unavailable. "
+            "Install: https://mineru.net/ecosystem?tab=cli"
+        )
+
+
 def main():
     """Main entry point."""
     # Parse arguments first (no GUI needed)
@@ -362,6 +388,9 @@ def main():
 
     # Store debug agents for activation after loop manager starts
     app._debug_agents_on_start = args.debug_agent
+
+    # Check optional dependencies
+    _check_dependencies(app.config_manager)
 
     # Auto-sync presets on startup (failure is non-fatal)
     if not _try_sync_presets(silent=True):
