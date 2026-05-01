@@ -18,6 +18,7 @@ class MessageBus:
         self._lock = asyncio.Lock()
         self._subscribers_lock = threading.Lock()
         self._queue: asyncio.Queue[Message] = asyncio.Queue()
+        self._shutdown = False
 
     async def publish(self, message: Message) -> None:
         """Publish a message to all subscribers.
@@ -30,8 +31,11 @@ class MessageBus:
 
     async def process_queue(self) -> None:
         """Process messages from queue and notify subscribers."""
-        while True:
-            message = await self._queue.get()
+        while not self._shutdown:
+            try:
+                message = await asyncio.wait_for(self._queue.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
             await self._notify_subscribers(message)
 
     async def _notify_subscribers(self, message: Message) -> None:
@@ -87,3 +91,7 @@ class MessageBus:
                     logger.debug("Unsubscribed from message type: {}", message_type.__name__)
                 except ValueError:
                     pass
+
+    def shutdown(self) -> None:
+        """Signal the processing loop to exit."""
+        self._shutdown = True

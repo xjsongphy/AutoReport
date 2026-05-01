@@ -110,10 +110,15 @@ class AgentLoop:
         """Main processing loop for messages."""
         while self._running:
             try:
-                # Wait for next message
-                message = await self._message_queue.get()
-                self._current_message = message
+                # Wait for next message with timeout so stop() can break out
+                try:
+                    message = await asyncio.wait_for(
+                        self._message_queue.get(), timeout=1.0
+                    )
+                except asyncio.TimeoutError:
+                    continue
 
+                self._current_message = message
                 await self._process_message(message)
 
             except Exception as e:

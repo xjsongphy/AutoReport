@@ -93,8 +93,21 @@ class AutoReportApp:
 
     async def shutdown(self) -> None:
         """Shutdown application."""
+        # Signal bus to stop processing
+        self.bus.shutdown()
+
         if self.loop_manager:
             await self.loop_manager.stop()
+
+        # Give pending tasks a moment to finish
+        await asyncio.sleep(0.5)
+
+        # Cancel remaining tasks
+        loop = asyncio.get_event_loop()
+        for task in asyncio.all_tasks(loop):
+            if task is not asyncio.current_task():
+                task.cancel()
+
         logger.info("Application shut down")
 
     def run_gui(self) -> None:
@@ -165,6 +178,13 @@ class AutoReportApp:
         self.main_window.show()
 
         exit_code = app.exec()
+
+        # Graceful shutdown: run async cleanup in the loop
+        future = asyncio.run_coroutine_threadsafe(self.shutdown(), self._async_loop)
+        try:
+            future.result(timeout=5)
+        except Exception:
+            pass
 
         # Stop the background event loop
         self._async_loop.call_soon_threadsafe(self._async_loop.stop)
