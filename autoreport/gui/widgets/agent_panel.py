@@ -281,14 +281,7 @@ class AgentPanel(QWidget):
         if streaming and role == "agent":
             rows = self._messages_area.get_message_rows()
             if rows and rows[-1]._role == "agent":
-                last_row = rows[-1]
-                last_row._content += content
-                if last_row.layout().count() > 1:
-                    content_widget = last_row.layout().itemAt(0)
-                    if content_widget and content_widget.layout():
-                        text_item = content_widget.layout().itemAt(1)
-                        if text_item and text_item.widget():
-                            text_item.widget().setText(last_row._content)
+                rows[-1].append_content(content)
                 return
 
         ts = datetime.now().strftime("%H:%M")

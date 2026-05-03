@@ -42,8 +42,6 @@ def _parse_code_blocks(content: str) -> list[tuple[str, str | None]]:
 class _CodeBlockWidget(QWidget):
     """VS Code-style code block card with monospace text and copy button."""
 
-    clicked_copy = None  # set by caller
-
     def __init__(self, code: str, language: str | None, parent=None):
         super().__init__(parent)
         self._code = code
@@ -52,15 +50,6 @@ class _CodeBlockWidget(QWidget):
 
     def _setup_ui(self) -> None:
         self.setObjectName("codeBlockCard")
-        self.setStyleSheet("""
-            #codeBlockCard {
-                background-color: #1e1e1e;
-                border: 1px solid #3c3c3c;
-                border-radius: 6px;
-                margin: 4px 0;
-            }
-        """)
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -92,15 +81,6 @@ class _CodeBlockWidget(QWidget):
         code_label.setWordWrap(False)
         code_label.setTextFormat(Qt.TextFormat.PlainText)
         code_label.setContentsMargins(12, 0, 12, 10)
-        code_label.setStyleSheet("""
-            #codeBlockContent {
-                color: #cccccc;
-                font-family: "Cascadia Code", "SF Mono", "Consolas", monospace;
-                font-size: 12px;
-                line-height: 1.45;
-                padding: 8px 12px 10px 12px;
-            }
-        """)
         layout.addWidget(code_label)
 
     def _copy(self) -> None:
@@ -125,6 +105,9 @@ class MessageRow(QWidget):
         self._content = content
         self._timestamp = timestamp
         self._is_coordination = is_coordination
+        self._outer = None
+        self._outer_layout = None
+        self._agent_content_layout: QVBoxLayout | None = None
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -132,16 +115,16 @@ class MessageRow(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        outer = QWidget()
-        outer.setObjectName("msgOuterContainer")
-        ol = QVBoxLayout(outer)
-        ol.setContentsMargins(16, 6, 16, 6)
-        ol.setSpacing(0)
+        self._outer = QWidget()
+        self._outer.setObjectName("msgOuterContainer")
+        self._outer_layout = QVBoxLayout(self._outer)
+        self._outer_layout.setContentsMargins(16, 6, 16, 6)
+        self._outer_layout.setSpacing(0)
 
         if self._is_coordination:
             coord = QLabel("[Main Agent → Sub Agent]")
             coord.setObjectName("msgCoordination")
-            ol.addWidget(coord)
+            self._outer_layout.addWidget(coord)
 
         if self._role == "user":
             row = QWidget()
@@ -164,7 +147,7 @@ class MessageRow(QWidget):
             bl.addWidget(text)
 
             rl.addWidget(bubble, 0)
-            ol.addWidget(row)
+            self._outer_layout.addWidget(row)
         else:
             # Agent header
             header = QWidget()
@@ -183,30 +166,14 @@ class MessageRow(QWidget):
             username.setObjectName("agentUsername")
             hl.addWidget(username)
             hl.addStretch()
-            ol.addWidget(header)
+            self._outer_layout.addWidget(header)
 
-            # Content area with code block parsing
-            content_widget = QWidget()
-            content_widget.setObjectName("agentMessageRow")
-            cl = QVBoxLayout(content_widget)
-            cl.setContentsMargins(32, 0, 0, 0)
-            cl.setSpacing(0)
-
-            segments = _parse_code_blocks(self._content)
-            for seg_text, seg_lang in segments:
-                if seg_lang is not None:
-                    # Code block segment
-                    code_widget = _CodeBlockWidget(seg_text, seg_lang, content_widget)
-                    cl.addWidget(code_widget)
-                else:
-                    # Text segment
-                    text_label = QLabel(seg_text)
-                    text_label.setObjectName("agentMessageText")
-                    text_label.setWordWrap(True)
-                    text_label.setTextFormat(Qt.TextFormat.PlainText)
-                    cl.addWidget(text_label)
-
-            ol.addWidget(content_widget)
+            # Content area — rebuilt via _rebuild_agent_content
+            self._agent_content_layout = QVBoxLayout()
+            self._agent_content_layout.setContentsMargins(32, 0, 0, 0)
+            self._agent_content_layout.setSpacing(0)
+            self._outer_layout.addLayout(self._agent_content_layout)
+            self._rebuild_agent_content()
 
             # Hover footer toolbar
             self._footer = QWidget()
@@ -224,9 +191,48 @@ class MessageRow(QWidget):
 
             fl.addStretch()
             self._footer.setVisible(False)
-            ol.addWidget(self._footer)
+            self._outer_layout.addWidget(self._footer)
 
-        layout.addWidget(outer)
+        layout.addWidget(self._outer)
+
+    def _clear_agent_content(self) -> None:
+        """Remove all widgets from the agent content area."""
+        if self._agent_content_layout is None:
+            return
+        while self._agent_content_layout.count():
+            item = self._agent_content_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+            elif item.layout():
+                # Clear nested layouts recursively
+                inner = item.layout()
+                while inner.count():
+                    inner_item = inner.takeAt(0)
+                    if inner_item.widget():
+                        inner_item.widget().deleteLater()
+
+    def _rebuild_agent_content(self) -> None:
+        """Rebuild the agent content area from self._content."""
+        self._clear_agent_content()
+        if self._agent_content_layout is None:
+            return
+
+        segments = _parse_code_blocks(self._content)
+        for seg_text, seg_lang in segments:
+            if seg_lang is not None:
+                code_widget = _CodeBlockWidget(seg_text, seg_lang)
+                self._agent_content_layout.addWidget(code_widget)
+            else:
+                text_label = QLabel(seg_text)
+                text_label.setObjectName("agentMessageText")
+                text_label.setWordWrap(True)
+                text_label.setTextFormat(Qt.TextFormat.PlainText)
+                self._agent_content_layout.addWidget(text_label)
+
+    def append_content(self, delta: str) -> None:
+        """Append streaming text delta and rebuild content area."""
+        self._content += delta
+        self._rebuild_agent_content()
 
     def _copy_content(self) -> None:
         clipboard = QApplication.clipboard()

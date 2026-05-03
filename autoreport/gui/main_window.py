@@ -608,8 +608,11 @@ class MainWindow(QMainWindow):
     def _handle_agent_response(self, message: AgentResponse) -> None:
         agent_str = str(message.agent_type)
         panel = self._get_panel_for_agent(agent_str)
+        # Skip empty non-streaming messages (completion signal only)
+        if not message.streaming and not message.content:
+            return
         panel.add_message("agent", message.content, streaming=message.streaming)
-        if not message.streaming or message.content == "":
+        if not message.streaming:
             self._conv_store.append_message(agent_str, "agent", message.content)
 
     def _handle_user_message(self, message: UserMessage) -> None:
