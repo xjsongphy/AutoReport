@@ -343,8 +343,7 @@ class MainWindow(QMainWindow):
                 margin-bottom: 4px;
             }}
 
-            /* ---- Message Footer (hover toolbar) ----
-               VS Code: .chat-footer-toolbar { display: none; opacity: 0 → 1 on hover } */
+            /* ---- Message Footer (hover toolbar) ---- */
             #msgFooter {{
                 background-color: transparent;
                 padding-top: 4px;
