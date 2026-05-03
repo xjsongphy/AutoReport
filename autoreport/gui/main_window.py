@@ -288,14 +288,7 @@ class MainWindow(QMainWindow):
                 background-color: {c["hover"]};
             }}
 
-            /* ---- User Message — right-aligned bubble ----
-               VS Code: .interactive-request .value .rendered-markdown {
-                 background-color: var(--vscode-chat-requestBubbleBackground);
-                 border-radius: var(--vscode-cornerRadius-xLarge);
-                 padding: 8px 12px;
-                 max-width: 90%;
-                 margin-left: auto;
-               } */
+            /* ---- User Message — right-aligned bubble ---- */
             #userMessageRow {{
                 background-color: transparent;
             }}
@@ -313,11 +306,7 @@ class MainWindow(QMainWindow):
                 line-height: 1.5;
             }}
 
-            /* ---- Agent Message — flat with avatar ----
-               VS Code: .header { display: flex; gap: 8px; margin-bottom: 8px }
-               .avatar { width: 24px; height: 24px; border-radius: 50% }
-               .username { font-size: 13px; font-weight: 600 }
-               .value .rendered-markdown { line-height: 1.5em } */
+            /* ---- Agent Message — flat with avatar ---- */
             #agentHeader {{
                 background-color: transparent;
             }}
@@ -349,11 +338,7 @@ class MainWindow(QMainWindow):
                 margin-bottom: 4px;
             }}
 
-            /* ---- Tool Call Group —
-               VS Code: border: 1px solid var(--vscode-widget-border);
-               border-radius: var(--vscode-cornerRadius-medium);
-               background: var(--vscode-editor-background);
-               margin: 4px 0 */
+            /* ---- Tool Call Group ---- */
             #toolCallHeader {{
                 background-color: transparent;
                 border: none;
