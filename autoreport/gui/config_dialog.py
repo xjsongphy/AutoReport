@@ -483,16 +483,17 @@ class ConfigDialog(QDialog):
         self.scroll_layout.setContentsMargins(20, 8, 20, 8)
         self.scroll_layout.setSpacing(12)
 
+        # Empty hint — must exist before _rebuild_cards calls _update_empty_hint_visibility
+        self._empty_hint = QLabel("暂无 API 配置。点击下方「+ 添加配置」开始。")
+        self._empty_hint.setObjectName("emptyHint")
+        self._empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_hint.setWordWrap(True)
+
         self._rebuild_cards()
         self.scroll_layout.addStretch()
         scroll.setWidget(self.scroll_content)
         root.addWidget(scroll, 1)
 
-        # Show empty state hint when no configs
-        self._empty_hint = QLabel("暂无 API 配置。点击下方「+ 添加配置」开始。")
-        self._empty_hint.setObjectName("emptyHint")
-        self._empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty_hint.setWordWrap(True)
         self._update_empty_hint_visibility()
         self.scroll_layout.addWidget(self._empty_hint)
 
