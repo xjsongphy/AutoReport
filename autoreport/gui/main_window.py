@@ -60,7 +60,7 @@ class MainWindow(QMainWindow):
         logger.info("Main window initialized for workspace: {}", self.workspace)
 
     def _apply_theme(self) -> None:
-        """Apply Codex CLI / GitHub-inspired theme."""
+        """Apply theme matching VS Code Copilot Chat color variables."""
         from PyQt6.QtWidgets import QApplication
 
         hints = QApplication.styleHints()
@@ -68,73 +68,83 @@ class MainWindow(QMainWindow):
 
         if dark:
             c = {
-                "bg": "#0d1117",
-                "surface": "#161b22",
-                "border": "#30363d",
-                "fg": "#e6edf3",
-                "muted": "#8b949e",
-                "focus": "#58a6ff",
-                "input_bg": "#0d1117",
-                "input_border": "#30363d",
-                "badge_bg": "#1c2333",
-                "badge_fg": "#e6edf3",
-                "send_bg": "#238636",
-                "send_hover": "#2ea043",
-                "scrollbar": "#30363d",
-                "scrollbar_hover": "#484f58",
-                "hover": "#1c2333",
+                # --vscode-editor-background
+                "bg": "#1e1e1e",
+                # --vscode-sideBar-background / --vscode-editorWidget-background
+                "surface": "#252526",
+                # --vscode-widget-border / --vscode-input-border
+                "border": "#3c3c3c",
+                # --vscode-foreground
+                "fg": "#cccccc",
+                # --vscode-descriptionForeground
+                "muted": "#717171",
+                # --vscode-focusBorder
+                "focus": "#007fd4",
+                # --vscode-input-background
+                "input_bg": "#3c3c3c",
+                "input_border": "#3c3c3c",
+                # --vscode-chat-requestBubbleBackground
+                "bubble_bg": "#2a2a2a",
+                "bubble_hover": "#333333",
+                # --vscode-button-background
+                "send_bg": "#0078d4",
+                "send_hover": "#026ec1",
+                "scrollbar": "#424242",
+                "scrollbar_hover": "#4f4f4f",
+                # --vscode-toolbar-hoverBackground
+                "hover": "#2a2d2e",
                 "selection": "#264f78",
-                "status_think": "#58a6ff",
-                "status_tool": "#d29922",
-                "status_error": "#f85149",
-                "status_debug": "#bc8cff",
-                "status_idle": "#8b949e",
-                "header_action": "#8b949e",
-                "header_action_hover": "#e6edf3",
-                "context_bg": "#161b22",
-                "context_border": "#30363d",
-                "spinner_fg": "#58a6ff",
-                "user_prompt": "#8b949e",
-                "agent_bullet": "#484f58",
-                "tool_bg": "#161b22",
-                "tool_fg": "#e6edf3",
-                "tool_border": "#30363d",
-                "tool_detail": "#8b949e",
+                "status_think": "#007fd4",
+                "status_tool": "#cca700",
+                "status_error": "#f44747",
+                "status_debug": "#b180d7",
+                "status_idle": "#717171",
+                "header_action": "#717171",
+                "header_action_hover": "#cccccc",
+                "context_bg": "#252526",
+                "context_border": "#3c3c3c",
+                "spinner_fg": "#007fd4",
+                # --vscode-chat-avatarBackground
+                "avatar_bg": "#3c3c3c",
+                "avatar_fg": "#cccccc",
+                # --vscode-textPreformat-foreground
+                "tool_fg": "#cccccc",
+                "tool_border": "#3c3c3c",
+                "tool_detail": "#717171",
             }
         else:
             c = {
                 "bg": "#ffffff",
-                "surface": "#f6f8fa",
-                "border": "#d0d7de",
-                "fg": "#1f2328",
-                "muted": "#656d76",
-                "focus": "#0969da",
+                "surface": "#f3f3f3",
+                "border": "#e0e0e0",
+                "fg": "#616161",
+                "muted": "#9e9e9e",
+                "focus": "#0090ff",
                 "input_bg": "#ffffff",
-                "input_border": "#d0d7de",
-                "badge_bg": "#f6f8fa",
-                "badge_fg": "#1f2328",
-                "send_bg": "#1f883d",
-                "send_hover": "#1a7f37",
-                "scrollbar": "#d0d7de",
-                "scrollbar_hover": "#afb8c1",
-                "hover": "#f6f8fa",
-                "selection": "#0969da",
-                "status_think": "#0969da",
-                "status_tool": "#9a6700",
-                "status_error": "#cf222e",
-                "status_debug": "#8250df",
-                "status_idle": "#656d76",
-                "header_action": "#656d76",
-                "header_action_hover": "#1f2328",
-                "context_bg": "#f6f8fa",
-                "context_border": "#d0d7de",
-                "spinner_fg": "#0969da",
-                "user_prompt": "#656d76",
-                "agent_bullet": "#afb8c1",
-                "tool_bg": "#f6f8fa",
-                "tool_fg": "#1f2328",
-                "tool_border": "#d0d7de",
-                "tool_detail": "#656d76",
+                "input_border": "#e0e0e0",
+                "bubble_bg": "#f0f0f0",
+                "bubble_hover": "#e8e8e8",
+                "send_bg": "#0078d4",
+                "send_hover": "#006cbe",
+                "scrollbar": "#c1c1c1",
+                "scrollbar_hover": "#a8a8a8",
+                "hover": "#e8e8e8",
+                "selection": "#0090ff",
+                "status_think": "#0090ff",
+                "status_tool": "#bf8900",
+                "status_error": "#d32f2f",
+                "status_debug": "#7b1fa2",
+                "status_idle": "#9e9e9e",
+                "header_action": "#9e9e9e",
+                "header_action_hover": "#616161",
+                "context_bg": "#f3f3f3",
+                "context_border": "#e0e0e0",
+                "spinner_fg": "#0090ff",
+                "avatar_bg": "#e0e0e0",
+                "avatar_fg": "#616161",
+                "tool_fg": "#616161",
+                "tool_border": "#e0e0e0",
+                "tool_detail": "#9e9e9e",
             }
 
         self._theme_colors = c
@@ -195,19 +205,18 @@ class MainWindow(QMainWindow):
                 border: 1px solid {c["border"]};
                 padding: 6px 8px;
                 font-size: 12px;
-                border-radius: 6px;
+                border-radius: 4px;
             }}
 
-            /* ---- Panel Header (Codex-style) ---- */
+            /* ---- Panel Header ---- */
             #panelHeader {{
                 background-color: {c["bg"]};
                 border-bottom: 1px solid {c["border"]};
             }}
             #panelTitle {{
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: 600;
                 color: {c["fg"]};
-                letter-spacing: 0.02em;
             }}
             #panelStatus {{
                 font-size: 11px;
@@ -217,7 +226,7 @@ class MainWindow(QMainWindow):
                 background-color: transparent;
                 color: {c["header_action"]};
                 border: none;
-                border-radius: 6px;
+                border-radius: 4px;
                 font-size: 13px;
             }}
             #headerAction:hover {{
@@ -228,7 +237,7 @@ class MainWindow(QMainWindow):
                 background-color: transparent;
                 color: {c["muted"]};
                 border: 1px solid {c["border"]};
-                border-radius: 6px;
+                border-radius: 4px;
                 padding: 2px 10px;
                 font-size: 11px;
             }}
@@ -244,15 +253,16 @@ class MainWindow(QMainWindow):
             /* ---- Input Bar ---- */
             #inputBar {{
                 background-color: {c["bg"]};
-                border-top: none;
             }}
+            /* VS Code send button: gradient filled circle, border-radius 5px */
             #sendBtn {{
                 background-color: {c["send_bg"]};
                 color: #ffffff;
                 border: none;
-                border-radius: 6px;
+                border-radius: 14px;
                 font-size: 14px;
                 font-weight: 700;
+                padding: 0px;
             }}
             #sendBtn:hover {{
                 background-color: {c["send_hover"]};
@@ -278,41 +288,77 @@ class MainWindow(QMainWindow):
                 background-color: {c["hover"]};
             }}
 
-            /* ---- Message Cells (Copilot flat style) ---- */
+            /* ---- User Message — right-aligned bubble ----
+               VS Code: .interactive-request .value .rendered-markdown {
+                 background-color: var(--vscode-chat-requestBubbleBackground);
+                 border-radius: var(--vscode-cornerRadius-xLarge);
+                 padding: 8px 12px;
+                 max-width: 90%;
+                 margin-left: auto;
+               } */
             #userMessageRow {{
                 background-color: transparent;
-                border-left: 3px solid {c["focus"]};
-                border-radius: 0;
+            }}
+            #userMessageBubble {{
+                background-color: {c["bubble_bg"]};
+                border-radius: 12px;
+                max-width: 85%;
+            }}
+            #userMessageBubble:hover {{
+                background-color: {c["bubble_hover"]};
             }}
             #userMessageText {{
                 color: {c["fg"]};
                 font-size: 13px;
+                line-height: 1.5;
+            }}
+
+            /* ---- Agent Message — flat with avatar ----
+               VS Code: .header { display: flex; gap: 8px; margin-bottom: 8px }
+               .avatar { width: 24px; height: 24px; border-radius: 50% }
+               .username { font-size: 13px; font-weight: 600 }
+               .value .rendered-markdown { line-height: 1.5em } */
+            #agentHeader {{
+                background-color: transparent;
+            }}
+            #agentAvatar {{
+                background-color: {c["avatar_bg"]};
+                color: {c["avatar_fg"]};
+                border-radius: 12px;
+                font-size: 12px;
+            }}
+            #agentUsername {{
+                font-size: 13px;
+                font-weight: 600;
+                color: {c["fg"]};
             }}
             #agentMessageRow {{
                 background-color: transparent;
             }}
-            #agentBullet {{
-                color: {c["agent_bullet"]};
-                font-size: 8px;
-            }}
             #agentMessageText {{
                 color: {c["fg"]};
                 font-size: 13px;
+                line-height: 1.5;
                 background-color: transparent;
             }}
             #msgCoordination {{
                 font-size: 11px;
                 color: {c["muted"]};
                 font-style: italic;
-                padding-left: 16px;
+                padding-left: 0px;
+                margin-bottom: 4px;
             }}
 
-            /* ---- Tool Call Group ---- */
+            /* ---- Tool Call Group —
+               VS Code: border: 1px solid var(--vscode-widget-border);
+               border-radius: var(--vscode-cornerRadius-medium);
+               background: var(--vscode-editor-background);
+               margin: 4px 0 */
             #toolCallHeader {{
                 background-color: transparent;
                 border: none;
                 color: {c["tool_fg"]};
-                font-family: "SF Mono", "Consolas", "Monaco", monospace;
+                font-family: "Cascadia Code", "SF Mono", "Consolas", monospace;
                 font-size: 12px;
                 text-align: left;
                 padding: 0;
@@ -324,7 +370,7 @@ class MainWindow(QMainWindow):
             }}
             #toolCallDetail {{
                 color: {c["tool_detail"]};
-                font-family: "SF Mono", "Consolas", "Monaco", monospace;
+                font-family: "Cascadia Code", "SF Mono", "Consolas", monospace;
                 font-size: 11px;
                 padding: 2px 0;
             }}

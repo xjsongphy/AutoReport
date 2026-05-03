@@ -1,4 +1,8 @@
-"""Animated status indicator — VS Code Copilot Chat style spinner."""
+"""Animated status indicator — VS Code Copilot Chat style progress.
+
+VS Code uses a spinner icon with descriptive text during tool/thinking state.
+The spinner is small (12px) with muted color (--vscode-descriptionForeground).
+"""
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QWidget
@@ -8,7 +12,7 @@ _SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇"
 
 
 class StatusIndicator(QWidget):
-    """Minimal spinner + status text row."""
+    """Minimal spinner + status text row matching VS Code chat progress."""
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)

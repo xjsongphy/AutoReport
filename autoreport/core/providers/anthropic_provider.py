@@ -27,6 +27,7 @@ class AnthropicProvider(LLMProvider):
             api_key=api_key,
             base_url=api_base,
             max_retries=0,  # Centralize retry logic in agent loop
+            auth_token=api_key,  # Prevent ANTHROPIC_AUTH_TOKEN env var override
         )
 
     # ------------------------------------------------------------------

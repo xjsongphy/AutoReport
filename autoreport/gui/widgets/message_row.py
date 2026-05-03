@@ -1,8 +1,8 @@
-"""Message cell — VS Code Copilot Chat flat style.
+"""Message cell — VS Code Copilot Chat style.
 
-- User messages: left accent border, no bubble
-- Agent messages: plain text with bullet prefix
-- Coordination: muted bracket label
+- User messages: right-aligned rounded bubble (VS Code interactive-request)
+- Agent messages: flat layout with avatar icon + content
+- Coordination: muted label above message
 """
 
 from PyQt6.QtCore import Qt
@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 
 class MessageRow(QWidget):
-    """Render a chat message in VS Code Copilot's flat style."""
+    """Render a chat message matching VS Code Copilot Chat's exact visual style."""
 
     def __init__(
         self,
@@ -32,48 +32,94 @@ class MessageRow(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        # Top-level padding matches VS Code: .interactive-item-container { padding: 12px 16px }
+        # For the non-panel (editor-instance) style: padding: 5px 16px
+        outer = QWidget()
+        outer.setObjectName("msgOuterContainer")
+        ol = QVBoxLayout(outer)
+        ol.setContentsMargins(16, 6, 16, 6)
+        ol.setSpacing(0)
+
         if self._is_coordination:
             coord = QLabel("[Main Agent → Sub Agent]")
             coord.setObjectName("msgCoordination")
-            coord.setContentsMargins(16, 4, 16, 0)
-            layout.addWidget(coord)
+            ol.addWidget(coord)
 
         if self._role == "user":
-            # User: flat row with left accent border (VS Code interactive-request)
+            # VS Code: right-aligned bubble with background
+            # .interactive-request .value .rendered-markdown {
+            #   background-color: var(--vscode-chat-requestBubbleBackground);
+            #   border-radius: var(--vscode-cornerRadius-xLarge);  // typically 12-14px
+            #   padding: 8px 12px;
+            #   max-width: 90%;
+            #   margin-left: auto;  (right-aligned)
+            # }
             row = QWidget()
             row.setObjectName("userMessageRow")
             rl = QHBoxLayout(row)
-            rl.setContentsMargins(16, 6, 16, 6)
-            rl.setSpacing(8)
+            rl.setContentsMargins(0, 0, 0, 0)
+            rl.setSpacing(0)
+
+            # Right-align the bubble
+            rl.addStretch(1)
+
+            bubble = QWidget()
+            bubble.setObjectName("userMessageBubble")
+            bl = QVBoxLayout(bubble)
+            bl.setContentsMargins(8, 8, 12, 8)
+            bl.setSpacing(0)
 
             text = QLabel(self._content)
             text.setObjectName("userMessageText")
             text.setWordWrap(True)
             text.setTextFormat(Qt.TextFormat.PlainText)
-            rl.addWidget(text, 1)
+            bl.addWidget(text)
 
-            layout.addWidget(row)
+            rl.addWidget(bubble, 0)
+
+            ol.addWidget(row)
         else:
-            # Agent: flat row with bullet prefix
-            row = QWidget()
-            row.setObjectName("agentMessageRow")
-            rl = QHBoxLayout(row)
-            rl.setContentsMargins(16, 4, 16, 4)
-            rl.setSpacing(6)
+            # VS Code: flat agent response with avatar + username + content
+            # .interactive-item-container .header { display: flex; align-items: center;
+            #   gap: 8px; margin-bottom: 8px; }
+            # .header .avatar { width: 24px; height: 24px; border-radius: 50%; }
+            # .header .username { font-size: 13px; font-weight: 600; }
+            # .value .rendered-markdown { line-height: 1.5em; font-size: 1em (13px); }
+            header = QWidget()
+            header.setObjectName("agentHeader")
+            hl = QHBoxLayout(header)
+            hl.setContentsMargins(0, 0, 0, 8)
+            hl.setSpacing(8)
 
-            bullet = QLabel("●")
-            bullet.setObjectName("agentBullet")
-            bullet.setFixedWidth(12)
-            bullet.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
-            rl.addWidget(bullet)
+            avatar = QLabel("✦")
+            avatar.setObjectName("agentAvatar")
+            avatar.setFixedSize(24, 24)
+            avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            hl.addWidget(avatar)
+
+            username = QLabel("Agent")
+            username.setObjectName("agentUsername")
+            hl.addWidget(username)
+
+            hl.addStretch()
+            ol.addWidget(header)
+
+            # Content area
+            content_row = QWidget()
+            content_row.setObjectName("agentMessageRow")
+            cl = QHBoxLayout(content_row)
+            cl.setContentsMargins(32, 0, 0, 0)
+            cl.setSpacing(0)
 
             text = QLabel(self._content)
             text.setObjectName("agentMessageText")
             text.setWordWrap(True)
             text.setTextFormat(Qt.TextFormat.PlainText)
-            rl.addWidget(text, 1)
+            cl.addWidget(text, 1)
 
-            layout.addWidget(row)
+            ol.addWidget(content_row)
+
+        layout.addWidget(outer)
 
     def get_display_text(self) -> str:
         role_text = "You" if self._role == "user" else "Agent"

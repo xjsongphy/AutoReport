@@ -1,7 +1,11 @@
 """Collapsible tool call group — VS Code Copilot Chat style.
 
-Collapsed: single line with status icon, tool name, duration, expand arrow
-Expanded: each tool call with result details
+VS Code tool invocation part:
+  border: 1px solid var(--vscode-widget-border)
+  border-radius: var(--vscode-cornerRadius-medium)  (~6px)
+  background: var(--vscode-editor-background)
+  margin: 4px 0
+  .output-title: padding 8px 12px, background editorWidget, border-bottom
 """
 
 from dataclasses import dataclass
@@ -22,7 +26,7 @@ class ToolCall:
 
 
 class ToolCallGroup(QWidget):
-    """Collapsible group of tool calls — compact VS Code style."""
+    """Collapsible group of tool calls matching VS Code tool invocation part."""
 
     expanded_changed = pyqtSignal(bool)
 
@@ -34,7 +38,7 @@ class ToolCallGroup(QWidget):
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 2, 16, 2)
+        layout.setContentsMargins(32, 4, 16, 4)
         layout.setSpacing(0)
 
         self._header_btn = QPushButton()
@@ -75,19 +79,18 @@ class ToolCallGroup(QWidget):
 
         ok = sum(1 for c in self._calls if c.success)
         fail = len(self._calls) - ok
-        icon = "✓" if fail == 0 else "✗"
+        # VS Code uses ▸/▾ arrow
         arrow = "▾" if self._expanded else "▸"
 
         if len(self._calls) == 1:
             c = self._calls[0]
-            self._header_btn.setText(f"  {icon} {c.name}  {c.duration_ms / 1000:.1f}s  {arrow}")
+            status = "✓" if c.success else "✗"
+            self._header_btn.setText(f"  {arrow} {c.name}  {c.duration_ms / 1000:.1f}s  {status}")
         else:
             total = sum(c.duration_ms for c in self._calls) / 1000
-            self._header_btn.setText(
-                f"  {icon} {len(self._calls)} tools  {total:.1f}s  {arrow}"
-            )
+            status = f"{ok}✓" if fail == 0 else f"{ok}✓ {fail}✗"
+            self._header_btn.setText(f"  {arrow} {len(self._calls)} tools  {total:.1f}s  {status}")
 
-        # Rebuild details
         for i in reversed(range(self._details_layout.count())):
             w = self._details_layout.itemAt(i).widget()
             if w:
@@ -98,9 +101,9 @@ class ToolCallGroup(QWidget):
             dur = f"{call.duration_ms / 1000:.1f}s"
             parts = [f"  {status} {call.name} ({dur})"]
             if call.error:
-                parts.append(f"  error: {call.error}")
+                parts.append(f"    error: {call.error}")
             elif call.result is not None:
-                parts.append(f"  → {str(call.result)[:200]}")
+                parts.append(f"    → {str(call.result)[:200]}")
 
             detail = QLabel("\n".join(parts))
             detail.setObjectName("toolCallDetail")

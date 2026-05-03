@@ -62,9 +62,9 @@ class AgentPanel(QWidget):
         # ---- Header (minimal, Codex-style) ----
         header = QWidget()
         header.setObjectName("panelHeader")
-        header.setFixedHeight(32)
+        header.setFixedHeight(36)
         hl = QHBoxLayout(header)
-        hl.setContentsMargins(12, 0, 12, 0)
+        hl.setContentsMargins(16, 0, 16, 0)
         hl.setSpacing(8)
 
         self._title_label = QLabel(title)
@@ -153,8 +153,8 @@ class AgentPanel(QWidget):
         input_bar = QWidget()
         input_bar.setObjectName("inputBar")
         il = QHBoxLayout(input_bar)
-        il.setContentsMargins(12, 6, 12, 6)
-        il.setSpacing(8)
+        il.setContentsMargins(16, 8, 16, 8)
+        il.setSpacing(6)
 
         self._input_field = ChatInput()
         self._input_field.setPlaceholderText("Message…  (@ file, Enter send)")
@@ -167,6 +167,7 @@ class AgentPanel(QWidget):
         send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         send_btn.clicked.connect(self._on_send)
         send_btn.setFixedSize(28, 28)
+        send_btn.setStyleSheet("border-radius: 14px;")
         il.addWidget(send_btn)
 
         layout.addWidget(input_bar)
