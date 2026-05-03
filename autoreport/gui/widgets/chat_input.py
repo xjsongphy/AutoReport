@@ -32,32 +32,33 @@ class ChatInput(QPlainTextEdit):
         self._setup_ui()
 
     def _setup_ui(self) -> None:
-        """Setup input matching Cline's ChatTextArea: 2px radius, focus-border blue."""
-        self.setPlaceholderText("输入消息… (@ 引用文件, Enter 发送)")
-        self.setMinimumHeight(60)   # ~3 rows
-        self.setMaximumHeight(200)  # ~10 rows
+        self.setPlaceholderText("Message…  (@ file, Enter send)")
+        self.setMinimumHeight(60)
+        self.setMaximumHeight(200)
 
         from PyQt6.QtWidgets import QApplication
         hints = QApplication.styleHints()
         dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
 
-        # Cline color tokens
-        input_bg = "#3c3c3c" if dark else "#ffffff"
-        input_fg = "#cccccc" if dark else "#333333"
-        input_border = "#3c3c3c" if dark else "#e0e0e0"
-        focus_border = "#007acc"  # --vscode-focusBorder
+        # Codex/GitHub palette
+        input_bg = "#0d1117" if dark else "#ffffff"
+        input_fg = "#e6edf3" if dark else "#1f2328"
+        input_border = "#30363d" if dark else "#d0d7de"
+        focus_border = "#58a6ff" if dark else "#0969da"
 
         self.setStyleSheet(f"""
             QPlainTextEdit {{
                 border: 1px solid {input_border};
-                border-radius: 2px;
-                padding: 9px 28px 9px 9px;
+                border-radius: 8px;
+                padding: 10px 12px;
                 background-color: {input_bg};
                 color: {input_fg};
                 font-size: 13px;
+                font-family: "Segoe UI", "SF Pro", sans-serif;
             }}
             QPlainTextEdit:focus {{
-                border: 1.5px solid {focus_border};
+                border: 2px solid {focus_border};
+                padding: 9px 11px;
             }}
         """)
 

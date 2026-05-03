@@ -170,14 +170,14 @@ def test_clear_messages(agent_panel):
 def test_history_button_exists(agent_panel):
     """AgentPanel header should have a history button."""
     assert hasattr(agent_panel, "_history_btn")
-    assert agent_panel._history_btn.objectName() == "historyBtn"
+    assert agent_panel._history_btn.objectName() == "headerAction"
     assert not agent_panel._history_btn.isHidden()
 
 
 def test_new_conv_button_exists(agent_panel):
     """AgentPanel header should have a new conversation button."""
     assert hasattr(agent_panel, "_new_conv_btn")
-    assert agent_panel._new_conv_btn.objectName() == "newConvBtn"
+    assert agent_panel._new_conv_btn.objectName() == "headerAction"
     assert not agent_panel._new_conv_btn.isHidden()
 
 

@@ -1,4 +1,4 @@
-"""Agent panel with chat-style messages, input, and @ file references."""
+"""Agent panel — Codex CLI style with flat timeline, status indicator, and clean input."""
 
 from datetime import datetime
 from pathlib import Path
@@ -20,11 +20,12 @@ from autoreport.gui.widgets.conversation_history import ConversationHistoryDropd
 from autoreport.gui.widgets.debug_panel import DebugPanel
 from autoreport.gui.widgets.file_search_popup import FileSearchPopup
 from autoreport.gui.widgets.messages_area import MessagesArea
+from autoreport.gui.widgets.status_indicator import StatusIndicator
 from autoreport.interfaces.types import ApiDebugMessage
 
 
 class AgentPanel(QWidget):
-    """Chat-style agent panel with messages, status, and @ file references."""
+    """Codex CLI-style agent panel with flat timeline, status bar, and composer."""
 
     message_sent = pyqtSignal(str)
     debug_mode_toggled = pyqtSignal(bool)
@@ -41,18 +42,16 @@ class AgentPanel(QWidget):
         self._agent_type = "sub"
         self._workspace = Path(workspace).resolve() if workspace else Path.cwd()
         self._preview_context: tuple[str, str, int, int] | None = None
-        self._opened_file: str | None = None  # file opened but no selection
-        self._context_enabled: bool = True  # eye toggle state
-        self._current_tool_group = None  # Track current tool call group
+        self._opened_file: str | None = None
+        self._context_enabled: bool = True
+        self._current_tool_group = None
 
         self._file_search_manager = FileSearchManager(self._workspace)
         self._file_search_popup: FileSearchPopup | None = None
 
         self._setup_ui(title)
-        self._apply_style()
         self._setup_file_search()
 
-        # Bridge debug messages from async bus to Qt thread
         self._debug_msg_signal.connect(self._handle_debug_msg)
 
     def _setup_ui(self, title: str) -> None:
@@ -60,50 +59,50 @@ class AgentPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # ---- Header bar ----
+        # ---- Header (minimal, Codex-style) ----
         header = QWidget()
         header.setObjectName("panelHeader")
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(10, 6, 10, 6)
+        header.setFixedHeight(36)
+        hl = QHBoxLayout(header)
+        hl.setContentsMargins(12, 0, 12, 0)
+        hl.setSpacing(8)
 
         self._title_label = QLabel(title)
         self._title_label.setObjectName("panelTitle")
-        header_layout.addWidget(self._title_label)
+        hl.addWidget(self._title_label)
 
-        self._status_label = QLabel("空闲")
+        self._status_label = QLabel("idle")
         self._status_label.setObjectName("panelStatus")
-        header_layout.addWidget(self._status_label)
+        hl.addWidget(self._status_label)
 
-        header_layout.addStretch()
+        hl.addStretch()
 
-        # New conversation button (Cline-style)
         self._new_conv_btn = QPushButton("+")
-        self._new_conv_btn.setObjectName("newConvBtn")
-        self._new_conv_btn.setToolTip("新建对话")
+        self._new_conv_btn.setObjectName("headerAction")
+        self._new_conv_btn.setToolTip("New conversation")
         self._new_conv_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._new_conv_btn.clicked.connect(self._on_new_conversation)
-        self._new_conv_btn.setFixedSize(24, 24)
-        header_layout.addWidget(self._new_conv_btn)
+        self._new_conv_btn.setFixedSize(28, 28)
+        hl.addWidget(self._new_conv_btn)
 
-        # History button (Cline-style)
         self._history_btn = QPushButton("☰")
-        self._history_btn.setObjectName("historyBtn")
-        self._history_btn.setToolTip("对话历史")
+        self._history_btn.setObjectName("headerAction")
+        self._history_btn.setToolTip("History")
         self._history_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._history_btn.clicked.connect(self._on_history)
-        self._history_btn.setFixedSize(24, 24)
-        header_layout.addWidget(self._history_btn)
+        self._history_btn.setFixedSize(28, 28)
+        hl.addWidget(self._history_btn)
 
-        self._debug_button = QPushButton("调试")
+        self._debug_button = QPushButton("Debug")
         self._debug_button.setObjectName("debugBtn")
         self._debug_button.setCheckable(True)
         self._debug_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self._debug_button.clicked.connect(self._on_debug_toggled)
-        header_layout.addWidget(self._debug_button)
+        hl.addWidget(self._debug_button)
 
         layout.addWidget(header)
 
-        # ---- Inline history dropdown (hidden by default) ----
+        # ---- Inline history dropdown ----
         self._history_dropdown = ConversationHistoryDropdown()
         self._history_dropdown.setVisible(False)
         self._history_dropdown.session_selected.connect(self._on_history_session_selected)
@@ -112,196 +111,65 @@ class AgentPanel(QWidget):
         self._history_dropdown.rename_session_requested.connect(self._on_history_rename)
         layout.addWidget(self._history_dropdown)
 
-        # ---- Main content area (messages + debug) ----
-        content_splitter = QWidget()
-        content_layout = QVBoxLayout(content_splitter)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(0)
-
         # ---- Messages area ----
         self._messages_area = MessagesArea()
-        content_layout.addWidget(self._messages_area, 1)
+        layout.addWidget(self._messages_area, 1)
 
-        # ---- Debug panel (hidden by default) ----
+        # ---- Debug panel (hidden) ----
         self._debug_panel = DebugPanel()
         self._debug_panel.setVisible(False)
-        content_layout.addWidget(self._debug_panel)
+        layout.addWidget(self._debug_panel)
 
-        layout.addWidget(content_splitter, 1)
+        # ---- Status indicator (Codex-style, animated) ----
+        self._status_indicator = StatusIndicator()
+        layout.addWidget(self._status_indicator)
 
         # ---- Context chip bar ----
         self._context_bar = QWidget()
         self._context_bar.setObjectName("contextBar")
         self._context_bar.setVisible(False)
-        context_layout = QHBoxLayout(self._context_bar)
-        context_layout.setContentsMargins(8, 2, 8, 2)
-        context_layout.setSpacing(4)
-
-        file_icon = QLabel("\U0001F4C4")
-        file_icon.setObjectName("contextIcon")
-        context_layout.addWidget(file_icon)
+        cl = QHBoxLayout(self._context_bar)
+        cl.setContentsMargins(16, 4, 12, 4)
+        cl.setSpacing(6)
 
         self._context_label = QLabel()
         self._context_label.setObjectName("contextLabel")
         self._context_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        context_layout.addWidget(self._context_label, 1)
+        cl.addWidget(self._context_label, 1)
 
-        self._context_eye = QPushButton("\U0001F441")  # eye open
+        self._context_eye = QPushButton("👁")
         self._context_eye.setObjectName("contextEye")
         self._context_eye.setCheckable(True)
         self._context_eye.setChecked(True)
         self._context_eye.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._context_eye.setToolTip("发送时包含上下文引用 (点击切换)")
+        self._context_eye.setToolTip("Include context (toggle)")
         self._context_eye.clicked.connect(self._on_eye_toggled)
         self._context_eye.setFixedSize(24, 24)
-        context_layout.addWidget(self._context_eye)
+        cl.addWidget(self._context_eye)
 
         layout.addWidget(self._context_bar)
 
-        # ---- Input bar ----
+        # ---- Input bar (Codex-style composer) ----
         input_bar = QWidget()
         input_bar.setObjectName("inputBar")
-        input_layout = QHBoxLayout(input_bar)
-        input_layout.setContentsMargins(8, 6, 8, 6)
-        input_layout.setSpacing(6)
+        il = QHBoxLayout(input_bar)
+        il.setContentsMargins(12, 8, 12, 8)
+        il.setSpacing(8)
 
         self._input_field = ChatInput()
-        self._input_field.setPlaceholderText("输入消息… (@ 引用文件, Enter 发送)")
+        self._input_field.setPlaceholderText("Message…  (@ file, Enter send)")
         self._input_field.send_message.connect(self._on_send)
         self._input_field.file_reference_requested.connect(self._on_file_reference_requested)
-        input_layout.addWidget(self._input_field, 1)
+        il.addWidget(self._input_field, 1)
 
         send_btn = QPushButton("↑")
         send_btn.setObjectName("sendBtn")
         send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         send_btn.clicked.connect(self._on_send)
         send_btn.setFixedSize(36, 36)
-        input_layout.addWidget(send_btn)
+        il.addWidget(send_btn)
 
         layout.addWidget(input_bar)
-
-    def _apply_style(self) -> None:
-        from PyQt6.QtWidgets import QApplication
-        hints = QApplication.styleHints()
-        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
-
-        if dark:
-            c = {
-                "headerBg": "#252526",
-                "headerBorder": "#3c3c3c",
-                "titleFg": "#cccccc",
-                "statusIdle": "#8b949e",
-                "statusThink": "#4fc3f7",
-                "statusTool": "#ffb74d",
-                "statusError": "#f14c4c",
-                "statusDebug": "#ce93d8",
-                "sendBg": "#0e639c",
-                "sendFg": "#ffffff",
-                "sendHover": "#1177bb",
-                "debugFg": "#8b949e",
-                "debugActiveBg": "#5c1a1a",
-                "debugActiveFg": "#f14c4c",
-                "contextBg": "#2d2d2d",
-                "contextBorder": "#007acc",
-                "contextFg": "#cccccc",
-                "contextIconFg": "#007acc",
-            }
-        else:
-            c = {
-                "headerBg": "#f3f3f3",
-                "headerBorder": "#e0e0e0",
-                "titleFg": "#333333",
-                "statusIdle": "#8b949e",
-                "statusThink": "#0066bf",
-                "statusTool": "#e65100",
-                "statusError": "#c62828",
-                "statusDebug": "#7b1fa2",
-                "sendBg": "#0e639c",
-                "sendFg": "#ffffff",
-                "sendHover": "#1177bb",
-                "debugFg": "#8b949e",
-                "debugActiveBg": "#ffcdd2",
-                "debugActiveFg": "#c62828",
-                "contextBg": "#e8f0fe",
-                "contextBorder": "#007acc",
-                "contextFg": "#333333",
-                "contextIconFg": "#007acc",
-            }
-        self._colors = c
-
-        self.setStyleSheet(f"""
-            #panelHeader {{
-                background-color: {c["headerBg"]};
-                border-bottom: 1px solid {c["headerBorder"]};
-            }}
-            #panelTitle {{
-                font-size: 13px;
-                font-weight: 600;
-                color: {c["titleFg"]};
-            }}
-            #panelStatus {{
-                font-size: 11px;
-                color: {c["statusIdle"]};
-                margin-left: 8px;
-            }}
-            #inputBar {{
-                background-color: {c["headerBg"]};
-                border-top: 1px solid {c["headerBorder"]};
-            }}
-            #sendBtn {{
-                background-color: {c["sendBg"]};
-                color: {c["sendFg"]};
-                border: none;
-                border-radius: 2px;
-                padding: 0px;
-                font-size: 18px;
-                font-weight: 600;
-            }}
-            #sendBtn:hover {{ background-color: {c["sendHover"]}; }}
-            #historyBtn, #newConvBtn {{
-                background-color: transparent;
-                color: {c["debugFg"]};
-                border: 1px solid {c["headerBorder"]};
-                border-radius: 2px;
-                font-size: 12px;
-                padding: 0px;
-            }}
-            #historyBtn:hover, #newConvBtn:hover {{ background-color: rgba(128,128,128,0.15); }}
-            #newConvBtn {{
-                color: {c["titleFg"]};
-                font-size: 14px;
-                font-weight: bold;
-            }}
-            #debugBtn {{
-                background-color: transparent;
-                color: {c["debugFg"]};
-                border: 1px solid {c["headerBorder"]};
-                border-radius: 2px;
-                padding: 2px 8px;
-                font-size: 11px;
-            }}
-            #contextBar {{
-                background-color: {c["contextBg"]};
-                border-left: 2px solid {c["contextBorder"]};
-                border-bottom: 1px solid {c["headerBorder"]};
-            }}
-            #contextLabel {{
-                font-size: 11px;
-                color: {c["contextFg"]};
-            }}
-            #contextIcon, #contextEye {{
-                font-size: 13px;
-                color: {c["contextIconFg"]};
-            }}
-            #contextEye {{
-                background-color: transparent;
-                border: none;
-                border-radius: 2px;
-            }}
-            #contextEye:hover {{ background-color: rgba(128,128,128,0.15); }}
-        """)
-
-        self._current_tool_group = None
 
     def _setup_file_search(self) -> None:
         self._file_search_popup = FileSearchPopup(self)
@@ -341,51 +209,27 @@ class AgentPanel(QWidget):
     # ---- Public API ----
 
     def set_opened_file(self, file_path: str) -> None:
-        """Set context for a file that was opened but no text selected.
-
-        Chip shows filename; on send, includes the file path for agent to read.
-
-        Args:
-            file_path: Relative file path.
-        """
         self._opened_file = file_path
         self._preview_context = None
         self._context_enabled = True
         self._context_eye.setChecked(True)
-        self._context_eye.setText("\U0001F441")  # eye open
-        fname = Path(file_path).name
-        self._context_label.setText(fname)
+        self._context_eye.setText("👁")
+        self._context_label.setText(Path(file_path).name)
         self._context_bar.setVisible(True)
 
     def set_preview_context(self, file_path: str, selected_text: str, start_line: int, end_line: int) -> None:
-        """Set context for selected text in preview.
-
-        Chip shows line count; on send, includes filename, line range, and content.
-
-        Args:
-            file_path: Relative file path.
-            selected_text: Selected text content.
-            start_line: Start line number (1-indexed).
-            end_line: End line number (1-indexed).
-        """
         self._preview_context = (file_path, selected_text, start_line, end_line)
         self._opened_file = None
         self._context_enabled = True
         self._context_eye.setChecked(True)
-        self._context_eye.setText("\U0001F441")  # eye open
-        line_count = end_line - start_line + 1
-        label = f"{line_count} line selected" if line_count == 1 else f"{line_count} lines selected"
-        self._context_label.setText(label)
+        self._context_eye.setText("👁")
+        lines = end_line - start_line + 1
+        self._context_label.setText(f"{lines} line{'s' if lines > 1 else ''} — {Path(file_path).name}")
         self._context_bar.setVisible(True)
 
     def _on_eye_toggled(self) -> None:
         self._context_enabled = self._context_eye.isChecked()
-        if self._context_enabled:
-            self._context_eye.setText("\U0001F441")  # eye open
-            self._context_eye.setToolTip("发送时包含上下文引用 (点击切换)")
-        else:
-            self._context_eye.setText("\U0001F576")  # crossed-out / hidden
-            self._context_eye.setToolTip("上下文已隐藏，不会发送给 Agent (点击恢复)")
+        self._context_eye.setText("👁" if self._context_enabled else "🚫")
 
     def set_workspace(self, workspace: Path) -> None:
         self._workspace = Path(workspace).resolve()
@@ -394,12 +238,12 @@ class AgentPanel(QWidget):
     def set_agent_type(self, agent_type: str) -> None:
         self._agent_type = agent_type
         titles = {
-            "data_analysis": "数据分析 Agent",
-            "plotting": "图像绘制 Agent",
-            "theory": "理论推导 Agent",
-            "report": "报告撰写 Agent",
-            "main": "主 Agent",
-            "sub": "子 Agent",
+            "data_analysis": "Data Analysis",
+            "plotting": "Plotting",
+            "theory": "Theory",
+            "report": "Report",
+            "main": "Main Agent",
+            "sub": "Sub Agent",
         }
         self._title_label.setText(titles.get(agent_type, "Agent"))
 
@@ -417,37 +261,22 @@ class AgentPanel(QWidget):
         coordination: bool = False,
         streaming: bool = False,
     ) -> None:
-        """Add a message to the display using MessageRow widget.
-
-        Args:
-            role: Message role ("user" or "agent").
-            content: Message content.
-            source: Message source ("user" or "main_agent").
-            coordination: Whether this is a coordination message.
-            streaming: If True, append to last agent message instead of creating new.
-        """
-        # For streaming agent messages, we need to append to the last message
         if streaming and role == "agent" and not content:
-            # Empty content signals completion - just ensure visible
             return
 
         if streaming and role == "agent":
-            # Append to last agent message
-            # Find the last MessageRow and append to it
             rows = self._messages_area.get_message_rows()
             if rows and rows[-1]._role == "agent":
-                # Append content to the last message
                 last_row = rows[-1]
                 last_row._content += content
-                # Update the content label
-                # Find the content label (second child)
                 if last_row.layout().count() > 1:
-                    content_label = last_row.layout().itemAt(1).widget()
-                    if content_label:
-                        content_label.setText(last_row._content)
-            return
+                    content_widget = last_row.layout().itemAt(0)
+                    if content_widget and content_widget.layout():
+                        text_item = content_widget.layout().itemAt(1)
+                        if text_item and text_item.widget():
+                            text_item.widget().setText(last_row._content)
+                return
 
-        # Add new message row
         ts = datetime.now().strftime("%H:%M")
         self._messages_area.add_message_row(
             role=role,
@@ -457,51 +286,25 @@ class AgentPanel(QWidget):
         )
 
     def add_tool_call(self, tool_name: str, arguments: dict) -> None:
-        """Add a tool call entry using ToolCallGroup.
-
-        Args:
-            tool_name: Name of the tool being called.
-            arguments: Tool arguments.
-        """
-        # Get or create the current tool group
         groups = self._messages_area.get_tool_groups()
-
-        # If there's no recent group or the last group is "done", create a new one
         if not groups:
             group = self._messages_area.add_tool_group()
             self._current_tool_group = group
         else:
-            # Use the last group
             self._current_tool_group = groups[-1]
 
     def add_tool_result(self, tool_name: str, result: Any, error: str | None = None) -> None:
-        """Add a tool result entry to the current ToolCallGroup.
-
-        Args:
-            tool_name: Name of the tool.
-            result: Tool result.
-            error: Optional error message.
-        """
-        if hasattr(self, '_current_tool_group') and self._current_tool_group:
-            # Calculate duration (placeholder - would need actual timing)
-            duration_ms = 100  # Placeholder
-
+        if hasattr(self, "_current_tool_group") and self._current_tool_group:
             self._current_tool_group.add_tool_call(
                 name=tool_name,
-                arguments={},  # Arguments were already added in add_tool_call
+                arguments={},
                 success=error is None,
-                duration_ms=duration_ms,
+                duration_ms=100,
                 result=result if error is None else None,
                 error=error,
             )
 
     def add_error(self, source: str, message: str) -> None:
-        """Add an error message to the display.
-
-        Args:
-            source: Error source.
-            message: Error message.
-        """
         ts = datetime.now().strftime("%H:%M")
         self._messages_area.add_message_row(
             role="agent",
@@ -510,12 +313,6 @@ class AgentPanel(QWidget):
         )
 
     def add_checkpoint(self, checkpoint_id: str, description: str) -> None:
-        """Add a checkpoint notification to the display.
-
-        Args:
-            checkpoint_id: Checkpoint ID.
-            description: Checkpoint description.
-        """
         ts = datetime.now().strftime("%H:%M")
         self._messages_area.add_message_row(
             role="agent",
@@ -526,25 +323,21 @@ class AgentPanel(QWidget):
     # ---- Status ----
 
     def set_status(self, status: str, extra: dict | None = None) -> None:
-        labels = {
-            "idle": "空闲",
-            "thinking": "思考中…",
-            "running_tool": "执行工具…",
-            "error": "错误",
-            "debug_mode": "调试模式",
+        status_map = {
+            "idle": ("idle", False),
+            "thinking": ("thinking", True),
+            "running_tool": ("tool", True),
+            "error": ("error", False),
+            "debug_mode": ("debug", False),
         }
-        color_map = {
-            "idle": "statusIdle",
-            "thinking": "statusThink",
-            "running_tool": "statusTool",
-            "error": "statusError",
-            "debug_mode": "statusDebug",
-        }
-        label = labels.get(status, status)
-        color_key = color_map.get(status, "statusIdle")
-        color = self._colors.get(color_key, "#888")
+        label, active = status_map.get(status, (status, False))
         self._status_label.setText(label)
-        self._status_label.setStyleSheet(f"color: {color}; font-size: 11px; margin-left: 8px;")
+
+        if active:
+            header = "Thinking" if status == "thinking" else "Running tool"
+            self._status_indicator.start(header)
+        else:
+            self._status_indicator.stop()
 
     # ---- Actions ----
 
@@ -556,85 +349,50 @@ class AgentPanel(QWidget):
         final_message = content
         if self._context_enabled:
             if self._preview_context:
-                file_path, selected_text, start_line, end_line = self._preview_context
-                context_block = (
-                    f"\n\n<!-- 上下文引用 -->\n"
-                    f"**文件**: {file_path} (行 {start_line}-{end_line})\n"
-                    f"```\n{selected_text}\n```\n"
-                )
-                final_message = content + context_block
+                fp, text, s, e = self._preview_context
+                ctx = f"\n\n<!-- context -->\n**File**: {fp} (lines {s}-{e})\n```\n{text}\n```\n"
+                final_message = content + ctx
             elif self._opened_file:
-                context_block = (
-                    f"\n\n<!-- 上下文引用 -->\n"
-                    f"**文件**: {self._opened_file}\n"
-                )
-                final_message = content + context_block
+                ctx = f"\n\n<!-- context -->\n**File**: {self._opened_file}\n"
+                final_message = content + ctx
 
         self._input_field.clear_text()
-        # Don't display user message here - backend will send UserMessage back
-        # which will be displayed by _handle_user_message in main_window.py
         self.message_sent.emit(final_message)
 
-        # Clear context bar after sending
         self._preview_context = None
         self._opened_file = None
         self._context_bar.setVisible(False)
 
     def _on_history(self) -> None:
-        """Toggle inline history dropdown."""
         if self._history_dropdown.isVisible():
             self._history_dropdown.setVisible(False)
         else:
             self.history_requested.emit()
 
     def _on_new_conversation(self) -> None:
-        """Handle new conversation button click."""
         self.new_conversation_requested.emit()
 
     def show_history_dropdown(self, sessions: list[dict], current_id: str | None = None) -> None:
-        """Populate and show the inline history dropdown."""
         self._history_dropdown.populate(sessions, current_id)
 
     def _on_history_session_selected(self, session_id: str) -> None:
-        """Handle session selected from dropdown."""
         self.session_selected_from_dropdown.emit(session_id)
 
     def _on_history_new_conversation(self) -> None:
-        """Handle new conversation from dropdown."""
         self.new_conversation_requested.emit()
 
     def _on_history_delete(self, session_id: str) -> None:
-        """Handle session deletion from dropdown."""
         self.delete_session_requested.emit(session_id)
 
     def _on_history_rename(self, session_id: str, new_name: str) -> None:
-        """Handle session rename from dropdown."""
         self.rename_session_requested.emit(session_id, new_name)
 
     def _on_debug_toggled(self) -> None:
         enabled = self._debug_button.isChecked()
-        if enabled:
-            self._debug_button.setStyleSheet(
-                f"background-color: {self._colors['debugActiveBg']}; "
-                f"color: {self._colors['debugActiveFg']}; "
-                "border: 1px solid transparent; border-radius: 3px; padding: 2px 8px; font-size: 11px;"
-            )
-            # Show debug panel
-            self._debug_panel.setVisible(True)
-        else:
-            self._debug_button.setStyleSheet("")
-            # Hide debug panel
-            self._debug_panel.setVisible(False)
+        self._debug_panel.setVisible(enabled)
         self.debug_mode_toggled.emit(enabled)
 
     def subscribe_to_debug_messages(self, bus) -> None:
-        """Subscribe to ApiDebugMessage from the message bus.
-
-        Uses signal bridge to safely update Qt widgets from async thread.
-
-        Args:
-            bus: MessageBus instance to subscribe to.
-        """
         async def on_debug_message(msg):
             if isinstance(msg, ApiDebugMessage):
                 self._debug_msg_signal.emit(msg)
@@ -642,7 +400,6 @@ class AgentPanel(QWidget):
         bus.subscribe(ApiDebugMessage, on_debug_message)
 
     def _handle_debug_msg(self, msg) -> None:
-        """Handle debug message in Qt thread (triggered by signal)."""
         self._debug_panel.add_entry(
             timestamp=msg.timestamp,
             model=msg.model,
