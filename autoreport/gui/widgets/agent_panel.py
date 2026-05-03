@@ -150,34 +150,27 @@ class AgentPanel(QWidget):
 
         layout.addWidget(self._context_bar)
 
-        # ---- Input bar (Codex-style composer) ----
-        input_bar = QWidget()
-        input_bar.setObjectName("inputBar")
-        il = QHBoxLayout(input_bar)
-        il.setContentsMargins(16, 8, 16, 8)
-        il.setSpacing(6)
+        # ---- Input bar (VS Code Copilot-style composer) ----
+        # Single container with input + send button, wrapped by working border
+        self._input_container = QWidget()
+        self._input_container.setObjectName("inputContainer")
+        icl = QHBoxLayout(self._input_container)
+        icl.setContentsMargins(4, 2, 4, 2)
+        icl.setSpacing(4)
 
         self._input_field = ChatInput()
         self._input_field.setPlaceholderText("Message…  (@ file, Enter send)")
         self._input_field.send_message.connect(self._on_send)
         self._input_field.file_reference_requested.connect(self._on_file_reference_requested)
-        il.addWidget(self._input_field, 1)
+        icl.addWidget(self._input_field, 1)
 
         send_btn = QPushButton("↑")
         send_btn.setObjectName("sendBtn")
         send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         send_btn.clicked.connect(self._on_send)
-        send_btn.setFixedSize(28, 28)
-        send_btn.setStyleSheet("border-radius: 14px;")
-        il.addWidget(send_btn)
+        send_btn.setFixedSize(26, 26)
 
-        # Wrap input_bar in a container with animated working border
-        self._input_container = QWidget()
-        self._input_container.setObjectName("inputContainer")
-        icl = QHBoxLayout(self._input_container)
-        icl.setContentsMargins(2, 2, 2, 2)
-        icl.setSpacing(0)
-        icl.addWidget(input_bar)
+        icl.addWidget(send_btn)
 
         # Working border overlays the container
         self._working_border = WorkingBorder(self._input_container)
@@ -189,22 +182,21 @@ class AgentPanel(QWidget):
         secondary_bar = QWidget()
         secondary_bar.setObjectName("secondaryToolbar")
         sl = QHBoxLayout(secondary_bar)
-        sl.setContentsMargins(16, 2, 10, 4)
-        sl.setSpacing(4)
+        sl.setContentsMargins(10, 0, 6, 2)
+        sl.setSpacing(2)
 
         add_btn = QPushButton("+")
         add_btn.setObjectName("secondaryBtn")
         add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         add_btn.setToolTip("添加上下文")
-        add_btn.setFixedSize(24, 20)
+        add_btn.setFixedSize(22, 18)
         sl.addWidget(add_btn)
 
         at_btn = QPushButton("@")
         at_btn.setObjectName("secondaryBtn")
         at_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         at_btn.setToolTip("引用文件")
-        at_btn.setFixedSize(24, 20)
-        at_btn.clicked.connect(lambda: self._input_field._check_for_at_token())
+        at_btn.setFixedSize(22, 18)
         sl.addWidget(at_btn)
 
         sl.addStretch()

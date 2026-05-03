@@ -279,15 +279,19 @@ class MainWindow(QMainWindow):
                 font-size: 11px;
                 color: {c["muted"]};
             }}
-            /* VS Code send button: gradient filled circle, border-radius 5px */
+            /* VS Code send button: gradient filled circle, codicon-arrow-up */
             #sendBtn {{
                 background-color: {c["send_bg"]};
                 color: #ffffff;
                 border: none;
-                border-radius: 14px;
+                border-radius: 13px;
                 font-size: 14px;
                 font-weight: 700;
                 padding: 0px;
+                min-width: 26px;
+                min-height: 26px;
+                max-width: 26px;
+                max-height: 26px;
             }}
             #sendBtn:hover {{
                 background-color: {c["send_hover"]};
