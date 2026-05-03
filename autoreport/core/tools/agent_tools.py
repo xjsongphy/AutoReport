@@ -44,7 +44,7 @@ class SendToAgentTool(Tool):
             content: Task instruction to send to the sub-agent.
 
         Returns:
-            Dictionary with agent_type, status, and response content.
+            Dictionary with agent_type, status, response content, and any feedback.
         """
         try:
             target = AgentType(agent_type)
@@ -58,6 +58,7 @@ class SendToAgentTool(Tool):
         # Create future to wait for response
         loop = asyncio.get_running_loop()
         future: asyncio.Future[str] = loop.create_future()
+        feedback_items: list[dict[str, str]] = []
 
         def _on_response(msg: Any) -> None:
             if not isinstance(msg, AgentResponse):
@@ -69,8 +70,19 @@ class SendToAgentTool(Tool):
             if not future.done():
                 future.set_result(msg.content)
 
-        # Subscribe and send
+        def _on_feedback(msg: Any) -> None:
+            if not isinstance(msg, AgentFeedback):
+                return
+            if msg.agent_type != target.value and msg.agent_type != target:
+                return
+            feedback_items.append({
+                "type": msg.feedback_type,
+                "content": msg.content,
+            })
+
+        # Subscribe BEFORE publishing to avoid race condition
         self._bus.subscribe(AgentResponse, _on_response)
+        self._bus.subscribe(AgentFeedback, _on_feedback)
 
         await self._bus.publish(UserMessage(
             content=content,
@@ -83,20 +95,27 @@ class SendToAgentTool(Tool):
         # Wait for response
         try:
             response_content = await asyncio.wait_for(future, timeout=self._timeout)
-            return {
+            result: dict[str, Any] = {
                 "status": "success",
                 "agent_type": target.value,
                 "response": response_content,
             }
+            if feedback_items:
+                result["feedback"] = feedback_items
+            return result
         except asyncio.TimeoutError:
-            return {
+            result = {
                 "status": "timeout",
                 "agent_type": target.value,
                 "error": f"Sub-agent did not respond within {self._timeout}s. "
                          "It may still be processing. Try again or use read_file to check its output.",
             }
+            if feedback_items:
+                result["feedback"] = feedback_items
+            return result
         finally:
             self._bus.unsubscribe(AgentResponse, _on_response)
+            self._bus.unsubscribe(AgentFeedback, _on_feedback)
 
 
 class ReportIssueTool(Tool):

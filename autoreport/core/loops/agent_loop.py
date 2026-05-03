@@ -363,12 +363,18 @@ class AgentLoop:
                 )
                 await self._handle_tool_calls(response, message.message_id)
 
-            # Send final completion signal (empty content, streaming=False)
+            # Send final completion signal.
+            # For tool-call paths, _handle_tool_calls already published the
+            # final content — this is just a completion marker.
+            # For no-tool paths, include the accumulated content so that
+            # SendToAgentTool (and any other bus listener) receives the
+            # full response text on the non-streaming message.
+            final_content = "" if accumulated_tool_calls else accumulated_content
             await self.bus.publish(AgentResponse(
                 agent_type=self.agent_type,
-                content="",  # Empty to signal completion
+                content=final_content,
                 message_id=message.message_id,
-                streaming=False,  # Final message
+                streaming=False,
             ))
 
             await self._set_status(AgentStatus.IDLE)
