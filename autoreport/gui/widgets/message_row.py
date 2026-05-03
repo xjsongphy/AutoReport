@@ -1,9 +1,8 @@
 """Message cell — VS Code Copilot Chat style.
 
-- User messages: right-aligned rounded bubble (VS Code interactive-request)
-- Agent messages: flat layout with avatar icon + content + hover copy footer
-- Coordination: muted label above message
-- Code blocks: monospace card with hover-visible copy icon
+- User messages: right-aligned rounded bubble
+- Agent messages: flat layout with avatar + markdown content + bottom copy
+- Code blocks: monospace card with right-side copy icon (hover visible)
 """
 
 import re
@@ -19,8 +18,11 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from .markdown_renderer import render_markdown
+
 
 def _parse_code_blocks(content: str) -> list[tuple[str, str | None]]:
+    """Split content into segments: (text, None) for text, (code, language) for code."""
     pattern = r"```(\w*)\n(.*?)```"
     parts: list[tuple[str, str | None]] = []
     last_end = 0
@@ -39,7 +41,7 @@ def _parse_code_blocks(content: str) -> list[tuple[str, str | None]]:
 
 
 class _CodeBlockWidget(QWidget):
-    """VS Code-style code block with hover-visible copy icon."""
+    """VS Code-style code block with right-side hover-visible copy icon."""
 
     def __init__(self, code: str, language: str | None, parent=None):
         super().__init__(parent)
@@ -53,11 +55,11 @@ class _CodeBlockWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Header bar
+        # Header bar with language label (left) and copy icon (right)
         header = QWidget()
         header.setObjectName("codeBlockHeader")
         hl = QHBoxLayout(header)
-        hl.setContentsMargins(12, 6, 8, 6)
+        hl.setContentsMargins(12, 4, 4, 4)
         hl.setSpacing(8)
 
         lang_label = QLabel(self._language or "code")
@@ -65,7 +67,6 @@ class _CodeBlockWidget(QWidget):
         hl.addWidget(lang_label)
         hl.addStretch()
 
-        # Copy icon button — only visible on hover (handled by parent CSS)
         self._copy_btn = QPushButton("📋")
         self._copy_btn.setObjectName("codeBlockCopyBtn")
         self._copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -91,7 +92,7 @@ class _CodeBlockWidget(QWidget):
 
 
 class MessageRow(QWidget):
-    """Render a chat message matching VS Code Copilot Chat's exact visual style."""
+    """Render a chat message matching VS Code Copilot Chat's visual style."""
 
     def __init__(
         self,
@@ -106,7 +107,7 @@ class MessageRow(QWidget):
         self._content = content
         self._timestamp = timestamp
         self._is_coordination = is_coordination
-        self._complete = False  # streaming not yet finished
+        self._complete = False
         self._agent_content_layout: QVBoxLayout | None = None
         self._setup_ui()
 
@@ -168,18 +169,18 @@ class MessageRow(QWidget):
             hl.addStretch()
             self._outer_layout.addWidget(header)
 
-            # Content area
+            # Content area — rebuilt via _rebuild_agent_content
             self._agent_content_layout = QVBoxLayout()
             self._agent_content_layout.setContentsMargins(32, 0, 0, 0)
             self._agent_content_layout.setSpacing(0)
             self._outer_layout.addLayout(self._agent_content_layout)
             self._rebuild_agent_content()
 
-            # Footer copy toolbar — only visible on hover AFTER streaming complete
+            # Copy button at bottom, always visible after complete (VS Code: .chat-footer-toolbar)
             self._footer = QWidget()
             self._footer.setObjectName("msgFooter")
             fl = QHBoxLayout(self._footer)
-            fl.setContentsMargins(32, 6, 0, 0)
+            fl.setContentsMargins(32, 4, 0, 0)
             fl.setSpacing(4)
 
             self._copy_btn = QPushButton("📋")
@@ -189,7 +190,6 @@ class MessageRow(QWidget):
             self._copy_btn.clicked.connect(self._copy_content)
             self._copy_btn.setFixedSize(24, 22)
             fl.addWidget(self._copy_btn)
-
             fl.addStretch()
             self._footer.setVisible(False)
             self._outer_layout.addWidget(self._footer)
@@ -214,16 +214,21 @@ class MessageRow(QWidget):
         self._clear_agent_content()
         if self._agent_content_layout is None:
             return
+
         segments = _parse_code_blocks(self._content)
         for seg_text, seg_lang in segments:
             if seg_lang is not None:
                 code_widget = _CodeBlockWidget(seg_text, seg_lang)
                 self._agent_content_layout.addWidget(code_widget)
             else:
-                text_label = QLabel(seg_text)
+                # Render markdown text
+                html = render_markdown(seg_text)
+                text_label = QLabel(html)
                 text_label.setObjectName("agentMessageText")
                 text_label.setWordWrap(True)
-                text_label.setTextFormat(Qt.TextFormat.PlainText)
+                text_label.setTextFormat(Qt.TextFormat.RichText)
+                text_label.setOpenExternalLinks(True)
+                text_label.setContentsMargins(0, 2, 0, 4)
                 self._agent_content_layout.addWidget(text_label)
 
     def append_content(self, delta: str) -> None:
@@ -232,23 +237,15 @@ class MessageRow(QWidget):
         self._rebuild_agent_content()
 
     def mark_complete(self) -> None:
-        """Mark streaming as complete — footer copy button becomes available on hover."""
+        """Mark streaming complete — show copy button at bottom."""
         self._complete = True
+        if hasattr(self, "_footer"):
+            self._footer.setVisible(True)
 
     def _copy_content(self) -> None:
         clipboard = QApplication.clipboard()
         if clipboard:
             clipboard.setText(self._content, QClipboard.Mode.Clipboard)
-
-    def enterEvent(self, event) -> None:  # noqa: N802
-        if hasattr(self, "_footer") and self._complete:
-            self._footer.setVisible(True)
-        super().enterEvent(event)
-
-    def leaveEvent(self, event) -> None:  # noqa: N802
-        if hasattr(self, "_footer"):
-            self._footer.setVisible(False)
-        super().leaveEvent(event)
 
     def get_display_text(self) -> str:
         role_text = "You" if self._role == "user" else "Agent"

@@ -635,12 +635,19 @@ class MainWindow(QMainWindow):
     def _handle_agent_response(self, message: AgentResponse) -> None:
         agent_str = str(message.agent_type)
         panel = self._get_panel_for_agent(agent_str)
-        # Skip empty non-streaming messages (completion signal only)
+        # Empty non-streaming message = completion signal for streaming
         if not message.streaming and not message.content:
+            rows = panel._messages_area.get_message_rows()
+            if rows and rows[-1]._role == "agent":
+                rows[-1].mark_complete()
             return
         panel.add_message("agent", message.content, streaming=message.streaming)
         if not message.streaming:
             self._conv_store.append_message(agent_str, "agent", message.content)
+            # Mark newly added message as complete (copy button visible)
+            rows = panel._messages_area.get_message_rows()
+            if rows and rows[-1]._role == "agent":
+                rows[-1].mark_complete()
 
     def _handle_user_message(self, message: UserMessage) -> None:
         agent_str = str(message.agent_type)
