@@ -123,6 +123,13 @@ class AutoReportApp:
 
         logger.info("Application shut down")
 
+    def _check_interrupt(self) -> None:
+        if self._interrupted:
+            logger.info("Shutting down via interrupt check timer...")
+            from PyQt6.QtWidgets import QApplication
+            QApplication.closeAllWindows()
+            self._qt_app.quit()
+
     def run_gui(self, qt_app: QApplication) -> None:
         """Run GUI application."""
         import threading
@@ -143,7 +150,7 @@ class AutoReportApp:
         # Timer to check for interrupts periodically (Qt event loop blocks signals)
         from PyQt6.QtCore import QTimer
         self._interrupt_timer = QTimer()
-        self._interrupt_timer.timeout.connect(lambda: None)
+        self._interrupt_timer.timeout.connect(self._check_interrupt)
         self._interrupt_timer.start(100)  # Check every 100ms
 
         # QApplication already created in main(), get the instance
