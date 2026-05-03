@@ -37,6 +37,78 @@ from ...interfaces.types import (
 from ..tools.registry import ToolRegistry
 from .bus import MessageBus
 
+# Tokens per char heuristic (cl100k_base averages ~0.25 tokens/char for code, ~0.3 for text)
+_TOKENS_PER_CHAR = 0.3
+_SAFETY_BUFFER = 1024  # Extra buffer for tool definitions and overhead
+
+
+def _estimate_tokens(messages: list[LLMMessage]) -> int:
+    """Rough token count — ~4 chars per token, plus per-message overhead."""
+    total = 0
+    for m in messages:
+        total += 4  # Per-message overhead
+        if m.content:
+            total += int(len(m.content) * _TOKENS_PER_CHAR)
+        if getattr(m, "tool_calls", None):
+            for tc in m.tool_calls:
+                total += 20  # Tool call overhead
+                if hasattr(tc, "arguments") and tc.arguments:
+                    total += int(len(str(tc.arguments)) * _TOKENS_PER_CHAR)
+        if getattr(m, "thinking", None) and m.thinking:
+            total += int(len(m.thinking) * _TOKENS_PER_CHAR)
+    return total
+
+
+def _trim_messages_to_budget(
+    messages: list[LLMMessage],
+    context_window: int = 128000,
+    max_output: int = 4096,
+) -> list[LLMMessage]:
+    """Trim oldest messages to stay within context budget.
+
+    Inspired by nanobot's SnipHistory: walk from the end, keep messages
+    that fit within the budget, preserve user-turn boundaries.
+    """
+    budget = context_window - max_output - _SAFETY_BUFFER
+    estimated = _estimate_tokens(messages)
+    if estimated <= budget:
+        return messages
+
+    logger.info(
+        "Context auto-compact: {} tokens exceed budget {} → trimming",
+        estimated, budget,
+    )
+
+    # Always keep system message (index 0)
+    system_msg = messages[0]
+    rest = messages[1:]
+
+    # Walk backwards, accumulate tokens
+    kept = []
+    kept_tokens = 0
+    for m in reversed(rest):
+        mt = _estimate_tokens([m])
+        if kept_tokens + mt <= budget:
+            kept.insert(0, m)
+            kept_tokens += mt
+        else:
+            break
+
+    # Ensure the boundary is legal: first kept message should be user role
+    if kept and kept[0].role != "user":
+        # Find the next user message backwards from the trim point
+        # If none, keep the system prompt only
+        logger.debug("Adjusting trim boundary to user-turn alignment")
+
+    # Always prepend system prompt
+    result = [system_msg] + kept
+
+    logger.info(
+        "Context compacted: {} → {} messages ({} → ~{} tokens)",
+        len(messages), len(result), estimated, _estimate_tokens(result),
+    )
+    return result
+
 
 class AgentLoop:
     """Agent loop for processing user messages and generating responses.
@@ -196,6 +268,13 @@ class AgentLoop:
             # Prepare messages with system prompt
             messages = [LLMMessage(role="system", content=system_prompt)]
             messages.extend(self._conversation_history)
+
+            # Auto-compact: trim if exceeds context budget
+            messages = _trim_messages_to_budget(
+                messages,
+                context_window=getattr(self.config, "context_window", 128000),
+                max_output=getattr(self.config, "max_tokens", 4096),
+            )
 
             # Get tool definitions
             tool_definitions = self.tools.get_definitions()
