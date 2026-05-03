@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -488,6 +489,14 @@ class ConfigDialog(QDialog):
         scroll.setWidget(self.scroll_content)
         root.addWidget(scroll, 1)
 
+        # Show empty state hint when no configs
+        self._empty_hint = QLabel("暂无 API 配置。点击下方「+ 添加配置」开始。")
+        self._empty_hint.setObjectName("emptyHint")
+        self._empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_hint.setWordWrap(True)
+        self._update_empty_hint_visibility()
+        self.scroll_layout.addWidget(self._empty_hint)
+
         # Add config button
         add_row = QHBoxLayout()
         add_row.setContentsMargins(20, 4, 20, 4)
@@ -554,8 +563,27 @@ class ConfigDialog(QDialog):
         for cfg in configs:
             card = ConfigCard(cfg)
             card.delete_btn.clicked.connect(lambda checked, c=card: self._remove_card(c))
-            self.scroll_layout.insertWidget(self.scroll_layout.count() - 1, card)
+            self.scroll_layout.insertWidget(self.scroll_layout.count() - 2, card)
             self._cards.append(card)
+
+        self._update_empty_hint_visibility()
+
+    def _update_empty_hint_visibility(self) -> None:
+        show_hint = len(self._cards) == 0
+        self._empty_hint.setVisible(show_hint)
+        # When showing hint, hide the stretch before it to center it
+        if show_hint:
+            # Find the stretch spacer before the hint
+            for i in range(self.scroll_layout.count() - 1):
+                item = self.scroll_layout.itemAt(i)
+                if item and item.spacerItem():
+                    item.spacerItem().changeSize(0, 0, QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        else:
+            # Restore stretch
+            for i in range(self.scroll_layout.count() - 1):
+                item = self.scroll_layout.itemAt(i)
+                if item and item.spacerItem():
+                    item.spacerItem().changeSize(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def _remove_card(self, card: ConfigCard) -> None:
         cfg = card.get_config()
@@ -568,13 +596,15 @@ class ConfigDialog(QDialog):
         elif was_active:
             self._config_manager.config.providers.active = ""
         self._refresh_active_combo()
+        self._update_empty_hint_visibility()
 
     def _add_card(self, cfg: ApiConfig) -> None:
         card = ConfigCard(cfg)
         card.delete_btn.clicked.connect(lambda checked, c=card: self._remove_card(c))
-        self.scroll_layout.insertWidget(self.scroll_layout.count() - 1, card)
+        self.scroll_layout.insertWidget(self.scroll_layout.count() - 2, card)
         self._cards.append(card)
         self._refresh_active_combo()
+        self._update_empty_hint_visibility()
 
     def _add_config(self) -> None:
         dlg = PresetSelectorDialog(self)
@@ -767,6 +797,11 @@ class ConfigDialog(QDialog):
                 border: 1px solid {c["warningBorder"]};
                 border-radius: 6px;
                 margin-top: 8px;
+            }}
+            #emptyHint {{
+                font-size: 14px;
+                color: {c["subtitleFg"]};
+                padding: 40px 20px;
             }}
             #activeLabel {{
                 font-size: 13px;
