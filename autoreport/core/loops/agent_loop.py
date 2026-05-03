@@ -228,8 +228,9 @@ class AgentLoop:
                         accumulated_tool_calls = chunk.tool_calls
 
                     if chunk.done:
-                        # Stream complete
-                        if accumulated_content:
+                        # Stream complete — only save to history if no tool calls.
+                        # When tool calls exist, _handle_tool_calls manages history.
+                        if accumulated_content and not accumulated_tool_calls:
                             self._conversation_history.append(
                                 LLMMessage(role="assistant", content=accumulated_content)
                             )
