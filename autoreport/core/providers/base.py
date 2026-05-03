@@ -38,6 +38,7 @@ class Message:
     tool_calls: list[ToolCall] | None = None  # assistant messages with tool calls
     tool_call_id: str | None = None  # tool result messages (role="tool" for OpenAI)
     is_tool_result: bool = False  # marks this as a tool result message
+    thinking: str | None = None  # DeepSeek extended thinking blocks
 
 
 @dataclass
@@ -48,6 +49,7 @@ class LLMResponse:
     tool_calls: list[ToolCall] = field(default_factory=list)
     usage: dict[str, int] | None = None
     streaming: bool = False  # Whether this is a streaming chunk
+    thinking: str | None = None  # DeepSeek extended thinking
 
 
 @dataclass
@@ -57,6 +59,7 @@ class LLMStreamChunk:
     delta: str | None = None  # Text content delta (None if no new text)
     tool_calls: list[ToolCall] | None = None  # Final tool calls at end
     done: bool = False  # Whether stream is complete
+    thinking: str | None = None  # DeepSeek extended thinking
 
 
 class LLMProvider(ABC):

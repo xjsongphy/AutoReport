@@ -21,6 +21,7 @@ def mock_gui():
 @pytest.fixture
 def mock_provider():
     provider = AsyncMock()
+    provider.model = "test-model"
     provider.chat.return_value = LLMResponse(
         content="I will help you.",
         tool_calls=[],

@@ -205,6 +205,7 @@ class AgentLoop:
 
             accumulated_content = ""
             accumulated_tool_calls = []
+            accumulated_thinking = None
             last_error = None
 
             try:
@@ -226,6 +227,9 @@ class AgentLoop:
 
                     if chunk.tool_calls:
                         accumulated_tool_calls = chunk.tool_calls
+
+                    if chunk.thinking:
+                        accumulated_thinking = chunk.thinking
 
                     if chunk.done:
                         # Stream complete — only save to history if no tool calls.
@@ -267,10 +271,12 @@ class AgentLoop:
                 class StreamResponse:
                     content: str
                     tool_calls: list
+                    thinking: str | None = None
 
                 response = StreamResponse(
                     content=accumulated_content,
                     tool_calls=accumulated_tool_calls,
+                    thinking=accumulated_thinking,
                 )
                 await self._handle_tool_calls(response, message.message_id)
 
@@ -321,6 +327,7 @@ class AgentLoop:
                 role="assistant",
                 content=response.content or "",
                 tool_calls=response.tool_calls,
+                thinking=response.thinking,
             ))
 
             # Execute each tool call and add results as structured messages

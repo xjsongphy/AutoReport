@@ -33,8 +33,8 @@ class ChatInput(QPlainTextEdit):
 
     def _setup_ui(self) -> None:
         self.setPlaceholderText("Message…  (@ file, Enter send)")
-        self.setMinimumHeight(60)
-        self.setMaximumHeight(200)
+        self.setMinimumHeight(36)
+        self.setMaximumHeight(160)
 
         from PyQt6.QtWidgets import QApplication
         hints = QApplication.styleHints()
@@ -50,7 +50,7 @@ class ChatInput(QPlainTextEdit):
             QPlainTextEdit {{
                 border: 1px solid {input_border};
                 border-radius: 8px;
-                padding: 10px 12px;
+                padding: 6px 10px;
                 background-color: {input_bg};
                 color: {input_fg};
                 font-size: 13px;
@@ -58,7 +58,7 @@ class ChatInput(QPlainTextEdit):
             }}
             QPlainTextEdit:focus {{
                 border: 2px solid {focus_border};
-                padding: 9px 11px;
+                padding: 5px 9px;
             }}
         """)
 

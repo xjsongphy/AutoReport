@@ -70,6 +70,8 @@ class AnthropicProvider(LLMProvider):
             # Assistant message with tool calls -> structured content blocks
             if msg.role == "assistant" and msg.tool_calls:
                 content_blocks: list[dict] = []
+                if msg.thinking:
+                    content_blocks.append({"type": "thinking", "thinking": msg.thinking})
                 if msg.content:
                     content_blocks.append({"type": "text", "text": msg.content})
                 for tc in msg.tool_calls:
@@ -110,8 +112,12 @@ class AnthropicProvider(LLMProvider):
         # Merge consecutive same-role messages (Anthropic requirement)
         merged = self._merge_consecutive(anthropic_messages)
 
-        # Strip trailing assistant turns (Anthropic rejects prefill)
+        # Strip empty trailing assistant turns (prefill).
+        # Keep assistant turns that have actual content or tool_use blocks.
         while merged and merged[-1].get("role") == "assistant":
+            content = merged[-1].get("content")
+            if content:
+                break
             merged.pop()
 
         return system_message, merged
@@ -176,6 +182,7 @@ class AnthropicProvider(LLMProvider):
 
         content = None
         tool_calls = []
+        thinking = None
 
         for block in response.content:
             if block.type == "text":
@@ -186,6 +193,8 @@ class AnthropicProvider(LLMProvider):
                     name=block.name,
                     arguments=block.input,
                 ))
+            elif block.type == "thinking":
+                thinking = block.thinking
 
         logger.debug(
             "Anthropic response: content_length={}, tool_calls={}, input_tokens={}, output_tokens={}",
@@ -203,6 +212,7 @@ class AnthropicProvider(LLMProvider):
                 "output_tokens": response.usage.output_tokens,
                 "total_tokens": response.usage.input_tokens + response.usage.output_tokens,
             },
+            thinking=thinking,
         )
 
     # ------------------------------------------------------------------
@@ -264,6 +274,7 @@ class AnthropicProvider(LLMProvider):
             # Parse final response (outside context manager)
             final_tool_calls = []
             accumulated_text = ""
+            final_thinking = None
             for block in final_message.content:
                 if block.type == "tool_use":
                     final_tool_calls.append(ToolCall(
@@ -273,11 +284,14 @@ class AnthropicProvider(LLMProvider):
                     ))
                 elif block.type == "text":
                     accumulated_text += block.text
+                elif block.type == "thinking":
+                    final_thinking = block.thinking
 
             yield LLMStreamChunk(
                 delta=None,
                 done=True,
                 tool_calls=final_tool_calls or None,
+                thinking=final_thinking,
             )
 
         except asyncio.TimeoutError:

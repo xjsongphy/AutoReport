@@ -8,5 +8,7 @@ CLAUDE.md
 logs/
 external/cc-switch/
 
+bug.md
+
 # User config (contains API keys)
 autoreport.config.yaml

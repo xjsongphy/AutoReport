@@ -19,7 +19,6 @@ Usage in tests::
 
 import asyncio
 from pathlib import Path
-from typing import Any
 
 from loguru import logger
 
@@ -28,7 +27,6 @@ from autoreport.core.loops import LoopManager, MessageBus
 from autoreport.interfaces.types import (
     AgentFeedback,
     AgentResponse,
-    AgentStatus,
     AgentType,
     Error,
     Message,
@@ -134,7 +132,7 @@ class MessageCollector:
 
     def get_full_agent_text(self, agent_type: AgentType | str = AgentType.MAIN) -> str:
         """Concatenate all non-streaming agent responses for a given agent."""
-        at = AgentType(str(agent_type)) if isinstance(agent_type, str) else agent_type
+        at = agent_type if isinstance(agent_type, AgentType) else AgentType(agent_type)
         parts = []
         for m in self.agent_responses:
             if m.agent_type == at:
