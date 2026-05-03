@@ -34,6 +34,7 @@ from ...interfaces.types import (
 from ...interfaces.types import (
     ToolResult as ToolResultMsg,
 )
+from ..skills import SkillLoader
 from ..tools.registry import ToolRegistry
 from .bus import MessageBus
 
@@ -127,6 +128,7 @@ class AgentLoop:
         llm_provider: LLMProvider,
         prompt_loader: PromptLoader | None = None,
         loop_manager: LoopManager | None = None,
+        skill_loader: SkillLoader | None = None,
     ):
         """Initialize agent loop.
 
@@ -139,6 +141,7 @@ class AgentLoop:
             llm_provider: LLM provider for generating responses.
             prompt_loader: Optional custom PromptLoader instance.
             loop_manager: Optional LoopManager reference for coordination.
+            skill_loader: Optional SkillLoader for skill injection.
         """
         self.agent_type = agent_type
         self.workspace = Path(workspace).resolve()
@@ -147,6 +150,7 @@ class AgentLoop:
         self.config = config
         self.llm_provider = llm_provider
         self._loop_manager = loop_manager
+        self._skill_loader = skill_loader
 
         self._prompt_loader = prompt_loader or PromptLoader()
         self._identity_prompt: str | None = None
@@ -647,10 +651,10 @@ class AgentLoop:
         )
 
     async def _get_system_prompt(self) -> str:
-        """Get system prompt with progressive loading.
+        """Get system prompt with progressive loading and skill injection.
 
         Returns:
-            Complete system prompt (identity + full instructions).
+            Complete system prompt (identity + full instructions + skills).
 
         Progressive loading strategy:
         - First call: Load identity (fast startup)
@@ -668,7 +672,19 @@ class AgentLoop:
         if not self._full_prompt_loaded:
             logger.debug("Loading full prompt for agent: {}", self.agent_type)
             full_prompt = self._prompt_loader.load_full(agent_type_str)
-            self._cached_full_prompt = f"{self._identity_prompt}\n\n{full_prompt}"
+
+            # Inject skills if available
+            skills_section = None
+            if self._skill_loader:
+                skills_section = self._skill_loader.build_skills_section(agent_type_str)
+
+            if skills_section:
+                self._cached_full_prompt = f"{self._identity_prompt}\n\n{full_prompt}\n\n{skills_section}"
+                logger.debug("Injected skills for agent {}: {}", self.agent_type,
+                             self._skill_loader.get_skills_for_agent(agent_type_str))
+            else:
+                self._cached_full_prompt = f"{self._identity_prompt}\n\n{full_prompt}"
+
             self._full_prompt_loaded = True
             return self._cached_full_prompt
 

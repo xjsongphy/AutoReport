@@ -36,6 +36,7 @@ class AgentPanel(QWidget):
     session_selected_from_dropdown = pyqtSignal(str)
     delete_session_requested = pyqtSignal(str)
     rename_session_requested = pyqtSignal(str, str)
+    conversation_cleared = pyqtSignal()
 
     def __init__(self, panel_id: str, title: str, workspace: Path | None = None):
         super().__init__()
@@ -279,7 +280,7 @@ class AgentPanel(QWidget):
             "theory": "Theory",
             "report": "Report",
             "main": "Main Agent",
-            "sub": "Sub Agent",
+            "sub": "Select Agent",
         }
         self._title_label.setText(titles.get(agent_type, "Agent"))
 
@@ -377,6 +378,12 @@ class AgentPanel(QWidget):
         if not content:
             return
 
+        # Handle /clear command
+        if content == "/clear":
+            self._input_field.clear_text()
+            self.clear_conversation()
+            return
+
         final_message = content
         if self._context_enabled:
             if self._preview_context:
@@ -450,3 +457,8 @@ class AgentPanel(QWidget):
     def hide_conv_buttons(self, hide: bool = True) -> None:
         self._history_btn.setHidden(hide)
         self._new_conv_btn.setHidden(hide)
+
+    def clear_conversation(self) -> None:
+        """Clear messages and notify backend."""
+        self._messages_area.clear()
+        self.conversation_cleared.emit()

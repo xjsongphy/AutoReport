@@ -159,7 +159,7 @@ class MessagesArea(QScrollArea):
         """Add a tool call group to the container.
 
         Returns:
-            The created ToolCallGroup widget.
+            The created ToolCallGroup.
         """
         # Insert before the stretch spacer
         group = ToolCallGroup(parent=self._container)

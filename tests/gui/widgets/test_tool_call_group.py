@@ -14,8 +14,9 @@ def test_collapsed_shows_summary(qtbot):
     # Initially collapsed
     assert not widget.is_expanded()
     summary = widget.get_summary_text()
-    # Codex-style: shows "N tools" for multiple calls
-    assert "2 tools" in summary
+    # Copilot-style: shows tool names grouped
+    assert "python_exec" in summary
+    assert "read_file" in summary
     assert "1.3s" in summary
 
 

@@ -54,14 +54,18 @@ class _QtCompatTreeprocessor(Treeprocessor):
                         "font-family: 'Cascadia Code', 'SF Mono', 'Consolas', monospace; "
                         "font-size: 12px; color: #e6edf3;")
 
-        # Style <table>
+        # Qt rich text supports <table> HTML attributes but not border-collapse.
+        # Use HTML attributes: border, cellpadding, cellspacing.
         for table in root.iter("table"):
-            table.set("style", "border-collapse: collapse; margin: 8px 0;")
+            table.set("border", "1")
+            table.set("cellpadding", "6")
+            table.set("cellspacing", "0")
+            table.set("style", "margin: 8px 0;")
         for th in root.iter("th"):
-            th.set("style", "border: 1px solid #3c3c3c; padding: 4px 8px; "
-                   "background-color: #252526; font-weight: bold;")
+            th.set("bgcolor", "#252526")
+            th.set("style", "font-weight: bold;")
         for td in root.iter("td"):
-            td.set("style", "border: 1px solid #3c3c3c; padding: 4px 8px;")
+            td.set("style", "")
 
         return root
 

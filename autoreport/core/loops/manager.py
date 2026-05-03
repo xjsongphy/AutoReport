@@ -9,6 +9,7 @@ from ...config import ConfigManager
 from ...core.providers import ProviderFactory, ProviderManager
 from ...interfaces.types import AgentType, Message, RestartRequest
 from ..checkpoints import CheckpointManager
+from ..skills import SkillLoader
 from ..tools import (
     EditFileTool,
     ExecTool,
@@ -47,6 +48,7 @@ class LoopManager:
         self._running = False
         self._provider_manager = ProviderManager()
         self.checkpoint_manager = CheckpointManager(self.workspace)
+        self.skill_loader = SkillLoader()
 
         # Subscribe to restart requests
         self.bus.subscribe(RestartRequest, self._handle_restart_request)
@@ -155,7 +157,8 @@ class LoopManager:
                 bus=self.bus,
                 config=config,
                 llm_provider=llm_provider,
-                loop_manager=self,  # Pass loop_manager for coordination
+                loop_manager=self,
+                skill_loader=self.skill_loader,
             )
             self._loops[agent_type] = loop
 

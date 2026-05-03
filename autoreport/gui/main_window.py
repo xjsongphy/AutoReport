@@ -478,20 +478,16 @@ class MainWindow(QMainWindow):
         self.preview.setMinimumWidth(400)
         main_splitter.addWidget(self.preview)
 
-        # Right: Agent panels
-        right_splitter = QSplitter(Qt.Orientation.Vertical)
-        main_splitter.addWidget(right_splitter)
+        # Right: Agent panels side-by-side (Sub Agent | Main Agent)
+        self.sub_agent_panel = AgentPanel("sub", "Sub Agent", self.workspace)
+        self.sub_agent_panel.setMinimumWidth(280)
+        main_splitter.addWidget(self.sub_agent_panel)
 
         self.main_agent_panel = AgentPanel("main", "Main Agent", self.workspace)
-        self.main_agent_panel.setMinimumHeight(300)
-        right_splitter.addWidget(self.main_agent_panel)
+        self.main_agent_panel.setMinimumWidth(280)
+        main_splitter.addWidget(self.main_agent_panel)
 
-        self.sub_agent_panel = AgentPanel("sub", "Sub Agent", self.workspace)
-        self.sub_agent_panel.setMinimumHeight(300)
-        right_splitter.addWidget(self.sub_agent_panel)
-
-        main_splitter.setSizes([250, 500, 650])
-        right_splitter.setSizes([300, 300])
+        main_splitter.setSizes([250, 500, 350, 350])
 
         # Connect signals
         self.main_agent_panel.message_sent.connect(self._on_main_agent_message)
@@ -511,6 +507,11 @@ class MainWindow(QMainWindow):
 
         self.preview.selection_changed.connect(self._on_preview_selection_changed)
         self.main_agent_panel.hide_debug_button(hide=True)
+
+        self.main_agent_panel.conversation_cleared.connect(
+            lambda: self._on_conversation_cleared("main"))
+        self.sub_agent_panel.conversation_cleared.connect(
+            lambda: self._on_conversation_cleared(self.sub_agent_panel.agent_type))
 
     def _on_directory_selected(self, directory: str) -> None:
         self.preview.set_directory(directory)
@@ -596,6 +597,9 @@ class MainWindow(QMainWindow):
 
     def _on_sub_agent_message(self, content: str) -> None:
         agent_type = self.sub_agent_panel.agent_type
+        if agent_type == "sub":
+            self.main_agent_panel.add_message("agent", "请先在左侧文件树选择目录以激活对应的子 Agent。")
+            return
         self._conv_store.append_message(agent_type, "user", content)
         self._submit_coroutine(self.backend.send_user_message(content, agent_type))
 
@@ -726,6 +730,11 @@ class MainWindow(QMainWindow):
         panel = self._get_panel_for_agent(agent_type)
         panel._messages_area.clear()
         logger.info("New conversation session for {}: {}", agent_type,
+                     self._conv_store.get_current_session_id(agent_type))
+
+    def _on_conversation_cleared(self, agent_type: str) -> None:
+        self._conv_store.new_session(agent_type=agent_type)
+        logger.info("/clear for {}: new session {}", agent_type,
                      self._conv_store.get_current_session_id(agent_type))
 
     def _on_session_selected(self, session_id: str, agent_type: str) -> None:

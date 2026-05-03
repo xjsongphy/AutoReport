@@ -14,17 +14,18 @@ Gather theory, analysis, and plots from other agents. Write well-structured LaTe
 
 **Narrative flow.** Never start sections with lists/tables/formulas. Always explanatory text first.
 
-**Compile twice.** First pass generates labels, second resolves cross-references.
+**Compile with skill.** Use the `/latex-compile` skill for all compilation steps.
 
 ## Full Instructions
 
 ### Workflow
 
 1. **Check requirements** — Read `project/references/` for custom templates and formatting guidelines
-2. **Check sub-agent outputs** — Verify all required files exist before writing (see completeness check below)
-3. **Gather content** — Theory from `theory/`, analysis from `data/processed/`, plots from `code/`
-4. **Write LaTeX** — Create source in `project/tex/`, follow narrative style
-5. **Compile** — Run xelatex twice, verify PDF
+2. **Select template** — Choose template per priority (see Template Priority below)
+3. **Check sub-agent outputs** — Verify all required files exist before writing (see completeness check below)
+4. **Gather content** — Theory from `theory/`, analysis from `data/processed/`, plots from `code/`
+5. **Write LaTeX** — Create source in `project/tex/`, follow narrative style
+6. **Compile** — Use the `/latex-compile` skill to compile. Verify PDF output
 
 ### Completeness Check (before writing)
 
@@ -40,136 +41,123 @@ Verify these files exist before starting. If any are missing, report to Main Age
 
 ### Template Priority
 
-1. User template in `project/references/` (highest priority)
-2. Built-in template in `autoreport/templates/`
+1. User template in `project/references/` (highest priority) — use whatever `.tex` or `.cls` files the user provides
+2. Built-in template `template.tex` in `autoreport/templates/reports/`
 3. Standard LaTeX article structure (fallback)
+
+**How to use templates:**
+- Copy the selected template to `project/tex/main.tex` as the starting point
+- Preserve all preamble settings, package imports, and document class from the template
+- Fill in content following the template's section structure
+- If the user template uses a custom document class (e.g., `mpltx`), do not override it
 
 If the custom template conflicts with best practices, follow the template but note concerns in feedback to Main Agent.
 
 ### Output Files
 
 Write to `project/tex/`:
-- `main.tex` — Main LaTeX document
-- `sections/` — Individual section files
+- `main.tex` — Main LaTeX document (based on selected template)
+- `sections/` — Individual section files (if template supports `\input{}`)
 - `main.pdf` — Compiled output
-- `figures/` — Copy of plots for inclusion
-
-### LaTeX Structure
-
-```latex
-\documentclass[12pt,a4paper]{article}
-
-\usepackage{ctex}           % Chinese support
-\usepackage{amsmath,amssymb} % Math
-\usepackage{graphicx}       % Images
-\usepackage{hyperref}       % Links
-\usepackage{geometry}       % Margins
-
-\title{Experiment Title}
-\author{Student Name}
-\date{\today}
-
-\begin{document}
-
-\maketitle
-
-\section{Introduction}
-\section{Theory}
-\section{Experimental Setup}
-\section{Data Analysis}
-\section{Results}
-\section{Discussion}
-\section{Conclusion}
-
-\end{document}
-```
-
-### Compilation
-
-```bash
-# Must compile TWICE for cross-references
-xelatex -interaction=nonstopmode main.tex
-xelatex -interaction=nonstopmode main.tex
-```
+- `figures/` — Symlink or copy of plots for inclusion
 
 ### Narrative Style
 
-**Critical principles:**
+**Critical principles (adapted from academic textbook writing):**
 
-1. **Text before content** — Never start with list/table/formula
-2. **Bold only, no italics** — Use **bold** for emphasis
-3. **Complete sentences** — Every sentence grammatically complete
-4. **No conversational filler** — Avoid "we will explore", "as we can see"
-5. **Define variables before formulas** — Use "For any...", "Let..."
+1. **Explanatory text before content** — Every section must start with a paragraph of prose before any table, figure, formula, or list. The opening paragraph should tell the reader what this section discusses and why it matters.
+
+2. **Narrative weaves through content** — Follow the pattern: narrative → content element → narrative → content element. Never stack multiple tables/figures/formulas without prose between them. After each figure or table, add text that interprets and discusses the result.
+
+3. **Bold for emphasis, never italics** — Use `\textbf{}` for emphasis on key terms, proper nouns, and important concepts. Never use `\textit{}` or `\emph{}` in the report body. Mathematical variables in italics are acceptable as they are part of notation, not emphasis.
+
+4. **No bullets or numbered lists in main narrative** — Lists (`itemize`, `enumerate`) are only acceptable in appendices (e.g., exercise solutions). In the main body, convert lists into flowing prose paragraphs.
+
+5. **Complete sentences** — Every sentence must be grammatically complete. Avoid fragments, telegraphic style, or note-like writing.
+
+6. **No conversational filler** — Eliminate phrases like "we will explore", "as we can see", "it is worth noting that", "interestingly". State facts and results directly.
+
+7. **Define variables before formulas** — Always state variable domains and meanings before writing equations. Use "For any...", "Let...", "Take..." constructions.
+
+8. **Proofs and derivations as coherent narrative** — Derivations should flow as continuous prose, not numbered steps. Use logical connectors ("since", "therefore", "hence", "note that") between paragraphs.
 
 **GOOD:**
-```
-## Results
+```latex
+\section{Results}
 
-Table 1 presents gravity measurements from free-fall experiments using a digital timer with millisecond precision.
+Table~\ref{tab:gravity} presents gravity measurements from free-fall
+experiments using a digital timer with millisecond precision. Each trial
+consists of dropping a steel ball from a fixed height and measuring the
+fall time over 50 repetitions.
 
-The measured value of 9.81 ± 0.02 m/s² agrees with theoretical prediction within uncertainty. This confirms the setup accurately models Earth's gravitational field.
+The measured value of $9.81 \pm 0.02$ m/s$^2$ agrees with the
+theoretical prediction of $9.80$ m/s$^2$ within experimental uncertainty,
+corresponding to a relative deviation of $0.1\%$. This confirms that the
+setup accurately models free-fall under Earth's gravitational field with
+negligible air resistance.
 
-For any object with mass $m$ subject to net force $F$, Newton's second law states:
-
-$$
-F = ma
-$$
-
-where $a$ is acceleration. For free-fall near Earth's surface, $F = mg$ and therefore $a = g$.
+For any object with mass $m$ subject to net force $F$, Newton's second
+law states:
+\begin{equation}
+  F = ma
+\end{equation}
+where $a$ denotes acceleration. For free-fall near Earth's surface,
+$F = mg$ and therefore $a = g = 9.80$ m/s$^2$.
 ```
 
 **BAD:**
-```
-## Results
+```latex
+\section{Results}
 
-Table 1 shows the data.
+Table~\ref{tab:gravity} shows the data.
 
 We can see that:
-- Value is 9.81
-- Uncertainty is 0.02
+\begin{itemize}
+  \item Value is 9.81
+  \item Uncertainty is 0.02
+\end{itemize}
 
 The equation is:
-$$F = ma$$
+\begin{equation}
+  F = ma
+\end{equation}
 ```
 
 ### Figures and Tables
 
-**Figures:**
+**Figures:** Every figure must be self-contained — a reader should understand the figure without reading the main text. Captions should describe what the figure shows, what each symbol/line represents, and the key takeaway.
+
 ```latex
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.8\textwidth]{figures/plot1.png}
-\caption{Position vs time. Data points (blue) show measurements, red curve shows theoretical prediction.}
+\caption{Position versus time in free-fall experiment. Blue data points
+show measurements with error bars, red curve shows theoretical prediction
+$y = \frac{1}{2}gt^2$ with $g = 9.80$ m/s$^2$. Inset shows residuals.}
+\label{fig:position}
 \end{figure}
 ```
 
-**Tables:**
-```latex
-\begin{table}[h]
-\centering
-\caption{Measurement results}
-\begin{tabular}{ccc}
-\hline
-Trial & Value (m/s²) & Uncertainty \\
-\hline
-1 & 9.81 & 0.02 \\
-2 & 9.79 & 0.02 \\
-\hline
-\end{tabular}
-\end{table}
-```
+**Tables:** Use the formatting conventions from the selected template. If the template provides `booktabs` (`\toprule`, `\midrule`, `\bottomrule`), prefer those over `\hline`.
+
+**Figure/table placement:** Always reference figures and tables in the surrounding text before or after they appear. Use `Figure~\ref{fig:...}`, `Table~\ref{tab:...}`, `Equation~\eqref{eq:...}`.
 
 ### Cross-References
 
-```latex
-\section{Introduction}
-\label{sec:intro}
+Use `\ref{}`, `\eqref{}`, and `\autoref{}` consistently. Every label should be descriptive:
+- Sections: `\label{sec:introduction}`, `\label{sec:theory}`
+- Figures: `\label{fig:position_time}`, `\label{fig:residuals}`
+- Tables: `\label{tab:measurements}`, `\label{tab:fit_params}`
+- Equations: `\label{eq:newton2}`, `\label{eq:freefall}`
 
-As shown in Section~\ref{sec:theory}...
-See Figure~\ref{fig:position}...
-From Equation~\eqref{eq:newton}...
-```
+### Compilation
+
+Use the `/latex-compile` skill for all LaTeX compilation. The skill handles:
+- Standard XeLaTeX compilation with `-synctex=1 -interaction=nonstopmode -file-line-error`
+- Two-pass compilation for cross-references
+- Error diagnosis and common fixes
+
+Do NOT run `xelatex` commands directly. Invoke the skill instead.
 
 ### Issue Reporting
 
@@ -183,18 +171,16 @@ When reporting, be specific about what's missing or problematic.
 ### Quality Checklist
 
 Before considering report complete:
-- [ ] Requirements checked
-- [ ] Custom templates checked (template priority followed)
+- [ ] Template selected per priority (user > built-in > fallback)
 - [ ] Completeness check passed (all sub-agent outputs present)
-- [ ] All sections start with explanatory text
-- [ ] No italics (bold only)
-- [ ] Variables defined before formulas
-- [ ] Complete sentences throughout
+- [ ] Every section starts with explanatory prose
+- [ ] Narrative weaves through content (no stacked tables/figures/formulas)
+- [ ] No italics for emphasis (bold only)
+- [ ] No bullets or numbered lists in main narrative
 - [ ] No conversational filler
-- [ ] Figures properly labeled (captions from `code/README.md`)
-- [ ] Tables properly formatted
+- [ ] Variables defined before formulas
+- [ ] Figures self-contained with descriptive captions
 - [ ] Cross-references resolve
-- [ ] Compiled twice
+- [ ] Compiled successfully using `/latex-compile` skill
 - [ ] PDF generated and verified
-- [ ] Narrative flows coherently
 - [ ] All agent outputs integrated

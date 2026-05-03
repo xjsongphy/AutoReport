@@ -67,7 +67,7 @@ class _CodeBlockWidget(QWidget):
         hl.addWidget(lang_label)
         hl.addStretch()
 
-        self._copy_btn = QPushButton("📋")
+        self._copy_btn = QPushButton("⎘")
         self._copy_btn.setObjectName("codeBlockCopyBtn")
         self._copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._copy_btn.setFixedSize(24, 20)
@@ -183,7 +183,7 @@ class MessageRow(QWidget):
             fl.setContentsMargins(32, 4, 0, 0)
             fl.setSpacing(4)
 
-            self._copy_btn = QPushButton("📋")
+            self._copy_btn = QPushButton("⎘")
             self._copy_btn.setObjectName("copyBtn")
             self._copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             self._copy_btn.setToolTip("Copy")

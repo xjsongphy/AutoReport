@@ -79,7 +79,6 @@ class ToolCallGroup(QWidget):
 
         ok = sum(1 for c in self._calls if c.success)
         fail = len(self._calls) - ok
-        # VS Code uses ▸/▾ arrow
         arrow = "▾" if self._expanded else "▸"
 
         if len(self._calls) == 1:
@@ -87,9 +86,14 @@ class ToolCallGroup(QWidget):
             status = "✓" if c.success else "✗"
             self._header_btn.setText(f"  {arrow} {c.name}  {c.duration_ms / 1000:.1f}s  {status}")
         else:
+            # Group by tool name: "read_file (3) · write_file (1)"
+            from collections import Counter
+            counts = Counter(c.name for c in self._calls)
+            parts = [f"{name} ({cnt})" if cnt > 1 else name for name, cnt in counts.items()]
+            tool_summary = " · ".join(parts)
             total = sum(c.duration_ms for c in self._calls) / 1000
             status = f"{ok}✓" if fail == 0 else f"{ok}✓ {fail}✗"
-            self._header_btn.setText(f"  {arrow} {len(self._calls)} tools  {total:.1f}s  {status}")
+            self._header_btn.setText(f"  {arrow} {tool_summary}  {total:.1f}s  {status}")
 
         for i in reversed(range(self._details_layout.count())):
             w = self._details_layout.itemAt(i).widget()
