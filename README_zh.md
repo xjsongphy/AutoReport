@@ -10,12 +10,14 @@
 - **检查点回滚** — 关键节点自动创建检查点，可回滚到任意历史状态
 - **交互式调整** — 用户可随时向任意 Agent 发送消息进行干预和优化
 
-### UI/UX（VSCode/Claude Code 风格）
+### UI/UX（VSCode/Copilot Chat 风格）
 - **流式传输** — 实时显示 Agent 输出，逐字流式呈现
+- **并排 Agent 面板** — 子 Agent 和主 Agent 面板水平排列，主 Agent 位于最右侧
 - **最近项目缓存** — VSCode 风格的最近项目列表，缓存于 `~/.autoreport/recent_projects.json`
 - **资源管理器** — VSCode 风格文件树，22px 行高、16px 图标，简洁标签（Data、References、Theory、Code、Tex）
 - **上下文引用栏** — 文件/行选择的可视化指示器，可切换是否包含在消息中
-- **对话界面** — Codex 风格的对话显示，正确的 Markdown 渲染
+- **对话界面** — Copilot 风格的对话显示，正确的 Markdown 渲染，工具调用按名称分组显示
+- **`/clear` 命令** — 在对话中输入 `/clear` 清除历史记录，开始新会话
 
 ### 开发工具
 - **@ 文件引用** — 在聊天输入中输入 `@` 触发模糊文件搜索，选择文件后插入 Markdown 引用链接
@@ -27,6 +29,7 @@
 - **多 Provider 支持** — Anthropic、OpenAI、DeepSeek 等，运行时切换模型
 - **Provider 预设** — 来自 [cc-switch](https://github.com/farion1231/cc-switch) 的 50+ 服务商预设
 - **渐进式提示词加载** — 启动时加载身份，首次激活时加载完整指令（快速启动、丰富上下文）
+- **上下文自动压缩** — 接近上下文窗口限制时自动裁剪对话历史
 
 ## 快速开始
 
@@ -100,11 +103,17 @@ autoreport/
 │   ├── loops/            # Agent 运行时：LoopManager、AgentLoop、MessageBus
 │   ├── providers/        # LLM Provider 抽象层（工厂、基类）
 │   ├── prompts/          # 渐进式提示词加载（身份 → 完整指令）
+│   ├── skills.py         # Skill 加载（external/skills/ → Agent 系统提示词）
 │   └── tools/            # 工具系统（注册表、文件工具、执行工具、PDF 工具）
 ├── gui/                  # PyQt6 界面（主窗口、对话框、小部件）
 │   └── widgets/          # 可复用组件（文件树、预览、Agent 面板）
 ├── interfaces/           # GUI-后台协议（Protocol 定义、消息类型）
 ├── templates/            # 内置模板（Agent 提示词、报告模板）
+│   ├── agents/           # Agent 提示词文件（Markdown）
+│   └── reports/          # LaTeX 报告模板（template.tex、default_experiment_report.tex）
+├── external/             # Git 忽略的同步内容（预设、技能）
+│   ├── cc-switch/        # 来自 cc-switch 仓库的 Provider 预设
+│   └── skills/           # Skill Markdown 文件（如 latex-compile.md）
 └── utils/                # 日志配置（loguru）
 ```
 
@@ -117,6 +126,10 @@ autoreport/
 **调试模式**：子 Agent 断开与主 Agent 消息通道的连接，仅接受直接用户输入。通过 GUI 切换或 `--debug-agent` CLI 参数激活。
 
 **渐进式提示词加载**：Agent 在启动时加载轻量级身份提示词，然后在第一条消息时加载完整指令。之后缓存。
+
+**技能系统**：外部 Markdown 技能（如 `latex-compile`）从 `external/skills/` 加载，根据每个 Agent 的配置注入到系统提示词中。`--sync-presets` 命令也会同步技能仓库中的技能文件。
+
+**报告模板**：报告 Agent 按优先级使用模板：用户 `references/` 目录中的自定义模板 > 内置 `templates/reports/template.tex` > 标准 LaTeX 回退。内置模板支持北大近代物理实验 PKUMpLtX 文档类。
 
 ## 开发
 
@@ -197,7 +210,13 @@ autoreport --debug-agent data_analysis --debug-agent plotting
 - `data_analysis_agent.md` — 数据注释模板、理论对比
 - `plotting_agent.md` — 图像注释模板、自验证
 - `theory_agent.md` — 公式元数据模板
-- `report_agent.md` — 完整性检查、模板优先级
+- `report_agent.md` — 完整性检查、模板优先级、叙述风格（基于教材写作原则增强）
+
+## 技能系统
+
+技能是存放在 `external/skills/` 中的 Markdown 文件，提供领域特定指令，注入到 Agent 的系统提示词中。当前已启用：
+
+- **latex-compile**（报告 Agent）— XeLaTeX 编译流程、错误诊断、两遍编译
 
 ## MinerU 集成
 

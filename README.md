@@ -12,12 +12,14 @@ A multi-agent collaborative automated physics experiment report writing system. 
 - **Checkpoint Rollback** — Automatically creates checkpoints at key nodes, can rollback to any historical state
 - **Interactive Adjustment** — Users can send messages to any agent at any time for intervention and optimization
 
-### UI/UX (VSCode/Claude Code Style)
+### UI/UX (VSCode/Copilot Chat Style)
 - **Streaming Responses** — Real-time agent output display, word-by-word streaming
+- **Side-by-Side Agent Panels** — Sub Agent and Main Agent panels arranged horizontally, Main Agent on the far right
 - **Recent Projects Cache** — VSCode-style recent projects list, cached in `~/.autoreport/recent_projects.json`
 - **File Explorer** — VSCode-style resource manager with 22px row height, 16px icons, concise labels (Data, References, Theory, Code, Tex)
 - **Context Chip Bar** — Visual indicator for file/line selections with toggle to include/exclude from messages
-- **Chat Interface** — Codex-style conversation display with proper markdown rendering
+- **Chat Interface** — Copilot-style conversation display with proper markdown rendering and grouped tool call display
+- **`/clear` Command** — Type `/clear` in chat to clear conversation history and start a fresh session
 
 ### Developer Tools
 - **@ File References** — Type `@` in chat to fuzzy-search and insert file references as markdown links
@@ -29,6 +31,7 @@ A multi-agent collaborative automated physics experiment report writing system. 
 - **Multi-Provider Support** — Anthropic, OpenAI, DeepSeek, etc. Runtime model switching
 - **Provider Presets** — 50+ provider templates from [cc-switch](https://github.com/farion1231/cc-switch)
 - **Progressive Prompt Loading** — Identity at startup, full instructions on first activation (fast startup, rich context)
+- **Context Auto-Compact** — Automatically trims conversation history when approaching context window limits
 
 ## Quick Start
 
@@ -102,11 +105,17 @@ autoreport/
 │   ├── loops/            # Agent runtime: LoopManager, AgentLoop, MessageBus
 │   ├── providers/        # LLM provider abstraction (factory, base classes)
 │   ├── prompts/          # Progressive prompt loading (identity → full instructions)
+│   ├── skills.py         # Skill loading (external/skills/ → agent system prompt)
 │   └── tools/            # Tool system (registry, file tools, exec tools, PDF tool)
 ├── gui/                  # PyQt6 interface (main window, dialogs, widgets)
 │   └── widgets/          # Reusable components (file tree, preview, agent panel)
 ├── interfaces/           # GUI-backend protocol (Protocol definitions, message types)
 ├── templates/            # Built-in templates (agent prompts, report templates)
+│   ├── agents/           # Agent prompt files (Markdown)
+│   └── reports/          # LaTeX report templates (template.tex, default_experiment_report.tex)
+├── external/             # Git-ignored synced content (presets, skills)
+│   ├── cc-switch/        # Provider presets from cc-switch repo
+│   └── skills/           # Skill Markdown files (e.g., latex-compile.md)
 └── utils/                # Logging configuration (loguru)
 ```
 
@@ -119,6 +128,10 @@ autoreport/
 **Debug Mode**: Sub-agents disconnect from Main Agent message channel, accept only direct user input. Activated via GUI toggle or `--debug-agent` CLI argument.
 
 **Progressive Prompt Loading**: Agents load a lightweight identity prompt at startup, then load full instructions on first message. Cached afterward.
+
+**Skill System**: External Markdown skills (e.g., `latex-compile`) are loaded from `external/skills/` and injected into agent system prompts based on per-agent configuration. The `--sync-presets` command also syncs skills from the skill repository.
+
+**Report Templates**: Report Agent uses templates with priority: user-provided templates in `references/` > built-in `templates/reports/template.tex` > standard LaTeX fallback. The built-in template supports the PKUMpLtX document class for Peking University Modern Physics Lab.
 
 ## Development
 
@@ -221,7 +234,13 @@ Located in `autoreport/templates/agents/`:
 - `data_analysis_agent.md` — Data annotation template, theory comparison
 - `plotting_agent.md` — Figure annotation template, self-verification
 - `theory_agent.md` — Formula metadata template
-- `report_agent.md` — Completeness check, template priority
+- `report_agent.md` — Completeness check, template priority, narrative style (enhanced with textbook writing principles)
+
+## Skills
+
+Skills are Markdown files in `external/skills/` that provide domain-specific instructions injected into agent system prompts. Currently enabled:
+
+- **latex-compile** (Report Agent) — XeLaTeX compilation workflow, error diagnosis, two-pass compilation
 
 ## MinerU Integration
 
