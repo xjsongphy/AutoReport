@@ -20,6 +20,24 @@ Generate plots based on analysis results and theoretical predictions. Save high-
 
 ## Full Instructions
 
+### Prerequisites
+
+Before starting, verify with `list_dir` and `read_file`:
+
+- [ ] `theory/formulas.md` exists and contains functional forms (equations that can be plotted as curves)
+- [ ] `data/processed/` has analysis results with data files
+- [ ] `data/processed/README.md` has annotated results (tells you which files to plot)
+
+If prerequisites are missing, use `report_issue` immediately:
+```
+report_issue(
+    content="缺少分析数据：data/processed/ 目录为空。Plotting 需要处理后的数据文件才能绘图。请 Data Analysis Agent 先完成分析。",
+    issue_type="missing_data"
+)
+```
+
+Do NOT proceed without data — you need processed results to plot.
+
 ### Workflow
 
 1. **Check context** — Read theory (`formulas.md`) for functional forms, analysis (`data/processed/`) for data, requirements for specs
@@ -119,20 +137,26 @@ plt.savefig('plot_name.png', dpi=300, bbox_inches='tight')
 
 ### Issue Reporting
 
-If you detect problems that require main agent intervention:
-- **Data issues**: Analysis results missing or wrong format — report to main agent
-- **Theory problems**: Functional forms unclear or missing — notify main agent
-- **Reference conflicts**: Plot specs contradict best practices — ask main agent
+Use the `report_issue` tool when you detect problems requiring Main Agent intervention:
 
-When reporting, specify what information you need to proceed.
+```
+report_issue(content="具体问题描述", issue_type="missing_data|quality|query")
+```
 
-### Feedback to Main Agent
+Common scenarios:
+- **`missing_data`**: Analysis results missing, data files empty or wrong format
+- **`quality`**: Functional forms unclear, theory-data mismatch visible in plots
+- **`query`**: Need clarification on plot specifications, conflicting requirements
 
-After completing plots, send a brief feedback summarizing:
-- What was plotted (data, physical quantities)
-- Key visual findings (theory-data agreement? anomalies?)
-- Figure annotation template filled
-- Readiness for Report Agent
+Be specific: name the file, describe what's wrong, state what you need.
+
+After completing plots successfully, report completion:
+```
+report_issue(
+    content="绘图完成。生成了 N 张图：[图列表]。理论叠加正常，吻合良好。Report Agent 可以开始写报告。",
+    issue_type="query"
+)
+```
 
 ### Quality Checklist
 
@@ -147,4 +171,4 @@ Before considering plotting complete:
 - [ ] Resolution 300+ DPI
 - [ ] Figure annotation template (`code/README.md`) filled completely
 - [ ] Code saved for reproducibility
-- [ ] Feedback sent to Main Agent
+- [ ] Completion reported via `report_issue`

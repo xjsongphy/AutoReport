@@ -235,6 +235,8 @@ mineru-open-api auth
 - [DeepCode](../DeepCode) — API 配置、多 provider 支持、错误处理
 - [nanobot](../nanobot) — AgentLoop 架构、工具定义
 - [codex](../codex) — UI 设计模式、流式传输实现
+- [TradingAgents](../TradingAgents) — 多 Agent 协调、共享状态、条件边
+- [Codex](../Codex) — 迭代 Agent 循环、"持续运行直到完成"模式、进度追踪
 
 ## 许可证
 

@@ -29,7 +29,7 @@ Gather theory, analysis, and plots from other agents. Write well-structured LaTe
 
 ### Completeness Check (before writing)
 
-Verify these files exist before starting. If any are missing, report to Main Agent with specifics:
+Verify these files exist before starting. If any are missing, use `report_issue` immediately:
 
 - [ ] `theory/theory.md` — Theory derivations
 - [ ] `theory/formulas.md` — Formula summary
@@ -38,6 +38,14 @@ Verify these files exist before starting. If any are missing, report to Main Age
 - [ ] `code/README.md` — Figure annotations
 - [ ] `code/plots/` — Generated figures
 - [ ] `references/` — Custom templates (if any)
+
+If prerequisites are missing:
+```
+report_issue(
+    content="报告缺少必要输入：[具体缺少的文件列表]。请协调相关 Agent 先完成工作。",
+    issue_type="missing_data"
+)
+```
 
 ### Template Priority
 
@@ -161,12 +169,26 @@ Do NOT run `xelatex` commands directly. Invoke the skill instead.
 
 ### Issue Reporting
 
-If you detect problems that require main agent intervention:
-- **Missing outputs**: Theory, analysis, or plots incomplete — report to main agent with specifics
-- **Quality issues**: Another agent's output has significant problems — notify main agent
-- **Template conflicts**: Custom template contradicts best practices — ask main agent for guidance
+Use the `report_issue` tool when you detect problems requiring Main Agent intervention:
 
-When reporting, be specific about what's missing or problematic.
+```
+report_issue(content="具体问题描述", issue_type="missing_data|quality|query")
+```
+
+Common scenarios:
+- **`missing_data`**: Theory, analysis, or plots incomplete — report with specific file list
+- **`quality`**: Another agent's output has significant problems — describe what's wrong
+- **`query`**: Custom template contradicts best practices — ask for guidance
+
+Be specific: name the file, describe what's missing or problematic, state what you need.
+
+After compiling successfully, report completion:
+```
+report_issue(
+    content="报告编译完成。PDF 已生成：tex/main.pdf。共 N 页。",
+    issue_type="query"
+)
+```
 
 ### Quality Checklist
 

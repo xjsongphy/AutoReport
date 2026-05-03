@@ -20,6 +20,24 @@ Read experimental data, apply theoretical formulas, perform statistical analysis
 
 ## Full Instructions
 
+### Prerequisites
+
+Before starting, verify with `list_dir` and `read_file`:
+
+- [ ] `theory/formulas.md` exists and contains relevant formulas
+- [ ] `theory/theory.md` exists with derivations
+- [ ] Raw data files in `data/` are readable (check format, encoding, column names)
+
+If prerequisites are missing, use `report_issue` immediately:
+```
+report_issue(
+    content="缺少理论公式：theory/formulas.md 不存在。Data Analysis 需要理论公式才能处理数据。请 Theory Agent 先完成推导。",
+    issue_type="missing_data"
+)
+```
+
+Do NOT proceed without theory formulas — you need them to know what to calculate.
+
 ### Workflow
 
 1. **Check theory** — Read `project/theory/formulas.md` for formulas and `theory/theory.md` for derivations
@@ -99,20 +117,26 @@ The measured acceleration is 9.81 ± 0.02 m/s², which agrees with the theoretic
 
 ### Issue Reporting
 
-If you detect problems that require main agent intervention:
-- **Theory issues**: Missing or incorrect derivation — report to main agent with specific citation
-- **Data problems**: Format incompatible with formulas — report to main agent
-- **Reference conflicts**: Requirements contradict theory — ask main agent for clarification
+Use the `report_issue` tool when you detect problems requiring Main Agent intervention:
 
-When reporting, be specific about what's wrong and what needs to happen.
+```
+report_issue(content="具体问题描述", issue_type="missing_data|quality|query")
+```
 
-### Feedback to Main Agent
+Common scenarios:
+- **`missing_data`**: Theory formulas missing, data files empty or unreadable
+- **`quality`**: Derivation errors, data inconsistent with theoretical expectations
+- **`query`**: Need clarification on analysis method, conflicting requirements
 
-After completing analysis, send a brief feedback summarizing:
-- What was analyzed (data files, physical quantities)
-- Key results (measured values vs theory)
-- Any issues encountered
-- Readiness for downstream (Plotting can proceed? Report can proceed?)
+Be specific: name the file, describe what's wrong, state what you need.
+
+After completing analysis successfully, report completion:
+```
+report_issue(
+    content="数据分析完成。处理了 N 个数据文件，计算了 [物理量列表]。结果保存在 data/processed/。Plotting Agent 可以开始绘图。",
+    issue_type="query"
+)
+```
 
 ### Quality Checklist
 
@@ -125,4 +149,4 @@ Before considering analysis complete:
 - [ ] Data annotation template (`data/processed/README.md`) filled completely
 - [ ] Analysis documented in `analysis.md`
 - [ ] Code saved to `code/scripts/`
-- [ ] Feedback sent to Main Agent
+- [ ] Completion reported via `report_issue`

@@ -673,18 +673,22 @@ class AgentLoop:
             logger.debug("Loading full prompt for agent: {}", self.agent_type)
             full_prompt = self._prompt_loader.load_full(agent_type_str)
 
+            parts = [self._identity_prompt, full_prompt]
+
+            # Inject shared output descriptions (all agents)
+            shared = self._prompt_loader.load_shared_context()
+            if shared and isinstance(shared, str):
+                parts.append(shared)
+
             # Inject skills if available
-            skills_section = None
             if self._skill_loader:
                 skills_section = self._skill_loader.build_skills_section(agent_type_str)
+                if skills_section:
+                    parts.append(skills_section)
+                    logger.debug("Injected skills for agent {}: {}", self.agent_type,
+                                 self._skill_loader.get_skills_for_agent(agent_type_str))
 
-            if skills_section:
-                self._cached_full_prompt = f"{self._identity_prompt}\n\n{full_prompt}\n\n{skills_section}"
-                logger.debug("Injected skills for agent {}: {}", self.agent_type,
-                             self._skill_loader.get_skills_for_agent(agent_type_str))
-            else:
-                self._cached_full_prompt = f"{self._identity_prompt}\n\n{full_prompt}"
-
+            self._cached_full_prompt = "\n\n".join(parts)
             self._full_prompt_loaded = True
             return self._cached_full_prompt
 

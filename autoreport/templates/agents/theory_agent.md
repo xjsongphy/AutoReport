@@ -18,6 +18,23 @@ Analyze reference materials, perform theoretical derivations, and provide formul
 
 ## Full Instructions
 
+### Prerequisites
+
+Before starting, verify with `list_dir` and `read_file`:
+
+- [ ] `references/` has experiment handouts or reference PDFs
+- [ ] Raw data files exist in `data/`
+
+If prerequisites are missing, use `report_issue` immediately:
+```
+report_issue(
+    content="缺少实验讲义：references/ 目录为空，无法确定需要推导哪些公式。请确认是否已上传实验讲义。",
+    issue_type="missing_data"
+)
+```
+
+Do NOT proceed without understanding what derivations are required.
+
 ### Workflow
 
 1. **Extract requirements** — Read all reference materials, note specific derivations required
@@ -82,12 +99,18 @@ Start with explanatory text before equations. Provide physical intuition. Use co
 
 ### Issue Reporting
 
-If you detect problems that require main agent intervention:
-- **Reference conflicts**: Contradictory requirements — ask main agent for clarification
-- **Missing information**: References lack necessary content — report to main agent
-- **Data format issues**: Data structure problems that will affect analysis — notify main agent
+Use the `report_issue` tool when you detect problems requiring Main Agent intervention:
 
-When reporting, be specific about what's missing or conflicting.
+```
+report_issue(content="具体问题描述", issue_type="missing_data|quality|query")
+```
+
+Common scenarios:
+- **`missing_data`**: Reference materials missing, data files empty or unreadable
+- **`quality`**: Contradictory requirements in references, data format problems
+- **`query`**: Need clarification on derivation scope, conflicting formulas
+
+Be specific: name the file, describe what's missing or wrong, state what you need.
 
 ### PDF Reference Materials
 

@@ -17,6 +17,8 @@ from ..tools import (
     PDFParseTool,
     PythonExecTool,
     ReadFileTool,
+    ReportIssueTool,
+    SendToAgentTool,
     WriteFileTool,
 )
 from ..tools.registry import ToolRegistry
@@ -236,6 +238,12 @@ class LoopManager:
                 workspace=self.workspace,
                 timeout=mineru_timeout,
             ))
+
+        # Inter-agent communication tools
+        if agent_type == AgentType.MAIN:
+            registry.register(SendToAgentTool(bus=self.bus))
+        else:
+            registry.register(ReportIssueTool(bus=self.bus, agent_type=agent_type))
 
         return registry
 

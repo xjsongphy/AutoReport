@@ -24,6 +24,7 @@ class PromptLoader:
     # Template directory paths
     _BASE_DIR: Final = Path(__file__).parent.parent.parent / "templates"
     _AGENTS_DIR: Final = _BASE_DIR / "agents"
+    _SHARED_DIR: Final = _BASE_DIR / "shared"
 
     def __init__(self, agents_dir: Path | None = None):
         """Initialize prompt loader.
@@ -34,6 +35,7 @@ class PromptLoader:
         """
         self._agents_dir = Path(agents_dir) if agents_dir else self._AGENTS_DIR
         self._cache: dict[str, dict[str, str]] = {}
+        self._shared_context: str | None = None
 
     def load_identity(self, agent_type: str) -> str:
         """Load identity section of agent prompt.
@@ -80,6 +82,24 @@ class PromptLoader:
         identity = self.load_identity(agent_type)
         full = self.load_full(agent_type)
         return f"{identity}\n\n{full}"
+
+    def load_shared_context(self) -> str | None:
+        """Load shared output descriptions for all agents.
+
+        Returns:
+            Shared context content, or None if file not found.
+        """
+        if self._shared_context is not None:
+            return self._shared_context
+
+        path = self._SHARED_DIR / "output_descriptions.md"
+        if not path.exists():
+            logger.debug("Shared context file not found: {}", path)
+            return None
+
+        content = path.read_text(encoding="utf-8").strip()
+        self._shared_context = content
+        return content
 
     def _load_section(self, agent_type: str, section: str) -> str:
         """Load a specific section from agent prompt file.

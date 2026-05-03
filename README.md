@@ -259,6 +259,8 @@ mineru-open-api auth
 - [DeepCode](../DeepCode) — API config, multi-provider support, error handling
 - [nanobot](../nanobot) — AgentLoop architecture, tool definitions
 - [codex](../codex) — UI design patterns, streaming implementation
+- [TradingAgents](../TradingAgents) — Multi-agent coordination, shared state, conditional edges
+- [Codex](../Codex) — Iterative agent loop, "persist until complete" pattern, progress tracking
 
 ## License
 
