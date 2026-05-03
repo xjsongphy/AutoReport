@@ -185,6 +185,36 @@ class AgentPanel(QWidget):
 
         layout.addWidget(self._input_container)
 
+        # ---- Secondary toolbar (VS Code: .chat-secondary-toolbar) ----
+        secondary_bar = QWidget()
+        secondary_bar.setObjectName("secondaryToolbar")
+        sl = QHBoxLayout(secondary_bar)
+        sl.setContentsMargins(16, 2, 10, 4)
+        sl.setSpacing(4)
+
+        add_btn = QPushButton("+")
+        add_btn.setObjectName("secondaryBtn")
+        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_btn.setToolTip("添加上下文")
+        add_btn.setFixedSize(24, 20)
+        sl.addWidget(add_btn)
+
+        at_btn = QPushButton("@")
+        at_btn.setObjectName("secondaryBtn")
+        at_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        at_btn.setToolTip("引用文件")
+        at_btn.setFixedSize(24, 20)
+        at_btn.clicked.connect(lambda: self._input_field._check_for_at_token())
+        sl.addWidget(at_btn)
+
+        sl.addStretch()
+
+        self._secondary_status = QLabel("")
+        self._secondary_status.setObjectName("secondaryStatus")
+        sl.addWidget(self._secondary_status)
+
+        layout.addWidget(secondary_bar)
+
     def _setup_file_search(self) -> None:
         self._file_search_popup = FileSearchPopup(self)
         self._file_search_popup.file_selected.connect(self._on_file_selected)

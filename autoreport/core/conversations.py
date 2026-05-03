@@ -40,7 +40,7 @@ class ConversationStore:
         self._sessions_file = self._dir / "sessions.json"
         self._current_session_ids: dict[str, str] = {}  # per-agent session tracking
         self._migrate_old_files()
-        self._load_or_create_sessions()
+        self._load_sessions_without_creating()
 
     # ---- Migration ----
 
@@ -83,7 +83,6 @@ class ConversationStore:
         else:
             # Each agent gets its own latest session (or first available)
             for t in _AGENT_TYPES:
-                # Try to find an existing session file for this agent
                 agent_dir = self._dir / t
                 if agent_dir.exists():
                     jsonl_files = sorted(agent_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
@@ -93,6 +92,31 @@ class ConversationStore:
                         self._current_session_ids[t] = sessions[0]["id"]
                 else:
                     self._current_session_ids[t] = sessions[0]["id"]
+
+    def _load_sessions_without_creating(self) -> None:
+        """Load session IDs without auto-creating new ones.
+
+        Session IDs are lazily created on first append_message call.
+        No sessions.json is written on startup.
+        """
+        sessions = self._load_sessions_metadata()
+        if not sessions:
+            return  # No sessions yet — will be created lazily on first message
+        # Load latest session for each agent type
+        for t in _AGENT_TYPES:
+            agent_dir = self._dir / t
+            if agent_dir.exists():
+                jsonl_files = sorted(agent_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+                if jsonl_files:
+                    self._current_session_ids[t] = jsonl_files[0].stem
+            # If no files for this agent, leave unset (will be lazily created)
+
+    def _ensure_session(self, agent_type: str) -> None:
+        """Lazily create a session for an agent type if not already set."""
+        if agent_type in self._current_session_ids and self._current_session_ids[agent_type]:
+            return
+        session_id = self._create_new_session("新对话")
+        self._current_session_ids[agent_type] = session_id
 
     def _load_sessions_metadata(self) -> list[dict]:
         if not self._sessions_file.exists():
@@ -130,8 +154,7 @@ class ConversationStore:
         return self._load_sessions_metadata()
 
     def get_current_session_id(self, agent_type: str = "main") -> str:
-        if agent_type not in self._current_session_ids:
-            self._current_session_ids[agent_type] = self._create_new_session()
+        self._ensure_session(agent_type)
         return self._current_session_ids[agent_type]
 
     def switch_session(self, session_id: str, agent_type: str = "main") -> bool:
@@ -209,6 +232,7 @@ class ConversationStore:
         self, agent_type: str, role: str, content: str,
         extra: dict[str, Any] | None = None,
     ) -> None:
+        self._ensure_session(agent_type)
         record: dict[str, Any] = {
             "ts": datetime.now().isoformat(timespec="seconds"),
             "role": role,

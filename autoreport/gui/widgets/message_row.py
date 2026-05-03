@@ -1,9 +1,9 @@
 """Message cell — VS Code Copilot Chat style.
 
 - User messages: right-aligned rounded bubble (VS Code interactive-request)
-- Agent messages: flat layout with avatar icon + content + hover toolbar
+- Agent messages: flat layout with avatar icon + content + hover copy footer
 - Coordination: muted label above message
-- Code blocks: monospace card with copy button (VS Code interactive-result-code-block)
+- Code blocks: monospace card with hover-visible copy icon
 """
 
 import re
@@ -21,7 +21,6 @@ from PyQt6.QtWidgets import (
 
 
 def _parse_code_blocks(content: str) -> list[tuple[str, str | None]]:
-    """Split content into segments: (text, None) for text, (code, language) for code."""
     pattern = r"```(\w*)\n(.*?)```"
     parts: list[tuple[str, str | None]] = []
     last_end = 0
@@ -40,7 +39,7 @@ def _parse_code_blocks(content: str) -> list[tuple[str, str | None]]:
 
 
 class _CodeBlockWidget(QWidget):
-    """VS Code-style code block card with monospace text and copy button."""
+    """VS Code-style code block with hover-visible copy icon."""
 
     def __init__(self, code: str, language: str | None, parent=None):
         super().__init__(parent)
@@ -66,12 +65,14 @@ class _CodeBlockWidget(QWidget):
         hl.addWidget(lang_label)
         hl.addStretch()
 
-        copy_btn = QPushButton("Copy")
-        copy_btn.setObjectName("codeBlockCopyBtn")
-        copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        copy_btn.setFixedSize(52, 22)
-        copy_btn.clicked.connect(self._copy)
-        hl.addWidget(copy_btn)
+        # Copy icon button — only visible on hover (handled by parent CSS)
+        self._copy_btn = QPushButton("📋")
+        self._copy_btn.setObjectName("codeBlockCopyBtn")
+        self._copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._copy_btn.setFixedSize(24, 20)
+        self._copy_btn.setToolTip("Copy code")
+        self._copy_btn.clicked.connect(self._copy)
+        hl.addWidget(self._copy_btn)
 
         layout.addWidget(header)
 
@@ -105,8 +106,7 @@ class MessageRow(QWidget):
         self._content = content
         self._timestamp = timestamp
         self._is_coordination = is_coordination
-        self._outer = None
-        self._outer_layout = None
+        self._complete = False  # streaming not yet finished
         self._agent_content_layout: QVBoxLayout | None = None
         self._setup_ui()
 
@@ -115,9 +115,9 @@ class MessageRow(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self._outer = QWidget()
-        self._outer.setObjectName("msgOuterContainer")
-        self._outer_layout = QVBoxLayout(self._outer)
+        outer = QWidget()
+        outer.setObjectName("msgOuterContainer")
+        self._outer_layout = QVBoxLayout(outer)
         self._outer_layout.setContentsMargins(16, 6, 16, 6)
         self._outer_layout.setSpacing(0)
 
@@ -168,35 +168,35 @@ class MessageRow(QWidget):
             hl.addStretch()
             self._outer_layout.addWidget(header)
 
-            # Content area — rebuilt via _rebuild_agent_content
+            # Content area
             self._agent_content_layout = QVBoxLayout()
             self._agent_content_layout.setContentsMargins(32, 0, 0, 0)
             self._agent_content_layout.setSpacing(0)
             self._outer_layout.addLayout(self._agent_content_layout)
             self._rebuild_agent_content()
 
-            # Hover footer toolbar
+            # Footer copy toolbar — only visible on hover AFTER streaming complete
             self._footer = QWidget()
             self._footer.setObjectName("msgFooter")
             fl = QHBoxLayout(self._footer)
-            fl.setContentsMargins(32, 4, 0, 0)
+            fl.setContentsMargins(32, 6, 0, 0)
             fl.setSpacing(4)
 
-            copy_btn = QPushButton("Copy")
-            copy_btn.setObjectName("copyBtn")
-            copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            copy_btn.clicked.connect(self._copy_content)
-            copy_btn.setFixedHeight(22)
-            fl.addWidget(copy_btn)
+            self._copy_btn = QPushButton("📋")
+            self._copy_btn.setObjectName("copyBtn")
+            self._copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._copy_btn.setToolTip("Copy")
+            self._copy_btn.clicked.connect(self._copy_content)
+            self._copy_btn.setFixedSize(24, 22)
+            fl.addWidget(self._copy_btn)
 
             fl.addStretch()
             self._footer.setVisible(False)
             self._outer_layout.addWidget(self._footer)
 
-        layout.addWidget(self._outer)
+        layout.addWidget(outer)
 
     def _clear_agent_content(self) -> None:
-        """Remove all widgets from the agent content area."""
         if self._agent_content_layout is None:
             return
         while self._agent_content_layout.count():
@@ -204,7 +204,6 @@ class MessageRow(QWidget):
             if item.widget():
                 item.widget().deleteLater()
             elif item.layout():
-                # Clear nested layouts recursively
                 inner = item.layout()
                 while inner.count():
                     inner_item = inner.takeAt(0)
@@ -212,11 +211,9 @@ class MessageRow(QWidget):
                         inner_item.widget().deleteLater()
 
     def _rebuild_agent_content(self) -> None:
-        """Rebuild the agent content area from self._content."""
         self._clear_agent_content()
         if self._agent_content_layout is None:
             return
-
         segments = _parse_code_blocks(self._content)
         for seg_text, seg_lang in segments:
             if seg_lang is not None:
@@ -234,13 +231,17 @@ class MessageRow(QWidget):
         self._content += delta
         self._rebuild_agent_content()
 
+    def mark_complete(self) -> None:
+        """Mark streaming as complete — footer copy button becomes available on hover."""
+        self._complete = True
+
     def _copy_content(self) -> None:
         clipboard = QApplication.clipboard()
         if clipboard:
             clipboard.setText(self._content, QClipboard.Mode.Clipboard)
 
     def enterEvent(self, event) -> None:  # noqa: N802
-        if hasattr(self, "_footer"):
+        if hasattr(self, "_footer") and self._complete:
             self._footer.setVisible(True)
         super().enterEvent(event)
 

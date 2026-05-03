@@ -28,9 +28,14 @@ class ChatInput(QPlainTextEdit):
 
     def _setup_ui(self) -> None:
         self.setPlaceholderText("Message Copilot…")
-        # VS Code: single-line start, auto-expanding
-        self.setMinimumHeight(32)
-        self.setMaximumHeight(150)
+        # VS Code: single-line start, auto-expand max 4 lines
+        self.setMinimumHeight(28)
+        self.setMaximumHeight(100)  # ~4 lines
+        self.setSizePolicy(
+            self.sizePolicy().horizontalPolicy(),
+            self.sizePolicy().verticalPolicy(),
+        )
+        self.document().setDocumentMargin(0)
 
         from PyQt6.QtWidgets import QApplication
         hints = QApplication.styleHints()

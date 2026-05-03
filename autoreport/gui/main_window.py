@@ -51,7 +51,7 @@ class MainWindow(QMainWindow):
 
         self._apply_theme()
         self._setup_ui()
-        self._load_conversations()
+        # No longer auto-load history — each session starts fresh
 
         self._message_signal.connect(self._dispatch_backend_message)
         self.backend.subscribe_to_messages(self._on_bus_message)
@@ -259,6 +259,26 @@ class MainWindow(QMainWindow):
             #inputBar {{
                 background-color: transparent;
             }}
+
+            /* ---- Secondary Toolbar ---- */
+            #secondaryToolbar {{
+                background-color: {c["bg"]};
+            }}
+            #secondaryBtn {{
+                background-color: transparent;
+                color: {c["muted"]};
+                border: none;
+                border-radius: 4px;
+                font-size: 14px;
+            }}
+            #secondaryBtn:hover {{
+                background-color: {c["hover"]};
+                color: {c["fg"]};
+            }}
+            #secondaryStatus {{
+                font-size: 11px;
+                color: {c["muted"]};
+            }}
             /* VS Code send button: gradient filled circle, border-radius 5px */
             #sendBtn {{
                 background-color: {c["send_bg"]};
@@ -379,15 +399,18 @@ class MainWindow(QMainWindow):
             }}
             #codeBlockCopyBtn {{
                 background-color: transparent;
-                color: {c["muted"]};
-                border: 1px solid {c["border"]};
+                color: transparent;
+                border: none;
                 border-radius: 4px;
-                font-size: 11px;
-                padding: 2px 8px;
+                font-size: 12px;
+                padding: 1px 4px;
+            }}
+            #codeBlockCard:hover #codeBlockCopyBtn {{
+                color: {c["muted"]};
             }}
             #codeBlockCopyBtn:hover {{
                 background-color: {c["hover"]};
-                color: {c["fg"]};
+                color: {c["fg"]} !important;
             }}
             #codeBlockContent {{
                 color: {c["fg"]};

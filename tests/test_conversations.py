@@ -20,21 +20,27 @@ class TestSessionManagement:
     """Session CRUD operations."""
 
     def test_initial_session_created(self, store: ConversationStore):
-        """A new store should create an initial session."""
+        """Sessions are lazily created — no session on init without messages."""
+        sessions = store.get_sessions()
+        assert len(sessions) == 0  # Lazy: no session until first message
+
+    def test_session_created_on_first_message(self, store: ConversationStore):
+        """First append_message should auto-create a session and rename from content."""
+        store.append_message("main", "user", "hello")
         sessions = store.get_sessions()
         assert len(sessions) == 1
-        assert sessions[0]["name"] == "新对话"
+        assert sessions[0]["name"] == "hello"  # Renamed from first message content
 
-    def test_sessions_json_created(self, store: ConversationStore):
-        """sessions.json should be created on disk."""
-        assert store._sessions_file.exists()
+    def test_sessions_file_not_created_on_init(self, store: ConversationStore):
+        """sessions.json should NOT exist until first message is saved."""
+        assert not store._sessions_file.exists()
 
     def test_new_session(self, store: ConversationStore):
         """new_session should create and switch to a new session."""
         sid = store.new_session("Test session")
         assert store.get_current_session_id("main") == sid
         sessions = store.get_sessions()
-        assert len(sessions) == 2
+        assert len(sessions) == 1  # Lazy: only the explicitly created one
         assert sessions[0]["id"] == sid
         assert sessions[0]["name"] == "Test session"
 
@@ -87,10 +93,9 @@ class TestSessionManagement:
         store.new_session("Second")
         store.new_session("Third")
         sessions = store.get_sessions()
-        assert len(sessions) == 3
+        assert len(sessions) == 2
         assert sessions[0]["name"] == "Third"
         assert sessions[1]["name"] == "Second"
-        assert sessions[2]["name"] == "新对话"
 
 
 class TestMessagePersistence:

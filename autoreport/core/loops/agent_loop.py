@@ -416,6 +416,13 @@ class AgentLoop:
             current_messages.append(
                 LLMMessage(role="assistant", content=response.content)
             )
+            # Publish final content to GUI (it was generated inside the tool loop)
+            await self.bus.publish(AgentResponse(
+                agent_type=self.agent_type,
+                content=response.content,
+                message_id=user_message_id,
+                streaming=False,
+            ))
 
         self._conversation_history = current_messages
 
