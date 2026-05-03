@@ -244,14 +244,14 @@ class MainWindow(QMainWindow):
             /* ---- Input Bar ---- */
             #inputBar {{
                 background-color: {c["bg"]};
-                border-top: 1px solid {c["border"]};
+                border-top: none;
             }}
             #sendBtn {{
                 background-color: {c["send_bg"]};
                 color: #ffffff;
                 border: none;
-                border-radius: 8px;
-                font-size: 16px;
+                border-radius: 6px;
+                font-size: 14px;
                 font-weight: 700;
             }}
             #sendBtn:hover {{
@@ -278,36 +278,33 @@ class MainWindow(QMainWindow):
                 background-color: {c["hover"]};
             }}
 
-            /* ---- Message Cells (Codex flat timeline) ---- */
-            #userMessageBubble {{
-                background-color: {c["badge_bg"]};
-                border-radius: 8px;
-            }}
-            #userPrompt {{
-                color: {c["user_prompt"]};
-                font-weight: 700;
-                font-size: 14px;
+            /* ---- Message Cells (Copilot flat style) ---- */
+            #userMessageRow {{
+                background-color: transparent;
+                border-left: 3px solid {c["focus"]};
+                border-radius: 0;
             }}
             #userMessageText {{
-                color: {c["badge_fg"]};
+                color: {c["fg"]};
                 font-size: 13px;
-                line-height: 1.5;
+            }}
+            #agentMessageRow {{
+                background-color: transparent;
             }}
             #agentBullet {{
                 color: {c["agent_bullet"]};
-                font-size: 14px;
+                font-size: 8px;
             }}
             #agentMessageText {{
                 color: {c["fg"]};
                 font-size: 13px;
                 background-color: transparent;
-                line-height: 1.5;
             }}
             #msgCoordination {{
                 font-size: 11px;
                 color: {c["muted"]};
                 font-style: italic;
-                margin-left: 30px;
+                padding-left: 16px;
             }}
 
             /* ---- Tool Call Group ---- */
@@ -338,17 +335,8 @@ class MainWindow(QMainWindow):
                 font-size: 13px;
             }}
             #statusHeader {{
-                color: {c["fg"]};
+                color: {c["muted"]};
                 font-size: 12px;
-                font-weight: 500;
-            }}
-            #statusElapsed {{
-                color: {c["muted"]};
-                font-size: 11px;
-            }}
-            #statusHint {{
-                color: {c["muted"]};
-                font-size: 11px;
             }}
         """)
 

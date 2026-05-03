@@ -1,7 +1,7 @@
-"""Collapsible tool call group — Codex CLI style.
+"""Collapsible tool call group — VS Code Copilot Chat style.
 
-Collapsed: single line summary with status icon and duration
-Expanded: each tool call with $ prefix, exit code, and result
+Collapsed: single line with status icon, tool name, duration, expand arrow
+Expanded: each tool call with result details
 """
 
 from dataclasses import dataclass
@@ -22,7 +22,7 @@ class ToolCall:
 
 
 class ToolCallGroup(QWidget):
-    """Collapsible group of tool calls — Codex CLI style."""
+    """Collapsible group of tool calls — compact VS Code style."""
 
     expanded_changed = pyqtSignal(bool)
 
@@ -32,9 +32,9 @@ class ToolCallGroup(QWidget):
         self._expanded = False
         self._setup_ui()
 
-    def _setup_ui(self) -> None:
+    def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(30, 2, 16, 2)
+        layout.setContentsMargins(24, 2, 16, 2)
         layout.setSpacing(0)
 
         self._header_btn = QPushButton()
@@ -46,8 +46,8 @@ class ToolCallGroup(QWidget):
         self._details = QWidget()
         self._details.setObjectName("toolCallDetails")
         self._details_layout = QVBoxLayout(self._details)
-        self._details_layout.setContentsMargins(0, 4, 0, 0)
-        self._details_layout.setSpacing(2)
+        self._details_layout.setContentsMargins(0, 2, 0, 0)
+        self._details_layout.setSpacing(1)
         self._details.setVisible(False)
         layout.addWidget(self._details)
 
@@ -96,11 +96,11 @@ class ToolCallGroup(QWidget):
         for call in self._calls:
             status = "✓" if call.success else "✗"
             dur = f"{call.duration_ms / 1000:.1f}s"
-            parts = [f"$ {status} {call.name} ({dur})"]
+            parts = [f"  {status} {call.name} ({dur})"]
             if call.error:
                 parts.append(f"  error: {call.error}")
             elif call.result is not None:
-                parts.append(f"  → {str(call.result)[:120]}")
+                parts.append(f"  → {str(call.result)[:200]}")
 
             detail = QLabel("\n".join(parts))
             detail.setObjectName("toolCallDetail")

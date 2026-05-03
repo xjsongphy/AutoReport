@@ -62,7 +62,7 @@ class AgentPanel(QWidget):
         # ---- Header (minimal, Codex-style) ----
         header = QWidget()
         header.setObjectName("panelHeader")
-        header.setFixedHeight(36)
+        header.setFixedHeight(32)
         hl = QHBoxLayout(header)
         hl.setContentsMargins(12, 0, 12, 0)
         hl.setSpacing(8)
@@ -153,7 +153,7 @@ class AgentPanel(QWidget):
         input_bar = QWidget()
         input_bar.setObjectName("inputBar")
         il = QHBoxLayout(input_bar)
-        il.setContentsMargins(12, 8, 12, 8)
+        il.setContentsMargins(12, 6, 12, 6)
         il.setSpacing(8)
 
         self._input_field = ChatInput()
@@ -166,7 +166,7 @@ class AgentPanel(QWidget):
         send_btn.setObjectName("sendBtn")
         send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         send_btn.clicked.connect(self._on_send)
-        send_btn.setFixedSize(36, 36)
+        send_btn.setFixedSize(28, 28)
         il.addWidget(send_btn)
 
         layout.addWidget(input_bar)

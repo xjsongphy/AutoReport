@@ -33,14 +33,13 @@ class ChatInput(QPlainTextEdit):
 
     def _setup_ui(self) -> None:
         self.setPlaceholderText("Message…  (@ file, Enter send)")
-        self.setMinimumHeight(36)
-        self.setMaximumHeight(160)
+        self.setMinimumHeight(32)
+        self.setMaximumHeight(150)
 
         from PyQt6.QtWidgets import QApplication
         hints = QApplication.styleHints()
         dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
 
-        # Codex/GitHub palette
         input_bg = "#0d1117" if dark else "#ffffff"
         input_fg = "#e6edf3" if dark else "#1f2328"
         input_border = "#30363d" if dark else "#d0d7de"
@@ -49,16 +48,15 @@ class ChatInput(QPlainTextEdit):
         self.setStyleSheet(f"""
             QPlainTextEdit {{
                 border: 1px solid {input_border};
-                border-radius: 8px;
-                padding: 6px 10px;
+                border-radius: 6px;
+                padding: 4px 8px;
                 background-color: {input_bg};
                 color: {input_fg};
                 font-size: 13px;
                 font-family: "Segoe UI", "SF Pro", sans-serif;
             }}
             QPlainTextEdit:focus {{
-                border: 2px solid {focus_border};
-                padding: 5px 9px;
+                border: 1px solid {focus_border};
             }}
         """)
 
