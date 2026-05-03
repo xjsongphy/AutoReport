@@ -21,6 +21,7 @@ from autoreport.gui.widgets.debug_panel import DebugPanel
 from autoreport.gui.widgets.file_search_popup import FileSearchPopup
 from autoreport.gui.widgets.messages_area import MessagesArea
 from autoreport.gui.widgets.status_indicator import StatusIndicator
+from autoreport.gui.widgets.working_border import WorkingBorder
 from autoreport.interfaces.types import ApiDebugMessage
 
 
@@ -170,7 +171,19 @@ class AgentPanel(QWidget):
         send_btn.setStyleSheet("border-radius: 14px;")
         il.addWidget(send_btn)
 
-        layout.addWidget(input_bar)
+        # Wrap input_bar in a container with animated working border
+        self._input_container = QWidget()
+        self._input_container.setObjectName("inputContainer")
+        icl = QHBoxLayout(self._input_container)
+        icl.setContentsMargins(2, 2, 2, 2)
+        icl.setSpacing(0)
+        icl.addWidget(input_bar)
+
+        # Working border overlays the container
+        self._working_border = WorkingBorder(self._input_container)
+        self._working_border.show()
+
+        layout.addWidget(self._input_container)
 
     def _setup_file_search(self) -> None:
         self._file_search_popup = FileSearchPopup(self)
@@ -337,8 +350,10 @@ class AgentPanel(QWidget):
         if active:
             header = "Thinking" if status == "thinking" else "Running tool"
             self._status_indicator.start(header)
+            self._working_border.start()
         else:
             self._status_indicator.stop()
+            self._working_border.stop()
 
     # ---- Actions ----
 

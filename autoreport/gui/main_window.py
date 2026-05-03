@@ -250,9 +250,14 @@ class MainWindow(QMainWindow):
                 border-color: transparent;
             }}
 
+            /* ---- Input Container (with working border space) ---- */
+            #inputContainer {{
+                background-color: {c["bg"]};
+            }}
+
             /* ---- Input Bar ---- */
             #inputBar {{
-                background-color: {c["bg"]};
+                background-color: transparent;
             }}
             /* VS Code send button: gradient filled circle, border-radius 5px */
             #sendBtn {{
@@ -336,6 +341,59 @@ class MainWindow(QMainWindow):
                 font-style: italic;
                 padding-left: 0px;
                 margin-bottom: 4px;
+            }}
+
+            /* ---- Message Footer (hover toolbar) ----
+               VS Code: .chat-footer-toolbar { display: none; opacity: 0 → 1 on hover } */
+            #msgFooter {{
+                background-color: transparent;
+                padding-top: 4px;
+            }}
+            #copyBtn {{
+                background-color: transparent;
+                color: {c["muted"]};
+                border: 1px solid {c["border"]};
+                border-radius: 4px;
+                padding: 2px 10px;
+                font-size: 11px;
+            }}
+            #copyBtn:hover {{
+                background-color: {c["hover"]};
+                color: {c["fg"]};
+            }}
+
+            /* ---- Code Block (VS Code interactive-result-code-block) ---- */
+            #codeBlockCard {{
+                background-color: {c["surface"]};
+                border: 1px solid {c["border"]};
+                border-radius: 6px;
+                margin: 4px 0;
+            }}
+            #codeBlockHeader {{
+                background-color: transparent;
+                border-bottom: 1px solid {c["border"]};
+            }}
+            #codeBlockLang {{
+                font-size: 11px;
+                color: {c["muted"]};
+                font-family: "Cascadia Code", "SF Mono", "Consolas", monospace;
+            }}
+            #codeBlockCopyBtn {{
+                background-color: transparent;
+                color: {c["muted"]};
+                border: 1px solid {c["border"]};
+                border-radius: 4px;
+                font-size: 11px;
+                padding: 2px 8px;
+            }}
+            #codeBlockCopyBtn:hover {{
+                background-color: {c["hover"]};
+                color: {c["fg"]};
+            }}
+            #codeBlockContent {{
+                color: {c["fg"]};
+                font-family: "Cascadia Code", "SF Mono", "Consolas", monospace;
+                font-size: 12px;
             }}
 
             /* ---- Tool Call Group ---- */
