@@ -76,7 +76,6 @@ class NoWheelComboBox(QComboBox):
             self.addItem("（无可用项）")
             self.model().item(0).setEnabled(False)
             super().showPopup()
-            self.clear()
         else:
             super().showPopup()
 
