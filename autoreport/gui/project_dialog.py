@@ -224,7 +224,7 @@ class ProjectDialog(QDialog):
             "primaryHover": "#026ec1" if dark else "#106ebe",
             "secondaryBorder": "#555" if dark else "#ccc",
             "secondaryFg": "#ddd" if dark else "#333333",
-            "secondaryHoverBg": "#333" if dark else "#e9e9e9",
+            "secondaryHoverBg": "#2a2d2e" if dark else "#e9e9e9",
             "itemBg": "#1f1f1f" if dark else "#eaeaea",
             "itemHoverBg": "#2a2d2e" if dark else "#ddd",
             "itemName": "#e0e0e0" if dark else "#1a1a1a",
@@ -237,7 +237,13 @@ class ProjectDialog(QDialog):
             ProjectDialog {{
                 background-color: {c["bg"]};
             }}
+            QWidget {{
+                background-color: {c["bg"]};
+            }}
             #header {{
+                background-color: {c["headerBg"]};
+            }}
+            #header QWidget {{
                 background-color: {c["headerBg"]};
             }}
             #title {{
@@ -312,6 +318,9 @@ class ProjectDialog(QDialog):
                 color: {c["itemPath"]};
             }}
             #footer {{
+                background-color: {c["headerBg"]};
+            }}
+            #footer QWidget {{
                 background-color: {c["headerBg"]};
             }}
             #cancelBtn {{

@@ -775,9 +775,15 @@ class ConfigDialog(QDialog):
             ConfigDialog {{
                 background-color: {c["bodyBg"]};
             }}
+            QWidget {{
+                background-color: {c["bodyBg"]};
+            }}
             #dialogHeader {{
                 background-color: {c["headerBg"]};
                 border-bottom: 1px solid {c["headerBorder"]};
+            }}
+            #dialogHeader QWidget {{
+                background-color: {c["headerBg"]};
             }}
             #dialogTitle {{
                 font-size: 20px;
@@ -811,6 +817,9 @@ class ConfigDialog(QDialog):
             #dialogFooter {{
                 background-color: {c["footerBg"]};
                 border-top: 1px solid {c["footerBorder"]};
+            }}
+            #dialogFooter QWidget {{
+                background-color: {c["footerBg"]};
             }}
             #providerCard {{
                 background-color: {c["cardBg"]};
