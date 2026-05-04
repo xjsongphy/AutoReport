@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -13,6 +14,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from ..scale import dpi_scale
 
 
 class ConversationHistoryDropdown(QWidget):
@@ -33,17 +36,19 @@ class ConversationHistoryDropdown(QWidget):
         self._setup_ui()
 
     def _setup_ui(self) -> None:
-        self.setFixedHeight(280)
+        s = dpi_scale()
+        self.setFixedHeight(round(260 * s))
+        self.setMaximumWidth(round(300 * s))
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Session list
+        # Session list — compact Copilot-style
         self._session_list = QListWidget()
         self._session_list.setObjectName("sessionList")
+        self._session_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._session_list.itemClicked.connect(self._on_item_clicked)
-        self._session_list.itemDoubleClicked.connect(self._on_item_double_clicked)
         self._session_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._session_list.customContextMenuRequested.connect(self._show_context_menu)
         layout.addWidget(self._session_list, 1)
@@ -53,7 +58,7 @@ class ConversationHistoryDropdown(QWidget):
         new_btn.setObjectName("newSessionBtn")
         new_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         new_btn.clicked.connect(self._on_new_conversation)
-        new_btn.setFixedHeight(32)
+        new_btn.setFixedHeight(round(32 * s))
         layout.addWidget(new_btn)
 
         self._apply_style()
@@ -62,6 +67,10 @@ class ConversationHistoryDropdown(QWidget):
         from PyQt6.QtWidgets import QApplication
         hints = QApplication.styleHints()
         dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
+        s = dpi_scale()
+
+        def px(v: int) -> str:
+            return f"{round(v * s)}px"
 
         bg = "#1f1f1f" if dark else "#ffffff"
         border = "#2b2b2b" if dark else "#e0e0e0"
@@ -82,13 +91,13 @@ class ConversationHistoryDropdown(QWidget):
                 background-color: transparent;
                 border: none;
                 outline: none;
-                font-size: 13px;
+                font-size: {px(13)};
                 color: {fg};
             }}
             QListWidget#sessionList::item {{
-                padding: 10px 12px;
-                border-radius: 2px;
-                margin: 1px 4px;
+                padding: {px(5)} {px(12)};
+                border-radius: {px(2)};
+                margin: {px(1)} {px(4)};
             }}
             QListWidget#sessionList::item:hover {{
                 background-color: {hover};
@@ -101,9 +110,9 @@ class ConversationHistoryDropdown(QWidget):
                 border: none;
                 border-top: 1px solid {border};
                 color: {new_fg};
-                font-size: 12px;
+                font-size: {px(12)};
                 font-weight: 600;
-                border-radius: 0px;
+                border-radius: 0;
             }}
             QPushButton#newSessionBtn:hover {{
                 background-color: {hover};
@@ -125,11 +134,12 @@ class ConversationHistoryDropdown(QWidget):
             except Exception:
                 time_str = timestamp
 
-            lines = [name, time_str]
+            # Copilot-style: name (bold) — preview below
             if preview:
-                preview_short = preview[:50] + "..." if len(preview) > 50 else preview
-                lines.append(preview_short)
-            item_text = "\n".join(lines)
+                preview_short = preview[:40] + "…" if len(preview) > 40 else preview
+                item_text = f"{name}  {time_str}\n{preview_short}"
+            else:
+                item_text = f"{name}  {time_str}"
 
             item = QListWidgetItem(item_text)
             item.setData(Qt.ItemDataRole.UserRole, session_id)
@@ -144,13 +154,13 @@ class ConversationHistoryDropdown(QWidget):
         self.setVisible(True)
 
     def _on_item_clicked(self, item: QListWidgetItem) -> None:
-        pass  # single-click just selects
-
-    def _on_item_double_clicked(self, item: QListWidgetItem) -> None:
         session_id = item.data(Qt.ItemDataRole.UserRole)
         if session_id:
             self.session_selected.emit(session_id)
             self.setVisible(False)
+
+    def _on_item_double_clicked(self, item: QListWidgetItem) -> None:
+        pass  # single-click handles selection
 
     def _on_new_conversation(self) -> None:
         self.new_conversation_requested.emit()

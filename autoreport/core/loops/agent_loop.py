@@ -793,12 +793,12 @@ class AgentLoop:
                     TaskStatus.IN_PROGRESS: "进行中",
                 }
                 s = status_map.get(t.status, t.status.value)
-                lines.append(f"  - {t.task_id}: {s} {t.description}")
+                lines.append(f"  - {s} {t.description}")
         if waitlist:
             lines.append("等待:")
             for t in waitlist[:10]:
                 tgt = t.target_agent.value
-                lines.append(f"  - {t.task_id}: 等待{tgt} {t.description}")
+                lines.append(f"  - 等待{tgt} {t.description}")
 
         total = len(todolist) + len(waitlist)
         if total > 20:

@@ -254,7 +254,7 @@ class DebugPanel(QWidget):
         if dark:
             frame.setStyleSheet("""
                 QFrame {
-                    background-color: #252526;
+                    background-color: #1f1f1f;
                     border: 1px solid #2b2b2b;
                     border-radius: 4px;
                     padding: 4px;

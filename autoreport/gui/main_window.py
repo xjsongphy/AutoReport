@@ -25,6 +25,7 @@ from ..interfaces.types import (
     ToolResult,
     UserMessage,
 )
+from .scale import dpi_scale
 from .widgets.agent_panel import AgentPanel
 from .widgets.file_tree import FileTreeWidget
 from .widgets.preview import PreviewWidget
@@ -66,13 +67,20 @@ class MainWindow(QMainWindow):
 
         hints = QApplication.styleHints()
         dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
+        s = dpi_scale()
+
+        # Helper: scale pixel value for DPI
+        def px(v: int) -> str:
+            return f"{round(v * s)}px"
 
         if dark:
             c = {
-                # VSCode Dark Modern: content area
+                # VSCode Dark Modern: only 2 bg colors for large panels
+                # #1F1F1F = content area  |  #181818 = chrome (sidebar/file tree)
                 "bg": "#1f1f1f",
-                # VSCode Dark Modern: chrome (sidebar, panel headers)
                 "surface": "#181818",
+                # code block / small elevated card
+                "card": "#252526",
                 # VSCode Dark Modern: subtle borders
                 "border": "#2b2b2b",
                 # --vscode-foreground
@@ -82,7 +90,7 @@ class MainWindow(QMainWindow):
                 # --vscode-focusBorder
                 "focus": "#0078d4",
                 # --vscode-input-background
-                "input_bg": "#1f1f1f",
+                "input_bg": "#313131",
                 "input_border": "#3c3c3c",
                 # --vscode-chat-requestBubbleBackground
                 "bubble_bg": "#2a2a2a",
@@ -90,8 +98,9 @@ class MainWindow(QMainWindow):
                 # --vscode-button-background
                 "send_bg": "#0078d4",
                 "send_hover": "#026ec1",
-                "scrollbar": "#424242",
-                "scrollbar_hover": "#4f4f4f",
+                # subtle scrollbar (VSCode: transparent track, barely visible handle)
+                "scrollbar": "#ffffff1a",
+                "scrollbar_hover": "#ffffff33",
                 # --vscode-toolbar-hoverBackground
                 "hover": "#2a2d2e",
                 "selection": "#264f78",
@@ -117,6 +126,7 @@ class MainWindow(QMainWindow):
             c = {
                 "bg": "#ffffff",
                 "surface": "#f3f3f3",
+                "card": "#f5f5f5",
                 "border": "#e0e0e0",
                 "fg": "#616161",
                 "muted": "#9e9e9e",
@@ -158,55 +168,55 @@ class MainWindow(QMainWindow):
             QWidget {{
                 color: {c["fg"]};
                 font-family: "Segoe UI", "SF Pro", -apple-system, sans-serif;
-                font-size: 13px;
+                font-size: {px(13)};
             }}
             QSplitter::handle {{
                 background-color: {c["border"]};
             }}
             QSplitter::handle:horizontal {{
-                width: 1px;
+                width: {px(1)};
             }}
             QSplitter::handle:vertical {{
-                height: 1px;
+                height: {px(1)};
             }}
             QScrollBar:vertical {{
                 background-color: transparent;
-                width: 8px;
+                width: {px(8)};
                 border: none;
             }}
             QScrollBar::handle:vertical {{
                 background-color: {c["scrollbar"]};
-                min-height: 30px;
-                border-radius: 4px;
+                min-height: {px(30)};
+                border-radius: {px(4)};
             }}
             QScrollBar::handle:vertical:hover {{
                 background-color: {c["scrollbar_hover"]};
             }}
             QScrollBar::add-line:vertical,
             QScrollBar::sub-line:vertical {{
-                height: 0px;
+                height: 0;
             }}
             QScrollBar:horizontal {{
                 background-color: transparent;
-                height: 8px;
+                height: {px(8)};
                 border: none;
             }}
             QScrollBar::handle:horizontal {{
                 background-color: {c["scrollbar"]};
-                min-width: 30px;
-                border-radius: 4px;
+                min-width: {px(30)};
+                border-radius: {px(4)};
             }}
             QScrollBar::add-line:horizontal,
             QScrollBar::sub-line:horizontal {{
-                width: 0px;
+                width: 0;
             }}
             QToolTip {{
                 background-color: {c["surface"]};
                 color: {c["fg"]};
                 border: 1px solid {c["border"]};
-                padding: 6px 8px;
-                font-size: 12px;
-                border-radius: 4px;
+                padding: {px(3)} {px(7)};
+                font-size: {px(12)};
+                border-radius: {px(4)};
             }}
 
             /* ---- Panel Header ---- */
@@ -215,20 +225,20 @@ class MainWindow(QMainWindow):
                 border-bottom: 1px solid {c["border"]};
             }}
             #panelTitle {{
-                font-size: 13px;
+                font-size: {px(13)};
                 font-weight: 600;
                 color: {c["fg"]};
             }}
             #panelStatus {{
-                font-size: 11px;
+                font-size: {px(11)};
                 color: {c["status_idle"]};
             }}
             #headerAction {{
                 background-color: transparent;
                 color: {c["header_action"]};
                 border: none;
-                border-radius: 4px;
-                font-size: 13px;
+                border-radius: {px(4)};
+                font-size: {px(13)};
             }}
             #headerAction:hover {{
                 background-color: {c["hover"]};
@@ -238,9 +248,9 @@ class MainWindow(QMainWindow):
                 background-color: transparent;
                 color: {c["muted"]};
                 border: 1px solid {c["border"]};
-                border-radius: 4px;
-                padding: 2px 10px;
-                font-size: 11px;
+                border-radius: {px(4)};
+                padding: {px(2)} {px(10)};
+                font-size: {px(11)};
             }}
             #debugBtn:hover {{
                 background-color: {c["hover"]};
@@ -269,30 +279,30 @@ class MainWindow(QMainWindow):
                 background-color: transparent;
                 color: {c["muted"]};
                 border: none;
-                border-radius: 4px;
-                font-size: 14px;
+                border-radius: {px(4)};
+                font-size: {px(14)};
             }}
             #secondaryBtn:hover {{
                 background-color: {c["hover"]};
                 color: {c["fg"]};
             }}
             #secondaryStatus {{
-                font-size: 11px;
+                font-size: {px(11)};
                 color: {c["muted"]};
             }}
-            /* VS Code send button: gradient filled circle, codicon-arrow-up */
+            /* VS Code send button */
             #sendBtn {{
                 background-color: {c["send_bg"]};
                 color: #ffffff;
                 border: none;
-                border-radius: 13px;
-                font-size: 14px;
+                border-radius: {px(13)};
+                font-size: {px(14)};
                 font-weight: 700;
-                padding: 0px;
-                min-width: 26px;
-                min-height: 26px;
-                max-width: 26px;
-                max-height: 26px;
+                padding: 0;
+                min-width: {px(26)};
+                min-height: {px(26)};
+                max-width: {px(26)};
+                max-height: {px(26)};
             }}
             #sendBtn:hover {{
                 background-color: {c["send_hover"]};
@@ -304,15 +314,15 @@ class MainWindow(QMainWindow):
                 border-top: 1px solid {c["context_border"]};
             }}
             #contextLabel {{
-                font-size: 11px;
+                font-size: {px(11)};
                 color: {c["muted"]};
                 font-family: "SF Mono", "Consolas", monospace;
             }}
             #contextEye {{
                 background-color: transparent;
                 border: none;
-                border-radius: 4px;
-                font-size: 12px;
+                border-radius: {px(4)};
+                font-size: {px(12)};
             }}
             #contextEye:hover {{
                 background-color: {c["hover"]};
@@ -324,7 +334,7 @@ class MainWindow(QMainWindow):
             }}
             #userMessageBubble {{
                 background-color: {c["bubble_bg"]};
-                border-radius: 12px;
+                border-radius: {px(12)};
                 max-width: 95%;
             }}
             #userMessageBubble:hover {{
@@ -332,7 +342,7 @@ class MainWindow(QMainWindow):
             }}
             #userMessageText {{
                 color: {c["fg"]};
-                font-size: 13px;
+                font-size: {px(13)};
                 line-height: 1.5;
             }}
 
@@ -343,11 +353,11 @@ class MainWindow(QMainWindow):
             #agentAvatar {{
                 background-color: {c["avatar_bg"]};
                 color: {c["avatar_fg"]};
-                border-radius: 12px;
-                font-size: 12px;
+                border-radius: {px(12)};
+                font-size: {px(12)};
             }}
             #agentUsername {{
-                font-size: 13px;
+                font-size: {px(13)};
                 font-weight: 600;
                 color: {c["fg"]};
             }}
@@ -356,49 +366,49 @@ class MainWindow(QMainWindow):
             }}
             #agentMessageText {{
                 color: {c["fg"]};
-                font-size: 13px;
+                font-size: {px(13)};
                 line-height: 1.5;
                 background-color: transparent;
             }}
             #msgCoordination {{
-                font-size: 11px;
+                font-size: {px(11)};
                 color: {c["muted"]};
                 font-style: italic;
-                padding-left: 0px;
-                margin-bottom: 4px;
+                padding-left: 0;
+                margin-bottom: {px(4)};
             }}
 
             /* ---- Message Footer (hover toolbar) ---- */
             #msgFooter {{
                 background-color: transparent;
-                padding-top: 4px;
+                padding-top: {px(4)};
             }}
             #copyBtn {{
                 background-color: transparent;
                 color: {c["muted"]};
                 border: 1px solid {c["border"]};
-                border-radius: 4px;
-                padding: 2px 10px;
-                font-size: 11px;
+                border-radius: {px(4)};
+                padding: {px(1)} {px(5)};
+                font-size: {px(11)};
             }}
             #copyBtn:hover {{
                 background-color: {c["hover"]};
                 color: {c["fg"]};
             }}
 
-            /* ---- Code Block (VS Code interactive-result-code-block) ---- */
+            /* ---- Code Block ---- */
             #codeBlockCard {{
-                background-color: {c["surface"]};
+                background-color: {c["card"]};
                 border: 1px solid {c["border"]};
-                border-radius: 6px;
-                margin: 4px 0;
+                border-radius: {px(6)};
+                margin: {px(4)} 0;
             }}
             #codeBlockHeader {{
                 background-color: transparent;
                 border-bottom: 1px solid {c["border"]};
             }}
             #codeBlockLang {{
-                font-size: 11px;
+                font-size: {px(11)};
                 color: {c["muted"]};
                 font-family: "Cascadia Code", "SF Mono", "Consolas", monospace;
             }}
@@ -406,9 +416,9 @@ class MainWindow(QMainWindow):
                 background-color: transparent;
                 color: transparent;
                 border: none;
-                border-radius: 4px;
-                font-size: 12px;
-                padding: 1px 4px;
+                border-radius: {px(4)};
+                font-size: {px(12)};
+                padding: {px(1)} {px(4)};
             }}
             #codeBlockCard:hover #codeBlockCopyBtn {{
                 color: {c["muted"]};
@@ -420,7 +430,7 @@ class MainWindow(QMainWindow):
             #codeBlockContent {{
                 color: {c["fg"]};
                 font-family: "Cascadia Code", "SF Mono", "Consolas", monospace;
-                font-size: 12px;
+                font-size: {px(12)};
             }}
 
             /* ---- Tool Call Group ---- */
@@ -429,10 +439,10 @@ class MainWindow(QMainWindow):
                 border: none;
                 color: {c["tool_fg"]};
                 font-family: "Cascadia Code", "SF Mono", "Consolas", monospace;
-                font-size: 12px;
+                font-size: {px(12)};
                 text-align: left;
                 padding: 0;
-                border-radius: 4px;
+                border-radius: {px(4)};
             }}
             #toolCallHeader:hover {{
                 background-color: {c["hover"]};
@@ -441,14 +451,14 @@ class MainWindow(QMainWindow):
             #toolCallDetail {{
                 color: {c["tool_detail"]};
                 font-family: "Cascadia Code", "SF Mono", "Consolas", monospace;
-                font-size: 11px;
-                padding: 2px 0;
+                font-size: {px(11)};
+                padding: {px(2)} 0;
             }}
 
             /* ---- Status Indicator ---- */
             #statusSpinner {{
                 color: {c["spinner_fg"]};
-                font-size: 13px;
+                font-size: {px(13)};
             }}
             #statusHeader {{
                 color: {c["muted"]};
@@ -549,10 +559,10 @@ class MainWindow(QMainWindow):
             return file_path.as_posix()
 
     def _load_conversations(self) -> None:
-        for agent_type in self._conv_store.get_agent_types_with_history():
-            records = self._conv_store.load_messages(agent_type)
-            if not records:
-                continue
+        # Only restore main agent history. Sub-agents start fresh each session.
+        agent_type = "main"
+        records = self._conv_store.load_messages(agent_type)
+        if records:
             panel = self._get_panel_for_agent(agent_type)
             for rec in records:
                 role = rec.get("role", "")

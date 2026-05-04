@@ -225,7 +225,7 @@ class ProjectDialog(QDialog):
             "secondaryBorder": "#555" if dark else "#ccc",
             "secondaryFg": "#ddd" if dark else "#333333",
             "secondaryHoverBg": "#333" if dark else "#e9e9e9",
-            "itemBg": "#252526" if dark else "#eaeaea",
+            "itemBg": "#1f1f1f" if dark else "#eaeaea",
             "itemHoverBg": "#2a2d2e" if dark else "#ddd",
             "itemName": "#e0e0e0" if dark else "#1a1a1a",
             "itemPath": "#858585" if dark else "#888888",
@@ -295,7 +295,7 @@ class ProjectDialog(QDialog):
             }}
             #projectItem {{
                 background-color: {c["itemBg"]};
-                border: 1px solid transparent;
+                border: 1px solid {c["border"]};
                 border-radius: 6px;
             }}
             #projectItem:hover {{

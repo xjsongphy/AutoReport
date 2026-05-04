@@ -87,14 +87,12 @@ class TestSignals:
         assert dropdown.isVisible() is False
 
     def test_double_click_emits_session_selected(self, qtbot, dropdown: ConversationHistoryDropdown, sample_sessions):
-        """Double-clicking a session should emit session_selected."""
-        from PyQt6.QtCore import Qt
-
+        """Single-clicking a session should emit session_selected."""
         dropdown.populate(sample_sessions)
 
         with qtbot.waitSignal(dropdown.session_selected, timeout=1000) as blocker:
             item = dropdown._session_list.item(0)
-            dropdown._on_item_double_clicked(item)
+            dropdown._on_item_clicked(item)
 
         assert blocker.args == ["s1"]
         assert dropdown.isVisible() is False

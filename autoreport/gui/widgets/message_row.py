@@ -9,6 +9,8 @@ import re
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QClipboard
+
+from ..scale import scaled_size
 from PyQt6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -67,10 +69,11 @@ class _CodeBlockWidget(QWidget):
         hl.addWidget(lang_label)
         hl.addStretch()
 
+        w, h = scaled_size(28, 20)
         self._copy_btn = QPushButton("⎘")
         self._copy_btn.setObjectName("codeBlockCopyBtn")
         self._copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._copy_btn.setFixedSize(24, 20)
+        self._copy_btn.setFixedSize(w, h)
         self._copy_btn.setToolTip("Copy code")
         self._copy_btn.clicked.connect(self._copy)
         hl.addWidget(self._copy_btn)
@@ -185,12 +188,13 @@ class MessageRow(QWidget):
             fl.setContentsMargins(32, 4, 0, 0)
             fl.setSpacing(4)
 
+            w, h = scaled_size(28, 24)
             self._copy_btn = QPushButton("⎘")
             self._copy_btn.setObjectName("copyBtn")
             self._copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             self._copy_btn.setToolTip("Copy")
             self._copy_btn.clicked.connect(self._copy_content)
-            self._copy_btn.setFixedSize(24, 22)
+            self._copy_btn.setFixedSize(w, h)
             fl.addWidget(self._copy_btn)
             fl.addStretch()
             self._footer.setVisible(False)

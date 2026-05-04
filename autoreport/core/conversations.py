@@ -112,10 +112,10 @@ class ConversationStore:
             # If no files for this agent, leave unset (will be lazily created)
 
     def _ensure_session(self, agent_type: str) -> None:
-        """Lazily create a session for an agent type if not already set."""
+        """Lazily create a session id in-memory (no metadata save until first message)."""
         if agent_type in self._current_session_ids and self._current_session_ids[agent_type]:
             return
-        session_id = self._create_new_session("新对话")
+        session_id = str(uuid.uuid4())
         self._current_session_ids[agent_type] = session_id
 
     def _load_sessions_metadata(self) -> list[dict]:
@@ -151,7 +151,15 @@ class ConversationStore:
         return agent_dir / f"{session_id}.jsonl"
 
     def get_sessions(self) -> list[dict]:
-        return self._load_sessions_metadata()
+        """Return sessions that have at least one message file for any agent."""
+        sessions = self._load_sessions_metadata()
+        return [
+            s for s in sessions
+            if any(
+                (self._dir / t / f"{s['id']}.jsonl").exists()
+                for t in _AGENT_TYPES
+            )
+        ]
 
     def get_current_session_id(self, agent_type: str = "main") -> str:
         self._ensure_session(agent_type)
@@ -233,6 +241,17 @@ class ConversationStore:
         extra: dict[str, Any] | None = None,
     ) -> None:
         self._ensure_session(agent_type)
+        session_id = self._current_session_ids[agent_type]
+        path = self._dir / agent_type / f"{session_id}.jsonl"
+
+        # Save session metadata on first write (deferred to avoid empty sessions)
+        is_new = not path.exists()
+        if is_new:
+            timestamp = datetime.now().isoformat(timespec="seconds")
+            sessions = self._load_sessions_metadata()
+            sessions.insert(0, {"id": session_id, "name": "新对话", "timestamp": timestamp, "preview": ""})
+            self._save_sessions_metadata(sessions)
+
         record: dict[str, Any] = {
             "ts": datetime.now().isoformat(timespec="seconds"),
             "role": role,
@@ -241,12 +260,10 @@ class ConversationStore:
         if extra:
             record.update(extra)
 
-        # Auto-name session from first user message to main agent
-        if agent_type == "main" and role == "user":
+        # Auto-name session from first user message
+        if role == "user":
             self.rename_current_session_from_first_message(agent_type, content)
             self.update_session_preview(agent_type, content)
-
-        path = self._get_session_file_path(agent_type)
         try:
             with open(path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
