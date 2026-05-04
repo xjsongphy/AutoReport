@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
 from ..core.conversations import ConversationStore
 from ..interfaces.protocol import BackendAPI
 from ..interfaces.types import (
+    AgentFeedback,
     AgentResponse,
     Checkpoint,
     Error,
@@ -643,6 +644,8 @@ class MainWindow(QMainWindow):
             self._handle_checkpoint(message)
         elif isinstance(message, TaskUpdateMessage):
             self._handle_task_update_msg(message)
+        elif isinstance(message, AgentFeedback):
+            self._handle_agent_feedback(message)
 
     def _handle_agent_response(self, message: AgentResponse) -> None:
         agent_str = str(message.agent_type)
@@ -726,6 +729,17 @@ class MainWindow(QMainWindow):
 
     def _handle_error(self, message: Error) -> None:
         self.main_agent_panel.add_error(message.source, message.message)
+
+    def _handle_agent_feedback(self, message: AgentFeedback) -> None:
+        """Handle AgentFeedback — show sub-agent issue report in main panel."""
+        from enum import Enum
+        agent_str = message.agent_type.value if isinstance(message.agent_type, Enum) else str(message.agent_type)
+        issue_type = message.feedback_type or "issue"
+        self.main_agent_panel.add_message(
+            "agent",
+            f"[{agent_str} reported {issue_type}] {message.content}",
+            source=agent_str,
+        )
 
     def _handle_checkpoint(self, message: Checkpoint) -> None:
         self.main_agent_panel.add_checkpoint(message.checkpoint_id, message.description)

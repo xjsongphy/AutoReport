@@ -174,6 +174,9 @@ class AgentLoop:
         self.bus.subscribe(UserMessage, self._bus_callback)
         # Subscribe to task updates
         self.bus.subscribe(TaskUpdateMessage, self._handle_task_update)
+        # Main Agent subscribes to sub-agent feedback
+        if self.agent_type == AgentType.MAIN:
+            self.bus.subscribe(AgentFeedback, self._handle_agent_feedback)
 
     @property
     def status(self) -> AgentStatus:
@@ -282,6 +285,23 @@ class AgentLoop:
             source="system",
         ))
         logger.debug("Task update delivered to {}: {}", self.agent_type, message.task_id)
+
+    async def _handle_agent_feedback(self, message: Message) -> None:
+        """Handle AgentFeedback from sub-agents — inject into Main Agent's queue."""
+        if not isinstance(message, AgentFeedback):
+            return
+
+        from enum import Enum
+        agent_str = message.agent_type.value if isinstance(message.agent_type, Enum) else str(message.agent_type)
+        issue_type = message.feedback_type or "issue"
+
+        notification = f"[{agent_str} 报告 {issue_type}] {message.content}"
+        await self._message_queue.put(UserMessage(
+            content=notification,
+            agent_type=self.agent_type,
+            source="system",
+        ))
+        logger.info("AgentFeedback delivered to Main Agent from {}: {}", agent_str, issue_type)
 
     async def _process_message(self, message: UserMessage) -> None:
         """Process a user message.
