@@ -318,11 +318,13 @@ class AgentPanel(QWidget):
                 return
 
         ts = datetime.now().strftime("%H:%M")
+        agent_name = self._title_label.text() or "Agent"
         self._messages_area.add_message_row(
             role=role,
             content=content,
             timestamp=ts,
             is_coordination=coordination or source == "main_agent",
+            agent_name=agent_name,
         )
 
     def add_tool_call(self, tool_name: str, arguments: dict) -> None:
@@ -401,10 +403,14 @@ class AgentPanel(QWidget):
         if not content:
             return
 
-        # Handle /clear command
-        if content == "/clear":
+        # Handle slash commands
+        if content.startswith("/"):
+            cmd = content.split()[0].lower()
             self._input_field.clear_text()
-            self.clear_conversation()
+            if cmd in ("/clear", "/new"):
+                self.clear_conversation()
+            elif cmd == "/help":
+                self.add_message("agent", "Available commands:\n/clear — Clear conversation\n/new — New conversation\n/help — Show this help")
             return
 
         final_message = content

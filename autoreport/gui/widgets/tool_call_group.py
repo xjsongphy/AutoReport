@@ -30,6 +30,10 @@ class ToolCallGroup(QWidget):
 
     expanded_changed = pyqtSignal(bool)
 
+    @staticmethod
+    def _display_name(name: str) -> str:
+        return name.replace("_", " ").replace("/", " ").title()
+
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._calls: list[ToolCall] = []
@@ -84,12 +88,11 @@ class ToolCallGroup(QWidget):
         if len(self._calls) == 1:
             c = self._calls[0]
             status = "✓" if c.success else "✗"
-            self._header_btn.setText(f"  {arrow} {c.name}  {c.duration_ms / 1000:.1f}s  {status}")
+            self._header_btn.setText(f"  {arrow} {self._display_name(c.name)}  {c.duration_ms / 1000:.1f}s  {status}")
         else:
-            # Group by tool name: "read_file (3) · write_file (1)"
             from collections import Counter
             counts = Counter(c.name for c in self._calls)
-            parts = [f"{name} ({cnt})" if cnt > 1 else name for name, cnt in counts.items()]
+            parts = [f"{self._display_name(name)} ({cnt})" if cnt > 1 else self._display_name(name) for name, cnt in counts.items()]
             tool_summary = " · ".join(parts)
             total = sum(c.duration_ms for c in self._calls) / 1000
             status = f"{ok}✓" if fail == 0 else f"{ok}✓ {fail}✗"
@@ -103,7 +106,7 @@ class ToolCallGroup(QWidget):
         for call in self._calls:
             status = "✓" if call.success else "✗"
             dur = f"{call.duration_ms / 1000:.1f}s"
-            parts = [f"  {status} {call.name} ({dur})"]
+            parts = [f"  {status} {self._display_name(call.name)} ({dur})"]
             if call.error:
                 parts.append(f"    error: {call.error}")
             elif call.result is not None:

@@ -292,15 +292,11 @@ class FileTreeWidget(QWidget):
                 background: none;
             }}
 
-            #fileTree::branch:has-children:!has-siblings:closed,
-            #fileTree::branch:closed:has-children:has-siblings {{
-                image: none;
+            #fileTree::branch:has-children:closed {{
                 border: none;
             }}
 
-            #fileTree::branch:open:has-children:!has-siblings,
-            #fileTree::branch:open:has-children:has-siblings {{
-                image: none;
+            #fileTree::branch:has-children:open {{
                 border: none;
             }}
 

@@ -149,38 +149,50 @@ class ChatInput(QPlainTextEdit):
         return "", -1, -1
 
     def insert_file_reference(self, file_path: Path) -> None:
-        token, start, end = self.current_prefixed_token()
+        text = self.toPlainText()
+        at_idx = text.rfind("@")
+        if at_idx < 0:
+            self._on_popup_closed()
+            return
 
-        if token and token.startswith("@"):
-            try:
-                rel_path = file_path.relative_to(Path.cwd())
-            except ValueError:
-                rel_path = file_path
+        try:
+            rel_path = file_path.relative_to(Path.cwd())
+        except ValueError:
+            rel_path = file_path
 
-            filename = file_path.name
-            link = f"[@{filename}](project://{rel_path})"
+        filename = file_path.name
+        link = f"[@{filename}](project://{rel_path})"
 
-            cursor = self.textCursor()
-            cursor.setPosition(start, QTextCursor.MoveMode.MoveAnchor)
-            cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
-            cursor.insertText(link)
+        end = at_idx + 1
+        while end < len(text) and text[end] not in " \t\n\r":
+            end += 1
 
-            cursor.setPosition(start + len(link))
-            self.setTextCursor(cursor)
-
+        cursor = self.textCursor()
+        doc_len = len(text)
+        cursor.setPosition(min(at_idx, doc_len), QTextCursor.MoveMode.MoveAnchor)
+        cursor.setPosition(min(end, doc_len), QTextCursor.MoveMode.KeepAnchor)
+        cursor.insertText(link)
+        self.setTextCursor(cursor)
         self._on_popup_closed()
 
     def insert_agent_reference(self, name: str) -> None:
-        token, start, end = self.current_prefixed_token()
+        text = self.toPlainText()
+        at_idx = text.rfind("@")
+        if at_idx < 0:
+            self._on_popup_closed()
+            return
 
-        if token and token.startswith("@"):
-            mention = f"@{name} "
+        mention = f"@{name} "
+        end = at_idx + 1
+        while end < len(text) and text[end] not in " \t\n\r":
+            end += 1
 
-            cursor = self.textCursor()
-            cursor.setPosition(start, QTextCursor.MoveMode.MoveAnchor)
-            cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
-            cursor.insertText(mention)
-
+        cursor = self.textCursor()
+        doc_len = len(text)
+        cursor.setPosition(min(at_idx, doc_len), QTextCursor.MoveMode.MoveAnchor)
+        cursor.setPosition(min(end, doc_len), QTextCursor.MoveMode.KeepAnchor)
+        cursor.insertText(mention)
+        self.setTextCursor(cursor)
         self._on_popup_closed()
 
     def _on_popup_closed(self) -> None:

@@ -37,7 +37,7 @@ class MessagesArea(QScrollArea):
         self._container.setObjectName("messagesContainer")
 
         self._layout = QVBoxLayout(self._container)
-        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setContentsMargins(0, 8, 0, 4)
         self._layout.setSpacing(0)
         self._layout.addStretch()  # Push content to top
 
@@ -123,26 +123,16 @@ class MessagesArea(QScrollArea):
         content: str,
         timestamp: str = "",
         is_coordination: bool = False,
+        agent_name: str = "Agent",
     ) -> MessageRow:
-        """Add a message row to the container.
-
-        Args:
-            role: Message role ("user" or "agent").
-            content: Message content.
-            timestamp: Time in HH:MM format.
-            is_coordination: Whether this is a coordination message.
-
-        Returns:
-            The created MessageRow widget.
-        """
-        # Create row without parent to avoid thread issues
-        # Qt will handle parent-child when added to layout
+        """Add a message row to the container."""
         row = MessageRow(
             role=role,
             content=content,
             timestamp=timestamp,
             is_coordination=is_coordination,
-            parent=None,  # Let layout handle parent
+            agent_name=agent_name,
+            parent=None,
         )
 
         # Find the stretch item and insert before it

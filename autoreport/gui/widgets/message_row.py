@@ -100,6 +100,7 @@ class MessageRow(QWidget):
         content: str,
         timestamp: str = "",
         is_coordination: bool = False,
+        agent_name: str = "Agent",
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
@@ -107,6 +108,7 @@ class MessageRow(QWidget):
         self._content = content
         self._timestamp = timestamp
         self._is_coordination = is_coordination
+        self._agent_name = agent_name
         self._complete = False
         self._agent_content_layout: QVBoxLayout | None = None
         self._setup_ui()
@@ -163,7 +165,7 @@ class MessageRow(QWidget):
             avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
             hl.addWidget(avatar)
 
-            username = QLabel("Agent")
+            username = QLabel(self._agent_name)
             username.setObjectName("agentUsername")
             hl.addWidget(username)
             hl.addStretch()
