@@ -174,6 +174,28 @@ class MessagesArea(QScrollArea):
 
         return group
 
+    def add_task_row(self, text: str, row_type: str = "task_update") -> None:
+        """Add a task-related message row (waitlist, todolist, notification).
+
+        Args:
+            text: Display text for the task row.
+            row_type: "waitlist", "todolist", "task_update", or "task_summary".
+        """
+        row = MessageRow(
+            role="system",
+            content=text,
+            timestamp="",
+            is_coordination=True,
+            parent=None,
+        )
+
+        # Find the stretch item and insert before it
+        stretch_index = self._layout.count() - 1
+        self._layout.insertWidget(stretch_index, row)
+
+        if self._auto_scroll_enabled:
+            self.scroll_to_bottom()
+
     def scroll_to_bottom(self) -> None:
         """Scroll to the bottom of the messages area."""
         scrollbar = self.verticalScrollBar()

@@ -26,6 +26,8 @@ from ...interfaces.types import (
     Error,
     Message,
     StatusChange,
+    TaskStatus,
+    TaskUpdateMessage,
     UserMessage,
 )
 from ...interfaces.types import (
@@ -169,6 +171,8 @@ class AgentLoop:
 
         # Subscribe to user messages for this agent type
         self.bus.subscribe(UserMessage, self._bus_callback)
+        # Subscribe to task updates
+        self.bus.subscribe(TaskUpdateMessage, self._handle_task_update)
 
     @property
     def status(self) -> AgentStatus:
@@ -242,6 +246,39 @@ class AgentLoop:
             return
 
         await self._message_queue.put(message)
+
+    async def _handle_task_update(self, message: Message) -> None:
+        """Handle TaskUpdateMessage from the message bus.
+
+        Task notifications are always delivered, even in debug mode.
+        They are wrapped into a UserMessage(source="system") for LLM processing.
+        """
+        if not isinstance(message, TaskUpdateMessage):
+            return
+
+        # Only process if relevant to this agent
+        if (message.source_agent != self.agent_type and
+                message.target_agent != self.agent_type):
+            return
+
+        src = message.source_agent.value
+        tgt = message.target_agent.value
+
+        action_texts = {
+            "created": f"[新任务] (ID: {message.task_id}): {message.description}",
+            "started": f"[进行中] {src} 开始了任务: {message.description}",
+            "completed": f"[完成] {src} 完成了任务: {message.description} (ID: {message.task_id})",
+            "failed": f"[失败] {src} 任务失败: {message.description} (ID: {message.task_id})",
+            "cancelled": f"[取消] {src} 任务已取消: {message.description} (ID: {message.task_id})",
+        }
+        notification_text = action_texts.get(message.action, f"任务更新 {message.action}: {message.description}")
+
+        await self._message_queue.put(UserMessage(
+            content=notification_text,
+            agent_type=self.agent_type,
+            source="system",
+        ))
+        logger.debug("Task update delivered to {}: {}", self.agent_type, message.task_id)
 
     async def _process_message(self, message: UserMessage) -> None:
         """Process a user message.
@@ -696,10 +733,55 @@ class AgentLoop:
 
             self._cached_full_prompt = "\n\n".join(parts)
             self._full_prompt_loaded = True
+
+            # Inject task state
+            task_section = self._build_task_state_section()
+            if task_section:
+                return self._cached_full_prompt + task_section
+
             return self._cached_full_prompt
 
-        # Return cached complete prompt
+        # Return cached complete prompt with current task state
+        task_section = self._build_task_state_section()
+        if task_section:
+            return self._cached_full_prompt + task_section
         return self._cached_full_prompt
+
+    def _build_task_state_section(self) -> str:
+        """Build current task state section for the system prompt."""
+        if self._loop_manager is None:
+            return ""
+        task_board = getattr(self._loop_manager, '_task_board', None)
+        if task_board is None:
+            return ""
+
+        todolist = task_board.get_todolist(self.agent_type)
+        waitlist = task_board.get_waitlist(self.agent_type)
+
+        if not todolist and not waitlist:
+            return ""
+
+        lines = ["\n[当前任务]"]
+        if todolist:
+            lines.append("待办:")
+            for t in todolist[:10]:
+                status_map = {
+                    TaskStatus.PENDING: "待处理",
+                    TaskStatus.IN_PROGRESS: "进行中",
+                }
+                s = status_map.get(t.status, t.status.value)
+                lines.append(f"  - {t.task_id}: {s} {t.description}")
+        if waitlist:
+            lines.append("等待:")
+            for t in waitlist[:10]:
+                tgt = t.target_agent.value
+                lines.append(f"  - {t.task_id}: 等待{tgt} {t.description}")
+
+        total = len(todolist) + len(waitlist)
+        if total > 20:
+            lines.append(f"  ... 还有 {total - 20} 项")
+
+        return "\n".join(lines)
 
     def _get_agent_type_str(self) -> str:
         """Convert AgentType to string for prompt loading.

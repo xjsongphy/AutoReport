@@ -25,6 +25,7 @@ class MessageType(str, Enum):
     ERROR = "error"
     CHECKPOINT = "checkpoint"
     API_DEBUG = "api_debug"  # API call debugging information
+    TASK_UPDATE = "task_update"
 
 
 class AgentType(str, Enum):
@@ -45,6 +46,16 @@ class AgentStatus(str, Enum):
     RUNNING_TOOL = "running_tool"
     ERROR = "error"
     DEBUG_MODE = "debug_mode"
+
+
+class TaskStatus(str, Enum):
+    """Task lifecycle status."""
+
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class Message(BaseModel):
@@ -154,6 +165,33 @@ class Error(Message):
     source: str  # "agent", "tool", "system"
     message: str
     details: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskItem(BaseModel):
+    """Single task record — dual view: waitlist for source_agent, todolist for target_agent."""
+
+    task_id: str
+    description: str
+    source_agent: AgentType
+    target_agent: AgentType
+    status: TaskStatus = TaskStatus.PENDING
+    priority: str = "normal"
+    created_at: datetime = Field(default_factory=datetime.now)
+    completed_at: datetime | None = None
+    parent_task_id: str | None = None
+    blocking: bool = False
+
+
+class TaskUpdateMessage(Message):
+    """Task lifecycle notification routed through the message bus."""
+
+    type: MessageType = MessageType.TASK_UPDATE
+    task_id: str
+    action: str  # "created" | "started" | "completed" | "failed" | "cancelled"
+    source_agent: AgentType
+    target_agent: AgentType
+    description: str
+    previous_status: str | None = None
 
 
 class ApiDebugMessage(Message):

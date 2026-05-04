@@ -23,25 +23,34 @@ class SendToAgentTool(Tool):
 
     name = "send_to_agent"
     description = (
-        "Send a task instruction to a sub-agent and wait for its response. "
-        "Use this to dispatch work to: theory, data_analysis, plotting, report. "
+        "Send a task instruction to a sub-agent. Use this to dispatch work to: "
+        "theory, data_analysis, plotting, report. "
+        "Optionally create tracked tasks with 'task_items' parameter for "
+        "waitlist/todolist tracking. "
+        "Set blocking=False for non-blocking delegation — the task will be "
+        "tracked and you'll be notified when the sub-agent completes it. "
         "Returns the sub-agent's full response text."
     )
 
-    def __init__(self, bus: MessageBus, timeout: int = 120):
+    def __init__(self, bus: MessageBus, task_board=None, timeout: int = 120):
         self._bus = bus
+        self._task_board = task_board
         self._timeout = timeout
 
     async def __call__(
         self,
         agent_type: str,
         content: str,
+        task_items: list[dict] | None = None,
+        blocking: bool = True,
     ) -> dict[str, Any]:
         """Send a task to a sub-agent.
 
         Args:
             agent_type: Target sub-agent type. One of: theory, data_analysis, plotting, report.
             content: Task instruction to send to the sub-agent.
+            task_items: Optional list of task dicts with 'description' keys for tracking.
+            blocking: If True, wait for response. If False, return immediately after dispatch.
 
         Returns:
             Dictionary with agent_type, status, response content, and any feedback.
@@ -54,6 +63,39 @@ class SendToAgentTool(Tool):
                 "status": "error",
                 "error": f"Unknown agent type '{agent_type}'. Valid: {valid}",
             }
+
+        # --- Task items: create linked waitlist/todolist entries ---
+        created_task_ids: list[str] = []
+        if task_items and self._task_board:
+            main_type = AgentType.MAIN
+            for item in task_items:
+                desc = str(item.get("description", content[:120]))
+                task = self._task_board.create_task(
+                    source=main_type,
+                    target=target,
+                    description=desc,
+                    blocking=blocking,
+                )
+                created_task_ids.append(task.task_id)
+            logger.info("SendToAgentTool: created tasks {}", created_task_ids)
+
+        # Non-blocking: return immediately after dispatch
+        if not blocking:
+            await self._bus.publish(UserMessage(
+                content=content,
+                agent_type=target,
+                source="main_agent",
+            ))
+            logger.info("Main Agent dispatched non-blocking task to {}", target)
+            result: dict[str, Any] = {
+                "status": "delegated",
+                "agent_type": target.value,
+                "message": f"Task sent to {target.value} (non-blocking). "
+                           "Agent will be notified on completion.",
+            }
+            if created_task_ids:
+                result["task_ids"] = created_task_ids
+            return result
 
         # Create future to wait for response
         loop = asyncio.get_running_loop()
@@ -102,6 +144,8 @@ class SendToAgentTool(Tool):
             }
             if feedback_items:
                 result["feedback"] = feedback_items
+            if created_task_ids:
+                result["task_ids"] = created_task_ids
             return result
         except asyncio.TimeoutError:
             result = {
@@ -132,14 +176,17 @@ class ReportIssueTool(Tool):
         "or you need Main Agent to coordinate a fix."
     )
 
-    def __init__(self, bus: MessageBus, agent_type: AgentType):
+    def __init__(self, bus: MessageBus, agent_type: AgentType, task_board=None):
         self._bus = bus
         self._agent_type = agent_type
+        self._task_board = task_board
 
     async def __call__(
         self,
         content: str,
         issue_type: str = "missing_data",
+        request_task_for: str | None = None,
+        task_description: str | None = None,
     ) -> dict[str, Any]:
         """Report an issue to the Main Agent.
 
@@ -148,6 +195,8 @@ class ReportIssueTool(Tool):
                 missing, wrong, or needed.
             issue_type: Type of issue. One of: missing_data (prerequisites absent),
                 quality (output is wrong/malformed), query (need clarification).
+            request_task_for: Optional agent type to request a task for.
+            task_description: Description for the requested task.
 
         Returns:
             Confirmation dictionary.
@@ -155,6 +204,25 @@ class ReportIssueTool(Tool):
         valid_types = {"missing_data", "quality", "query"}
         if issue_type not in valid_types:
             issue_type = "missing_data"
+
+        # Create task if requested
+        created_task_id: str | None = None
+        if request_task_for and task_description and self._task_board:
+            try:
+                target = AgentType(request_task_for)
+            except ValueError:
+                target = AgentType.MAIN
+            task = self._task_board.create_task(
+                source=self._agent_type,
+                target=target,
+                description=task_description,
+                blocking=False,
+            )
+            created_task_id = task.task_id
+            logger.info(
+                "ReportIssueTool: {} created task {} for delegation to {}",
+                self._agent_type, task.task_id, request_task_for,
+            )
 
         await self._bus.publish(AgentFeedback(
             agent_type=self._agent_type,
@@ -167,8 +235,12 @@ class ReportIssueTool(Tool):
             self._agent_type, issue_type, content[:80],
         )
 
-        return {
+        result: dict[str, Any] = {
             "status": "reported",
             "agent_type": self._agent_type.value if isinstance(self._agent_type, AgentType) else str(self._agent_type),
             "issue_type": issue_type,
         }
+        if created_task_id:
+            result["task_id"] = created_task_id
+            result["requested_target"] = request_task_for
+        return result

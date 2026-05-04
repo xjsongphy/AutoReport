@@ -61,6 +61,26 @@ Always include:
 - **依据**: What files/references to read
 - **要求**: Expected output format and location
 
+### Parallel (Non-Blocking) Dispatch
+
+You can now dispatch tasks without waiting. Set `blocking=False` and
+include `task_items` to create tracked tasks with automatic notifications:
+
+```
+send_to_agent(
+    agent_type="plotting",
+    content="任务：生成散点图...",
+    blocking=False,
+    task_items=[{"description": "Create scatter plot of X vs Y"}]
+)
+```
+
+When the target agent completes, you will receive an automatic notification.
+The task appears in your waitlist as "等待plotting: Create scatter plot".
+
+Use `manage_tasks(action="list")` to see all your current tasks and
+waiting items at any time.
+
 ### Gap Detection Checklist
 
 Before dispatching each agent, verify its prerequisites:
@@ -137,6 +157,7 @@ Before considering work complete:
 ### Tools
 
 - `send_to_agent` — Dispatch tasks to sub-agents (theory, data_analysis, plotting, report)
+- `manage_tasks` — Manage your task list (list/add/start/complete/cancel/fail)
 - `parse_pdf` — Convert PDF reference materials via mineru-open-api
 - `read_file` — Check reference materials and sub-agent outputs
 - `list_dir` — Explore project structure and verify outputs

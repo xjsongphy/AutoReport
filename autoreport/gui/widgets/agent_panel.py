@@ -350,6 +350,31 @@ class AgentPanel(QWidget):
             timestamp=ts,
         )
 
+    def handle_task_update(self, task_id: str, action: str, source: str,
+                           target: str, description: str) -> None:
+        """Handle task update for GUI display."""
+        action_texts = {
+            "completed": "完成",
+            "failed": "失败",
+            "cancelled": "取消",
+            "started": "开始",
+            "created": "新任务",
+        }
+        label = action_texts.get(action, action)
+
+        if action == "completed":
+            text = f"[{label}] {source} 完成了任务：{description}"
+        elif action == "failed":
+            text = f"[{label}] {source} 任务失败：{description}"
+        elif action == "cancelled":
+            text = f"[{label}] {source} 任务已取消：{description}"
+        elif action == "created":
+            text = f"[{label}] ({task_id})：{description}"
+        else:
+            text = f"[{label}] 任务更新 ({task_id})：{description}"
+
+        self._messages_area.add_task_row(text, row_type="task_update")
+
     # ---- Status ----
 
     def set_status(self, status: str, extra: dict | None = None) -> None:

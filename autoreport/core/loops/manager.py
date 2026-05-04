@@ -14,11 +14,13 @@ from ..tools import (
     EditFileTool,
     ExecTool,
     ListDirTool,
+    ManageTasksTool,
     PDFParseTool,
     PythonExecTool,
     ReadFileTool,
     ReportIssueTool,
     SendToAgentTool,
+    TaskBoard,
     WriteFileTool,
 )
 from ..tools.registry import ToolRegistry
@@ -51,6 +53,7 @@ class LoopManager:
         self._provider_manager = ProviderManager()
         self.checkpoint_manager = CheckpointManager(self.workspace)
         self.skill_loader = SkillLoader()
+        self._task_board = TaskBoard()
 
         # Subscribe to restart requests
         self.bus.subscribe(RestartRequest, self._handle_restart_request)
@@ -241,9 +244,16 @@ class LoopManager:
 
         # Inter-agent communication tools
         if agent_type == AgentType.MAIN:
-            registry.register(SendToAgentTool(bus=self.bus))
+            registry.register(SendToAgentTool(bus=self.bus, task_board=self._task_board))
         else:
-            registry.register(ReportIssueTool(bus=self.bus, agent_type=agent_type))
+            registry.register(ReportIssueTool(bus=self.bus, agent_type=agent_type, task_board=self._task_board))
+
+        # Task management — all agents can manage their own tasks
+        registry.register(ManageTasksTool(
+            task_board=self._task_board,
+            agent_type=agent_type,
+            bus=self.bus,
+        ))
 
         return registry
 
