@@ -97,7 +97,7 @@ class ProjectDialog(QDialog):
         header = QWidget()
         header.setObjectName("header")
         header_layout = QVBoxLayout(header)
-        header_layout.setContentsMargins(40, 36, 40, 20)
+        header_layout.setContentsMargins(40, 36, 40, 28)
         header_layout.setSpacing(6)
 
         title = QLabel("AutoReport")
@@ -118,7 +118,7 @@ class ProjectDialog(QDialog):
         actions = QWidget()
         actions.setObjectName("actionBar")
         actions_layout = QHBoxLayout(actions)
-        actions_layout.setContentsMargins(40, 0, 40, 16)
+        actions_layout.setContentsMargins(40, 12, 40, 16)
         actions_layout.setSpacing(12)
 
         open_btn = QPushButton("打开文件夹…")
