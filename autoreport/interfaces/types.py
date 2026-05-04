@@ -171,6 +171,7 @@ class TaskItem(BaseModel):
     """Single task record — dual view: waitlist for source_agent, todolist for target_agent."""
 
     task_id: str
+    brief: str
     description: str
     source_agent: AgentType
     target_agent: AgentType

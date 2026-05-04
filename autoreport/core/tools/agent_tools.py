@@ -49,7 +49,8 @@ class SendToAgentTool(Tool):
         Args:
             agent_type: Target sub-agent type. One of: theory, data_analysis, plotting, report.
             content: Task instruction to send to the sub-agent.
-            task_items: Optional list of task dicts with 'description' keys for tracking.
+            task_items: Optional list of task dicts with 'brief' (short UI text) and
+                'description' (detailed API content) keys for tracking.
             blocking: If True, wait for response. If False, return immediately after dispatch.
 
         Returns:
@@ -70,10 +71,12 @@ class SendToAgentTool(Tool):
             main_type = AgentType.MAIN
             for item in task_items:
                 desc = str(item.get("description", content[:120]))
+                brief = str(item.get("brief", desc[:80]))
                 task = self._task_board.create_task(
                     source=main_type,
                     target=target,
                     description=desc,
+                    brief=brief,
                     blocking=blocking,
                 )
                 created_task_ids.append(task.task_id)
@@ -187,6 +190,7 @@ class ReportIssueTool(Tool):
         issue_type: str = "missing_data",
         request_task_for: str | None = None,
         task_description: str | None = None,
+        task_brief: str = "",
     ) -> dict[str, Any]:
         """Report an issue to the Main Agent.
 
@@ -196,7 +200,8 @@ class ReportIssueTool(Tool):
             issue_type: Type of issue. One of: missing_data (prerequisites absent),
                 quality (output is wrong/malformed), query (need clarification).
             request_task_for: Optional agent type to request a task for.
-            task_description: Description for the requested task.
+            task_description: Description for the requested task (detailed, for API).
+            task_brief: Short summary for UI list display (optional).
 
         Returns:
             Confirmation dictionary.
@@ -216,6 +221,7 @@ class ReportIssueTool(Tool):
                 source=self._agent_type,
                 target=target,
                 description=task_description,
+                brief=task_brief,
                 blocking=False,
             )
             created_task_id = task.task_id

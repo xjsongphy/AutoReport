@@ -38,14 +38,16 @@ class ManageTasksTool(Tool):
         description: str | None = None,
         task_id: str | None = None,
         priority: str = "normal",
+        brief: str = "",
     ) -> dict[str, Any]:
         """Manage your tasks.
 
         Args:
             action: One of: list, add, start, complete, cancel, fail.
-            description: Task description (required for 'add').
+            description: Task description (required for 'add'). Detailed content for API.
             task_id: Task ID (required for start/complete/cancel/fail).
             priority: Priority for 'add' action. One of: normal, high, low.
+            brief: Short summary for UI list display (optional, defaults to description prefix).
 
         Returns:
             Result dictionary with action-specific data.
@@ -58,7 +60,7 @@ class ManageTasksTool(Tool):
             return self._handle_list()
 
         if action == "add":
-            return self._handle_add(description, priority)
+            return self._handle_add(description, priority, brief)
 
         if action == "start":
             return self._handle_start(task_id)
@@ -83,6 +85,7 @@ class ManageTasksTool(Tool):
             "todolist": [
                 {
                     "task_id": t.task_id,
+                    "brief": t.brief,
                     "description": t.description,
                     "status": t.status.value,
                     "source_agent": t.source_agent.value,
@@ -94,6 +97,7 @@ class ManageTasksTool(Tool):
             "waitlist": [
                 {
                     "task_id": t.task_id,
+                    "brief": t.brief,
                     "description": t.description,
                     "status": t.status.value,
                     "target_agent": t.target_agent.value,
@@ -104,13 +108,14 @@ class ManageTasksTool(Tool):
             ],
         }
 
-    def _handle_add(self, description: str | None, priority: str = "normal") -> dict[str, Any]:
+    def _handle_add(self, description: str | None, priority: str = "normal", brief: str = "") -> dict[str, Any]:
         if not description:
             return {"status": "error", "error": "description is required for 'add' action"}
         task = self._task_board.create_task(
             source=self._agent_type,
             target=self._agent_type,
             description=description,
+            brief=brief,
             priority=priority,
         )
         logger.info("{} added local task {}: {}", self._agent_type, task.task_id, description)

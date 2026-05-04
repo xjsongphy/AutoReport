@@ -29,8 +29,10 @@ def test_resolve_nested_relative_path(workspace):
 
 def test_reject_absolute_path():
     ws = Path(tempfile.mkdtemp()).resolve()
+    # Use an OS-appropriate absolute path
+    abs_path = str(Path("/") / "etc" / "passwd")
     with pytest.raises(ValueError):
-        resolve_and_validate_path("C:\\Windows\\System32", ws)
+        resolve_and_validate_path(abs_path, ws)
 
 
 def test_reject_path_traversal(workspace):

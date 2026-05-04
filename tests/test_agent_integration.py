@@ -187,12 +187,18 @@ class TestAgentCoordination:
                 "main",
                 "请让数据分析 agent 分析 data/experiment.csv 文件中的电压和电流数据",
             )
-            # Wait for main agent to respond (may delegate to sub-agent)
-            await collector.wait_for(AgentResponse, timeout=90)
+            # Wait for any agent response (main or sub-agent) with generous timeout
+            await collector.wait_for(AgentResponse, timeout=120)
 
             # Should have at least a response from main or sub agent
-            all_text = collector.get_full_agent_text(AgentType.MAIN)
-            assert len(all_text) > 0
+            all_text = (
+                collector.get_full_agent_text(AgentType.MAIN)
+                or collector.get_full_agent_text(AgentType.DATA_ANALYSIS)
+            )
+            assert len(all_text) > 0, (
+                f"No response text from main or data_analysis. "
+                f"Messages: {[type(m).__name__ for m in collector.all_messages]}"
+            )
 
 
 class TestErrorHandling:

@@ -85,9 +85,9 @@ def test_add_tool_result_adds_to_group(agent_panel):
     assert len(groups) == 1
 
     # Check that the tool group has the tool call
-    # The group should have 1 tool call
+    # The group should have 1 tool call — summary uses display names
     summary = groups[0].get_summary_text()
-    assert "read_file" in summary
+    assert "Read File" in summary
 
 
 def test_debug_toggle_shows_hides_panel(agent_panel):

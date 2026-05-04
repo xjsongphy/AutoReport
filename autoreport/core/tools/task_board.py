@@ -34,6 +34,7 @@ class TaskBoard:
         source: AgentType,
         target: AgentType,
         description: str,
+        brief: str = "",
         blocking: bool = False,
         parent_task_id: str | None = None,
         priority: str = "normal",
@@ -41,6 +42,7 @@ class TaskBoard:
         """Create a new task item."""
         task = TaskItem(
             task_id=self._next_id(description),
+            brief=brief or description[:80],
             description=description,
             source_agent=source,
             target_agent=target,
