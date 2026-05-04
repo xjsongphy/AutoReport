@@ -213,23 +213,23 @@ class ProjectDialog(QDialog):
         dark = self._get_dark_mode()
 
         c = {
-            "bg": "#1e1e1e" if dark else "#f3f3f3",
-            "headerBg": "#252526" if dark else "#f3f3f3",
+            "bg": "#1f1f1f" if dark else "#f3f3f3",
+            "headerBg": "#181818" if dark else "#f3f3f3",
             "titleFg": "#e0e0e0" if dark else "#1a1a1a",
             "subtitleFg": "#999" if dark else "#666",
-            "border": "#3c3c3c" if dark else "#e0e0e0",
+            "border": "#2b2b2b" if dark else "#e0e0e0",
             "sectionFg": "#ccc" if dark else "#555",
-            "primaryBg": "#0e639c" if dark else "#0078d4",
+            "primaryBg": "#0078d4" if dark else "#0078d4",
             "primaryFg": "#ffffff",
-            "primaryHover": "#1177bb" if dark else "#106ebe",
+            "primaryHover": "#026ec1" if dark else "#106ebe",
             "secondaryBorder": "#555" if dark else "#ccc",
             "secondaryFg": "#ddd" if dark else "#333333",
             "secondaryHoverBg": "#333" if dark else "#e9e9e9",
-            "itemBg": "#2d2d2d" if dark else "#eaeaea",
-            "itemHoverBg": "#3d3d3d" if dark else "#ddd",
+            "itemBg": "#252526" if dark else "#eaeaea",
+            "itemHoverBg": "#2a2d2e" if dark else "#ddd",
             "itemName": "#e0e0e0" if dark else "#1a1a1a",
-            "itemPath": "#888" if dark else "#888888",
-            "cancelFg": "#999" if dark else "#888888",
+            "itemPath": "#858585" if dark else "#888888",
+            "cancelFg": "#858585" if dark else "#888888",
             "cancelHoverFg": "#ccc" if dark else "#333333",
         }
 

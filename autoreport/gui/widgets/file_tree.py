@@ -218,19 +218,19 @@ class FileTreeWidget(QWidget):
         hints = QApplication.styleHints()
         dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
 
-        # VSCode color palette
+        # VSCode Dark Modern color palette
         c = {
-            "bg": "#252526" if dark else "#f3f3f3",
-            "bg_header": "#252526" if dark else "#f3f3f3",
-            "bg_header_alt": "#2d2d2d" if dark else "#ececec",
+            "bg": "#181818" if dark else "#f3f3f3",
+            "bg_header": "#181818" if dark else "#f3f3f3",
+            "bg_header_alt": "#1f1f1f" if dark else "#ececec",
             "fg": "#cccccc" if dark else "#616161",
             "fg_dim": "#858585" if dark else "#858585",
             "title": "#bbbbbb" if dark else "#616161",
-            "border": "#3c3c3c" if dark else "#e0e0e0",
+            "border": "#2b2b2b" if dark else "#e0e0e0",
             "hover": "#2a2d2e" if dark else "#e8e8e8",
             "sel_bg": "#094771" if dark else "#cce4f7",
             "sel_fg": "#ffffff" if dark else "#003660",
-            "focus_border": "#3794ff" if dark else "#0066bf",
+            "focus_border": "#0078d4" if dark else "#0066bf",
         }
 
         self.setStyleSheet(f"""

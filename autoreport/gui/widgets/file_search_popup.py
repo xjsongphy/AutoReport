@@ -1,4 +1,4 @@
-"""File search popup widget for @ file references."""
+"""File search popup widget for @ file references with agent quick-select."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,55 +26,91 @@ class FileMatch:
 
 
 class FileSearchPopup(QWidget):
-    """Popup widget for displaying file search results.
+    """Popup widget for displaying agent quick-select and file search results."""
 
-    Based on Codex's FileSearchPopup pattern adapted for PyQt6.
-    """
-
-    file_selected = pyqtSignal(Path)  # Emits selected file path
-    cancelled = pyqtSignal()  # User cancelled (Esc)
+    file_selected = pyqtSignal(Path)
+    agent_selected = pyqtSignal(str)
+    cancelled = pyqtSignal()
 
     MAX_VISIBLE_ROWS = 10
 
-    def __init__(self, parent=None):
-        """Initialize file search popup.
+    AGENT_INFO: dict[str, tuple[str, str]] = {
+        "main": ("Main Agent", "✦"),
+        "data_analysis": ("Data Analysis", "📊"),
+        "plotting": ("Plotting", "📈"),
+        "theory": ("Theory", "📐"),
+        "report": ("Report", "📝"),
+    }
 
-        Args:
-            parent: Parent widget.
-        """
+    def __init__(self, parent=None):
         super().__init__(parent)
         self._query = ""
         self._matches: list[FileMatch] = []
         self._selected_idx = 0
+        self._agents: list[tuple[str, str, str]] = []
+        self._current_agent: str = ""
 
         self._setup_ui()
         self._setup_window_flags()
 
     def _setup_ui(self) -> None:
-        """Setup user interface."""
+        from PyQt6.QtWidgets import QApplication
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(2)
 
-        # Status label (shows "loading..." or "no matches")
         self._status_label = QLabel()
         self._status_label.setVisible(False)
         layout.addWidget(self._status_label)
 
-        # Results list
         self._list_widget = QListWidget()
         self._list_widget.setItemDelegate(HTMLDelegate())
-        self._list_widget.setSpacing(2)
+        self._list_widget.setSpacing(1)
         self._list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._list_widget.currentRowChanged.connect(self._on_current_row_changed)
         self._list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
         layout.addWidget(self._list_widget)
 
-        # Set fixed width for consistent display
         self.setFixedWidth(400)
 
+        hints = QApplication.styleHints()
+        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
+
+        bg = "#1f1f1f" if dark else "#ffffff"
+        border = "#2b2b2b" if dark else "#e0e0e0"
+        fg = "#cccccc" if dark else "#333333"
+        muted = "#737373" if dark else "#999999"
+        sel_bg = "#094771" if dark else "#cce4f7"
+        hover = "#2a2d2e" if dark else "#e8e8e8"
+
+        self.setStyleSheet(f"""
+            FileSearchPopup {{
+                background-color: {bg};
+                border: 1px solid {border};
+                border-radius: 6px;
+            }}
+            QListWidget {{
+                background-color: {bg};
+                border: none;
+                outline: none;
+                padding: 2px;
+            }}
+            QListWidget::item {{
+                padding: 5px 8px;
+                border-radius: 3px;
+                color: {fg};
+            }}
+            QListWidget::item:hover {{
+                background-color: {hover};
+            }}
+            QListWidget::item:selected {{
+                background-color: {sel_bg};
+                color: #ffffff;
+            }}
+        """)
+
     def _setup_window_flags(self) -> None:
-        """Setup window flags for popup behavior."""
         self.setWindowFlags(
             Qt.WindowType.Popup
             | Qt.WindowType.FramelessWindowHint
@@ -82,17 +118,24 @@ class FileSearchPopup(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
 
-    def set_query(self, query: str, waiting: bool = True) -> None:
-        """Set current search query.
+    def set_current_agent(self, agent_type: str) -> None:
+        self._current_agent = agent_type
+        self._agents = [
+            (t, n, e) for t, (n, e) in self.AGENT_INFO.items()
+            if t != agent_type
+        ]
 
-        Args:
-            query: Search query string.
-            waiting: True if waiting for search results.
-        """
+    def set_query(self, query: str, waiting: bool = True) -> None:
         self._query = query
         self._selected_idx = 0
 
-        if waiting:
+        if self._agents:
+            self._status_label.setVisible(False)
+            status = "searching files…" if waiting else (
+                "no file matches" if not self._matches else None
+            )
+            self._populate_list(file_status=status)
+        elif waiting:
             self._show_status("loading...")
         elif not self._matches:
             self._show_status("no matches")
@@ -101,64 +144,67 @@ class FileSearchPopup(QWidget):
             self._populate_list()
 
     def set_matches(self, matches: list[FileMatch]) -> None:
-        """Set search results.
-
-        Args:
-            matches: List of file matches.
-        """
         self._matches = matches
         self._selected_idx = 0
 
-        if not matches:
+        if self._agents:
+            self._status_label.setVisible(False)
+            self._populate_list(file_status=None if matches else "no file matches")
+        elif not matches:
             self._show_status("no matches")
         else:
             self._status_label.setVisible(False)
             self._populate_list()
 
     def _show_status(self, text: str) -> None:
-        """Show status message instead of list.
-
-        Args:
-            text: Status text to display.
-        """
         self._list_widget.setVisible(False)
         self._status_label.setText(text)
         self._status_label.setVisible(True)
 
-    def _populate_list(self) -> None:
-        """Populate list widget with current matches."""
+    def _populate_list(self, file_status: str | None = None) -> None:
         self._list_widget.clear()
         self._list_widget.setVisible(True)
+        self._status_label.setVisible(False)
 
-        for match in self._matches[: self.MAX_VISIBLE_ROWS]:
-            item = QListWidgetItem()
-            item.setData(Qt.ItemDataRole.UserRole, match)
-
-            # Format item text with highlighting
-            text = self._format_match_text(match)
-            item.setText(text)
-
+        for agent_type, name, emoji in self._agents:
+            item = QListWidgetItem(f"  {emoji}  {name}")
+            item.setData(Qt.ItemDataRole.UserRole, ("agent", agent_type))
             self._list_widget.addItem(item)
 
-        # Set initial selection
-        if self._list_widget.count() > 0:
-            self._list_widget.setCurrentRow(0)
+        has_files = file_status is None and self._matches
+        if self._agents and (has_files or file_status):
+            text = file_status if file_status else "── files ──"
+            sep = QListWidgetItem(f"  {text}")
+            sep.setData(Qt.ItemDataRole.UserRole, ("separator", None))
+            sep.setFlags(Qt.ItemFlag.NoItemFlags)
+            self._list_widget.addItem(sep)
+
+        if file_status is None:
+            for match in self._matches[:self.MAX_VISIBLE_ROWS]:
+                item = QListWidgetItem()
+                item.setData(Qt.ItemDataRole.UserRole, ("file", match))
+                item.setText(self._format_match_text(match))
+                self._list_widget.addItem(item)
+
+        for i in range(self._list_widget.count()):
+            if self._is_selectable(i):
+                self._list_widget.setCurrentRow(i)
+                break
+
+    def _is_selectable(self, row: int) -> bool:
+        item = self._list_widget.item(row)
+        if item is None:
+            return False
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(data, tuple) and data[0] == "separator":
+            return False
+        return bool(item.flags() & Qt.ItemFlag.ItemIsSelectable)
 
     def _format_match_text(self, match: FileMatch) -> str:
-        """Format match text with highlighted search terms.
-
-        Args:
-            match: File match to format.
-
-        Returns:
-            HTML-formatted text with highlighting.
-        """
         path_str = str(match.path)
         rel_path = path_str
 
-        # If indices provided, highlight matched characters
         if match.indices:
-            # Build HTML with highlighted characters
             highlighted = []
             for i, char in enumerate(path_str):
                 if i in match.indices:
@@ -167,72 +213,65 @@ class FileSearchPopup(QWidget):
                     highlighted.append(char)
             rel_path = "".join(highlighted)
 
-        # Show relative path if possible
-        # For now, show filename with parent directory
         if len(path_str) > 50:
-            # Truncate long paths
             parts = Path(path_str).parts
             if len(parts) > 3:
                 rel_path = ".../" + "/".join(parts[-3:])
-                if match.indices:
-                    # Simplified highlighting for truncated paths
-                    rel_path = rel_path
 
         return rel_path
 
     def move_up(self) -> None:
-        """Move selection up."""
         if not self._list_widget.isVisible():
             return
         current = self._list_widget.currentRow()
-        if current > 0:
-            self._list_widget.setCurrentRow(current - 1)
+        row = current - 1
+        while row >= 0 and not self._is_selectable(row):
+            row -= 1
+        if row >= 0:
+            self._list_widget.setCurrentRow(row)
 
     def move_down(self) -> None:
-        """Move selection down."""
         if not self._list_widget.isVisible():
             return
         current = self._list_widget.currentRow()
-        if current < self._list_widget.count() - 1:
-            self._list_widget.setCurrentRow(current + 1)
+        row = current + 1
+        while row < self._list_widget.count() and not self._is_selectable(row):
+            row += 1
+        if row < self._list_widget.count():
+            self._list_widget.setCurrentRow(row)
 
     def select_current(self) -> None:
-        """Select current item and emit signal."""
         if not self._list_widget.isVisible():
             return
 
         current_item = self._list_widget.currentItem()
-        if current_item:
-            match: FileMatch = current_item.data(Qt.ItemDataRole.UserRole)
-            self.file_selected.emit(match.path)
+        if not current_item:
+            return
+
+        data = current_item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(data, tuple):
+            kind, value = data
+            if kind == "agent":
+                self.agent_selected.emit(value)
+                return
+            elif kind == "file":
+                self.file_selected.emit(value.path)
+                return
+
+        if isinstance(data, FileMatch):
+            self.file_selected.emit(data.path)
 
     def cancel(self) -> None:
-        """Cancel the popup."""
         self.cancelled.emit()
 
     def _on_current_row_changed(self, row: int) -> None:
-        """Handle current row changed.
-
-        Args:
-            row: New current row index.
-        """
         self._selected_idx = row
 
     def _on_item_double_clicked(self, item: QListWidgetItem) -> None:
-        """Handle item double-click.
-
-        Args:
-            item: Clicked item.
-        """
         self.select_current()
 
     @override
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        """Handle key press events.
-
-        Args:
-            event: Key event.
-        """
         match event.key():
             case Qt.Key.Key_Up:
                 self.move_up()
@@ -245,42 +284,40 @@ class FileSearchPopup(QWidget):
                 self.cancel()
                 return
             case _:
-                # Pass other keys to parent
                 super().keyPressEvent(event)
 
     def calculate_height(self) -> int:
-        """Calculate required height based on content.
-
-        Returns:
-            Required height in pixels.
-        """
         if self._status_label.isVisible():
             return 40
 
-        row_count = min(len(self._matches), self.MAX_VISIBLE_ROWS)
-        row_height = self._list_widget.sizeHintForRow(0) or 24
-        return row_count * row_height + 20  # +20 for margins
+        total = 0
+        for i in range(self._list_widget.count()):
+            hint = self._list_widget.sizeHintForRow(i)
+            total += hint if hint > 0 else 26
+        return total + 20
 
 
 class HTMLDelegate(QStyledItemDelegate):
-    """Delegate for rendering HTML in list items."""
+    """Delegate for rendering HTML in file match items."""
 
     @override
     def paint(self, painter, option, index):
-        """Paint item with HTML rendering.
-
-        Args:
-            painter: QPainter instance.
-            option: Style option.
-            index: Model index.
-        """
         item = index.model().data(index, Qt.ItemDataRole.UserRole)
-        if item and isinstance(item, FileMatch):
-            # Use custom painting for highlighted text
+
+        match_obj = None
+        if isinstance(item, FileMatch):
+            match_obj = item
+        elif isinstance(item, tuple):
+            if item[0] == "file":
+                match_obj = item[1]
+            else:
+                super().paint(painter, option, index)
+                return
+
+        if match_obj:
             option.text = ""
             super().paint(painter, option, index)
 
-            # Draw text manually
             text = index.model().data(index, Qt.ItemDataRole.DisplayRole)
             if text:
                 document = QTextDocument()
@@ -296,21 +333,19 @@ class HTMLDelegate(QStyledItemDelegate):
 
     @override
     def sizeHint(self, option, index):
-        """Calculate size hint for item.
-
-        Args:
-            option: Style option.
-            index: Model index.
-
-        Returns:
-            Size hint.
-        """
         item = index.model().data(index, Qt.ItemDataRole.UserRole)
-        if item and isinstance(item, FileMatch):
+
+        match_obj = None
+        if isinstance(item, FileMatch):
+            match_obj = item
+        elif isinstance(item, tuple) and item[0] == "file":
+            match_obj = item[1]
+
+        if match_obj:
             text = index.model().data(index, Qt.ItemDataRole.DisplayRole)
             if text:
                 document = QTextDocument()
                 document.setHtml(text)
-                document.setTextWidth(400)  # Match popup width
+                document.setTextWidth(400)
                 return QSize(400, int(document.size().height()) + 4)
         return super().sizeHint(option, index)

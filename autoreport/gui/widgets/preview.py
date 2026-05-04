@@ -64,9 +64,9 @@ class PreviewWidget(QWidget):
         dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
 
         c = {
-            "bg": "#1e1e1e" if dark else "#ffffff",
-            "header": "#252526" if dark else "#f3f3f3",
-            "border": "#3c3c3c" if dark else "#e0e0e0",
+            "bg": "#1f1f1f" if dark else "#ffffff",
+            "header": "#181818" if dark else "#f3f3f3",
+            "border": "#2b2b2b" if dark else "#e0e0e0",
             "title": "#ffffff" if dark else "#1a1a1a",
             "file": "#858585" if dark else "#888888",
             "fg": "#d4d4d4" if dark else "#333333",

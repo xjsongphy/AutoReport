@@ -70,11 +70,9 @@ class WorkingBorder(QWidget):
         cx = w / 2.0
         cy = h / 2.0
 
-        # Compute radius so the gradient ring sits just inside the widget bounds
         r = max(w, h) * 0.8
 
-        # Beam: bright conic gradient with tight arc
-        beam_color = QColor("#58a6ff")
+        beam_color = QColor("#0078d4")
         transparent = QColor(0, 0, 0, 0)
 
         grad = QConicalGradient(cx, cy, self._angle)

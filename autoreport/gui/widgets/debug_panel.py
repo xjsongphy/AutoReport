@@ -113,29 +113,56 @@ class DebugPanel(QWidget):
 
     def _apply_styling(self):
         """Apply dark/light theme styling."""
-        # Modern, clean styling
-        self.setStyleSheet("""
-            QFrame {
-                background-color: #f5f5f5;
-                border-bottom: 1px solid #ddd;
-            }
-            QLabel {
-                color: #333;
-            }
-            QPushButton {
-                background-color: #e0e0e0;
-                border: 1px solid #ccc;
-                border-radius: 4px;
-                padding: 4px 12px;
-                color: #333;
-            }
-            QPushButton:hover {
-                background-color: #d0d0d0;
-            }
-            QPushButton:pressed {
-                background-color: #c0c0c0;
-            }
-        """)
+        from PyQt6.QtWidgets import QApplication
+        hints = QApplication.styleHints()
+        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
+
+        if dark:
+            self.setStyleSheet("""
+                QFrame {
+                    background-color: #1f1f1f;
+                    border-bottom: 1px solid #2b2b2b;
+                }
+                QLabel {
+                    color: #cccccc;
+                }
+                QPushButton {
+                    background-color: #2b2b2b;
+                    border: 1px solid #3c3c3c;
+                    border-radius: 4px;
+                    padding: 4px 12px;
+                    color: #cccccc;
+                }
+                QPushButton:hover {
+                    background-color: #3c3c3c;
+                }
+                QPushButton:pressed {
+                    background-color: #4f4f4f;
+                }
+            """)
+        else:
+            self.setStyleSheet("""
+                QFrame {
+                    background-color: #f5f5f5;
+                    border-bottom: 1px solid #ddd;
+                }
+                QLabel {
+                    color: #333;
+                }
+                QPushButton {
+                    background-color: #e0e0e0;
+                    border: 1px solid #ccc;
+                    border-radius: 4px;
+                    padding: 4px 12px;
+                    color: #333;
+                }
+                QPushButton:hover {
+                    background-color: #d0d0d0;
+                }
+                QPushButton:pressed {
+                    background-color: #c0c0c0;
+                }
+            """)
 
     def _toggle_collapsed(self):
         """Toggle collapsed state."""
@@ -217,16 +244,34 @@ class DebugPanel(QWidget):
 
     def _create_entry_widget(self, entry: DebugEntry) -> QFrame:
         """Create a widget for a single debug entry."""
+        from PyQt6.QtWidgets import QApplication
+        hints = QApplication.styleHints()
+        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
+
         frame = QFrame()
         frame.setFrameShape(QFrame.Shape.StyledPanel)
-        frame.setStyleSheet("""
-            QFrame {
-                background-color: white;
-                border: 1px solid #ddd;
-                border-radius: 4px;
-                padding: 4px;
-            }
-        """)
+
+        if dark:
+            frame.setStyleSheet("""
+                QFrame {
+                    background-color: #252526;
+                    border: 1px solid #2b2b2b;
+                    border-radius: 4px;
+                    padding: 4px;
+                }
+                QLabel {
+                    color: #cccccc;
+                }
+            """)
+        else:
+            frame.setStyleSheet("""
+                QFrame {
+                    background-color: white;
+                    border: 1px solid #ddd;
+                    border-radius: 4px;
+                    padding: 4px;
+                }
+            """)
 
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(8, 4, 8, 4)

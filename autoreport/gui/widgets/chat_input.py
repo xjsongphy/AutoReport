@@ -41,11 +41,11 @@ class ChatInput(QPlainTextEdit):
         hints = QApplication.styleHints()
         dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
 
-        # Match VS Code CSS variables
-        input_bg = "#1e1e1e" if dark else "#ffffff"
+        # VSCode Dark Modern CSS variables
+        input_bg = "#1f1f1f" if dark else "#ffffff"
         input_fg = "#cccccc" if dark else "#616161"
         input_border = "#3c3c3c" if dark else "#e0e0e0"
-        focus_border = "#007fd4" if dark else "#0090ff"
+        focus_border = "#0078d4" if dark else "#0090ff"
         placeholder_fg = "#6e7681" if dark else "#8b949e"
 
         self.setStyleSheet(f"""
@@ -167,6 +167,19 @@ class ChatInput(QPlainTextEdit):
 
             cursor.setPosition(start + len(link))
             self.setTextCursor(cursor)
+
+        self._on_popup_closed()
+
+    def insert_agent_reference(self, name: str) -> None:
+        token, start, end = self.current_prefixed_token()
+
+        if token and token.startswith("@"):
+            mention = f"@{name} "
+
+            cursor = self.textCursor()
+            cursor.setPosition(start, QTextCursor.MoveMode.MoveAnchor)
+            cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+            cursor.insertText(mention)
 
         self._on_popup_closed()
 

@@ -63,8 +63,8 @@ class ConversationHistoryDropdown(QWidget):
         hints = QApplication.styleHints()
         dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
 
-        bg = "#252526" if dark else "#ffffff"
-        border = "#3c3c3c" if dark else "#e0e0e0"
+        bg = "#1f1f1f" if dark else "#ffffff"
+        border = "#2b2b2b" if dark else "#e0e0e0"
         fg = "#cccccc" if dark else "#333333"
         muted = "#8b949e"
         hover = "#2a2d2e" if dark else "#f5f5f5"

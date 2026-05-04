@@ -9,27 +9,53 @@ from typing import Any
 
 import markdown
 from markdown.extensions import Extension
-from markdown.postprocessors import Postprocessor
 from markdown.treeprocessors import Treeprocessor
 from xml.etree import ElementTree as etree
+
+
+def _is_dark_mode() -> bool:
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QApplication
+    hints = QApplication.styleHints()
+    return hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
 
 
 class _QtCompatTreeprocessor(Treeprocessor):
     """Adjust HTML tree for Qt rich text compatibility."""
 
     def run(self, root: etree.Element) -> Any:
+        dark = _is_dark_mode()
+
+        if dark:
+            code_bg = "#252526"
+            code_border = "#2b2b2b"
+            code_fg = "#cccccc"
+            inline_code_bg = "#2a2a2a"
+            inline_code_fg = "#e6edf3"
+            accent = "#0078d4"
+            muted = "#8b949e"
+            th_bg = "#252526"
+        else:
+            code_bg = "#f6f8fa"
+            code_border = "#e0e0e0"
+            code_fg = "#333333"
+            inline_code_bg = "#eff1f3"
+            inline_code_fg = "#333333"
+            accent = "#0090ff"
+            muted = "#656d76"
+            th_bg = "#f6f8fa"
+
         # Qt rich text doesn't support <pre>, convert to styled <div>
         for pre in root.iter("pre"):
             pre.tag = "div"
-            pre.set("style", "background-color: #1e1e1e; border: 1px solid #3c3c3c; "
+            pre.set("style", f"background-color: {code_bg}; border: 1px solid {code_border}; "
                     "border-radius: 6px; padding: 8px 12px; margin: 4px 0; "
                     "font-family: 'Cascadia Code', 'SF Mono', 'Consolas', monospace; "
                     "font-size: 12px; white-space: pre-wrap;")
 
-            # Convert <code> inside <pre> to <span>
             for code in pre.iter("code"):
                 code.tag = "span"
-                code.set("style", "color: #cccccc; font-family: inherit; font-size: inherit;")
+                code.set("style", f"color: {code_fg}; font-family: inherit; font-size: inherit;")
 
         # Qt rich text doesn't support <h1>-<h6>, convert to styled <p>
         for i in range(1, 7):
@@ -42,27 +68,26 @@ class _QtCompatTreeprocessor(Treeprocessor):
 
         # Style <blockquote>
         for bq in root.iter("blockquote"):
-            bq.set("style", "border-left: 3px solid #58a6ff; padding-left: 12px; "
-                   "margin: 8px 0; color: #8b949e;")
+            bq.set("style", f"border-left: 3px solid {accent}; padding-left: 12px; "
+                   f"margin: 8px 0; color: {muted};")
 
         # Style <code> (inline)
         for code in root.iter("code"):
-            if code.get("style") is None:  # Skip pre-wrapped code that was already styled
+            if code.get("style") is None:
                 code.tag = "span"
-                code.set("style", "background-color: #2a2a2a; border: 1px solid #3c3c3c; "
+                code.set("style", f"background-color: {inline_code_bg}; border: 1px solid {code_border}; "
                         "border-radius: 4px; padding: 1px 4px; "
                         "font-family: 'Cascadia Code', 'SF Mono', 'Consolas', monospace; "
-                        "font-size: 12px; color: #e6edf3;")
+                        f"font-size: 12px; color: {inline_code_fg};")
 
-        # Qt rich text supports <table> HTML attributes but not border-collapse.
-        # Use HTML attributes: border, cellpadding, cellspacing.
+        # Table styling
         for table in root.iter("table"):
             table.set("border", "1")
             table.set("cellpadding", "6")
             table.set("cellspacing", "0")
             table.set("style", "margin: 8px 0;")
         for th in root.iter("th"):
-            th.set("bgcolor", "#252526")
+            th.set("bgcolor", th_bg)
             th.set("style", "font-weight: bold;")
         for td in root.iter("td"):
             td.set("style", "")
