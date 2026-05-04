@@ -10,11 +10,10 @@ Based on VSCode explorer design:
 """
 
 import base64
-import io
 from pathlib import Path
 
 from loguru import logger
-from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QBuffer, QByteArray, QIODevice, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QLabel,
@@ -146,9 +145,12 @@ def _draw_chevron_icon(down: bool, color: str = "#cccccc") -> QIcon:
 def _icon_to_data_uri(icon: QIcon, size: int = 16) -> str:
     """Encode QIcon as PNG data URI for QSS url()."""
     pixmap = icon.pixmap(size, size)
-    buf = io.BytesIO()
+    data = QByteArray()
+    buf = QBuffer(data)
+    buf.open(QIODevice.OpenModeFlag.WriteOnly)
     pixmap.save(buf, "PNG")
-    b64 = base64.b64encode(buf.getvalue()).decode()
+    buf.close()
+    b64 = base64.b64encode(data.data()).decode()
     return f"data:image/png;base64,{b64}"
 
 
