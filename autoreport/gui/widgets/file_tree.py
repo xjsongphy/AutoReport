@@ -6,8 +6,11 @@ Based on VSCode explorer design:
 - Flexbox-like layout for icon + text
 - Text overflow ellipsis
 - Subtle hover/focus states
+- Codicon-style chevron branch indicators
 """
 
+import base64
+import io
 from pathlib import Path
 
 from loguru import logger
@@ -116,9 +119,44 @@ def _draw_file_icon(color: QColor, size: int = 16) -> QIcon:
     return QIcon(pixmap)
 
 
+def _draw_chevron_icon(down: bool, color: str = "#cccccc") -> QIcon:
+    """Draw a VSCode codicon-style chevron (10px equiv)."""
+    size = 16
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pixmap)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(QColor(color), 1.5)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    p.setPen(pen)
+    cx, cy = size // 2, size // 2
+    if down:
+        # ∨ shape
+        p.drawLine(cx - 3, cy - 1, cx, cy + 2)
+        p.drawLine(cx, cy + 2, cx + 3, cy - 1)
+    else:
+        # > shape
+        p.drawLine(cx - 1, cy - 3, cx + 2, cy)
+        p.drawLine(cx + 2, cy, cx - 1, cy + 3)
+    p.end()
+    return QIcon(pixmap)
+
+
+def _icon_to_data_uri(icon: QIcon, size: int = 16) -> str:
+    """Encode QIcon as PNG data URI for QSS url()."""
+    pixmap = icon.pixmap(size, size)
+    buf = io.BytesIO()
+    pixmap.save(buf, "PNG")
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    return f"data:image/png;base64,{b64}"
+
+
 # Icon cache
 _FOLDER_ICON: QIcon | None = None
 _FILE_ICONS: dict[str, QIcon] = {}
+_CHEVRON_CLOSED_URI: str = ""
+_CHEVRON_OPEN_URI: str = ""
 
 
 def _get_folder_icon() -> QIcon:
@@ -218,6 +256,12 @@ class FileTreeWidget(QWidget):
         hints = QApplication.styleHints()
         dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
 
+        # Generate chevron icons for current theme
+        global _CHEVRON_CLOSED_URI, _CHEVRON_OPEN_URI
+        chev_color = "#cccccc" if dark else "#616161"
+        _CHEVRON_CLOSED_URI = _icon_to_data_uri(_draw_chevron_icon(down=False, color=chev_color))
+        _CHEVRON_OPEN_URI = _icon_to_data_uri(_draw_chevron_icon(down=True, color=chev_color))
+
         # VSCode Dark Modern color palette
         c = {
             "bg": "#181818" if dark else "#f3f3f3",
@@ -287,17 +331,19 @@ class FileTreeWidget(QWidget):
                 background-color: {c["sel_bg"]};
             }}
 
-            /* Branch arrows (expand/collapse) */
+            /* Branch chevrons — VSCode codicon style */
             #fileTree::branch {{
                 background: none;
-            }}
-
-            #fileTree::branch:has-children:closed {{
                 border: none;
             }}
 
-            #fileTree::branch:has-children:open {{
-                border: none;
+            #fileTree::branch:has-children:!has-siblings:closed,
+            #fileTree::branch:closed:has-children {{
+                image: url({_CHEVRON_CLOSED_URI});
+            }}
+
+            #fileTree::branch:open:has-children {{
+                image: url({_CHEVRON_OPEN_URI});
             }}
 
             /* Scrollbar */
