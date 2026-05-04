@@ -145,7 +145,7 @@ class ProjectDialog(QDialog):
 
         # ---- Action buttons ----
         actions = QWidget()
-        actions.setObjectName("actions")
+        actions.setObjectName("actionBar")
         actions_layout = QHBoxLayout(actions)
         actions_layout.setContentsMargins(40, 0, 40, 16)
         actions_layout.setSpacing(12)
@@ -174,8 +174,9 @@ class ProjectDialog(QDialog):
 
         # ---- Recent projects ----
         recent_header = QWidget()
+        recent_header.setObjectName("sectionHeader")
         recent_header_layout = QHBoxLayout(recent_header)
-        recent_header_layout.setContentsMargins(40, 16, 40, 8)
+        recent_header_layout.setContentsMargins(40, 20, 40, 12)
         recent_label = QLabel("最近的项目")
         recent_label.setObjectName("sectionLabel")
         recent_header_layout.addWidget(recent_label)
@@ -296,9 +297,18 @@ class ProjectDialog(QDialog):
                 text-transform: uppercase;
                 letter-spacing: 0.5px;
             }}
+            #actionBar {{
+                background-color: {c["bg"]};
+            }}
+            #sectionHeader {{
+                background-color: {c["bg"]};
+            }}
             #recentScroll {{
                 background-color: {c["bg"]};
                 border: none;
+            }}
+            #recentScroll > QWidget {{
+                background-color: {c["bg"]};
             }}
             #projectItem {{
                 background-color: {c["itemBg"]};
