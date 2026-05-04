@@ -9,11 +9,10 @@ Based on VSCode explorer design:
 - Codicon-style chevron branch indicators
 """
 
-import base64
 from pathlib import Path
 
 from loguru import logger
-from PyQt6.QtCore import QBuffer, QByteArray, QIODevice, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QLabel,
@@ -118,47 +117,50 @@ def _draw_file_icon(color: QColor, size: int = 16) -> QIcon:
     return QIcon(pixmap)
 
 
-def _draw_chevron_icon(down: bool, color: str = "#cccccc") -> QIcon:
-    """Draw a VSCode codicon-style chevron (10px equiv)."""
-    size = 16
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    p = QPainter(pixmap)
-    p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    pen = QPen(QColor(color), 1.5)
-    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-    p.setPen(pen)
-    cx, cy = size // 2, size // 2
-    if down:
-        # ∨ shape
-        p.drawLine(cx - 3, cy - 1, cx, cy + 2)
-        p.drawLine(cx, cy + 2, cx + 3, cy - 1)
-    else:
-        # > shape
-        p.drawLine(cx - 1, cy - 3, cx + 2, cy)
-        p.drawLine(cx + 2, cy, cx - 1, cy + 3)
-    p.end()
-    return QIcon(pixmap)
+class _ChevronTreeWidget(QTreeWidget):
+    """QTreeWidget that draws VSCode codicon-style chevrons via drawBranches."""
 
+    def __init__(self, chev_color: QColor, parent=None):
+        super().__init__(parent)
+        self._chev_color = chev_color
 
-def _icon_to_data_uri(icon: QIcon, size: int = 16) -> str:
-    """Encode QIcon as PNG data URI for QSS url()."""
-    pixmap = icon.pixmap(size, size)
-    data = QByteArray()
-    buf = QBuffer(data)
-    buf.open(QIODevice.OpenModeFlag.WriteOnly)
-    pixmap.save(buf, "PNG")
-    buf.close()
-    b64 = base64.b64encode(data.data()).decode()
-    return f"data:image/png;base64,{b64}"
+    def drawBranches(self, painter: QPainter, rect, index):
+        """Override to draw VSCode-style chevron indicators instead of default branch lines."""
+        if not self.model() or not index.isValid():
+            return
+
+        if self.model().hasChildren(index):
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+            pen = QPen(self._chev_color, 1.5)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+
+            level = 0
+            parent = index.parent()
+            while parent.isValid():
+                level += 1
+                parent = parent.parent()
+
+            indent = self.indentation()
+            chev_x = level * indent + indent // 2
+            chev_y = rect.y() + rect.height() // 2
+
+            if self.isExpanded(index):
+                painter.drawLine(int(chev_x - 4), int(chev_y - 2), int(chev_x), int(chev_y + 2))
+                painter.drawLine(int(chev_x), int(chev_y + 2), int(chev_x + 4), int(chev_y - 2))
+            else:
+                painter.drawLine(int(chev_x - 2), int(chev_y - 4), int(chev_x + 2), int(chev_y))
+                painter.drawLine(int(chev_x + 2), int(chev_y), int(chev_x - 2), int(chev_y + 4))
+
+            painter.restore()
 
 
 # Icon cache
 _FOLDER_ICON: QIcon | None = None
 _FILE_ICONS: dict[str, QIcon] = {}
-_CHEVRON_CLOSED_URI: str = ""
-_CHEVRON_OPEN_URI: str = ""
 
 
 def _get_folder_icon() -> QIcon:
@@ -235,8 +237,8 @@ class FileTreeWidget(QWidget):
 
         layout.addWidget(header)
 
-        # File tree
-        self.tree = QTreeWidget()
+        # File tree with custom chevron rendering
+        self.tree = _ChevronTreeWidget(QColor("#cccccc"))
         self.tree.setObjectName("fileTree")
         self.tree.setHeaderLabels(["名称"])
         self.tree.setDragEnabled(True)
@@ -258,11 +260,8 @@ class FileTreeWidget(QWidget):
         hints = QApplication.styleHints()
         dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
 
-        # Generate chevron icons for current theme
-        global _CHEVRON_CLOSED_URI, _CHEVRON_OPEN_URI
-        chev_color = "#cccccc" if dark else "#616161"
-        _CHEVRON_CLOSED_URI = _icon_to_data_uri(_draw_chevron_icon(down=False, color=chev_color))
-        _CHEVRON_OPEN_URI = _icon_to_data_uri(_draw_chevron_icon(down=True, color=chev_color))
+        # Update chevron color for current theme
+        self.tree._chev_color = QColor("#cccccc" if dark else "#616161")
 
         # VSCode Dark Modern color palette
         c = {
@@ -333,19 +332,10 @@ class FileTreeWidget(QWidget):
                 background-color: {c["sel_bg"]};
             }}
 
-            /* Branch chevrons — VSCode codicon style */
+            /* Branch chevrons — drawn by _ChevronTreeWidget.drawBranches */
             #fileTree::branch {{
                 background: none;
                 border: none;
-            }}
-
-            #fileTree::branch:has-children:!has-siblings:closed,
-            #fileTree::branch:closed:has-children {{
-                image: url({_CHEVRON_CLOSED_URI});
-            }}
-
-            #fileTree::branch:open:has-children {{
-                image: url({_CHEVRON_OPEN_URI});
             }}
 
             /* Scrollbar */
