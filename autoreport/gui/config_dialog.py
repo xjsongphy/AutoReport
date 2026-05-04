@@ -971,7 +971,13 @@ class ConfigDialog(QDialog):
                 selection-color: {c["primaryBtnFg"]};
                 padding: 4px;
             }}
-            QScrollArea {{ background-color: transparent; }}
+            QScrollArea {{
+                background-color: {c["bodyBg"]};
+                border: none;
+            }}
+            QScrollArea > QWidget {{
+                background-color: {c["bodyBg"]};
+            }}
         """)
 
         hints = QApplication.styleHints()
