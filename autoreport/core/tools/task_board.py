@@ -1,5 +1,6 @@
 """TaskBoard — central in-memory task store for agent task delegation."""
 
+import hashlib
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -23,9 +24,10 @@ class TaskBoard:
         self._tasks: dict[str, TaskItem] = {}
         self._counter: int = 0
 
-    def _next_id(self) -> str:
+    def _next_id(self, description: str = "") -> str:
         self._counter += 1
-        return f"T-{self._counter:03d}"
+        raw = f"{self._counter}-{description}-{id(self)}"
+        return hashlib.md5(raw.encode()).hexdigest()[:8]
 
     def create_task(
         self,
@@ -38,7 +40,7 @@ class TaskBoard:
     ) -> TaskItem:
         """Create a new task item."""
         task = TaskItem(
-            task_id=self._next_id(),
+            task_id=self._next_id(description),
             description=description,
             source_agent=source,
             target_agent=target,

@@ -211,6 +211,7 @@ class AgentPanel(QWidget):
     def _setup_file_search(self) -> None:
         self._file_search_popup = FileSearchPopup(self)
         self._file_search_popup.file_selected.connect(self._on_file_selected)
+        self._file_search_popup.agent_selected.connect(self._on_agent_selected)
         self._file_search_popup.cancelled.connect(self._on_file_search_cancelled)
 
     # ---- File reference handling ----
@@ -242,6 +243,13 @@ class AgentPanel(QWidget):
         self._file_search_popup.hide()
         self._input_field.set_popup_active(False)
         self._input_field.setFocus()
+
+    def _on_agent_selected(self, agent_type: str) -> None:
+        self._file_search_popup.hide()
+        self._input_field.set_popup_active(False)
+        self._input_field.setFocus()
+        name = FileSearchPopup.AGENT_INFO.get(agent_type, (agent_type, ""))[0]
+        self._input_field.insert_agent_reference(name)
 
     # ---- Public API ----
 
@@ -283,6 +291,8 @@ class AgentPanel(QWidget):
             "sub": "Select Agent",
         }
         self._title_label.setText(titles.get(agent_type, "Agent"))
+        if self._file_search_popup:
+            self._file_search_popup.set_current_agent(agent_type)
 
     @property
     def agent_type(self) -> str:
@@ -350,30 +360,18 @@ class AgentPanel(QWidget):
             timestamp=ts,
         )
 
-    def handle_task_update(self, task_id: str, action: str, source: str,
-                           target: str, description: str) -> None:
-        """Handle task update for GUI display."""
-        action_texts = {
-            "completed": "完成",
-            "failed": "失败",
-            "cancelled": "取消",
-            "started": "开始",
-            "created": "新任务",
-        }
-        label = action_texts.get(action, action)
+    def handle_task_update(self, source: str, target: str, text: str) -> None:
+        """Handle task update for GUI display.
 
-        if action == "completed":
-            text = f"[{label}] {source} 完成了任务：{description}"
-        elif action == "failed":
-            text = f"[{label}] {source} 任务失败：{description}"
-        elif action == "cancelled":
-            text = f"[{label}] {source} 任务已取消：{description}"
-        elif action == "created":
-            text = f"[{label}] ({task_id})：{description}"
-        else:
-            text = f"[{label}] 任务更新 ({task_id})：{description}"
-
-        self._messages_area.add_task_row(text, row_type="task_update")
+        Uses coordination message style (muted, italic) to blend with timeline.
+        """
+        ts = datetime.now().strftime("%H:%M")
+        self._messages_area.add_message_row(
+            role="agent",
+            content=text,
+            timestamp=ts,
+            is_coordination=True,
+        )
 
     # ---- Status ----
 

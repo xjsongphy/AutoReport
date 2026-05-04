@@ -24,8 +24,8 @@ class TestTaskBoard:
         t1 = board.create_task(AgentType.MAIN, AgentType.THEORY, "t1")
         t2 = board.create_task(AgentType.MAIN, AgentType.THEORY, "t2")
         assert t1.task_id != t2.task_id
-        assert t1.task_id == "T-001"
-        assert t2.task_id == "T-002"
+        assert len(t1.task_id) == 8
+        assert len(t2.task_id) == 8
 
     def test_start_task(self):
         board = TaskBoard()
@@ -92,4 +92,4 @@ class TestTaskBoard:
     def test_task_not_found_raises(self):
         board = TaskBoard()
         with pytest.raises(ValueError, match="not found"):
-            board.start_task("T-999")
+            board.start_task("deadbeef")

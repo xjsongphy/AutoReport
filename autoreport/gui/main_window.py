@@ -68,20 +68,20 @@ class MainWindow(QMainWindow):
 
         if dark:
             c = {
-                # --vscode-editor-background
-                "bg": "#1e1e1e",
-                # --vscode-sideBar-background / --vscode-editorWidget-background
-                "surface": "#252526",
-                # --vscode-widget-border / --vscode-input-border
-                "border": "#3c3c3c",
+                # VSCode Dark Modern: content area
+                "bg": "#1f1f1f",
+                # VSCode Dark Modern: chrome (sidebar, panel headers)
+                "surface": "#181818",
+                # VSCode Dark Modern: subtle borders
+                "border": "#2b2b2b",
                 # --vscode-foreground
                 "fg": "#cccccc",
                 # --vscode-descriptionForeground
-                "muted": "#717171",
+                "muted": "#737373",
                 # --vscode-focusBorder
-                "focus": "#007fd4",
+                "focus": "#0078d4",
                 # --vscode-input-background
-                "input_bg": "#3c3c3c",
+                "input_bg": "#1f1f1f",
                 "input_border": "#3c3c3c",
                 # --vscode-chat-requestBubbleBackground
                 "bubble_bg": "#2a2a2a",
@@ -94,23 +94,23 @@ class MainWindow(QMainWindow):
                 # --vscode-toolbar-hoverBackground
                 "hover": "#2a2d2e",
                 "selection": "#264f78",
-                "status_think": "#007fd4",
+                "status_think": "#0078d4",
                 "status_tool": "#cca700",
                 "status_error": "#f44747",
                 "status_debug": "#b180d7",
-                "status_idle": "#717171",
-                "header_action": "#717171",
+                "status_idle": "#737373",
+                "header_action": "#737373",
                 "header_action_hover": "#cccccc",
-                "context_bg": "#252526",
-                "context_border": "#3c3c3c",
-                "spinner_fg": "#007fd4",
+                "context_bg": "#1f1f1f",
+                "context_border": "#2b2b2b",
+                "spinner_fg": "#0078d4",
                 # --vscode-chat-avatarBackground
                 "avatar_bg": "#3c3c3c",
                 "avatar_fg": "#cccccc",
                 # --vscode-textPreformat-foreground
                 "tool_fg": "#cccccc",
-                "tool_border": "#3c3c3c",
-                "tool_detail": "#717171",
+                "tool_border": "#2b2b2b",
+                "tool_detail": "#737373",
             }
         else:
             c = {
@@ -324,7 +324,7 @@ class MainWindow(QMainWindow):
             #userMessageBubble {{
                 background-color: {c["bubble_bg"]};
                 border-radius: 12px;
-                max-width: 85%;
+                max-width: 95%;
             }}
             #userMessageBubble:hover {{
                 background-color: {c["bubble_hover"]};
@@ -523,7 +523,12 @@ class MainWindow(QMainWindow):
             "tex": "report",
         }
         agent_type = agent_map.get(directory, "sub")
-        self.sub_agent_panel.set_agent_type(agent_type)
+
+        if agent_type != self.sub_agent_panel.agent_type:
+            self.sub_agent_panel._messages_area.clear()
+            self.sub_agent_panel.set_agent_type(agent_type)
+            if agent_type != "sub":
+                self._load_conversations_for_agent(agent_type, self.sub_agent_panel)
 
     def _on_preview_selection_changed(self, file_path: str, selected_text: str, start_line: int, end_line: int) -> None:
         self.main_agent_panel.set_preview_context(file_path, selected_text, start_line, end_line)
@@ -616,6 +621,7 @@ class MainWindow(QMainWindow):
             Checkpoint,
             Error,
             StatusChange,
+            TaskUpdateMessage,
             ToolCall,
             ToolResult,
             UserMessage,
@@ -635,6 +641,8 @@ class MainWindow(QMainWindow):
             self._handle_error(message)
         elif isinstance(message, Checkpoint):
             self._handle_checkpoint(message)
+        elif isinstance(message, TaskUpdateMessage):
+            self._handle_task_update_msg(message)
 
     def _handle_agent_response(self, message: AgentResponse) -> None:
         agent_str = str(message.agent_type)
@@ -645,6 +653,16 @@ class MainWindow(QMainWindow):
             if rows and rows[-1]._role == "agent":
                 rows[-1].mark_complete()
             return
+        # Non-streaming with content — check if streaming already delivered it
+        if not message.streaming and message.content:
+            rows = panel._messages_area.get_message_rows()
+            if (rows
+                    and rows[-1]._role == "agent"
+                    and rows[-1]._content
+                    and not rows[-1]._complete):
+                rows[-1].mark_complete()
+                self._conv_store.append_message(agent_str, "agent", rows[-1]._content)
+                return
         panel.add_message("agent", message.content, streaming=message.streaming)
         if not message.streaming:
             self._conv_store.append_message(agent_str, "agent", message.content)
@@ -711,6 +729,38 @@ class MainWindow(QMainWindow):
 
     def _handle_checkpoint(self, message: Checkpoint) -> None:
         self.main_agent_panel.add_checkpoint(message.checkpoint_id, message.description)
+
+    def _handle_task_update_msg(self, message) -> None:
+        """Handle TaskUpdateMessage — display task notification in relevant panels."""
+        from enum import Enum
+
+        src = message.source_agent
+        src_str = src.value if isinstance(src, Enum) else str(src)
+        tgt = message.target_agent
+        tgt_str = tgt.value if isinstance(tgt, Enum) else str(tgt)
+
+        action_labels = {
+            "completed": "完成",
+            "failed": "失败",
+            "cancelled": "取消",
+            "started": "开始",
+            "created": "新任务",
+        }
+        label = action_labels.get(message.action, message.action)
+
+        if message.action == "completed":
+            text = f"[{label}] {src_str} 完成了任务：{message.description}"
+        elif message.action == "failed":
+            text = f"[{label}] {src_str} 任务失败：{message.description}"
+        elif message.action == "created":
+            text = f"[{label}] {message.description}"
+        else:
+            text = f"[{label}] {src_str}：{message.description}"
+
+        src_panel = self._get_panel_for_agent(src_str)
+        tgt_panel = self._get_panel_for_agent(tgt_str)
+        for panel in {src_panel, tgt_panel}:
+            panel.handle_task_update(src_str, tgt_str, text)
 
     def _get_panel_for_agent(self, agent_type: str) -> AgentPanel:
         if agent_type == "main":

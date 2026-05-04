@@ -268,11 +268,11 @@ class AgentLoop:
             return
 
         action_texts = {
-            "created": f"[新任务] (ID: {message.task_id}): {message.description}",
+            "created": f"[新任务] {message.description}",
             "started": f"[进行中] {src_val} 开始了任务: {message.description}",
-            "completed": f"[完成] {src_val} 完成了任务: {message.description} (ID: {message.task_id})",
-            "failed": f"[失败] {src_val} 任务失败: {message.description} (ID: {message.task_id})",
-            "cancelled": f"[取消] {src_val} 任务已取消: {message.description} (ID: {message.task_id})",
+            "completed": f"[完成] {src_val} 完成了任务: {message.description}",
+            "failed": f"[失败] {src_val} 任务失败: {message.description}",
+            "cancelled": f"[取消] {src_val} 任务已取消: {message.description}",
         }
         notification_text = action_texts.get(message.action, f"任务更新 {message.action}: {message.description}")
 

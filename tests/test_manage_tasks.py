@@ -158,6 +158,6 @@ class TestManageTasksToolErrors:
     @pytest.mark.asyncio
     async def test_nonexistent_task(self, board, bus):
         tool = ManageTasksTool(task_board=board, agent_type=AgentType.MAIN, bus=bus)
-        result = await tool(action="start", task_id="T-999")
+        result = await tool(action="start", task_id="deadbeef")
         assert result["status"] == "error"
         assert "not found" in result["error"]
