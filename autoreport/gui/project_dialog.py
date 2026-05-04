@@ -212,6 +212,13 @@ class ProjectDialog(QDialog):
     def _apply_style(self) -> None:
         dark = self._get_dark_mode()
 
+        # Set palette so child widgets inherit correct bg without QWidget CSS hack
+        from PyQt6.QtGui import QPalette
+        palette = self.palette()
+        palette.setColor(QPalette.ColorRole.Window, QColor("#1f1f1f" if dark else "#f3f3f3"))
+        self.setPalette(palette)
+        self.setAutoFillBackground(True)
+
         c = {
             "bg": "#1f1f1f" if dark else "#f3f3f3",
             "headerBg": "#181818" if dark else "#f3f3f3",
@@ -237,13 +244,7 @@ class ProjectDialog(QDialog):
             ProjectDialog {{
                 background-color: {c["bg"]};
             }}
-            QWidget {{
-                background-color: {c["bg"]};
-            }}
             #header {{
-                background-color: {c["headerBg"]};
-            }}
-            #header QWidget {{
                 background-color: {c["headerBg"]};
             }}
             #title {{
@@ -318,9 +319,6 @@ class ProjectDialog(QDialog):
                 color: {c["itemPath"]};
             }}
             #footer {{
-                background-color: {c["headerBg"]};
-            }}
-            #footer QWidget {{
                 background-color: {c["headerBg"]};
             }}
             #cancelBtn {{

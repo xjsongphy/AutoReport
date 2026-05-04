@@ -718,6 +718,12 @@ class ConfigDialog(QDialog):
     def _apply_style(self) -> None:
         dark = self._is_dark_mode()
 
+        from PyQt6.QtGui import QPalette
+        palette = self.palette()
+        palette.setColor(QPalette.ColorRole.Window, QColor("#1f1f1f" if dark else "#ffffff"))
+        self.setPalette(palette)
+        self.setAutoFillBackground(True)
+
         c = {
             "headerBg": "#181818" if dark else "#f8fafc",
             "headerBorder": "#2b2b2b" if dark else "#e2e8f0",
@@ -775,15 +781,9 @@ class ConfigDialog(QDialog):
             ConfigDialog {{
                 background-color: {c["bodyBg"]};
             }}
-            QWidget {{
-                background-color: {c["bodyBg"]};
-            }}
             #dialogHeader {{
                 background-color: {c["headerBg"]};
                 border-bottom: 1px solid {c["headerBorder"]};
-            }}
-            #dialogHeader QWidget {{
-                background-color: {c["headerBg"]};
             }}
             #dialogTitle {{
                 font-size: 20px;
@@ -817,9 +817,6 @@ class ConfigDialog(QDialog):
             #dialogFooter {{
                 background-color: {c["footerBg"]};
                 border-top: 1px solid {c["footerBorder"]};
-            }}
-            #dialogFooter QWidget {{
-                background-color: {c["footerBg"]};
             }}
             #providerCard {{
                 background-color: {c["cardBg"]};
