@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -256,20 +257,22 @@ class AgentLoop:
         if not isinstance(message, TaskUpdateMessage):
             return
 
-        # Only process if relevant to this agent
-        if (message.source_agent != self.agent_type and
-                message.target_agent != self.agent_type):
-            return
+        # use_enum_values=True may store enums as strings
+        src_val = message.source_agent.value if isinstance(message.source_agent, Enum) else str(message.source_agent)
+        tgt_val = message.target_agent.value if isinstance(message.target_agent, Enum) else str(message.target_agent)
+        src_enum = AgentType(src_val) if src_val in [e.value for e in AgentType] else None
+        tgt_enum = AgentType(tgt_val) if tgt_val in [e.value for e in AgentType] else None
 
-        src = message.source_agent.value
-        tgt = message.target_agent.value
+        # Only process if relevant to this agent
+        if self.agent_type not in (src_enum, tgt_enum):
+            return
 
         action_texts = {
             "created": f"[新任务] (ID: {message.task_id}): {message.description}",
-            "started": f"[进行中] {src} 开始了任务: {message.description}",
-            "completed": f"[完成] {src} 完成了任务: {message.description} (ID: {message.task_id})",
-            "failed": f"[失败] {src} 任务失败: {message.description} (ID: {message.task_id})",
-            "cancelled": f"[取消] {src} 任务已取消: {message.description} (ID: {message.task_id})",
+            "started": f"[进行中] {src_val} 开始了任务: {message.description}",
+            "completed": f"[完成] {src_val} 完成了任务: {message.description} (ID: {message.task_id})",
+            "failed": f"[失败] {src_val} 任务失败: {message.description} (ID: {message.task_id})",
+            "cancelled": f"[取消] {src_val} 任务已取消: {message.description} (ID: {message.task_id})",
         }
         notification_text = action_texts.get(message.action, f"任务更新 {message.action}: {message.description}")
 
