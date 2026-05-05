@@ -307,6 +307,22 @@ class MainWindow(QMainWindow):
             #sendBtn:hover {{
                 background-color: {c["send_hover"]};
             }}
+            #stopBtn {{
+                background-color: {c["stop_bg"]};
+                color: #ffffff;
+                border: none;
+                border-radius: {px(13)};
+                font-size: {px(14)};
+                font-weight: 700;
+                padding: 0;
+                min-width: {px(26)};
+                min-height: {px(26)};
+                max-width: {px(26)};
+                max-height: {px(26)};
+            }}
+            #stopBtn:hover {{
+                background-color: {c["stop_hover"]};
+            }}
 
             /* ---- Context Bar ---- */
             #contextBar {{
