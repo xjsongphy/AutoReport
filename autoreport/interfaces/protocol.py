@@ -43,6 +43,10 @@ class BackendAPI(ABC):
         """
 
     @abstractmethod
+    async def interrupt_current_message(self, agent_type: str) -> None:
+        """Interrupt the currently processing message for an agent."""
+
+    @abstractmethod
     async def restart_agents(self, reason: str) -> None:
         """Restart the agent system."""
 

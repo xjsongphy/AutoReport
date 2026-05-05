@@ -138,10 +138,12 @@ class ChatInput(QPlainTextEdit):
         position = cursor.position()
         document = self.document()
 
+        # Walk backwards to find the @ or / prefix, tracking start position
         start = position
         while start > 0:
             char = document.characterAt(start - 1)
             if char in ("@", "/"):
+                start -= 1  # Point to the @/ character itself
                 break
             elif char in " \t\n\r":
                 return "", -1, -1
@@ -151,8 +153,10 @@ class ChatInput(QPlainTextEdit):
         else:
             return "", -1, -1
 
+        # Walk forwards from cursor to find token end (exclude trailing paragraph sep)
         end = position
-        while end < document.characterCount():
+        doc_len = document.characterCount()
+        while end < doc_len - 1:  # -1 excludes the implicit paragraph separator
             char = document.characterAt(end)
             if char in " \t\n\r()[]{}<>\"'":
                 break
@@ -169,7 +173,7 @@ class ChatInput(QPlainTextEdit):
             char_before = document.characterAt(start - 1)
             space_before = char_before in " \t\n\r"
 
-        if space_before:
+        if space_before and token:
             return token, start, end
 
         return "", -1, -1
@@ -194,10 +198,11 @@ class ChatInput(QPlainTextEdit):
         while end < len(text) and text[end] not in " \t\n\r":
             end += 1
 
+        # Use document character positions (not Python string len)
         doc_len = self.document().characterCount()
         cursor = self.textCursor()
-        cursor.setPosition(min(at_idx, doc_len), QTextCursor.MoveMode.MoveAnchor)
-        cursor.setPosition(min(end, doc_len), QTextCursor.MoveMode.KeepAnchor)
+        cursor.setPosition(at_idx, QTextCursor.MoveMode.MoveAnchor)
+        cursor.setPosition(min(end, doc_len - 1), QTextCursor.MoveMode.KeepAnchor)
         cursor.insertText(link)
         self.setTextCursor(cursor)
         self._on_popup_closed()
@@ -217,8 +222,8 @@ class ChatInput(QPlainTextEdit):
 
         doc_len = self.document().characterCount()
         cursor = self.textCursor()
-        cursor.setPosition(min(at_idx, doc_len), QTextCursor.MoveMode.MoveAnchor)
-        cursor.setPosition(min(end, doc_len), QTextCursor.MoveMode.KeepAnchor)
+        cursor.setPosition(at_idx, QTextCursor.MoveMode.MoveAnchor)
+        cursor.setPosition(min(end, doc_len - 1), QTextCursor.MoveMode.KeepAnchor)
         cursor.insertText(mention)
         self.setTextCursor(cursor)
         self._on_popup_closed()

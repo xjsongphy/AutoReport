@@ -146,8 +146,8 @@ async def test_stop_idempotent(manager):
 
 @pytest.mark.asyncio
 async def test_create_checkpoint(manager, gui):
-    checkpoint_id = await manager.create_checkpoint("Test checkpoint")
-    assert checkpoint_id.startswith("cp_")
+    checkpoint_id = await manager.create_checkpoint("main", "Test checkpoint")
+    assert checkpoint_id.startswith("cp_main_")
 
 
 @pytest.mark.asyncio

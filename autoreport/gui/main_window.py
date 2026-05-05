@@ -752,7 +752,9 @@ class MainWindow(QMainWindow):
         )
 
     def _handle_checkpoint(self, message: Checkpoint) -> None:
-        self.main_agent_panel.add_checkpoint(message.checkpoint_id, message.description)
+        agent_str = str(message.agent_type) if hasattr(message, "agent_type") else "main"
+        panel = self._get_panel_for_agent(agent_str)
+        panel.add_checkpoint(message.checkpoint_id, message.description)
 
     def _handle_task_update_msg(self, message) -> None:
         """Handle TaskUpdateMessage — display task notification in relevant panels."""

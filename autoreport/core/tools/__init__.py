@@ -1,6 +1,7 @@
 """Agent tools for AutoReport."""
 
 from .agent_tools import ReportIssueTool, SendToAgentTool
+from .checkpoint_tool import CreateCheckpointTool, ListCheckpointsTool, RollbackCheckpointTool
 from .exec_tools import ExecTool, PythonExecTool
 from .file_tools import DeleteFileTool, EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from .manifest_tool import ManifestManager, ManifestTool
@@ -26,4 +27,7 @@ __all__ = [
     "PDFParseTool",
     "SendToAgentTool",
     "ReportIssueTool",
+    "CreateCheckpointTool",
+    "ListCheckpointsTool",
+    "RollbackCheckpointTool",
 ]

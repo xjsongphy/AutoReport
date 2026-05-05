@@ -11,8 +11,11 @@ from ...interfaces.types import AgentType, Message, RestartRequest
 from ..checkpoints import CheckpointManager
 from ..skills import SkillLoader
 from ..tools import (
+    CreateCheckpointTool,
+    DeleteFileTool,
     EditFileTool,
     ExecTool,
+    ListCheckpointsTool,
     ListDirTool,
     ManageTasksTool,
     ManifestManager,
@@ -20,6 +23,7 @@ from ..tools import (
     PythonExecTool,
     ReadFileTool,
     ReportIssueTool,
+    RollbackCheckpointTool,
     SendToAgentTool,
     TaskBoard,
     WriteFileTool,
@@ -135,6 +139,34 @@ class LoopManager:
         self._loops.clear()
         self._running = False
 
+    def cancel_current_operation(self, agent_type: str) -> None:
+        """Cancel the currently processing message for an agent.
+
+        Args:
+            agent_type: Agent type string (e.g. "main", "data_analysis").
+        """
+        from autoreport.interfaces.types import AgentType
+
+        agent_map = {
+            "main": AgentType.MAIN,
+            "data_analysis": AgentType.DATA_ANALYSIS,
+            "plotting": AgentType.PLOTTING,
+            "theory": AgentType.THEORY,
+            "report": AgentType.REPORT,
+        }
+        agent_enum = agent_map.get(agent_type)
+        if agent_enum is None:
+            logger.warning("Unknown agent type for cancel: {}", agent_type)
+            return
+
+        loop = self._loops.get(agent_enum)
+        if loop is None:
+            logger.warning("No loop found for agent: {}", agent_type)
+            return
+
+        loop.cancel_current()
+        logger.info("Cancelled current operation for agent: {}", agent_type)
+
     async def restart(self, reason: str = "user_request") -> None:
         """Restart all agent loops.
 
@@ -220,6 +252,12 @@ class LoopManager:
             manifest_manager=self.manifest_manager,
             agent_type=agent_type.value,
         ))
+        registry.register(DeleteFileTool(
+            workspace=self.workspace,
+            write_allowed_dir=write_dir,
+            manifest_manager=self.manifest_manager,
+            agent_type=agent_type.value,
+        ))
 
         # Execution tools (for data analysis, plotting, and main agent)
         if agent_type in (AgentType.DATA_ANALYSIS, AgentType.PLOTTING, AgentType.MAIN):
@@ -262,42 +300,57 @@ class LoopManager:
             bus=self.bus,
         ))
 
+        # Per-agent checkpoint tools
+        agent_type_str = agent_type.value
+        registry.register(CreateCheckpointTool(
+            checkpoint_manager=self.checkpoint_manager,
+            agent_type=agent_type_str,
+        ))
+        registry.register(ListCheckpointsTool(
+            checkpoint_manager=self.checkpoint_manager,
+            agent_type=agent_type_str,
+        ))
+        # Rollback is restricted to main agent inside the tool itself;
+        # we register it everywhere so main can use it, but sub-agents
+        # will get an error message if they try.
+        registry.register(RollbackCheckpointTool(
+            checkpoint_manager=self.checkpoint_manager,
+            agent_type=agent_type_str,
+        ))
+
         return registry
 
-    async def create_checkpoint(self, description: str) -> str:
-        """Create a checkpoint.
+    async def create_checkpoint(
+        self, agent_type: str, description: str = "", source: str = "pre_message"
+    ) -> str:
+        """Create a per-agent checkpoint.
 
         Args:
-            description: Description of the checkpoint.
+            agent_type: Agent type string (e.g. "main", "data_analysis").
+            description: Human-readable description.
+            source: Checkpoint source — "pre_message" | "manual" | "rollback".
 
         Returns:
             Checkpoint ID.
         """
-        checkpoint_id = await self.checkpoint_manager.create_checkpoint(description)
+        checkpoint_id = await self.checkpoint_manager.create_checkpoint(
+            agent_type=agent_type,
+            description=description,
+            source=source,
+        )
 
-        # Notify GUI about new checkpoint
-        checkpoint = self.checkpoint_manager.get_checkpoint(checkpoint_id)
-        if checkpoint:
+        cp = self.checkpoint_manager.get_checkpoint(agent_type, checkpoint_id)
+        if cp:
             from ...interfaces.types import Checkpoint as CheckpointMsg
             msg = CheckpointMsg(
+                agent_type=agent_type,
                 checkpoint_id=checkpoint_id,
-                description=description,
-                file_states={path: state.hash for path, state in checkpoint.file_states.items()},
+                description=cp.description,
+                file_states={path: state.hash for path, state in cp.file_states.items()},
             )
             await self.bus.publish(msg)
 
         return checkpoint_id
-
-    async def rollback_to_checkpoint(self, checkpoint_id: str) -> None:
-        """Rollback to a checkpoint.
-
-        Args:
-            checkpoint_id: Checkpoint ID to rollback to.
-        """
-        await self.checkpoint_manager.rollback_to_checkpoint(checkpoint_id)
-
-        # Create a new checkpoint after rollback
-        await self.create_checkpoint(f"After rollback to {checkpoint_id[:8]}")
 
     async def _handle_restart_request(self, message: Message) -> None:
         """Handle restart request from GUI.

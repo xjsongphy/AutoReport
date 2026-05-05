@@ -125,37 +125,48 @@ class _ChevronTreeWidget(QTreeWidget):
         self._chev_color = chev_color
 
     def drawBranches(self, painter: QPainter, rect, index):
-        """Override to draw VSCode-style chevron indicators instead of default branch lines."""
+        """Override to draw VSCode-style chevron indicators instead of default branch lines.
+
+        Draws chevrons for items with children AND for directory items that have
+        been expanded but contain no children (empty directories). This ensures
+        the chevron stays visible after expanding an empty directory.
+        """
         if not self.model() or not index.isValid():
             return
 
-        if self.model().hasChildren(index):
-            painter.save()
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        dir_name = self.model().data(index, Qt.ItemDataRole.UserRole)
+        is_dir = bool(dir_name)
+        has_children = self.model().hasChildren(index)
 
-            pen = QPen(self._chev_color, 1.5)
-            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-            painter.setPen(pen)
+        if not has_children and not is_dir:
+            return
 
-            level = 0
-            parent = index.parent()
-            while parent.isValid():
-                level += 1
-                parent = parent.parent()
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-            indent = self.indentation()
-            chev_x = level * indent + indent // 2
-            chev_y = rect.y() + rect.height() // 2
+        pen = QPen(self._chev_color, 1.5)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
 
-            if self.isExpanded(index):
-                painter.drawLine(int(chev_x - 4), int(chev_y - 2), int(chev_x), int(chev_y + 2))
-                painter.drawLine(int(chev_x), int(chev_y + 2), int(chev_x + 4), int(chev_y - 2))
-            else:
-                painter.drawLine(int(chev_x - 2), int(chev_y - 4), int(chev_x + 2), int(chev_y))
-                painter.drawLine(int(chev_x + 2), int(chev_y), int(chev_x - 2), int(chev_y + 4))
+        level = 0
+        parent = index.parent()
+        while parent.isValid():
+            level += 1
+            parent = parent.parent()
 
-            painter.restore()
+        indent = self.indentation()
+        chev_x = level * indent + indent // 2
+        chev_y = rect.y() + rect.height() // 2
+
+        if self.isExpanded(index):
+            painter.drawLine(int(chev_x - 4), int(chev_y - 2), int(chev_x), int(chev_y + 2))
+            painter.drawLine(int(chev_x), int(chev_y + 2), int(chev_x + 4), int(chev_y - 2))
+        else:
+            painter.drawLine(int(chev_x - 2), int(chev_y - 4), int(chev_x + 2), int(chev_y))
+            painter.drawLine(int(chev_x + 2), int(chev_y), int(chev_x - 2), int(chev_y + 4))
+
+        painter.restore()
 
 
 # Icon cache

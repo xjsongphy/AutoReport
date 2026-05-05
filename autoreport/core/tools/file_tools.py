@@ -7,7 +7,48 @@ from typing import Any
 from loguru import logger
 
 from ..tools.registry import Tool
+from .manifest_tool import ManifestManager
 from .path_utils import resolve_and_validate_path
+
+
+class WriteEnabledTool(Tool):
+    """Base for tools that modify files — provides write-permission checking and manifest integration."""
+
+    def __init__(
+        self,
+        workspace: Path,
+        write_allowed_dir: Path | None = None,
+        manifest_manager: ManifestManager | None = None,
+        agent_type: str | None = None,
+    ):
+        if (manifest_manager is None) != (agent_type is None):
+            raise ValueError(
+                "manifest_manager and agent_type must be both set or both None"
+            )
+        self.workspace = Path(workspace).resolve()
+        self.write_allowed_dir = Path(write_allowed_dir).resolve() if write_allowed_dir else None
+        self._manifest_manager = manifest_manager
+        self._agent_type = agent_type
+
+    def _check_write_permission(self, file_path: Path, action: str = "Write") -> None:
+        if not self.write_allowed_dir:
+            return
+        try:
+            file_path.relative_to(self.write_allowed_dir)
+        except ValueError:
+            raise PermissionError(
+                f"{action} not allowed outside {self.write_allowed_dir}. Attempted: {file_path}"
+            )
+
+    async def _touch_manifest(self, file_path: Path) -> None:
+        if self._manifest_manager:
+            posix_path = file_path.relative_to(self.workspace).as_posix()
+            await self._manifest_manager.touch_files(self._agent_type, [posix_path])
+
+    async def _remove_from_manifest(self, file_path: Path) -> None:
+        if self._manifest_manager:
+            posix_path = file_path.relative_to(self.workspace).as_posix()
+            await self._manifest_manager.remove_files(self._agent_type, [posix_path])
 
 
 class ReadFileTool(Tool):
@@ -17,11 +58,6 @@ class ReadFileTool(Tool):
     description = "Read the contents of a file. Supports line ranges."
 
     def __init__(self, workspace: Path):
-        """Initialize file reader.
-
-        Args:
-            workspace: Base workspace directory.
-        """
         self.workspace = Path(workspace).resolve()
 
     async def __call__(
@@ -69,21 +105,11 @@ class ReadFileTool(Tool):
             raise
 
 
-class WriteFileTool(Tool):
+class WriteFileTool(WriteEnabledTool):
     """Tool for writing files."""
 
     name = "write_file"
     description = "Write content to a file. Creates parent directories if needed."
-
-    def __init__(self, workspace: Path, write_allowed_dir: Path | None = None):
-        """Initialize file writer.
-
-        Args:
-            workspace: Base workspace directory.
-            write_allowed_dir: Directory where writes are allowed (for agent isolation).
-        """
-        self.workspace = Path(workspace).resolve()
-        self.write_allowed_dir = Path(write_allowed_dir).resolve() if write_allowed_dir else None
 
     async def __call__(
         self,
@@ -108,27 +134,18 @@ class WriteFileTool(Tool):
         file_path = resolve_and_validate_path(path, self.workspace)
         logger.debug("Writing file: {}", file_path)
 
-        # Check write permission
-        if self.write_allowed_dir:
-            try:
-                file_path.relative_to(self.write_allowed_dir)
-            except ValueError:
-                raise PermissionError(
-                    f"Write not allowed outside {self.write_allowed_dir}. "
-                    f"Attempted: {file_path}"
-                )
+        self._check_write_permission(file_path)
 
         try:
-            # Create backup if requested and file exists
             backup_path = None
-            if create_backup and file_path.exists():
-                backup_path = file_path.with_suffix(f"{file_path.suffix}.bak")
-                await asyncio.to_thread(backup_path.write_bytes, file_path.read_bytes())
+            if create_backup:
+                try:
+                    backup_path = file_path.with_suffix(f"{file_path.suffix}.bak")
+                    await asyncio.to_thread(backup_path.write_bytes, file_path.read_bytes())
+                except FileNotFoundError:
+                    pass
 
-            # Create parent directories
             file_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Write content
             await asyncio.to_thread(file_path.write_text, content, encoding="utf-8")
 
             result = {
@@ -137,6 +154,7 @@ class WriteFileTool(Tool):
             }
             if backup_path:
                 result["backup_path"] = str(backup_path)
+            await self._touch_manifest(file_path)
 
             return result
         except Exception as e:
@@ -144,21 +162,11 @@ class WriteFileTool(Tool):
             raise
 
 
-class EditFileTool(Tool):
+class EditFileTool(WriteEnabledTool):
     """Tool for editing files by text replacement."""
 
     name = "edit_file"
     description = "Replace text in a file. Finds old_text and replaces with new_text."
-
-    def __init__(self, workspace: Path, write_allowed_dir: Path | None = None):
-        """Initialize file editor.
-
-        Args:
-            workspace: Base workspace directory.
-            write_allowed_dir: Directory where writes are allowed.
-        """
-        self.workspace = Path(workspace).resolve()
-        self.write_allowed_dir = Path(write_allowed_dir).resolve() if write_allowed_dir else None
 
     async def __call__(
         self,
@@ -185,22 +193,17 @@ class EditFileTool(Tool):
         file_path = resolve_and_validate_path(path, self.workspace)
         logger.debug("Editing file: {}", file_path)
 
-        # Check write permission
-        if self.write_allowed_dir:
-            try:
-                file_path.relative_to(self.write_allowed_dir)
-            except ValueError:
-                raise PermissionError(
-                    f"Write not allowed outside {self.write_allowed_dir}. "
-                    f"Attempted: {file_path}"
-                )
+        self._check_write_permission(file_path)
 
         try:
             content = await asyncio.to_thread(file_path.read_text, encoding="utf-8")
 
+            if not old_text:
+                raise ValueError("old_text must be non-empty")
+
             if replace_all:
                 new_content = content.replace(old_text, new_text)
-                replacements = content.count(old_text) - new_content.count(new_text)
+                replacements = content.count(old_text)
             else:
                 if old_text not in content:
                     raise ValueError(f"old_text not found in file: {file_path}")
@@ -208,6 +211,7 @@ class EditFileTool(Tool):
                 replacements = 1
 
             await asyncio.to_thread(file_path.write_text, new_content, encoding="utf-8")
+            await self._touch_manifest(file_path)
 
             return {
                 "path": str(file_path),
@@ -218,6 +222,40 @@ class EditFileTool(Tool):
             raise
 
 
+class DeleteFileTool(WriteEnabledTool):
+    """Tool for deleting files."""
+
+    name = "delete_file"
+    description = "Delete a file from the workspace."
+
+    async def __call__(self, path: str) -> dict[str, Any]:
+        """Delete a file.
+
+        Args:
+            path: Path to file (relative to workspace)
+
+        Returns:
+            Dictionary with path and deleted status.
+        """
+        file_path = resolve_and_validate_path(path, self.workspace)
+        logger.debug("Deleting file: {}", file_path)
+
+        self._check_write_permission(file_path, action="Delete")
+
+        try:
+            existed = True
+            try:
+                await asyncio.to_thread(file_path.unlink)
+            except FileNotFoundError:
+                existed = False
+
+            await self._remove_from_manifest(file_path)
+            return {"path": str(file_path), "deleted": existed}
+        except Exception as e:
+            logger.error("Failed to delete file {}: {}", file_path, e)
+            raise
+
+
 class ListDirTool(Tool):
     """Tool for listing directory contents."""
 
@@ -225,11 +263,6 @@ class ListDirTool(Tool):
     description = "List contents of a directory."
 
     def __init__(self, workspace: Path):
-        """Initialize directory lister.
-
-        Args:
-            workspace: Base workspace directory.
-        """
         self.workspace = Path(workspace).resolve()
 
     async def __call__(

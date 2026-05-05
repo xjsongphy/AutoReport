@@ -294,6 +294,13 @@ class BackendAPIImpl(BackendAPI):
         )
         await self.bus.publish(message)
 
+    async def interrupt_current_message(self, agent_type: str) -> None:
+        """Interrupt the currently processing message for an agent."""
+        if self.loop_manager is None:
+            logger.warning("Loop manager not initialized, cannot interrupt")
+            return
+        self.loop_manager.cancel_current_operation(agent_type)
+
     async def restart_agents(self, reason: str) -> None:
         """Restart the agent system."""
         from .interfaces.types import RestartRequest

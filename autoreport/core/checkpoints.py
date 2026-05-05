@@ -1,10 +1,20 @@
-"""Checkpoint management for rollback functionality."""
+"""Per-agent checkpoint management for independent rollback.
+
+Each of the 5 agents maintains its own checkpoint timeline under
+.checkpoints/{agent_type}/.  A checkpoint is created before every message
+is processed so the agent can always undo to the pre-message state.
+
+Design follows VS Code Copilot Chat:
+- Sentinel checkpoints mark request boundaries (pre-message state)
+- Each checkpoint stores file states only for the agent's write directory
+- Checkpoint IDs include agent_type to prevent cross-agent mixing
+"""
 
 import asyncio
 import hashlib
 import json
-from dataclasses import asdict, dataclass
-from datetime import datetime
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -13,40 +23,41 @@ from loguru import logger
 
 @dataclass
 class FileState:
-    """State of a file at a checkpoint."""
+    """State of a single file at a checkpoint."""
 
-    path: str
-    hash: str
-    size: int
-    mtime: float
+    path: str           # relative posix path from workspace root
+    hash: str           # SHA256 hex digest
+    size: int           # bytes
+    mtime: float        # file modification time
     is_binary: bool = False
-    content: str | None = None  # Text file content snapshot (None for binary)
+    content: str | None = None  # text content snapshot (None for binary)
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "FileState":
-        """Create from dictionary."""
         return cls(**data)
 
 
 @dataclass
 class CheckpointData:
-    """Checkpoint data."""
+    """A single checkpoint in an agent's timeline."""
 
-    id: str
-    timestamp: str
-    description: str
-    file_states: dict[str, FileState]
-    source: str  # "main_agent", "user_confirmation"
+    id: str                 # unique checkpoint ID
+    agent_type: str         # which agent owns this checkpoint
+    timestamp: str          # ISO 8601 timestamp
+    epoch: int              # monotonically increasing counter per agent
+    description: str        # human-readable label
+    source: str             # "pre_message" | "manual" | "rollback"
+    file_states: dict[str, FileState] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
         return {
             "id": self.id,
+            "agent_type": self.agent_type,
             "timestamp": self.timestamp,
+            "epoch": self.epoch,
             "description": self.description,
             "source": self.source,
             "file_states": {
@@ -57,341 +68,270 @@ class CheckpointData:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CheckpointData":
-        """Create from dictionary."""
         return cls(
             id=data["id"],
+            agent_type=data.get("agent_type", "main"),
             timestamp=data["timestamp"],
+            epoch=data.get("epoch", 0),
             description=data["description"],
-            source=data["source"],
+            source=data.get("source", "manual"),
             file_states={
                 path: FileState.from_dict(state)
-                for path, state in data["file_states"].items()
+                for path, state in data.get("file_states", {}).items()
             },
         )
 
 
+# Write directories per agent type (relative to workspace root)
+_AGENT_WRITE_DIRS: dict[str, list[str]] = {
+    "main": ["data", "data/processed", "references", "theory", "code", "tex"],
+    "data_analysis": ["data/processed"],
+    "plotting": ["code"],
+    "theory": ["theory"],
+    "report": ["tex"],
+}
+
+
 class CheckpointManager:
-    """Manager for checkpoints and rollback."""
+    """Per-agent checkpoint manager.
+
+    Checkpoints are stored in .checkpoints/{agent_type}/ as individual JSON
+    files.  Each agent has its own epoch counter and only captures files
+    within its write directory.
+    """
 
     def __init__(self, workspace: Path):
-        """Initialize checkpoint manager.
-
-        Args:
-            workspace: Project workspace directory.
-        """
         self.workspace = Path(workspace).resolve()
-        self.checkpoints_dir = self.workspace / ".checkpoints"
-        self.checkpoints_dir.mkdir(parents=True, exist_ok=True)
+        self._base_dir = self.workspace / ".checkpoints"
+        self._base_dir.mkdir(parents=True, exist_ok=True)
 
-        self._checkpoints: dict[str, CheckpointData] = {}
-        self._current_checkpoint: str | None = None
+        # Per-agent in-memory state
+        self._checkpoints: dict[str, dict[str, CheckpointData]] = {}
+        self._epochs: dict[str, int] = {}
 
-        # Load existing checkpoints
-        self._load_checkpoints()
+        self._load_all()
 
-    def _load_checkpoints(self) -> None:
-        """Load existing checkpoints from disk."""
-        if not self.checkpoints_dir.exists():
-            return
-
-        for checkpoint_file in self.checkpoints_dir.glob("*.json"):
-            try:
-                with open(checkpoint_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    checkpoint = CheckpointData.from_dict(data)
-                    self._checkpoints[checkpoint.id] = checkpoint
-                    logger.debug("Loaded checkpoint: {}", checkpoint.id)
-            except Exception as e:
-                logger.warning("Failed to load checkpoint {}: {}", checkpoint_file, e)
-
-        logger.info("Loaded {} checkpoints", len(self._checkpoints))
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     async def create_checkpoint(
         self,
-        description: str,
-        source: str = "main_agent",
+        agent_type: str,
+        description: str = "",
+        source: str = "pre_message",
     ) -> str:
-        """Create a checkpoint of current file states.
+        """Create a checkpoint for *agent_type* capturing current file states.
 
-        Args:
-            description: Description of the checkpoint.
-            source: Source of the checkpoint (e.g., "main_agent", "user").
-
-        Returns:
-            Checkpoint ID.
+        Returns the checkpoint ID.
         """
-        checkpoint_id = self._generate_checkpoint_id()
-        timestamp = datetime.now().isoformat()
+        epoch = self._next_epoch(agent_type)
+        checkpoint_id = _make_checkpoint_id(agent_type, epoch)
+        timestamp = datetime.now(timezone.utc).isoformat()
 
-        # Capture file states
-        file_states = await self._capture_file_states()
+        dirs = _AGENT_WRITE_DIRS.get(agent_type, [])
+        file_states = await self._capture_file_states(dirs)
 
-        # Create checkpoint data
-        checkpoint = CheckpointData(
+        cp = CheckpointData(
             id=checkpoint_id,
+            agent_type=agent_type,
             timestamp=timestamp,
-            description=description,
+            epoch=epoch,
+            description=description or f"Checkpoint {agent_type}#{epoch}",
             source=source,
             file_states=file_states,
         )
 
-        # Save checkpoint
-        await self._save_checkpoint(checkpoint)
+        await self._save(cp)
 
-        self._checkpoints[checkpoint_id] = checkpoint
-        self._current_checkpoint = checkpoint_id
+        bucket = self._checkpoints.setdefault(agent_type, {})
+        bucket[checkpoint_id] = cp
 
         logger.info(
-            "Created checkpoint {}: {} ({} files)",
-            checkpoint_id,
-            description,
-            len(file_states),
+            "{} checkpoint {} — {} files captured",
+            agent_type, checkpoint_id, len(file_states),
         )
-
         return checkpoint_id
 
-    async def rollback_to_checkpoint(self, checkpoint_id: str) -> None:
-        """Rollback to a specific checkpoint.
+    async def rollback(self, agent_type: str, checkpoint_id: str) -> int:
+        """Rollback *agent_type* to a specific checkpoint by restoring file content.
 
-        Args:
-            checkpoint_id: Checkpoint ID to rollback to.
-
-        Raises:
-            ValueError: If checkpoint not found.
+        Returns the number of files restored.
         """
-        if checkpoint_id not in self._checkpoints:
-            raise ValueError(f"Checkpoint not found: {checkpoint_id}")
+        bucket = self._checkpoints.get(agent_type, {})
+        cp = bucket.get(checkpoint_id)
+        if cp is None:
+            raise ValueError(
+                f"Checkpoint not found: {checkpoint_id} for agent {agent_type}"
+            )
 
-        checkpoint = self._checkpoints[checkpoint_id]
+        logger.info("Rolling back {} to checkpoint {}", agent_type, checkpoint_id)
+        restored = await self._restore_files(cp)
+        logger.info("Rollback complete — {} files restored", restored)
+        return restored
 
-        logger.info(
-            "Rolling back to checkpoint {}: {}",
-            checkpoint_id,
-            checkpoint.description,
-        )
+    def get_checkpoint(self, agent_type: str, checkpoint_id: str) -> CheckpointData | None:
+        """Get a single checkpoint by agent_type and ID."""
+        return self._checkpoints.get(agent_type, {}).get(checkpoint_id)
 
-        # Restore files
-        await self._restore_files(checkpoint)
+    def list_checkpoints(self, agent_type: str) -> list[CheckpointData]:
+        """Return all checkpoints for *agent_type*, sorted by epoch ascending."""
+        bucket = self._checkpoints.get(agent_type, {})
+        return sorted(bucket.values(), key=lambda c: c.epoch)
 
-        logger.info("Rollback complete")
+    def get_latest(self, agent_type: str) -> CheckpointData | None:
+        """Return the most recent checkpoint for *agent_type*."""
+        bucket = self._checkpoints.get(agent_type, {})
+        if not bucket:
+            return None
+        return max(bucket.values(), key=lambda c: c.epoch)
 
-    async def _capture_file_states(self) -> dict[str, FileState]:
-        """Capture current file states.
+    def clear_old(self, agent_type: str, keep: int = 20) -> int:
+        """Remove old checkpoints for *agent_type*, keeping the most recent *keep*.
 
-        Returns:
-            Dictionary mapping file paths to FileState objects.
+        Returns the number of checkpoints removed.
         """
-        file_states = {}
+        bucket = self._checkpoints.get(agent_type, {})
+        if len(bucket) <= keep:
+            return 0
 
-        # Track all relevant directories
-        tracked_dirs = [
-            self.workspace / "data",
-            self.workspace / "data" / "processed",
-            self.workspace / "references",
-            self.workspace / "theory",
-            self.workspace / "code",
-            self.workspace / "tex",
-        ]
+        sorted_cps = sorted(bucket.values(), key=lambda c: c.epoch, reverse=True)
+        removed = 0
+        for cp in sorted_cps[keep:]:
+            self._delete_one(cp)
+            removed += 1
 
-        for dir_path in tracked_dirs:
-            if not dir_path.exists():
-                continue
+        logger.info("Cleared {} old checkpoints for {}, kept {}", removed, agent_type, keep)
+        return removed
 
-            # Capture all files in directory
-            for file_path in dir_path.rglob("*"):
-                if not file_path.is_file():
-                    continue
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
 
-                # Skip checkpoints directory
-                if ".checkpoints" in str(file_path):
-                    continue
-
-                # Calculate file hash
-                file_hash = await self._calculate_file_hash(file_path)
-
-                # Get file stats
-                stat = file_path.stat()
-                relative_path = file_path.relative_to(self.workspace)
-                posix_path = relative_path.as_posix()
-
-                is_binary = await self._is_binary_file(file_path)
-                content = None
-                if not is_binary and stat.st_size < 1_000_000:  # Skip files > 1MB
-                    try:
-                        content = await asyncio.to_thread(
-                            file_path.read_text, encoding="utf-8"
-                        )
-                    except (UnicodeDecodeError, OSError):
-                        content = None
-
-                file_states[posix_path] = FileState(
-                    path=posix_path,
-                    hash=file_hash,
-                    size=stat.st_size,
-                    mtime=stat.st_mtime,
-                    is_binary=is_binary,
-                    content=content,
-                )
-
-        return file_states
-
-    async def _save_checkpoint(self, checkpoint: CheckpointData) -> None:
-        """Save checkpoint to disk.
-
-        Args:
-            checkpoint: Checkpoint data to save.
-        """
-        checkpoint_file = self.checkpoints_dir / f"{checkpoint.id}.json"
-
-        with open(checkpoint_file, "w", encoding="utf-8") as f:
-            json.dump(checkpoint.to_dict(), f, indent=2, ensure_ascii=False)
-
-    async def _restore_files(self, checkpoint: CheckpointData) -> None:
-        """Restore files to checkpoint state.
-
-        Implementation uses content snapshots stored at checkpoint creation
-        time. Each checkpoint captures file content for non-binary files.
-
-        Args:
-            checkpoint: Checkpoint to restore.
-        """
-        restored = 0
-        for relative_path, state in checkpoint.file_states.items():
-            file_path = self.workspace / relative_path
-
-            if state.content is not None:
-                # Restore file content from snapshot
-                file_path.parent.mkdir(parents=True, exist_ok=True)
-                await asyncio.to_thread(
-                    file_path.write_text, state.content, encoding="utf-8"
-                )
-                logger.info("Restored file: {}", relative_path)
-                restored += 1
-            elif not file_path.exists():
-                logger.warning("Cannot restore binary file without snapshot: {}", relative_path)
-
-        logger.info("Restored {}/{} files from checkpoint {}", restored, len(checkpoint.file_states), checkpoint.id)
-
-        # For now, just verify that checkpoint files exist
-        missing_files = []
-        for relative_path, state in checkpoint.file_states.items():
-            file_path = self.workspace / relative_path
-            if not file_path.exists():
-                missing_files.append(relative_path)
-            else:
-                # Verify hash
-                current_hash = await self._calculate_file_hash(file_path)
-                if current_hash != state.hash:
-                    logger.debug(
-                        "File modified since checkpoint: {} (expected {}, got {})",
-                        relative_path,
-                        state.hash,
-                        current_hash,
-                    )
-
-        if missing_files:
-            logger.warning("Missing files at checkpoint: {}", missing_files)
-
-    async def _calculate_file_hash(self, file_path: Path) -> str:
-        """Calculate SHA256 hash of a file.
-
-        Args:
-            file_path: Path to file.
-
-        Returns:
-            Hex string of hash.
-        """
-        import aiofiles
-
-        sha256 = hashlib.sha256()
-
-        async with aiofiles.open(file_path, "rb") as f:
-            while chunk := await f.read(8192):
-                sha256.update(chunk)
-
-        return sha256.hexdigest()
-
-    async def _is_binary_file(self, file_path: Path) -> bool:
-        """Check if a file is binary.
-
-        Args:
-            file_path: Path to file.
-
-        Returns:
-            True if file is binary.
-        """
-        # Simple check: read first 1024 bytes and look for null bytes
-        try:
-            with open(file_path, "rb") as f:
-                chunk = f.read(1024)
-                return b"\x00" in chunk
-        except Exception:
-            return True
-
-    def _generate_checkpoint_id(self) -> str:
-        """Generate a unique checkpoint ID.
-
-        Returns:
-            Checkpoint ID string.
-        """
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        counter = len(self._checkpoints) + 1
-        return f"cp_{timestamp}_{counter:04d}"
-
-    def get_checkpoints(self) -> list[CheckpointData]:
-        """Get all checkpoints.
-
-        Returns:
-            List of checkpoint data.
-        """
-        return list(self._checkpoints.values())
-
-    def get_checkpoint(self, checkpoint_id: str) -> CheckpointData | None:
-        """Get a specific checkpoint.
-
-        Args:
-            checkpoint_id: Checkpoint ID.
-
-        Returns:
-            Checkpoint data or None if not found.
-        """
-        return self._checkpoints.get(checkpoint_id)
-
-    def clear_old_checkpoints(self, keep: int = 10) -> None:
-        """Clear old checkpoints, keeping only the most recent ones.
-
-        Args:
-            keep: Number of checkpoints to keep.
-        """
-        if len(self._checkpoints) <= keep:
+    def _load_all(self) -> None:
+        """Load all existing checkpoints from disk."""
+        if not self._base_dir.exists():
             return
 
-        # Sort checkpoints by timestamp
-        sorted_checkpoints = sorted(
-            self._checkpoints.values(),
-            key=lambda cp: cp.timestamp,
-            reverse=True,
+        for agent_dir in self._base_dir.iterdir():
+            if not agent_dir.is_dir():
+                continue
+            agent_type = agent_dir.name
+            for f in agent_dir.glob("*.json"):
+                try:
+                    data = json.loads(f.read_text(encoding="utf-8"))
+                    cp = CheckpointData.from_dict(data)
+                    self._checkpoints.setdefault(agent_type, {})[cp.id] = cp
+                except Exception:
+                    logger.warning("Failed to load checkpoint {}", f)
+
+            # Restore highest epoch
+            bucket = self._checkpoints.get(agent_type, {})
+            if bucket:
+                self._epochs[agent_type] = max(c.epoch for c in bucket.values())
+                logger.info(
+                    "Loaded {} checkpoints for {} (epoch={})",
+                    len(bucket), agent_type, self._epochs[agent_type],
+                )
+
+    async def _capture_file_states(self, dirs: list[str]) -> dict[str, FileState]:
+        """Capture file states for the given workspace-relative directories."""
+        states: dict[str, FileState] = {}
+
+        for rel_dir in dirs:
+            d = self.workspace / rel_dir
+            if not d.exists():
+                continue
+            for fp in d.rglob("*"):
+                if not fp.is_file():
+                    continue
+                if ".checkpoints" in fp.parts:
+                    continue
+
+                try:
+                    h = await _sha256(fp)
+                    st = fp.stat()
+                    rel = fp.relative_to(self.workspace).as_posix()
+                    is_bin = await _is_binary(fp)
+                    content = None
+                    if not is_bin and st.st_size < 1_000_000:
+                        try:
+                            content = await asyncio.to_thread(
+                                fp.read_text, encoding="utf-8"
+                            )
+                        except (UnicodeDecodeError, OSError):
+                            content = None
+                    states[rel] = FileState(
+                        path=rel, hash=h, size=st.st_size,
+                        mtime=st.st_mtime, is_binary=is_bin, content=content,
+                    )
+                except OSError:
+                    pass
+
+        return states
+
+    async def _restore_files(self, checkpoint: CheckpointData) -> int:
+        """Restore files from checkpoint content snapshots."""
+        count = 0
+        for rel, state in checkpoint.file_states.items():
+            fp = self.workspace / rel
+            if state.content is not None:
+                fp.parent.mkdir(parents=True, exist_ok=True)
+                await asyncio.to_thread(fp.write_text, state.content, encoding="utf-8")
+                count += 1
+            elif not fp.exists():
+                logger.warning("Cannot restore binary file without snapshot: {}", rel)
+        return count
+
+    async def _save(self, cp: CheckpointData) -> None:
+        agent_dir = self._base_dir / cp.agent_type
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        (agent_dir / f"{cp.id}.json").write_text(
+            json.dumps(cp.to_dict(), indent=2, ensure_ascii=False),
+            encoding="utf-8",
         )
 
-        # Remove oldest checkpoints
-        to_remove = sorted_checkpoints[keep:]
+    def _delete_one(self, cp: CheckpointData) -> None:
+        bucket = self._checkpoints.get(cp.agent_type, {})
+        bucket.pop(cp.id, None)
+        f = self._base_dir / cp.agent_type / f"{cp.id}.json"
+        try:
+            f.unlink(missing_ok=True)
+        except OSError:
+            pass
 
-        for checkpoint in to_remove:
-            self._delete_checkpoint(checkpoint.id)
+    def _next_epoch(self, agent_type: str) -> int:
+        epoch = self._epochs.get(agent_type, 0) + 1
+        self._epochs[agent_type] = epoch
+        return epoch
 
-        logger.info("Cleared old checkpoints, kept {} most recent", keep)
 
-    def _delete_checkpoint(self, checkpoint_id: str) -> None:
-        """Delete a checkpoint.
+# ------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------
 
-        Args:
-            checkpoint_id: Checkpoint ID to delete.
-        """
-        if checkpoint_id in self._checkpoints:
-            del self._checkpoints[checkpoint_id]
+async def _sha256(fp: Path) -> str:
+    import aiofiles
 
-        checkpoint_file = self.checkpoints_dir / f"{checkpoint_id}.json"
-        if checkpoint_file.exists():
-            checkpoint_file.unlink()
+    h = hashlib.sha256()
+    async with aiofiles.open(fp, "rb") as fh:
+        while chunk := await fh.read(8192):
+            h.update(chunk)
+    return h.hexdigest()
 
-        logger.debug("Deleted checkpoint: {}", checkpoint_id)
+
+async def _is_binary(fp: Path) -> bool:
+    try:
+        with open(fp, "rb") as fh:
+            return b"\x00" in fh.read(1024)
+    except Exception:
+        return True
+
+
+def _make_checkpoint_id(agent_type: str, epoch: int) -> str:
+    """Generate a unique checkpoint ID.
+
+    Format: cp_{agent_type}_{epoch:04d}_{timestamp}
+    """
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return f"cp_{agent_type}_{epoch:04d}_{ts}"

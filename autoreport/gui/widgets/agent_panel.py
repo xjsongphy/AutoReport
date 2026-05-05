@@ -31,6 +31,7 @@ class AgentPanel(QWidget):
     """Codex CLI-style agent panel with flat timeline, status bar, and composer."""
 
     message_sent = pyqtSignal(str)
+    interrupt_requested = pyqtSignal()
     debug_mode_toggled = pyqtSignal(bool)
     _debug_msg_signal = pyqtSignal(object)
     history_requested = pyqtSignal()
@@ -46,6 +47,7 @@ class AgentPanel(QWidget):
         super().__init__()
         self.panel_id = panel_id
         self._agent_type = "sub"
+        self._is_working = False
         self._workspace = Path(workspace).resolve() if workspace else Path.cwd()
         self._preview_context: tuple[str, str, int, int] | None = None
         self._opened_file: str | None = None
@@ -171,13 +173,13 @@ class AgentPanel(QWidget):
         self._input_field.popup_navigate.connect(self._on_popup_navigate)
         icl.addWidget(self._input_field, 1)
 
-        send_btn = QPushButton("↑")
-        send_btn.setObjectName("sendBtn")
-        send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        send_btn.clicked.connect(self._on_send)
-        send_btn.setFixedSize(26, 26)
+        self._send_btn = QPushButton("↑")
+        self._send_btn.setObjectName("sendBtn")
+        self._send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._send_btn.clicked.connect(self._on_send_btn_clicked)
+        self._send_btn.setFixedSize(26, 26)
 
-        icl.addWidget(send_btn)
+        icl.addWidget(self._send_btn)
 
         # Working border overlays the container
         self._working_border = WorkingBorder(self._input_container)
@@ -458,9 +460,10 @@ class AgentPanel(QWidget):
 
     def add_checkpoint(self, checkpoint_id: str, description: str) -> None:
         ts = datetime.now().strftime("%H:%M")
+        short_id = checkpoint_id[-12:] if len(checkpoint_id) > 12 else checkpoint_id
         self._messages_area.add_message_row(
             role="agent",
-            content=f"⚑ {description}",
+            content=f"⚑ [{short_id}] {description}",
             timestamp=ts,
         )
 
@@ -472,28 +475,71 @@ class AgentPanel(QWidget):
         target: str,
         description: str,
     ) -> None:
-        """Handle task update for GUI display."""
-        action_icons = {
-            "created": "📋",
-            "started": "⏳",
-            "completed": "✅",
-            "failed": "⚠",
-            "cancelled": "✗",
-        }
-        icon = action_icons.get(action, "📋")
+        """Handle task update for GUI display.
+
+        Text differs by agent perspective:
+        - Sub-agent as source: "等待 <target>：<description>"
+        - Sub-agent as target: "完成 <source> 的任务：<description>"
+        - Main agent: "<source> 等待 <target> 的 <description>"
+        - Completion propagates to source: "检查 <target> 完成的任务：<description>"
+        """
+        is_main = self._agent_type in ("main",)
+        am_source = self._agent_type == source
+        am_target = self._agent_type == target
+        is_local = source == target
 
         if action == "created":
-            text = f"{icon} 新任务 ({task_id})：{description}"
+            if am_source and is_main:
+                text = f"📋 {source} 等待 {target} 的：{description}"
+            elif am_source and not is_main:
+                text = f"⏳ 等待 {target} 完成：{description}"
+            elif am_target and is_local:
+                text = f"📋 本地任务：{description}"
+            elif am_target:
+                text = f"📋 完成 {source} 的任务：{description}"
+            elif is_main and not am_source and not am_target:
+                text = f"📋 {source} → {target}：{description}"
+            else:
+                text = f"📋 任务 ({task_id})：{description}"
+
         elif action == "completed":
-            text = f"{icon} {source} 完成了任务：{description} ({task_id})"
+            if am_source:
+                text = f"✅ {target} 已完成：{description} → 待检查"
+            elif am_target:
+                text = f"✅ 已完成 {source} 的任务：{description}"
+            elif is_main:
+                text = f"✅ {source} 等待 {target} 的任务已完成：{description}"
+            else:
+                text = f"✅ {source} 完成了 {target} 的任务：{description}"
+
         elif action == "failed":
-            text = f"{icon} {source} 任务失败：{description} ({task_id})"
+            if am_source:
+                text = f"⚠ {target} 失败：{description} → 待处理"
+            elif am_target:
+                text = f"⚠ 来自 {source} 的任务失败：{description}"
+            elif is_main:
+                text = f"⚠ {source} 等待 {target} 的任务失败：{description}"
+            else:
+                text = f"⚠ {source} 任务失败 ({target})：{description}"
+
         elif action == "cancelled":
-            text = f"{icon} {source} 任务已取消：{description} ({task_id})"
+            if am_source:
+                text = f"✗ {target} 已取消：{description}"
+            elif is_main:
+                text = f"✗ {source} 等待 {target} 的任务已取消：{description}"
+            else:
+                text = f"✗ {source} 任务已取消 ({target})：{description}"
+
         elif action == "started":
-            text = f"{icon} {source} 开始了任务：{description} ({task_id})"
+            if am_source:
+                text = f"⏳ {target} 已开始：{description}"
+            elif is_main:
+                text = f"⏳ {target} 开始了 {source} 的任务：{description}"
+            else:
+                text = f"⏳ {source} 开始了：{description}"
+
         else:
-            text = f"{icon} 任务更新 ({task_id})：{description}"
+            text = f"📋 任务更新 ({task_id})：{description}"
 
         ts = datetime.now().strftime("%H:%M")
         self._messages_area.add_message_row(
@@ -504,6 +550,19 @@ class AgentPanel(QWidget):
         )
 
     # ---- Status ----
+
+    def _set_working(self, working: bool) -> None:
+        """Toggle send/stop button appearance."""
+        self._is_working = working
+        if working:
+            self._send_btn.setText("■")
+            self._send_btn.setObjectName("stopBtn")
+        else:
+            self._send_btn.setText("↑")
+            self._send_btn.setObjectName("sendBtn")
+        # Force style refresh
+        self._send_btn.style().unpolish(self._send_btn)
+        self._send_btn.style().polish(self._send_btn)
 
     def set_status(self, status: str, extra: dict | None = None) -> None:
         status_map = {
@@ -520,9 +579,11 @@ class AgentPanel(QWidget):
             header = "Thinking" if status == "thinking" else "Running tool"
             self._status_indicator.start(header)
             self._working_border.start()
+            self._set_working(True)
         else:
             self._status_indicator.stop()
             self._working_border.stop()
+            self._set_working(False)
 
     # ---- Actions ----
 
@@ -548,11 +609,19 @@ class AgentPanel(QWidget):
                 final_message = content + ctx
 
         self._input_field.clear_text()
+        self._set_working(True)
         self.message_sent.emit(final_message)
 
         self._preview_context = None
         self._opened_file = None
         self._context_bar.setVisible(False)
+
+    def _on_send_btn_clicked(self) -> None:
+        """Handle send button click — send or interrupt based on state."""
+        if self._is_working:
+            self.interrupt_requested.emit()
+        else:
+            self._on_send()
 
     def _on_history(self) -> None:
         if self._history_dropdown.isVisible():

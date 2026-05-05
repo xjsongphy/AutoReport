@@ -150,12 +150,13 @@ class RestartRequest(Message):
 
 
 class Checkpoint(Message):
-    """Checkpoint created for rollback."""
+    """Checkpoint created for rollback — per-agent."""
 
     type: MessageType = MessageType.CHECKPOINT
+    agent_type: str  # "main", "data_analysis", "plotting", "theory", "report"
     checkpoint_id: str
     description: str
-    file_states: dict[str, str]  # path -> hash or snapshot
+    file_states: dict[str, str]  # path -> hash
 
 
 class Error(Message):

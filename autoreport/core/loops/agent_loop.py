@@ -169,6 +169,7 @@ class AgentLoop:
         self._current_message: UserMessage | None = None
         self._conversation_history: list[LLMMessage] = []
         self._manifest_dirty = False
+        self._cancel_event = asyncio.Event()
 
         # Debug mode
         self._debug_mode = False
@@ -208,6 +209,11 @@ class AgentLoop:
 
         self._running = False
         logger.info("Stopping agent loop for {}", self.agent_type)
+
+    def cancel_current(self) -> None:
+        """Cancel the currently processing message (if any)."""
+        self._cancel_event.set()
+        logger.info("Cancel requested for agent {}", self.agent_type)
 
     async def _process_loop(self) -> None:
         """Main processing loop for messages."""
@@ -263,6 +269,11 @@ class AgentLoop:
 
         Task notifications are always delivered, even in debug mode.
         They are wrapped into a UserMessage(source="system") for LLM processing.
+
+        Notification text is perspective-aware:
+        - Agent as source (waiting): "等待 <target>：<description>"
+        - Agent as target (todo): "完成 <source> 的任务：<description>"
+        - Main agent: "<source> 等待 <target> 的 <description>"
         """
         if not isinstance(message, TaskUpdateMessage):
             return
@@ -277,14 +288,60 @@ class AgentLoop:
         if self.agent_type not in (src_enum, tgt_enum):
             return
 
-        action_texts = {
-            "created": f"[新任务] {message.description}",
-            "started": f"[进行中] {src_val} 开始了任务: {message.description}",
-            "completed": f"[完成] {src_val} 完成了任务: {message.description}",
-            "failed": f"[失败] {src_val} 任务失败: {message.description}",
-            "cancelled": f"[取消] {src_val} 任务已取消: {message.description}",
-        }
-        notification_text = action_texts.get(message.action, f"任务更新 {message.action}: {message.description}")
+        am_source = self.agent_type == src_enum
+        am_target = self.agent_type == tgt_enum
+        is_local = src_enum == tgt_enum
+
+        if message.action == "created":
+            if am_source and self.agent_type == AgentType.MAIN:
+                notification_text = f"[等待] {src_val} 等待 {tgt_val} 的：{message.description}"
+            elif am_source:
+                notification_text = f"[等待] 等待 {tgt_val} 完成：{message.description}"
+            elif am_target and is_local:
+                notification_text = f"[待办] 本地任务：{message.description}"
+            elif am_target:
+                notification_text = f"[待办] 完成 {src_val} 的任务：{message.description}"
+            else:
+                notification_text = f"[新任务] {src_val} → {tgt_val}：{message.description}"
+
+        elif message.action == "completed":
+            if am_source:
+                notification_text = f"[完成] {tgt_val} 已完成：{message.description}。请检查其输出。"
+            elif am_target:
+                notification_text = f"[完成] 已完成 {src_val} 的任务：{message.description}"
+            elif self.agent_type == AgentType.MAIN:
+                notification_text = f"[完成] {src_val} 等待 {tgt_val} 的任务已完成：{message.description}"
+            else:
+                notification_text = f"[完成] {src_val} 完成了 {tgt_val} 的任务：{message.description}"
+
+        elif message.action == "started":
+            if am_source:
+                notification_text = f"[开始] {tgt_val} 已开始：{message.description}"
+            elif self.agent_type == AgentType.MAIN:
+                notification_text = f"[开始] {tgt_val} 开始了 {src_val} 的任务：{message.description}"
+            else:
+                notification_text = f"[开始] {src_val} 开始了：{message.description}"
+
+        elif message.action == "failed":
+            if am_source:
+                notification_text = f"[失败] {tgt_val} 失败：{message.description}。请检查并决定如何处理。"
+            elif am_target:
+                notification_text = f"[失败] 来自 {src_val} 的任务失败：{message.description}"
+            elif self.agent_type == AgentType.MAIN:
+                notification_text = f"[失败] {src_val} 等待 {tgt_val} 的任务失败：{message.description}"
+            else:
+                notification_text = f"[失败] {src_val} 任务失败 ({tgt_val})：{message.description}"
+
+        elif message.action == "cancelled":
+            if am_source:
+                notification_text = f"[取消] {tgt_val} 已取消：{message.description}"
+            elif self.agent_type == AgentType.MAIN:
+                notification_text = f"[取消] {src_val} 等待 {tgt_val} 的任务已取消：{message.description}"
+            else:
+                notification_text = f"[取消] {src_val} 任务已取消 ({tgt_val})：{message.description}"
+
+        else:
+            notification_text = f"任务更新 {message.action}: {message.description}"
 
         await self._message_queue.put(UserMessage(
             content=notification_text,
@@ -313,10 +370,31 @@ class AgentLoop:
     async def _process_message(self, message: UserMessage) -> None:
         """Process a user message.
 
+        Creates a per-agent checkpoint before processing so the agent can
+        roll back to the pre-message file state.
+
         Args:
             message: User message to process.
         """
         await self._set_status(AgentStatus.THINKING)
+
+        # Reset cancel event for this message
+        self._cancel_event.clear()
+
+        # Create a pre-message checkpoint for this agent
+        cp_id = None
+        if self._loop_manager is not None:
+            try:
+                source = message.source if hasattr(message, "source") else "user"
+                agent_str = self._get_agent_type_str()
+                cp_id = await self._loop_manager.create_checkpoint(
+                    agent_type=agent_str,
+                    description=f"pre:{source}",
+                    source="pre_message",
+                )
+                logger.debug("{} checkpoint created: {}", agent_str, cp_id)
+            except Exception as e:
+                logger.warning("Failed to create checkpoint for {}: {}", self.agent_type, e)
 
         try:
             # In debug mode, wrap message with context
@@ -396,6 +474,10 @@ class AgentLoop:
                                 LLMMessage(role="assistant", content=accumulated_content)
                             )
                         break
+
+                    if self._cancel_event.is_set():
+                        logger.info("Stream cancelled for agent {}", self.agent_type)
+                        break
             except Exception as e:
                 last_error = str(e)
                 raise
@@ -418,9 +500,24 @@ class AgentLoop:
                     tokens_in=tokens_in,
                     tokens_out=tokens_out,
                     duration_ms=duration_ms,
-                    status="success" if last_error is None else "error",
+                    status="cancelled" if self._cancel_event.is_set() else ("success" if last_error is None else "error"),
                     error=last_error,
                 ))
+
+            # Handle cancellation — skip tool calls and send cancellation notice
+            if self._cancel_event.is_set():
+                if accumulated_content:
+                    self._conversation_history.append(
+                        LLMMessage(role="assistant", content=accumulated_content)
+                    )
+                await self.bus.publish(AgentResponse(
+                    agent_type=self.agent_type,
+                    content="[已取消]",
+                    message_id=message.message_id,
+                    streaming=False,
+                ))
+                await self._set_status(AgentStatus.IDLE)
+                return
 
             # Handle tool calls if present
             if accumulated_tool_calls:
@@ -464,7 +561,13 @@ class AgentLoop:
             ))
 
     async def _flush_manifest_if_needed(self) -> None:
-        """Flush manifest notes at the end of a loop if needed."""
+        """Wrap up manifest at end of loop: prompt agent to update free-text notes.
+
+        Only fires when file tools were used during this turn.  Injects a
+        lightweight system instruction so the agent can decide whether the
+        notes section needs updating — no extra LLM round required; the
+        hint is prepended to the next turn's system prompt.
+        """
         if self.agent_type == AgentType.MAIN or self._manifest_manager is None:
             self._manifest_dirty = False
             return
@@ -472,14 +575,43 @@ class AgentLoop:
         if not self._manifest_dirty:
             return
 
+        self._manifest_dirty = False
+
+        # Inject a brief wrap-up prompt so the agent reviews the manifest
+        # notes *at the start of the next turn*.  That avoids an extra LLM
+        # call while still giving the agent a chance to update the free-text
+        # section when it next processes a message.
         try:
-            manifest = self._manifest_manager.load(self._get_agent_type_str())
-            manifest.setdefault("notes", manifest.get("notes", ""))
-            self._manifest_manager.save(self._get_agent_type_str(), manifest)
+            manifest = await self._manifest_manager.load(self._get_agent_type_str())
+            files = manifest.get("files", [])
+            notes = manifest.get("notes", "")
+            # Only poke the agent when there are un-described files or the
+            # notes area is empty after file changes.
+            undescribed = [f for f in files if not f.get("description", "").strip()]
+            if undescribed or not notes.strip():
+                hint = (
+                    "\n\n[Manifest 收尾提示]\n"
+                    "本轮的创建/修改/删除文件已自动更新到你的 manifest。"
+                )
+                if undescribed:
+                    hint += (
+                        f"以下文件尚无描述，请在方便时通过 manifest 工具补全：\n"
+                        + "\n".join(f"  - {f['path']}" for f in undescribed)
+                    )
+                if not notes.strip():
+                    hint += (
+                        "\n自由文本区（notes）当前为空，请在方便时补充文件之间的关系、"
+                        "依赖或协作说明。"
+                    )
+                else:
+                    hint += (
+                        "\n自由文本区（notes）可能需要补充。请查看并根据需要更新。"
+                    )
+                self._conversation_history.append(
+                    LLMMessage(role="user", content=hint)
+                )
         except Exception as e:
             logger.warning("Failed to flush manifest for {}: {}", self.agent_type, e)
-        finally:
-            self._manifest_dirty = False
 
     async def _handle_tool_calls(
         self,
@@ -529,6 +661,9 @@ class AgentLoop:
                         raise ValueError(f"Tool not found: {tool_call.name}")
 
                     result = await tool(**tool_call.arguments)
+
+                    if tool_call.name in ("write_file", "edit_file", "delete_file"):
+                        self._manifest_dirty = True
 
                     await self.bus.publish(ToolResultMsg(
                         agent_type=self.agent_type,
@@ -608,7 +743,6 @@ class AgentLoop:
             ))
 
         self._conversation_history = current_messages
-        self._manifest_dirty = True
 
         if iteration >= max_iterations:
             logger.warning("Max tool iterations reached for agent: {}", self.agent_type)

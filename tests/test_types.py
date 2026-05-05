@@ -128,11 +128,13 @@ def test_restart_request():
 
 def test_checkpoint_message():
     msg = Checkpoint(
+        agent_type="main",
         checkpoint_id="cp_12345678",
         description="Before analysis",
         file_states={"data/test.csv": "abc123"},
     )
     assert msg.type == "checkpoint"
+    assert msg.agent_type == "main"
     assert msg.file_states["data/test.csv"] == "abc123"
 
 
