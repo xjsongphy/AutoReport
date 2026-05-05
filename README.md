@@ -96,11 +96,17 @@ autoreport/
 │   ├── loops/            # Agent runtime: LoopManager, AgentLoop, MessageBus
 │   ├── providers/        # LLM provider abstraction (factory, base classes)
 │   ├── prompts/          # Progressive prompt loading (identity → full instructions)
-│   ├── skills.py         # Skill loading (external/skills/ → agent system prompt)
-│   └── tools/            # Tool system (registry, file tools, exec tools, PDF tool)
+│   ├── tools/            # Tool system (registry, file tools, exec tools, PDF tool)
+│   ├── checkpoints.py    # File-state checkpoint with hash tracking and rollback
+│   ├── conversations.py  # Multi-session conversation store
+│   ├── file_search.py    # Fuzzy file search for @ references
+│   ├── preset_sync.py    # cc-switch preset synchronization
+│   ├── recent_projects.py# Recent projects cache
+│   └── skills.py         # Skill loader (external/skills/ → agent system prompt)
 ├── gui/                  # PyQt6 interface (main window, dialogs, widgets)
 │   └── widgets/          # Reusable components (file tree, preview, agent panel)
-├── interfaces/           # GUI-backend protocol (Protocol definitions, message types)
+├── interfaces/           # GUI-backend protocol (protocol definitions, message types)
+├── resources/            # Built-in resources
 ├── templates/            # Built-in templates (agent prompts, report templates)
 │   ├── agents/           # Agent prompt files (Markdown)
 │   └── reports/          # LaTeX report templates
@@ -147,10 +153,24 @@ Valid agents: `data_analysis`, `plotting`, `theory`, `report`
 
 ### MinerU Integration
 
-```bash
-curl -fsSL https://cdn-mineru.openxlab.org.cn/open-api-cli/install.sh | sh
-mineru-open-api auth
-```
+AutoReport uses [mineru-open-api](https://github.com/opendatalab/MinerU) CLI for PDF parsing (PDF, images, DOCX, PPTX, XLSX → Markdown).
+
+**Setup:**
+
+1. Install mineru-open-api:
+   ```bash
+   curl -fsSL https://cdn-mineru.openxlab.org.cn/open-api-cli/install.sh | sh
+   ```
+   See [mineru-open-api docs](https://mineru.net/ecosystem?tab=cli) for details.
+
+2. Register at [MinerU](https://mineru.net/apiManage/token) for an API key, then authenticate:
+   ```bash
+   mineru-open-api auth
+   ```
+
+3. The app auto-detects availability on startup and shows a warning if not installed.
+
+Supports batch processing (max 200MB / 600 pages per file), text/image/table/formula extraction.
 
 ### Reference Projects
 
