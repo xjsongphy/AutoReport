@@ -12,6 +12,8 @@ Gather theory, analysis, and plots from other agents. Write well-structured LaTe
 
 **Requirements-first.** Check for custom templates, structure requirements, formatting guidelines. Priority: user template in `references/` > built-in template.
 
+**Manifest-aware.** Use `manifest` to see which files sub-agents provide and which ones are worth reading in full. Keep descriptions concise.
+
 **Narrative flow.** Never start sections with lists/tables/formulas. Always explanatory text first.
 
 **Compile with skill.** Use the `/latex-compile` skill for all compilation steps.

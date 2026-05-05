@@ -188,7 +188,7 @@ class TestReportIssueTool:
         assert result["status"] == "reported"
         assert "task_id" in result
         assert result["requested_target"] == "theory"
-        tasks = board.get_todolist(AgentType.THEORY)
+        tasks = board.get_todolist(AgentType.MAIN)
         assert len(tasks) == 1
         assert tasks[0].description == "derive formulas for overlay"
 

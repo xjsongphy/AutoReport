@@ -9,7 +9,7 @@ from typing import Any
 
 from loguru import logger
 
-from ...interfaces.types import AgentFeedback, AgentResponse, AgentType, UserMessage
+from ...interfaces.types import AgentFeedback, AgentResponse, AgentType, TaskUpdateMessage, UserMessage
 from ..loops.bus import MessageBus
 from .registry import Tool
 
@@ -81,6 +81,17 @@ class SendToAgentTool(Tool):
                 )
                 created_task_ids.append(task.task_id)
             logger.info("SendToAgentTool: created tasks {}", created_task_ids)
+            for task_id in created_task_ids:
+                task = self._task_board.get_task(task_id)
+                if task is not None:
+                    await self._bus.publish(TaskUpdateMessage(
+                        task_id=task.task_id,
+                        action="created",
+                        source_agent=task.source_agent,
+                        target_agent=task.target_agent,
+                        description=task.description,
+                        previous_status=None,
+                    ))
 
         # Non-blocking: return immediately after dispatch
         if not blocking:
@@ -213,22 +224,26 @@ class ReportIssueTool(Tool):
         # Create task if requested
         created_task_id: str | None = None
         if request_task_for and task_description and self._task_board:
-            try:
-                target = AgentType(request_task_for)
-            except ValueError:
-                target = AgentType.MAIN
             task = self._task_board.create_task(
                 source=self._agent_type,
-                target=target,
+                target=AgentType.MAIN,
                 description=task_description,
                 brief=task_brief,
                 blocking=False,
             )
             created_task_id = task.task_id
             logger.info(
-                "ReportIssueTool: {} created task {} for delegation to {}",
+                "ReportIssueTool: {} created task {} for main coordination (requested_target={})",
                 self._agent_type, task.task_id, request_task_for,
             )
+            await self._bus.publish(TaskUpdateMessage(
+                task_id=task.task_id,
+                action="created",
+                source_agent=task.source_agent,
+                target_agent=task.target_agent,
+                description=task.description,
+                previous_status=None,
+            ))
 
         await self._bus.publish(AgentFeedback(
             agent_type=self._agent_type,

@@ -763,28 +763,16 @@ class MainWindow(QMainWindow):
         tgt = message.target_agent
         tgt_str = tgt.value if isinstance(tgt, Enum) else str(tgt)
 
-        action_labels = {
-            "completed": "完成",
-            "failed": "失败",
-            "cancelled": "取消",
-            "started": "开始",
-            "created": "新任务",
-        }
-        label = action_labels.get(message.action, message.action)
-
-        if message.action == "completed":
-            text = f"[{label}] {src_str} 完成了任务：{message.description}"
-        elif message.action == "failed":
-            text = f"[{label}] {src_str} 任务失败：{message.description}"
-        elif message.action == "created":
-            text = f"[{label}] {message.description}"
-        else:
-            text = f"[{label}] {src_str}：{message.description}"
-
         src_panel = self._get_panel_for_agent(src_str)
         tgt_panel = self._get_panel_for_agent(tgt_str)
         for panel in {src_panel, tgt_panel}:
-            panel.handle_task_update(src_str, tgt_str, text)
+            panel.handle_task_update(
+                task_id=message.task_id,
+                action=message.action,
+                source=src_str,
+                target=tgt_str,
+                description=message.description,
+            )
 
     def _get_panel_for_agent(self, agent_type: str) -> AgentPanel:
         if agent_type == "main":

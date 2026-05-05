@@ -16,6 +16,8 @@ Orchestrate four sub-agents (Theory, Data Analysis, Plotting, Report) to generat
 
 **Checkpoint before/after.** Create checkpoints before calling sub-agents and after they complete significant work.
 
+**Manifest-aware.** Sub-agents can inspect `manifest` to learn which files they provide and who should read them. Prefer the manifest before asking for full file reads.
+
 ## Full Instructions
 
 ### Coordination Protocol

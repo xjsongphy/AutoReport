@@ -1,6 +1,5 @@
 """TaskBoard — central in-memory task store for agent task delegation."""
 
-import hashlib
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -24,10 +23,9 @@ class TaskBoard:
         self._tasks: dict[str, TaskItem] = {}
         self._counter: int = 0
 
-    def _next_id(self, description: str = "") -> str:
+    def _next_id(self) -> str:
         self._counter += 1
-        raw = f"{self._counter}-{description}-{id(self)}"
-        return hashlib.md5(raw.encode()).hexdigest()[:8]
+        return f"T-{self._counter:03d}"
 
     def create_task(
         self,
@@ -41,7 +39,7 @@ class TaskBoard:
     ) -> TaskItem:
         """Create a new task item."""
         task = TaskItem(
-            task_id=self._next_id(description),
+            task_id=self._next_id(),
             brief=brief or description[:80],
             description=description,
             source_agent=source,
@@ -73,6 +71,8 @@ class TaskBoard:
     def complete_task(self, task_id: str) -> list[TaskItem]:
         """Mark task COMPLETED, walk parent chain. Returns affected tasks (in chain order)."""
         task = self._require_task(task_id)
+        if task.status not in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS):
+            raise ValueError(f"Task {task_id} is {task.status}, cannot complete")
         task.status = TaskStatus.COMPLETED
         task.completed_at = datetime.now(timezone.utc)
         affected = [task]
@@ -83,6 +83,8 @@ class TaskBoard:
     def fail_task(self, task_id: str) -> list[TaskItem]:
         """Mark task FAILED, propagate up parent chain."""
         task = self._require_task(task_id)
+        if task.status not in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS):
+            raise ValueError(f"Task {task_id} is {task.status}, cannot fail")
         task.status = TaskStatus.FAILED
         task.completed_at = datetime.now(timezone.utc)
         affected = [task]
@@ -93,6 +95,8 @@ class TaskBoard:
     def cancel_task(self, task_id: str) -> list[TaskItem]:
         """Mark task CANCELLED, propagate up parent chain."""
         task = self._require_task(task_id)
+        if task.status not in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS):
+            raise ValueError(f"Task {task_id} is {task.status}, cannot cancel")
         task.status = TaskStatus.CANCELLED
         task.completed_at = datetime.now(timezone.utc)
         affected = [task]

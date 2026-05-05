@@ -347,7 +347,7 @@ class AgentPanel(QWidget):
             help_text = "可用命令：\n" + "\n".join(f"  {c} — {d}" for c, d in self.SLASH_COMMANDS)
             self.add_message("agent", help_text)
         elif cmd in ("/clear", "/new"):
-            self.clear_conversation.emit()
+            self.clear_conversation()
         elif cmd == "/compact":
             self.compact_requested.emit()
         elif cmd == "/init":
@@ -464,11 +464,37 @@ class AgentPanel(QWidget):
             timestamp=ts,
         )
 
-    def handle_task_update(self, source: str, target: str, text: str) -> None:
-        """Handle task update for GUI display.
+    def handle_task_update(
+        self,
+        task_id: str,
+        action: str,
+        source: str,
+        target: str,
+        description: str,
+    ) -> None:
+        """Handle task update for GUI display."""
+        action_icons = {
+            "created": "📋",
+            "started": "⏳",
+            "completed": "✅",
+            "failed": "⚠",
+            "cancelled": "✗",
+        }
+        icon = action_icons.get(action, "📋")
 
-        Uses coordination message style (muted, italic) to blend with timeline.
-        """
+        if action == "created":
+            text = f"{icon} 新任务 ({task_id})：{description}"
+        elif action == "completed":
+            text = f"{icon} {source} 完成了任务：{description} ({task_id})"
+        elif action == "failed":
+            text = f"{icon} {source} 任务失败：{description} ({task_id})"
+        elif action == "cancelled":
+            text = f"{icon} {source} 任务已取消：{description} ({task_id})"
+        elif action == "started":
+            text = f"{icon} {source} 开始了任务：{description} ({task_id})"
+        else:
+            text = f"{icon} 任务更新 ({task_id})：{description}"
+
         ts = datetime.now().strftime("%H:%M")
         self._messages_area.add_message_row(
             role="agent",

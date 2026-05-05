@@ -15,6 +15,7 @@ from ..tools import (
     ExecTool,
     ListDirTool,
     ManageTasksTool,
+    ManifestManager,
     PDFParseTool,
     PythonExecTool,
     ReadFileTool,
@@ -54,6 +55,7 @@ class LoopManager:
         self.checkpoint_manager = CheckpointManager(self.workspace)
         self.skill_loader = SkillLoader()
         self._task_board = TaskBoard()
+        self.manifest_manager = ManifestManager(self.workspace)
 
         # Subscribe to restart requests
         self.bus.subscribe(RestartRequest, self._handle_restart_request)
@@ -164,6 +166,7 @@ class LoopManager:
                 llm_provider=llm_provider,
                 loop_manager=self,
                 skill_loader=self.skill_loader,
+                manifest_manager=self.manifest_manager,
             )
             self._loops[agent_type] = loop
 
@@ -208,10 +211,14 @@ class LoopManager:
         registry.register(WriteFileTool(
             workspace=self.workspace,
             write_allowed_dir=write_dir,
+            manifest_manager=self.manifest_manager,
+            agent_type=agent_type.value,
         ))
         registry.register(EditFileTool(
             workspace=self.workspace,
             write_allowed_dir=write_dir,
+            manifest_manager=self.manifest_manager,
+            agent_type=agent_type.value,
         ))
 
         # Execution tools (for data analysis, plotting, and main agent)

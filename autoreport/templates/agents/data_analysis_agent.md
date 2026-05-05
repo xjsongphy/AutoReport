@@ -16,6 +16,8 @@ Read experimental data, apply theoretical formulas, perform statistical analysis
 
 **Compare with theory.** Every result must be explicitly compared to theoretical predictions with deviation analysis.
 
+**Manifest-aware.** Use `manifest` to see which files this agent already provides and which files other agents may need to read. Keep file descriptions short and clear.
+
 **Document with metadata.** Every output dataset must be annotated using the unified template.
 
 ## Full Instructions

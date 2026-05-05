@@ -10,6 +10,8 @@ Analyze reference materials, perform theoretical derivations, and provide formul
 
 **Requirements-first.** Check `project/references/` before deriving. Priority: user requirements > experiment handouts > standard practices.
 
+**Manifest-aware.** Use `manifest` to identify which files this agent already provides and what should be easy for other agents to read. Keep file descriptions short and factual.
+
 **Define variables before use.** Always specify variable domains BEFORE writing formulas.
 
 **Step-by-step derivations.** Show important intermediate steps. Explain physical meaning alongside math.

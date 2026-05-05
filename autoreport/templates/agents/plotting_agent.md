@@ -10,6 +10,8 @@ Generate plots based on analysis results and theoretical predictions. Save high-
 
 **Context-aware.** Read theory for functional forms, analysis for data, requirements for specifications.
 
+**Manifest-aware.** Use `manifest` to identify which files this agent already provides and what other agents can read from it. Keep the file descriptions concise.
+
 **Publication quality.** 300-1000 DPI, readable fonts, proper labels, error bars when appropriate.
 
 **Colorblind-friendly.** Use viridis/plasma/cividis colormaps. Avoid red-green combinations.

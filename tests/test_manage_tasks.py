@@ -53,6 +53,20 @@ class TestManageTasksToolAdd:
         assert tasks[0].target_agent == AgentType.MAIN
 
     @pytest.mark.asyncio
+    async def test_add_publishes_created_notification(self, board, bus):
+        notifications = []
+        bus.subscribe(TaskUpdateMessage, lambda msg: notifications.append(msg))
+
+        tool = ManageTasksTool(task_board=board, agent_type=AgentType.MAIN, bus=bus)
+        result = await tool(action="add", description="local todo")
+        assert result["status"] == "ok"
+
+        msg = await asyncio.wait_for(bus._queue.get(), timeout=1)
+        await bus._notify_subscribers(msg)
+        assert len(notifications) == 1
+        assert notifications[0].action == "created"
+
+    @pytest.mark.asyncio
     async def test_add_requires_description(self, board, bus):
         tool = ManageTasksTool(task_board=board, agent_type=AgentType.MAIN, bus=bus)
         result = await tool(action="add")
@@ -68,6 +82,21 @@ class TestManageTasksToolStart:
         result = await tool(action="start", task_id=task.task_id)
         assert result["status"] == "ok"
         assert board.get_task(task.task_id).status == TaskStatus.IN_PROGRESS
+
+    @pytest.mark.asyncio
+    async def test_start_publishes_started_notification(self, board, bus):
+        task = board.create_task(AgentType.MAIN, AgentType.PLOTTING, "draw")
+        notifications = []
+        bus.subscribe(TaskUpdateMessage, lambda msg: notifications.append(msg))
+
+        tool = ManageTasksTool(task_board=board, agent_type=AgentType.PLOTTING, bus=bus)
+        result = await tool(action="start", task_id=task.task_id)
+        assert result["status"] == "ok"
+
+        msg = await asyncio.wait_for(bus._queue.get(), timeout=1)
+        await bus._notify_subscribers(msg)
+        assert len(notifications) == 1
+        assert notifications[0].action == "started"
 
     @pytest.mark.asyncio
     async def test_start_wrong_agent_rejected(self, board, bus):

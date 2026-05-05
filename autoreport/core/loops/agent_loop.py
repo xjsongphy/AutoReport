@@ -38,6 +38,7 @@ from ...interfaces.types import (
     ToolResult as ToolResultMsg,
 )
 from ..skills import SkillLoader
+from ..tools.manifest_tool import ManifestManager, ManifestTool
 from ..tools.registry import ToolRegistry
 from .bus import MessageBus
 
@@ -132,6 +133,7 @@ class AgentLoop:
         prompt_loader: PromptLoader | None = None,
         loop_manager: LoopManager | None = None,
         skill_loader: SkillLoader | None = None,
+        manifest_manager: ManifestManager | None = None,
     ):
         """Initialize agent loop.
 
@@ -154,6 +156,7 @@ class AgentLoop:
         self.llm_provider = llm_provider
         self._loop_manager = loop_manager
         self._skill_loader = skill_loader
+        self._manifest_manager = manifest_manager
 
         self._prompt_loader = prompt_loader or PromptLoader()
         self._identity_prompt: str | None = None
@@ -165,6 +168,7 @@ class AgentLoop:
         self._message_queue: asyncio.Queue[UserMessage] = asyncio.Queue()
         self._current_message: UserMessage | None = None
         self._conversation_history: list[LLMMessage] = []
+        self._manifest_dirty = False
 
         # Debug mode
         self._debug_mode = False
@@ -177,6 +181,9 @@ class AgentLoop:
         # Main Agent subscribes to sub-agent feedback
         if self.agent_type == AgentType.MAIN:
             self.bus.subscribe(AgentFeedback, self._handle_agent_feedback)
+        # Manifest tool is only for sub-agents
+        if self.agent_type != AgentType.MAIN and self._manifest_manager is not None:
+            self.tools.register(ManifestTool(self._manifest_manager, self._get_agent_type_str()))
 
     @property
     def status(self) -> AgentStatus:
@@ -328,6 +335,13 @@ class AgentLoop:
 
             # Get system prompt with progressive loading
             system_prompt = await self._get_system_prompt()
+            if self._manifest_manager and self.agent_type != AgentType.MAIN:
+                system_prompt += (
+                    "\n\n[Manifest]\n"
+                    "你可以在需要时使用 manifest 了解当前本地提供了哪些文件。"
+                    "文件描述应简短，更复杂的关系、依赖、协作说明写在自由文本区。"
+                    "只有在本轮结束前，才重点补充 manifest 的自由文本区。"
+                )
 
             # Prepare messages with system prompt
             messages = [LLMMessage(role="system", content=system_prompt)]
@@ -437,15 +451,35 @@ class AgentLoop:
                 streaming=False,
             ))
 
+            await self._flush_manifest_if_needed()
             await self._set_status(AgentStatus.IDLE)
 
         except Exception as e:
             logger.error("Error processing message in {}: {}", self.agent_type, e)
+            await self._flush_manifest_if_needed()
             await self._set_status(AgentStatus.ERROR)
             await self.bus.publish(Error(
                 source=str(self.agent_type),
                 message=str(e),
             ))
+
+    async def _flush_manifest_if_needed(self) -> None:
+        """Flush manifest notes at the end of a loop if needed."""
+        if self.agent_type == AgentType.MAIN or self._manifest_manager is None:
+            self._manifest_dirty = False
+            return
+
+        if not self._manifest_dirty:
+            return
+
+        try:
+            manifest = self._manifest_manager.load(self._get_agent_type_str())
+            manifest.setdefault("notes", manifest.get("notes", ""))
+            self._manifest_manager.save(self._get_agent_type_str(), manifest)
+        except Exception as e:
+            logger.warning("Failed to flush manifest for {}: {}", self.agent_type, e)
+        finally:
+            self._manifest_dirty = False
 
     async def _handle_tool_calls(
         self,
@@ -574,6 +608,7 @@ class AgentLoop:
             ))
 
         self._conversation_history = current_messages
+        self._manifest_dirty = True
 
         if iteration >= max_iterations:
             logger.warning("Max tool iterations reached for agent: {}", self.agent_type)

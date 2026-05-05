@@ -60,10 +60,10 @@ class ManageTasksTool(Tool):
             return self._handle_list()
 
         if action == "add":
-            return self._handle_add(description, priority, brief)
+            return await self._handle_add(description, priority, brief)
 
         if action == "start":
-            return self._handle_start(task_id)
+            return await self._handle_start(task_id)
 
         if action == "complete":
             return await self._handle_complete(task_id)
@@ -108,7 +108,7 @@ class ManageTasksTool(Tool):
             ],
         }
 
-    def _handle_add(self, description: str | None, priority: str = "normal", brief: str = "") -> dict[str, Any]:
+    async def _handle_add(self, description: str | None, priority: str = "normal", brief: str = "") -> dict[str, Any]:
         if not description:
             return {"status": "error", "error": "description is required for 'add' action"}
         task = self._task_board.create_task(
@@ -118,6 +118,7 @@ class ManageTasksTool(Tool):
             brief=brief,
             priority=priority,
         )
+        await self._publish_task_update(task, "created")
         logger.info("{} added local task {}: {}", self._agent_type, task.task_id, description)
         return {
             "status": "ok",
@@ -125,7 +126,7 @@ class ManageTasksTool(Tool):
             "task_id": task.task_id,
         }
 
-    def _handle_start(self, task_id: str | None) -> dict[str, Any]:
+    async def _handle_start(self, task_id: str | None) -> dict[str, Any]:
         if not task_id:
             return {"status": "error", "error": "task_id is required for 'start' action"}
         try:
@@ -134,7 +135,9 @@ class ManageTasksTool(Tool):
                 return {"status": "error", "error": f"Task {task_id} not found"}
             if task.target_agent != self._agent_type:
                 return {"status": "error", "error": f"Task {task_id} is not assigned to you"}
+            previous_status = task.status.value
             self._task_board.start_task(task_id)
+            await self._publish_task_update(task, "started", previous_status)
             return {"status": "ok", "message": f"Task {task_id} started: {task.description}"}
         except ValueError as e:
             return {"status": "error", "error": str(e)}
@@ -203,12 +206,15 @@ class ManageTasksTool(Tool):
         self, affected_tasks: list, action: str, previous_status: str
     ) -> None:
         for task in affected_tasks:
-            msg = TaskUpdateMessage(
-                task_id=task.task_id,
-                action=action,
-                source_agent=task.source_agent,
-                target_agent=task.target_agent,
-                description=task.description,
-                previous_status=previous_status,
-            )
-            await self._bus.publish(msg)
+            await self._publish_task_update(task, action, previous_status)
+
+    async def _publish_task_update(self, task, action: str, previous_status: str | None = None) -> None:
+        msg = TaskUpdateMessage(
+            task_id=task.task_id,
+            action=action,
+            source_agent=task.source_agent,
+            target_agent=task.target_agent,
+            description=task.description,
+            previous_status=previous_status,
+        )
+        await self._bus.publish(msg)
