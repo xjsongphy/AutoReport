@@ -240,18 +240,32 @@ class AgentPanel(QWidget):
     def _on_file_reference_requested(self, query: str, position: QPoint) -> None:
         if not self._file_search_popup:
             return
-        self._file_search_popup.move(position)
+        # Position popup above input, same width
+        popup_w = self._input_field.width()
+        self._file_search_popup.setFixedWidth(popup_w)
+        # Calculate position: above the input field
+        input_top = self._input_field.mapToGlobal(self._input_field.rect().topLeft())
+        popup_h = self._file_search_popup.calculate_height()
+        self._file_search_popup.move(input_top.x(), input_top.y() - popup_h)
         self._file_search_popup.set_query(query, waiting=True)
         self._file_search_popup.show()
         self._file_search_popup.raise_()
-        # Don't steal focus — ChatInput keeps it for continued typing
 
-        async def on_results(matches):
+        # Run search synchronously via thread pool (fast: in-memory cache)
+        from concurrent.futures import ThreadPoolExecutor
+        executor = ThreadPoolExecutor(max_workers=1)
+
+        def _do_search():
+            return self._file_search_manager._do_search(query)
+
+        def _on_done(future):
+            matches = future.result()
             if self._file_search_popup and self._file_search_popup.isVisible():
                 self._file_search_popup.set_matches(matches)
+            executor.shutdown(wait=False)
 
-        import asyncio
-        asyncio.create_task(self._file_search_manager.search(query, on_results))
+        future = executor.submit(_do_search)
+        future.add_done_callback(_on_done)
 
     def _on_file_selected(self, file_path: Path) -> None:
         self._file_search_popup.hide()
@@ -293,15 +307,15 @@ class AgentPanel(QWidget):
     # ---- Command palette (/ commands) ----
 
     SLASH_COMMANDS = [
-        ("/new", "新建对话 — 清除当前会话，开始新对话"),
-        ("/clear", "清空对话 — 清除当前面板消息"),
-        ("/help", "帮助 — 显示可用命令列表"),
-        ("/compact", "压缩上下文 — 对长对话内容进行摘要压缩"),
-        ("/init", "初始化 — 重置 agent 状态"),
+        "/new",
+        "/clear",
+        "/help",
+        "/compact",
+        "/init",
     ]
 
     def _on_command_palette_requested(self, query: str, position: QPoint) -> None:
-        """Show a popup with available slash commands."""
+        """Show a popup with available slash commands above the input field."""
         from PyQt6.QtWidgets import QApplication
         hints = QApplication.styleHints()
         dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
@@ -309,25 +323,28 @@ class AgentPanel(QWidget):
         bg = "#1f1f1f" if dark else "#ffffff"
         border = "#2b2b2b" if dark else "#e0e0e0"
         fg = "#cccccc" if dark else "#333333"
-        muted = "#737373" if dark else "#999999"
         hover = "#2a2d2e" if dark else "#e8e8e8"
         sel_bg = "#094771" if dark else "#cce4f7"
 
         # Filter commands matching query
         q = query.lower()
-        matches = [(cmd, desc) for cmd, desc in self.SLASH_COMMANDS if q in cmd.lower() or q in desc.lower()]
+        matches = [cmd for cmd in self.SLASH_COMMANDS if q in cmd.lower()]
 
         self._cmd_popup.clear()
-        for cmd, desc in matches:
-            item = QListWidgetItem(f"  {cmd}  —  {desc}")
+        for cmd in matches:
+            item = QListWidgetItem(f"  {cmd}")
             item.setData(Qt.ItemDataRole.UserRole, cmd)
             self._cmd_popup.addItem(item)
         if self._cmd_popup.count() > 0:
             self._cmd_popup.setCurrentRow(0)
 
-        self._cmd_popup.move(position)
+        # Position above input, same width
+        popup_w = self._input_field.width()
+        self._cmd_popup.setFixedWidth(popup_w)
+        input_top = self._input_field.mapToGlobal(self._input_field.rect().topLeft())
         h = min(self._cmd_popup.sizeHintForRow(0) * self._cmd_popup.count() + 12, 200)
         self._cmd_popup.setFixedHeight(h)
+        self._cmd_popup.move(input_top.x(), input_top.y() - h)
         self._cmd_popup.show()
         self._cmd_popup.raise_()
 
@@ -346,7 +363,7 @@ class AgentPanel(QWidget):
     def _execute_slash_command(self, cmd: str, original_text: str) -> None:
         """Execute a slash command."""
         if cmd == "/help":
-            help_text = "可用命令：\n" + "\n".join(f"  {c} — {d}" for c, d in self.SLASH_COMMANDS)
+            help_text = "可用命令：\n" + "\n".join(f"  {c}" for c in self.SLASH_COMMANDS)
             self.add_message("agent", help_text)
         elif cmd in ("/clear", "/new"):
             self.clear_conversation()

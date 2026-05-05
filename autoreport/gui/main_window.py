@@ -98,6 +98,8 @@ class MainWindow(QMainWindow):
                 # --vscode-button-background
                 "send_bg": "#0078d4",
                 "send_hover": "#026ec1",
+                "stop_bg": "#f44747",
+                "stop_hover": "#d32f2f",
                 # subtle scrollbar (VSCode: transparent track, barely visible handle)
                 "scrollbar": "#ffffff1a",
                 "scrollbar_hover": "#ffffff33",
@@ -137,6 +139,8 @@ class MainWindow(QMainWindow):
                 "bubble_hover": "#e8e8e8",
                 "send_bg": "#0078d4",
                 "send_hover": "#006cbe",
+                "stop_bg": "#d32f2f",
+                "stop_hover": "#b71c1c",
                 "scrollbar": "#c1c1c1",
                 "scrollbar_hover": "#a8a8a8",
                 "hover": "#e8e8e8",
@@ -531,6 +535,8 @@ class MainWindow(QMainWindow):
         self.sub_agent_panel.session_selected_from_dropdown.connect(lambda sid: self._on_session_selected(sid, self.sub_agent_panel.agent_type))
         self.sub_agent_panel.delete_session_requested.connect(self._on_delete_session)
         self.sub_agent_panel.rename_session_requested.connect(self._on_rename_session)
+        self.main_agent_panel.interrupt_requested.connect(lambda: self._on_interrupt("main"))
+        self.sub_agent_panel.interrupt_requested.connect(lambda: self._on_interrupt(self.sub_agent_panel.agent_type))
 
         self.preview.selection_changed.connect(self._on_preview_selection_changed)
         self.main_agent_panel.hide_debug_button(hide=True)
@@ -634,6 +640,10 @@ class MainWindow(QMainWindow):
             return
         self._conv_store.append_message(agent_type, "user", content)
         self._submit_coroutine(self.backend.send_user_message(content, agent_type))
+
+    def _on_interrupt(self, agent_type: str) -> None:
+        """Handle interrupt request from GUI."""
+        self._submit_coroutine(self.backend.interrupt_current_message(agent_type))
 
     def _on_debug_mode_toggled(self, enabled: bool) -> None:
         agent_type = self.sub_agent_panel.agent_type

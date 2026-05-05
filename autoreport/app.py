@@ -320,12 +320,12 @@ class BackendAPIImpl(BackendAPI):
         self.config_manager.config.agents.defaults.model = model
         # No restart needed for model change
 
-    async def rollback_to_checkpoint(self, checkpoint_id: str) -> None:
-        """Rollback to a specific checkpoint."""
+    async def rollback_to_checkpoint(self, agent_type: str, checkpoint_id: str) -> None:
+        """Rollback an agent to a specific checkpoint."""
         if self.loop_manager is None:
             raise RuntimeError("Loop manager not initialized")
 
-        await self.loop_manager.rollback_to_checkpoint(checkpoint_id)
+        await self.loop_manager.rollback_to_checkpoint(agent_type, checkpoint_id)
 
     def set_agent_debug_mode(self, agent_type: str, enabled: bool) -> None:
         """Enable or disable debug mode for an agent."""

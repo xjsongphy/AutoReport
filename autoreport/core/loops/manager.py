@@ -352,6 +352,20 @@ class LoopManager:
 
         return checkpoint_id
 
+    async def rollback_to_checkpoint(self, agent_type: str, checkpoint_id: str) -> None:
+        """Rollback an agent to a specific checkpoint and create a post-rollback checkpoint.
+
+        Args:
+            agent_type: Agent type string.
+            checkpoint_id: Checkpoint ID to rollback to.
+        """
+        await self.checkpoint_manager.rollback(agent_type, checkpoint_id)
+        await self.create_checkpoint(
+            agent_type=agent_type,
+            description=f"After rollback to {checkpoint_id[-12:]}",
+            source="rollback",
+        )
+
     async def _handle_restart_request(self, message: Message) -> None:
         """Handle restart request from GUI.
 

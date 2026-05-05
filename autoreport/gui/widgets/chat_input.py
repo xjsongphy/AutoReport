@@ -66,7 +66,8 @@ class ChatInput(QPlainTextEdit):
         key = event.key()
         modifiers = event.modifiers()
 
-        # Popup navigation: forward to popup, don't insert into text
+        # When popup is active, only intercept up/down/enter/escape.
+        # Left/Right/Home/End pass through to move cursor normally.
         if self._popup_active:
             if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
                 direction = "up" if key == Qt.Key.Key_Up else "down"
@@ -77,11 +78,6 @@ class ChatInput(QPlainTextEdit):
                 return
             if key == Qt.Key.Key_Escape:
                 self.popup_navigate.emit("cancel")
-                return
-            if key in (Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Home, Qt.Key.Key_End):
-                # Allow cursor movement + re-check token
-                super().keyPressEvent(event)
-                self._check_current_token()
                 return
 
         # Send on Enter (no Shift)
@@ -115,10 +111,8 @@ class ChatInput(QPlainTextEdit):
             self._on_popup_closed()
             return
 
-        cursor = self.textCursor()
-        cursor.setPosition(start)
-        rect = self.cursorRect(cursor)
-        global_pos = self.mapToGlobal(rect.bottomLeft())
+        # Emit position: top-left of input (popup appears above the input field)
+        global_pos = self.mapToGlobal(self.rect().topLeft())
 
         if token.startswith("@"):
             query = token[1:] if len(token) > 1 else ""
@@ -134,48 +128,50 @@ class ChatInput(QPlainTextEdit):
             self._on_popup_closed()
 
     def current_prefixed_token(self) -> tuple[str, int, int]:
+        """Find @ or / prefixed token spanning the cursor position.
+
+        Searches backwards (inclusive of cursor position) for a @ or /
+        at a word boundary, then forwards to find the token end.
+        Returns (token, start_pos, end_pos) or ("", -1, -1).
+        """
         cursor = self.textCursor()
         position = cursor.position()
         document = self.document()
+        doc_len = document.characterCount()
 
-        # Walk backwards to find the @ or / prefix, tracking start position
-        start = position
-        while start > 0:
-            char = document.characterAt(start - 1)
+        # Search backwards (inclusive) for @ or / at a word boundary
+        prefix_pos = -1
+        search_pos = min(position, doc_len - 2)  # -2: skip trailing paragraph sep
+
+        while search_pos >= 0:
+            char = document.characterAt(search_pos)
             if char in ("@", "/"):
-                start -= 1  # Point to the @/ character itself
-                break
+                # Must be at a word boundary (start of doc or preceded by space)
+                if search_pos == 0 or document.characterAt(search_pos - 1) in " \t\n\r":
+                    prefix_pos = search_pos
+                    break
+                # @/ inside a word (e.g. email@example) — keep searching
             elif char in " \t\n\r":
-                return "", -1, -1
-            elif char in "()[]{}<>\"'":
-                return "", -1, -1
-            start -= 1
-        else:
+                break  # Hit a space — no prefix token before cursor
+            search_pos -= 1
+
+        if prefix_pos < 0:
             return "", -1, -1
 
-        # Walk forwards from cursor to find token end (exclude trailing paragraph sep)
-        end = position
-        doc_len = document.characterCount()
-        while end < doc_len - 1:  # -1 excludes the implicit paragraph separator
+        # Find end of token (stop at space, bracket, or paragraph end)
+        end = prefix_pos + 1
+        while end < doc_len - 1:  # -1: exclude paragraph separator
             char = document.characterAt(end)
             if char in " \t\n\r()[]{}<>\"'":
                 break
             end += 1
 
-        cursor.setPosition(start, QTextCursor.MoveMode.MoveAnchor)
+        cursor.setPosition(prefix_pos, QTextCursor.MoveMode.MoveAnchor)
         cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
         token = cursor.selectedText()
 
-        space_before = False
-        if start == 0:
-            space_before = True
-        else:
-            char_before = document.characterAt(start - 1)
-            space_before = char_before in " \t\n\r"
-
-        if space_before and token:
-            return token, start, end
-
+        if token:
+            return token, prefix_pos, end
         return "", -1, -1
 
     def insert_file_reference(self, file_path: Path) -> None:
@@ -198,7 +194,6 @@ class ChatInput(QPlainTextEdit):
         while end < len(text) and text[end] not in " \t\n\r":
             end += 1
 
-        # Use document character positions (not Python string len)
         doc_len = self.document().characterCount()
         cursor = self.textCursor()
         cursor.setPosition(at_idx, QTextCursor.MoveMode.MoveAnchor)
