@@ -29,8 +29,10 @@ from ...interfaces.types import (
     StatusChange,
     TaskStatus,
     TaskUpdateMessage,
+    QueueUpdateMessage,
     UserMessage,
 )
+from ...utils.agent_labels import get_agent_badge
 from ...interfaces.types import (
     ToolCall as ToolCallMsg,
 )
@@ -198,6 +200,7 @@ class AgentLoop:
 
         self._running = True
         logger.info("Starting agent loop for {}", self.agent_type)
+        await self._publish_queue_update()
 
         # Start processing task
         asyncio.create_task(self._process_loop())
@@ -228,6 +231,7 @@ class AgentLoop:
                     continue
 
                 self._current_message = message
+                await self._publish_queue_update()
                 await self._process_message(message)
 
             except Exception as e:
@@ -263,6 +267,7 @@ class AgentLoop:
             return
 
         await self._message_queue.put(message)
+        await self._publish_queue_update()
 
     async def _handle_task_update(self, message: Message) -> None:
         """Handle TaskUpdateMessage from the message bus.
@@ -294,60 +299,61 @@ class AgentLoop:
 
         if message.action == "created":
             if am_source and self.agent_type == AgentType.MAIN:
-                notification_text = f"[等待] {src_val} 等待 {tgt_val} 的：{message.description}"
+                notification_text = f"[等待] {src_val} 等待 {tgt_val} 的：{message.brief}"
             elif am_source:
-                notification_text = f"[等待] 等待 {tgt_val} 完成：{message.description}"
+                notification_text = f"[等待] 等待 {tgt_val} 完成：{message.brief}"
             elif am_target and is_local:
-                notification_text = f"[待办] 本地任务：{message.description}"
+                notification_text = f"[待办] 本地任务：{message.brief}"
             elif am_target:
-                notification_text = f"[待办] 完成 {src_val} 的任务：{message.description}"
+                notification_text = f"[待办] 完成 {src_val} 的任务：{message.brief}"
             else:
-                notification_text = f"[新任务] {src_val} → {tgt_val}：{message.description}"
+                notification_text = f"[新任务] {src_val} → {tgt_val}：{message.brief}"
 
         elif message.action == "completed":
             if am_source:
-                notification_text = f"[完成] {tgt_val} 已完成：{message.description}。请检查其输出。"
+                notification_text = f"[完成] {tgt_val} 已完成：{message.brief}。请检查其输出。"
             elif am_target:
-                notification_text = f"[完成] 已完成 {src_val} 的任务：{message.description}"
+                notification_text = f"[完成] 已完成 {src_val} 的任务：{message.brief}"
             elif self.agent_type == AgentType.MAIN:
-                notification_text = f"[完成] {src_val} 等待 {tgt_val} 的任务已完成：{message.description}"
+                notification_text = f"[完成] {src_val} 等待 {tgt_val} 的任务已完成：{message.brief}"
             else:
-                notification_text = f"[完成] {src_val} 完成了 {tgt_val} 的任务：{message.description}"
+                notification_text = f"[完成] {src_val} 完成了 {tgt_val} 的任务：{message.brief}"
 
         elif message.action == "started":
             if am_source:
-                notification_text = f"[开始] {tgt_val} 已开始：{message.description}"
+                notification_text = f"[开始] {tgt_val} 已开始：{message.brief}"
             elif self.agent_type == AgentType.MAIN:
-                notification_text = f"[开始] {tgt_val} 开始了 {src_val} 的任务：{message.description}"
+                notification_text = f"[开始] {tgt_val} 开始了 {src_val} 的任务：{message.brief}"
             else:
-                notification_text = f"[开始] {src_val} 开始了：{message.description}"
+                notification_text = f"[开始] {src_val} 开始了：{message.brief}"
 
         elif message.action == "failed":
             if am_source:
-                notification_text = f"[失败] {tgt_val} 失败：{message.description}。请检查并决定如何处理。"
+                notification_text = f"[失败] {tgt_val} 失败：{message.brief}。请检查并决定如何处理。"
             elif am_target:
-                notification_text = f"[失败] 来自 {src_val} 的任务失败：{message.description}"
+                notification_text = f"[失败] 来自 {src_val} 的任务失败：{message.brief}"
             elif self.agent_type == AgentType.MAIN:
-                notification_text = f"[失败] {src_val} 等待 {tgt_val} 的任务失败：{message.description}"
+                notification_text = f"[失败] {src_val} 等待 {tgt_val} 的任务失败：{message.brief}"
             else:
-                notification_text = f"[失败] {src_val} 任务失败 ({tgt_val})：{message.description}"
+                notification_text = f"[失败] {src_val} 任务失败 ({tgt_val})：{message.brief}"
 
         elif message.action == "cancelled":
             if am_source:
-                notification_text = f"[取消] {tgt_val} 已取消：{message.description}"
+                notification_text = f"[取消] {tgt_val} 已取消：{message.brief}"
             elif self.agent_type == AgentType.MAIN:
-                notification_text = f"[取消] {src_val} 等待 {tgt_val} 的任务已取消：{message.description}"
+                notification_text = f"[取消] {src_val} 等待 {tgt_val} 的任务已取消：{message.brief}"
             else:
-                notification_text = f"[取消] {src_val} 任务已取消 ({tgt_val})：{message.description}"
+                notification_text = f"[取消] {src_val} 任务已取消 ({tgt_val})：{message.brief}"
 
         else:
-            notification_text = f"任务更新 {message.action}: {message.description}"
+            notification_text = f"任务更新 {message.action}: {message.brief}"
 
         await self._message_queue.put(UserMessage(
             content=notification_text,
             agent_type=self.agent_type,
             source="system",
         ))
+        await self._publish_queue_update()
         logger.debug("Task update delivered to {}: {}", self.agent_type, message.task_id)
 
     async def _handle_agent_feedback(self, message: Message) -> None:
@@ -365,7 +371,28 @@ class AgentLoop:
             agent_type=self.agent_type,
             source="system",
         ))
+        await self._publish_queue_update()
         logger.info("AgentFeedback delivered to Main Agent from {}: {}", agent_str, issue_type)
+
+    def _queue_message_summary(self, message: UserMessage) -> str:
+        content = str(message.content or "").strip()
+        first_line = content.splitlines()[0].strip() if content else ""
+        if message.source == "main_agent":
+            return f"From Main: {first_line}" if first_line else "From Main"
+        if message.source == "system":
+            return first_line or "System update"
+        if message.source and message.source != "user":
+            sender = get_agent_badge(message.source)
+            return f"From {sender}: {first_line}" if first_line else f"From {sender}"
+        return first_line or "Queued message"
+
+    async def _publish_queue_update(self) -> None:
+        queued = list(self._message_queue._queue)
+        summaries = [self._queue_message_summary(msg) for msg in queued]
+        await self.bus.publish(QueueUpdateMessage(
+            agent_type=self.agent_type,
+            queued_messages=summaries,
+        ))
 
     async def _process_message(self, message: UserMessage) -> None:
         """Process a user message.
@@ -387,10 +414,13 @@ class AgentLoop:
             try:
                 source = message.source if hasattr(message, "source") else "user"
                 agent_str = self._get_agent_type_str()
+                # Save conversation history to checkpoint
+                history_dicts = [msg.model_dump() if hasattr(msg, "model_dump") else {"role": msg.role, "content": msg.content} for msg in self._conversation_history]
                 cp_id = await self._loop_manager.create_checkpoint(
                     agent_type=agent_str,
                     description=f"pre:{source}",
                     source="pre_message",
+                    conversation_history=history_dicts,
                 )
                 logger.debug("{} checkpoint created: {}", agent_str, cp_id)
             except Exception as e:
@@ -757,8 +787,11 @@ class AgentLoop:
             Formatted result string.
         """
         if isinstance(result, dict):
-            # Format dictionary result
-            return str(result)
+            filtered = {
+                key: value for key, value in result.items()
+                if not str(key).startswith("_ui_") and str(key) != "completion_summary"
+            }
+            return str(filtered)
         elif isinstance(result, str):
             return result
         else:
@@ -854,7 +887,7 @@ class AgentLoop:
     async def send_feedback(
         self,
         content: str,
-        feedback_type: str = "issue_report",
+        feedback_type: str = "missing_data",
     ) -> None:
         """Send structured feedback from sub-agent to main agent.
 
@@ -864,7 +897,7 @@ class AgentLoop:
 
         Args:
             content: Feedback message content.
-            feedback_type: Type of feedback — "issue_report", "completion",
+            feedback_type: Type of feedback — "missing_data", "quality",
                 or "query".
 
         Raises:
@@ -962,12 +995,12 @@ class AgentLoop:
                     TaskStatus.IN_PROGRESS: "进行中",
                 }
                 s = status_map.get(t.status, t.status.value)
-                lines.append(f"  - {s} {t.description}")
+                lines.append(f"  - {s} {t.brief}")
         if waitlist:
             lines.append("等待:")
             for t in waitlist[:10]:
                 tgt = t.target_agent.value
-                lines.append(f"  - 等待{tgt} {t.description}")
+                lines.append(f"  - 等待{tgt} {t.brief}")
 
         total = len(todolist) + len(waitlist)
         if total > 20:

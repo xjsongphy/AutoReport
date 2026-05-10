@@ -139,14 +139,16 @@ class TestMessagePersistence:
 
     def test_tool_call_round_trip(self, store: ConversationStore):
         """append_tool_call and append_tool_result should be readable."""
-        store.append_tool_call("main", "read_file", {"path": "test.py"})
-        store.append_tool_result("main", "read_file", result="content")
+        store.append_tool_call("main", "read_file", {"path": "test.py"}, extra={"summary": "Read File"})
+        store.append_tool_result("main", "read_file", result="content", extra={"summary": "Done"})
 
         msgs = store.load_messages("main")
         assert len(msgs) == 2
         assert msgs[0]["role"] == "tool_call"
         assert msgs[0]["content"] == "read_file"
+        assert msgs[0]["summary"] == "Read File"
         assert msgs[1]["role"] == "tool_result"
+        assert msgs[1]["summary"] == "Done"
 
     def test_load_empty_agent(self, store: ConversationStore):
         """load_messages for an agent with no messages should return []."""

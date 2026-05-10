@@ -2,6 +2,7 @@
 
 import asyncio
 from pathlib import Path
+from typing import Any, Dict, List
 
 from loguru import logger
 
@@ -321,7 +322,8 @@ class LoopManager:
         return registry
 
     async def create_checkpoint(
-        self, agent_type: str, description: str = "", source: str = "pre_message"
+        self, agent_type: str, description: str = "", source: str = "pre_message",
+        conversation_history: List[Dict[str, Any]] | None = None,
     ) -> str:
         """Create a per-agent checkpoint.
 
@@ -329,6 +331,7 @@ class LoopManager:
             agent_type: Agent type string (e.g. "main", "data_analysis").
             description: Human-readable description.
             source: Checkpoint source — "pre_message" | "manual" | "rollback".
+            conversation_history: Optional conversation history to save.
 
         Returns:
             Checkpoint ID.
@@ -337,6 +340,7 @@ class LoopManager:
             agent_type=agent_type,
             description=description,
             source=source,
+            conversation_history=conversation_history,
         )
 
         cp = self.checkpoint_manager.get_checkpoint(agent_type, checkpoint_id)
@@ -352,19 +356,55 @@ class LoopManager:
 
         return checkpoint_id
 
-    async def rollback_to_checkpoint(self, agent_type: str, checkpoint_id: str) -> None:
+    async def rollback_to_checkpoint(
+        self, agent_type: str, checkpoint_id: str, restore_conversation: bool = True
+    ) -> Dict[str, Any]:
         """Rollback an agent to a specific checkpoint and create a post-rollback checkpoint.
 
         Args:
             agent_type: Agent type string.
             checkpoint_id: Checkpoint ID to rollback to.
+            restore_conversation: Whether to restore conversation history to agent loop.
+
+        Returns:
+            Dictionary with restored_files count and conversation_history if restored.
         """
-        await self.checkpoint_manager.rollback(agent_type, checkpoint_id)
+        # Cancel any ongoing operation first
+        self.cancel_current_operation(agent_type)
+
+        # Get checkpoint before rolling back (to access conversation history)
+        cp = self.checkpoint_manager.get_checkpoint(agent_type, checkpoint_id)
+        if cp is None:
+            raise ValueError(f"Checkpoint not found: {checkpoint_id}")
+
+        # Rollback files
+        restored = await self.checkpoint_manager.rollback(agent_type, checkpoint_id)
+
+        result = {
+            "restored_files": restored,
+            "conversation_history": cp.conversation_history if restore_conversation else [],
+        }
+
+        # Restore conversation history to agent loop if requested
+        if restore_conversation and cp.conversation_history:
+            from .agent_loop import LLMMessage
+            loop = self._loops.get(agent_type)
+            if loop:
+                # Clear current history and restore from checkpoint
+                loop._conversation_history.clear()
+                for msg_dict in cp.conversation_history:
+                    msg = LLMMessage(**msg_dict)
+                    loop._conversation_history.append(msg)
+                logger.info("Restored {} messages for {}", len(loop._conversation_history), agent_type)
+
+        # Create post-rollback checkpoint
         await self.create_checkpoint(
             agent_type=agent_type,
             description=f"After rollback to {checkpoint_id[-12:]}",
             source="rollback",
         )
+
+        return result
 
     async def _handle_restart_request(self, message: Message) -> None:
         """Handle restart request from GUI.

@@ -9,7 +9,7 @@ from autoreport.config.schema import AgentDefaults
 from autoreport.core.loops.agent_loop import AgentLoop
 from autoreport.core.loops.bus import MessageBus
 from autoreport.core.providers.base import LLMResponse, ToolCall
-from autoreport.interfaces.types import AgentStatus, AgentType, UserMessage
+from autoreport.interfaces.types import AgentStatus, AgentType, QueueUpdateMessage, UserMessage
 
 
 @pytest.fixture
@@ -215,9 +215,31 @@ async def test_handle_user_message_queues(agent_loop):
     assert not agent_loop._message_queue.empty()
 
 
+@pytest.mark.asyncio
+async def test_handle_user_message_publishes_queue_update(agent_loop):
+    msg = UserMessage(content="Hello", agent_type=AgentType.MAIN)
+    await agent_loop._handle_user_message(msg)
+
+    published = list(agent_loop.bus._queue._queue)
+    assert any(isinstance(item, QueueUpdateMessage) for item in published)
+
+
 def test_format_tool_result_dict(agent_loop):
     result = agent_loop._format_tool_result({"key": "value"})
     assert "key" in result
+
+
+def test_format_tool_result_strips_ui_only_fields(agent_loop):
+    result = agent_loop._format_tool_result({
+        "status": "ok",
+        "completion_summary": "visible in tool result",
+        "_ui_summary": "ui only",
+        "_ui_detail": "detail only",
+    })
+    assert "status" in result
+    assert "completion_summary" not in result
+    assert "_ui_summary" not in result
+    assert "_ui_detail" not in result
 
 
 def test_format_tool_result_string(agent_loop):

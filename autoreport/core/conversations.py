@@ -112,11 +112,19 @@ class ConversationStore:
             # If no files for this agent, leave unset (will be lazily created)
 
     def _ensure_session(self, agent_type: str) -> None:
-        """Lazily create a session id in-memory (no metadata save until first message)."""
+        """Lazily create a session id and metadata entry for the agent."""
         if agent_type in self._current_session_ids and self._current_session_ids[agent_type]:
             return
         session_id = str(uuid.uuid4())
         self._current_session_ids[agent_type] = session_id
+        sessions = self._load_sessions_metadata()
+        sessions.insert(0, {
+            "id": session_id,
+            "name": "新对话",
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "preview": "",
+        })
+        self._save_sessions_metadata(sessions)
 
     def _load_sessions_metadata(self) -> list[dict]:
         if not self._sessions_file.exists():
@@ -151,15 +159,8 @@ class ConversationStore:
         return agent_dir / f"{session_id}.jsonl"
 
     def get_sessions(self) -> list[dict]:
-        """Return sessions that have at least one message file for any agent."""
-        sessions = self._load_sessions_metadata()
-        return [
-            s for s in sessions
-            if any(
-                (self._dir / t / f"{s['id']}.jsonl").exists()
-                for t in _AGENT_TYPES
-            )
-        ]
+        """Return session metadata ordered newest first."""
+        return self._load_sessions_metadata()
 
     def get_current_session_id(self, agent_type: str = "main") -> str:
         self._ensure_session(agent_type)
@@ -243,14 +244,16 @@ class ConversationStore:
         self._ensure_session(agent_type)
         session_id = self._current_session_ids[agent_type]
         path = self._dir / agent_type / f"{session_id}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Save session metadata on first write (deferred to avoid empty sessions)
+        # Save session metadata on first write when this session id is new.
         is_new = not path.exists()
         if is_new:
-            timestamp = datetime.now().isoformat(timespec="seconds")
             sessions = self._load_sessions_metadata()
-            sessions.insert(0, {"id": session_id, "name": "新对话", "timestamp": timestamp, "preview": ""})
-            self._save_sessions_metadata(sessions)
+            if not any(s.get("id") == session_id for s in sessions):
+                timestamp = datetime.now().isoformat(timespec="seconds")
+                sessions.insert(0, {"id": session_id, "name": "???", "timestamp": timestamp, "preview": ""})
+                self._save_sessions_metadata(sessions)
 
         record: dict[str, Any] = {
             "ts": datetime.now().isoformat(timespec="seconds"),
@@ -260,8 +263,8 @@ class ConversationStore:
         if extra:
             record.update(extra)
 
-        # Auto-name session from first user message
-        if role == "user":
+        # Auto-name only from the main panel's first direct user message.
+        if role == "user" and agent_type == "main":
             self.rename_current_session_from_first_message(agent_type, content)
             self.update_session_preview(agent_type, content)
         try:
@@ -270,19 +273,31 @@ class ConversationStore:
         except OSError as e:
             logger.warning("Failed to append conversation: {}", e)
 
-    def append_tool_call(self, agent_type: str, tool_name: str, arguments: dict) -> None:
-        self.append_message(agent_type, "tool_call", tool_name, {"arguments": arguments})
+    def append_tool_call(
+        self,
+        agent_type: str,
+        tool_name: str,
+        arguments: dict,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        payload: dict[str, Any] = {"arguments": arguments}
+        if extra:
+            payload.update(extra)
+        self.append_message(agent_type, "tool_call", tool_name, payload)
 
     def append_tool_result(
         self, agent_type: str, tool_name: str,
         result: str | None = None, error: str | None = None,
+        extra: dict[str, Any] | None = None,
     ) -> None:
-        extra: dict[str, Any] = {"tool": tool_name}
+        payload: dict[str, Any] = {"tool": tool_name}
         if error:
-            extra["error"] = error
+            payload["error"] = error
         elif result:
-            extra["result"] = result[:2000]
-        self.append_message(agent_type, "tool_result", tool_name, extra)
+            payload["result"] = result[:2000]
+        if extra:
+            payload.update(extra)
+        self.append_message(agent_type, "tool_result", tool_name, payload)
 
     # ---- Read ----
 

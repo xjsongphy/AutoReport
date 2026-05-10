@@ -51,6 +51,7 @@ class CheckpointData:
     description: str        # human-readable label
     source: str             # "pre_message" | "manual" | "rollback"
     file_states: dict[str, FileState] = field(default_factory=dict)
+    conversation_history: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -64,6 +65,7 @@ class CheckpointData:
                 path: state.to_dict()
                 for path, state in self.file_states.items()
             },
+            "conversation_history": self.conversation_history,
         }
 
     @classmethod
@@ -79,6 +81,7 @@ class CheckpointData:
                 path: FileState.from_dict(state)
                 for path, state in data.get("file_states", {}).items()
             },
+            conversation_history=data.get("conversation_history", []),
         )
 
 
@@ -120,6 +123,7 @@ class CheckpointManager:
         agent_type: str,
         description: str = "",
         source: str = "pre_message",
+        conversation_history: list[dict[str, Any]] | None = None,
     ) -> str:
         """Create a checkpoint for *agent_type* capturing current file states.
 
@@ -140,6 +144,7 @@ class CheckpointManager:
             description=description or f"Checkpoint {agent_type}#{epoch}",
             source=source,
             file_states=file_states,
+            conversation_history=conversation_history or [],
         )
 
         await self._save(cp)
