@@ -59,8 +59,12 @@ class BackendAPI(ABC):
         """Switch to a different model."""
 
     @abstractmethod
-    async def rollback_to_checkpoint(self, agent_type: str, checkpoint_id: str) -> None:
-        """Rollback an agent to a specific checkpoint."""
+    async def rollback_to_checkpoint(self, agent_type: str, checkpoint_id: str) -> dict:
+        """Rollback an agent to a specific checkpoint.
+
+        Returns:
+            Dictionary with restored_files count and conversation_history.
+        """
 
     @abstractmethod
     def set_agent_debug_mode(self, agent_type: str, enabled: bool) -> None:

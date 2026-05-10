@@ -26,6 +26,7 @@ class MessageType(str, Enum):
     CHECKPOINT = "checkpoint"
     API_DEBUG = "api_debug"  # API call debugging information
     TASK_UPDATE = "task_update"
+    QUEUE_UPDATE = "queue_update"
 
 
 class AgentType(str, Enum):
@@ -79,7 +80,7 @@ class UserMessage(Message):
     content: str
     agent_type: AgentType = AgentType.MAIN
     message_id: str | None = None
-    source: str = "user"  # "user" | "main_agent"
+    source: str = "user"  # "user" | "system" | "main_agent" | "<agent_type>"
 
 
 class AgentResponse(Message):
@@ -102,7 +103,7 @@ class AgentFeedback(Message):
     type: MessageType = MessageType.AGENT_FEEDBACK
     agent_type: AgentType
     content: str
-    feedback_type: str = "issue_report"  # "issue_report", "completion", "query"
+    feedback_type: str = "missing_data"  # "missing_data", "quality", "query"
 
 
 class ToolCall(Message):
@@ -173,14 +174,12 @@ class TaskItem(BaseModel):
 
     task_id: str
     brief: str
-    description: str
     source_agent: AgentType
     target_agent: AgentType
     status: TaskStatus = TaskStatus.PENDING
     priority: str = "normal"
     created_at: datetime = Field(default_factory=datetime.now)
     completed_at: datetime | None = None
-    parent_task_id: str | None = None
     blocking: bool = False
 
 
@@ -192,8 +191,16 @@ class TaskUpdateMessage(Message):
     action: str  # "created" | "started" | "completed" | "failed" | "cancelled"
     source_agent: AgentType
     target_agent: AgentType
-    description: str
+    brief: str = ""
     previous_status: str | None = None
+
+
+class QueueUpdateMessage(Message):
+    """Queued follow-up messages waiting for the next agent turn."""
+
+    type: MessageType = MessageType.QUEUE_UPDATE
+    agent_type: AgentType
+    queued_messages: list[str] = Field(default_factory=list)
 
 
 class ApiDebugMessage(Message):
