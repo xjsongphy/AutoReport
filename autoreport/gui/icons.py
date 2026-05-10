@@ -26,9 +26,9 @@ _AGENT_ICON_MAP: dict[str, str] = {
 _AGENT_COLORS: dict[str, str] = {
     "main": "#0078d4",        # Blue
     "data_analysis": "#107c10",  # Green
-    "plotting": "#d8a300",    # Orange/Gold
-    "theory": "#d13438",      # Red
-    "report": "#5c2d91",      # Purple
+    "plotting": "#8e44ad",    # Purple
+    "theory": "#e67e22",      # Orange
+    "report": "#5dade2",      # Light Blue
 }
 
 
