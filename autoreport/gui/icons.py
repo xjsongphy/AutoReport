@@ -22,6 +22,15 @@ _AGENT_ICON_MAP: dict[str, str] = {
     "report": "file-text",
 }
 
+# Agent icon colors
+_AGENT_COLORS: dict[str, str] = {
+    "main": "#0078d4",        # Blue
+    "data_analysis": "#107c10",  # Green
+    "plotting": "#d8a300",    # Orange/Gold
+    "theory": "#d13438",      # Red
+    "report": "#5c2d91",      # Purple
+}
+
 
 def _svg_to_icon(svg_data: str, color: str = "#d4d4d4", size: int = 16) -> QIcon:
     """Convert SVG string to QIcon with specified color and size."""
@@ -43,9 +52,18 @@ def _svg_to_icon(svg_data: str, color: str = "#d4d4d4", size: int = 16) -> QIcon
 _ICON_CACHE: dict[str, QIcon] = {}
 
 
-def get_agent_icon(agent_type: str, color: str = "#d4d4d4", size: int = 16) -> QIcon:
-    """Get QIcon for an agent type."""
+def get_agent_icon(agent_type: str, color: str | None = None, size: int = 16) -> QIcon:
+    """Get QIcon for an agent type.
+
+    Args:
+        agent_type: The agent type (main, data_analysis, plotting, theory, report)
+        color: Optional color override. If None, uses agent's theme color.
+        size: Icon size in pixels.
+    """
     icon_name = _AGENT_ICON_MAP.get(agent_type, "dashboard")
+    # Use agent's theme color if no override provided
+    if color is None:
+        color = _AGENT_COLORS.get(agent_type, "#0078d4")
     cache_key = f"{icon_name}_{color}_{size}"
 
     if cache_key not in _ICON_CACHE:
