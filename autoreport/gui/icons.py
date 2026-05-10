@@ -53,13 +53,13 @@ def _svg_to_icon(svg_data: str, color: str = "#d4d4d4", size: int = 16) -> QIcon
 _ICON_CACHE: dict[str, QIcon] = {}
 
 
-def get_agent_icon(agent_type: str, color: str | None = None, size: int = 16) -> QIcon:
+def get_agent_icon(agent_type: str, color: str | None = None, size: int = 24) -> QIcon:
     """Get QIcon for an agent type.
 
     Args:
         agent_type: The agent type (main, data_analysis, plotting, theory, report)
         color: Optional color override. If None, uses agent's theme color.
-        size: Icon size in pixels.
+        size: Icon size in pixels (default 24 for higher resolution).
     """
     icon_name = _AGENT_ICON_MAP.get(agent_type, "robot")
     # Use agent's theme color if no override provided

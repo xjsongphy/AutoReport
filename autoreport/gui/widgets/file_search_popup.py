@@ -45,7 +45,7 @@ class FileSearchPopup(QWidget):
         """Get agent info dict (lazy loaded to avoid QPixmap before QApplication)."""
         if cls._AGENT_INFO_CACHE is None:
             cls._AGENT_INFO_CACHE = {
-                key: (get_agent_title(key), get_agent_qicon(key, size=16))
+                key: (get_agent_title(key), get_agent_qicon(key, size=24))
                 for key in ("main", "data_analysis", "plotting", "theory", "report")
             }
         return cls._AGENT_INFO_CACHE

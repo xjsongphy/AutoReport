@@ -79,7 +79,7 @@ class AgentPanel(QWidget):
         # Icon label
         self._icon_label = QLabel()
         self._icon_label.setObjectName("panelIcon")
-        self._icon_label.setFixedSize(18, 18)
+        self._icon_label.setFixedSize(24, 24)
         self._icon_label.setScaledContents(True)
         hl.addWidget(self._icon_label)
 
@@ -119,14 +119,11 @@ class AgentPanel(QWidget):
 
         layout.addWidget(header)
 
-        # ---- Inline history dropdown ----
+        # ---- Floating history dropdown (popup, not in layout) ----
         self._history_dropdown = ConversationHistoryDropdown()
-        self._history_dropdown.setVisible(False)
         self._history_dropdown.session_selected.connect(self._on_history_session_selected)
-        self._history_dropdown.new_conversation_requested.connect(self._on_history_new_conversation)
         self._history_dropdown.delete_session_requested.connect(self._on_history_delete)
         self._history_dropdown.rename_session_requested.connect(self._on_history_rename)
-        layout.addWidget(self._history_dropdown)
 
         # ---- Queued follow-up messages ----
         self._queue_preview = QWidget()
@@ -445,8 +442,8 @@ class AgentPanel(QWidget):
     def set_agent_type(self, agent_type: str) -> None:
         self._agent_type = agent_type
         # Update icon
-        icon = get_agent_icon(agent_type, size=18)
-        self._icon_label.setPixmap(icon.pixmap(18, 18))
+        icon = get_agent_icon(agent_type, size=24)
+        self._icon_label.setPixmap(icon.pixmap(24, 24))
         # Update title
         self._title_label.setText(get_agent_title(agent_type))
         if self._file_search_popup:
@@ -723,7 +720,7 @@ class AgentPanel(QWidget):
 
     def _on_history(self) -> None:
         if self._history_dropdown.isVisible():
-            self._history_dropdown.setVisible(False)
+            self._history_dropdown.hide()
         else:
             self.history_requested.emit()
 
@@ -732,6 +729,7 @@ class AgentPanel(QWidget):
 
     def show_history_dropdown(self, sessions: list[dict], current_id: str | None = None) -> None:
         self._history_dropdown.populate(sessions, current_id)
+        self._history_dropdown.show_dropdown(self._history_btn)
 
     def _on_history_session_selected(self, session_id: str) -> None:
         self.session_selected_from_dropdown.emit(session_id)

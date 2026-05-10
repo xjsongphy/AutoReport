@@ -28,13 +28,13 @@ def normalize_agent_type(agent_type: AgentType | str) -> str:
     return str(agent_type or "").strip()
 
 
-def get_agent_icon(agent_type: AgentType | str, color: str | None = None, size: int = 16) -> QIcon:
+def get_agent_icon(agent_type: AgentType | str, color: str | None = None, size: int = 24) -> QIcon:
     """Get QIcon for an agent type.
 
     Args:
         agent_type: The agent type
         color: Optional color override. If None, uses agent's theme color.
-        size: Icon size in pixels.
+        size: Icon size in pixels (default 24 for higher resolution).
     """
     return _get_qicon(agent_type, color, size)
 
