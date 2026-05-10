@@ -37,10 +37,23 @@ class FileSearchPopup(QWidget):
 
     MAX_VISIBLE_ROWS = 10
 
-    AGENT_INFO: dict[str, tuple[str, QIcon]] = {
-        key: (get_agent_title(key), get_agent_qicon(key, size=16))
-        for key in ("main", "data_analysis", "plotting", "theory", "report")
-    }
+    # Lazy initialization to avoid QPixmap before QApplication
+    _AGENT_INFO_CACHE: dict[str, tuple[str, QIcon]] | None = None
+
+    @classmethod
+    def _get_agent_info(cls) -> dict[str, tuple[str, QIcon]]:
+        """Get agent info dict (lazy loaded to avoid QPixmap before QApplication)."""
+        if cls._AGENT_INFO_CACHE is None:
+            cls._AGENT_INFO_CACHE = {
+                key: (get_agent_title(key), get_agent_qicon(key, size=16))
+                for key in ("main", "data_analysis", "plotting", "theory", "report")
+            }
+        return cls._AGENT_INFO_CACHE
+
+    # For backward compatibility
+    @property
+    def AGENT_INFO(self) -> dict[str, tuple[str, QIcon]]:
+        return self._get_agent_info()
 
     def __init__(self, parent=None):
         super().__init__(parent)
