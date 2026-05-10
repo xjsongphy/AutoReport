@@ -4,7 +4,7 @@ import asyncio
 import signal
 import sys
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any, Dict
 
 import typer
 from loguru import logger
@@ -320,12 +320,19 @@ class BackendAPIImpl(BackendAPI):
         self.config_manager.config.agents.defaults.model = model
         # No restart needed for model change
 
-    async def rollback_to_checkpoint(self, agent_type: str, checkpoint_id: str) -> None:
-        """Rollback an agent to a specific checkpoint."""
+    async def rollback_to_checkpoint(self, agent_type: str, checkpoint_id: str) -> Dict[str, Any]:
+        """Rollback an agent to a specific checkpoint.
+
+        Returns:
+            Dictionary with restored_files count and conversation_history.
+        """
         if self.loop_manager is None:
             raise RuntimeError("Loop manager not initialized")
 
-        await self.loop_manager.rollback_to_checkpoint(agent_type, checkpoint_id)
+        result = await self.loop_manager.rollback_to_checkpoint(
+            agent_type, checkpoint_id, restore_conversation=True
+        )
+        return result
 
     def set_agent_debug_mode(self, agent_type: str, enabled: bool) -> None:
         """Enable or disable debug mode for an agent."""
