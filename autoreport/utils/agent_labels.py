@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
+from PyQt6.QtGui import QIcon
 from ..interfaces.types import AgentType
 
 
+def _get_qicon(agent_type: str, color: str = "#d4d4d4", size: int = 16) -> QIcon:
+    """Lazy import of icon function to avoid circular imports."""
+    from ..gui.icons import get_agent_icon as get_agent_qicon
+    return get_agent_qicon(agent_type, color, size)
+
+
 AGENT_LABELS: dict[str, dict[str, str]] = {
-    "main": {"icon": "[总]", "name": "Main"},
-    "data_analysis": {"icon": "[析]", "name": "Data Analysis"},
-    "plotting": {"icon": "[图]", "name": "Plotting"},
-    "theory": {"icon": "[笔]", "name": "Theory"},
-    "report": {"icon": "[稿]", "name": "Report"},
-    "sub": {"icon": "[选]", "name": "Select"},
+    "main": {"name": "Main"},
+    "data_analysis": {"name": "Data Analysis"},
+    "plotting": {"name": "Plotting"},
+    "theory": {"name": "Theory"},
+    "report": {"name": "Report"},
+    "sub": {"name": "Select"},
 }
 
 
@@ -21,9 +28,9 @@ def normalize_agent_type(agent_type: AgentType | str) -> str:
     return str(agent_type or "").strip()
 
 
-def get_agent_icon(agent_type: AgentType | str) -> str:
-    agent_key = normalize_agent_type(agent_type)
-    return AGENT_LABELS.get(agent_key, {}).get("icon", "[?]")
+def get_agent_icon(agent_type: AgentType | str, color: str = "#d4d4d4", size: int = 16) -> QIcon:
+    """Get QIcon for an agent type."""
+    return _get_qicon(agent_type, color, size)
 
 
 def get_agent_name(agent_type: AgentType | str) -> str:
@@ -34,11 +41,19 @@ def get_agent_name(agent_type: AgentType | str) -> str:
 
 
 def get_agent_badge(agent_type: AgentType | str) -> str:
-    return f"{get_agent_icon(agent_type)} {get_agent_name(agent_type)}"
+    """Get text badge for an agent type (no icon, just name)."""
+    return get_agent_name(agent_type)
 
 
 def get_agent_title(agent_type: AgentType | str) -> str:
+    """Get full title for an agent type."""
     agent_key = normalize_agent_type(agent_type)
+    name = get_agent_name(agent_type)
     if agent_key == "sub":
-        return f"{get_agent_badge(agent_type)} Agent"
-    return f"{get_agent_badge(agent_type)} Agent"
+        return f"{name} Agent"
+    return f"{name} Agent"
+
+
+def get_agent_badge_with_icon(agent_type: AgentType | str) -> tuple[QIcon, str]:
+    """Get (icon, name) tuple for an agent type."""
+    return get_agent_icon(agent_type), get_agent_name(agent_type)

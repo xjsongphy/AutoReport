@@ -21,7 +21,7 @@ from autoreport.gui.widgets.chat_input import ChatInput
 from autoreport.gui.widgets.conversation_history import ConversationHistoryDropdown
 from autoreport.gui.widgets.debug_panel import DebugPanel
 from autoreport.gui.widgets.file_search_popup import FileSearchPopup
-from autoreport.utils.agent_labels import get_agent_badge, get_agent_title
+from autoreport.utils.agent_labels import get_agent_badge, get_agent_title, get_agent_icon
 from autoreport.gui.widgets.messages_area import MessagesArea
 from autoreport.gui.widgets.status_indicator import StatusIndicator
 from autoreport.gui.widgets.working_border import WorkingBorder
@@ -76,6 +76,14 @@ class AgentPanel(QWidget):
         hl.setContentsMargins(16, 0, 16, 0)
         hl.setSpacing(8)
 
+        # Icon label
+        self._icon_label = QLabel()
+        self._icon_label.setObjectName("panelIcon")
+        self._icon_label.setFixedSize(18, 18)
+        self._icon_label.setScaledContents(True)
+        hl.addWidget(self._icon_label)
+
+        # Title label
         self._title_label = QLabel(title)
         self._title_label.setObjectName("panelTitle")
         hl.addWidget(self._title_label)
@@ -436,6 +444,10 @@ class AgentPanel(QWidget):
 
     def set_agent_type(self, agent_type: str) -> None:
         self._agent_type = agent_type
+        # Update icon
+        icon = get_agent_icon(agent_type, size=18)
+        self._icon_label.setPixmap(icon.pixmap(18, 18))
+        # Update title
         self._title_label.setText(get_agent_title(agent_type))
         if self._file_search_popup:
             self._file_search_popup.set_current_agent(agent_type)

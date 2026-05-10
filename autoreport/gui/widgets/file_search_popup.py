@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import override
 
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QKeyEvent, QTextDocument
+from PyQt6.QtGui import QKeyEvent, QTextDocument, QIcon
 from PyQt6.QtWidgets import (
     QLabel,
     QListWidget,
@@ -15,7 +15,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from autoreport.utils.agent_labels import get_agent_icon, get_agent_title
+from autoreport.utils.agent_labels import get_agent_title, get_agent_badge_with_icon
+from autoreport.gui.icons import get_agent_icon as get_agent_qicon
 
 
 @dataclass
@@ -36,8 +37,8 @@ class FileSearchPopup(QWidget):
 
     MAX_VISIBLE_ROWS = 10
 
-    AGENT_INFO: dict[str, tuple[str, str]] = {
-        key: (get_agent_title(key), get_agent_icon(key))
+    AGENT_INFO: dict[str, tuple[str, QIcon]] = {
+        key: (get_agent_title(key), get_agent_qicon(key, size=16))
         for key in ("main", "data_analysis", "plotting", "theory", "report")
     }
 
@@ -46,7 +47,7 @@ class FileSearchPopup(QWidget):
         self._query = ""
         self._matches: list[FileMatch] = []
         self._selected_idx = 0
-        self._agents: list[tuple[str, str, str]] = []
+        self._agents: list[tuple[str, str, QIcon]] = []
         self._current_agent: str = ""
 
         self._setup_ui()
@@ -165,8 +166,9 @@ class FileSearchPopup(QWidget):
         self._list_widget.setVisible(True)
         self._status_label.setVisible(False)
 
-        for agent_type, name, emoji in self._agents:
-            item = QListWidgetItem(f"  {emoji}  {name}")
+        for agent_type, name, icon in self._agents:
+            item = QListWidgetItem(f"  {name}")
+            item.setIcon(icon)
             item.setData(Qt.ItemDataRole.UserRole, ("agent", agent_type))
             self._list_widget.addItem(item)
 
