@@ -172,11 +172,16 @@ AutoReport uses [mineru-open-api](https://github.com/opendatalab/MinerU) CLI for
 
 Supports batch processing (max 200MB / 600 pages per file), text/image/table/formula extraction.
 
+### UI Icons
+
+Agent type icons are from [Tabler Icons](https://tabler-icons.io/) — 6000+ free SVG icons, MIT License.
+
 ### Reference Projects
 
+- [DeepCode](https://github.com/xjsongphy/DeepCode) — API config (YAML secrets + env fallback), multi-provider support, error handling
 - [cc-switch](https://github.com/farion1231/cc-switch) — Provider presets (50+ providers)
-- [nanobot](https://github.com/nanobot) — AgentLoop architecture, tool definitions
-- [codex](https://github.com/codex) — UI design patterns, streaming implementation
+- [nanobot](https://github.com/zai-ai/nanobot) — AgentLoop architecture, tool definitions, progressive prompt loading
+- [codex](https://github.com/zai-ai/codex) — UI design patterns, streaming implementation
 
 ### License
 
@@ -332,11 +337,16 @@ curl -fsSL https://cdn-mineru.openxlab.org.cn/open-api-cli/install.sh | sh
 mineru-open-api auth
 ```
 
+### UI 图标
+
+Agent 类型图标来自 [Tabler Icons](https://tabler-icons.io/) — 6000+ 免费 SVG 图标，MIT 许可证。
+
 ### 参考项目
 
+- [DeepCode](https://github.com/xjsongphy/DeepCode) — API 配置（YAML 密钥 + 环境变量回退）、多 Provider 支持、错误处理
 - [cc-switch](https://github.com/farion1231/cc-switch) — Provider 预设（50+ 服务商）
-- [nanobot](https://github.com/nanobot) — AgentLoop 架构、工具定义
-- [codex](https://github.com/codex) — UI 设计模式、流式传输实现
+- [nanobot](https://github.com/zai-ai/nanobot) — AgentLoop 架构、工具定义、渐进式提示词加载
+- [codex](https://github.com/zai-ai/codex) — UI 设计模式、流式传输实现
 
 ### 许可证
 
