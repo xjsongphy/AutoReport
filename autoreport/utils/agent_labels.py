@@ -6,7 +6,7 @@ from PyQt6.QtGui import QIcon
 from ..interfaces.types import AgentType
 
 
-def _get_qicon(agent_type: str, color: str = "#d4d4d4", size: int = 16) -> QIcon:
+def _get_qicon(agent_type: str, color: str | None = None, size: int = 16) -> QIcon:
     """Lazy import of icon function to avoid circular imports."""
     from ..gui.icons import get_agent_icon as get_agent_qicon
     return get_agent_qicon(agent_type, color, size)
@@ -28,8 +28,14 @@ def normalize_agent_type(agent_type: AgentType | str) -> str:
     return str(agent_type or "").strip()
 
 
-def get_agent_icon(agent_type: AgentType | str, color: str = "#d4d4d4", size: int = 16) -> QIcon:
-    """Get QIcon for an agent type."""
+def get_agent_icon(agent_type: AgentType | str, color: str | None = None, size: int = 16) -> QIcon:
+    """Get QIcon for an agent type.
+
+    Args:
+        agent_type: The agent type
+        color: Optional color override. If None, uses agent's theme color.
+        size: Icon size in pixels.
+    """
     return _get_qicon(agent_type, color, size)
 
 
