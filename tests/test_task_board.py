@@ -12,7 +12,7 @@ class TestTaskBoard:
         task = board.create_task(
             source=AgentType.DATA_ANALYSIS,
             target=AgentType.PLOTTING,
-            description="Create scatter plot",
+            brief="Create scatter plot",
         )
         assert task in board.get_waitlist(AgentType.DATA_ANALYSIS)
         assert task in board.get_todolist(AgentType.PLOTTING)
@@ -24,8 +24,8 @@ class TestTaskBoard:
         t1 = board.create_task(AgentType.MAIN, AgentType.THEORY, "t1")
         t2 = board.create_task(AgentType.MAIN, AgentType.THEORY, "t2")
         assert t1.task_id != t2.task_id
-        assert t1.task_id == "T-001"
-        assert t2.task_id == "T-002"
+        assert t1.task_id == "tk001"
+        assert t2.task_id == "tk002"
 
     def test_start_task(self):
         board = TaskBoard()
@@ -40,45 +40,30 @@ class TestTaskBoard:
         with pytest.raises(ValueError, match="COMPLETED"):
             board.start_task(task.task_id)
 
-    def test_complete_task_chain(self):
+    def test_complete_task_chain_with_shared_id(self):
         board = TaskBoard()
-        t1 = board.create_task(AgentType.DATA_ANALYSIS, AgentType.MAIN, "delegate plot")
-        t2 = board.create_task(AgentType.MAIN, AgentType.PLOTTING, "create plot",
-                               parent_task_id=t1.task_id)
-        affected = board.complete_task(t2.task_id)
+        t1 = board.create_task(AgentType.DATA_ANALYSIS, AgentType.MAIN, "delegate plot", task_id="tk999")
+        t2 = board.create_task(AgentType.MAIN, AgentType.PLOTTING, "create plot", task_id="tk999")
+        affected = board.complete_task(t2.task_id, target_agent=AgentType.PLOTTING)
         assert len(affected) == 2
-        assert board.get_task(t2.task_id).status == TaskStatus.COMPLETED
-        assert board.get_task(t1.task_id).status == TaskStatus.COMPLETED
+        assert board.get_task(t2.task_id, target_agent=AgentType.PLOTTING).status == TaskStatus.COMPLETED
+        assert board.get_task(t1.task_id, target_agent=AgentType.MAIN).status == TaskStatus.COMPLETED
 
-    def test_fail_task_chain(self):
+    def test_fail_task_chain_with_shared_id(self):
         board = TaskBoard()
-        t1 = board.create_task(AgentType.DATA_ANALYSIS, AgentType.MAIN, "delegate")
-        t2 = board.create_task(AgentType.MAIN, AgentType.PLOTTING, "plot",
-                               parent_task_id=t1.task_id)
-        affected = board.fail_task(t2.task_id)
+        board.create_task(AgentType.DATA_ANALYSIS, AgentType.MAIN, "delegate", task_id="tk999")
+        board.create_task(AgentType.MAIN, AgentType.PLOTTING, "plot", task_id="tk999")
+        affected = board.fail_task("tk999", target_agent=AgentType.PLOTTING)
         assert len(affected) == 2
-        assert board.get_task(t1.task_id).status == TaskStatus.FAILED
+        assert board.get_task("tk999", target_agent=AgentType.MAIN).status == TaskStatus.FAILED
 
-    def test_cancel_task_chain(self):
+    def test_cancel_task_chain_with_shared_id(self):
         board = TaskBoard()
-        t1 = board.create_task(AgentType.DATA_ANALYSIS, AgentType.MAIN, "delegate")
-        t2 = board.create_task(AgentType.MAIN, AgentType.PLOTTING, "plot",
-                               parent_task_id=t1.task_id)
-        affected = board.cancel_task(t2.task_id)
+        board.create_task(AgentType.DATA_ANALYSIS, AgentType.MAIN, "delegate", task_id="tk999")
+        board.create_task(AgentType.MAIN, AgentType.PLOTTING, "plot", task_id="tk999")
+        affected = board.cancel_task("tk999", target_agent=AgentType.PLOTTING)
         assert len(affected) == 2
-        assert board.get_task(t1.task_id).status == TaskStatus.CANCELLED
-
-    def test_chain_stops_at_resolved_parent(self):
-        board = TaskBoard()
-        t1 = board.create_task(AgentType.DATA_ANALYSIS, AgentType.MAIN, "delegate")
-        t2 = board.create_task(AgentType.MAIN, AgentType.PLOTTING, "plot",
-                               parent_task_id=t1.task_id)
-        board.complete_task(t1.task_id)
-        t3 = board.create_task(AgentType.REPORT, AgentType.PLOTTING, "other",
-                               parent_task_id=t1.task_id)
-        affected = board.complete_task(t3.task_id)
-        assert len(affected) == 1
-        assert affected[0].task_id == t3.task_id
+        assert board.get_task("tk999", target_agent=AgentType.MAIN).status == TaskStatus.CANCELLED
 
     def test_get_all_tasks(self):
         board = TaskBoard()

@@ -11,6 +11,7 @@ from autoreport.interfaces.types import (
     AgentFeedback,
     AgentResponse,
     AgentType,
+    TaskUpdateMessage,
     UserMessage,
 )
 
@@ -91,15 +92,30 @@ class TestSendToAgentTool:
         assert result["feedback"][0]["type"] == "quality"
 
     @pytest.mark.asyncio
-    async def test_non_blocking_dispatches_immediately(self, bus):
-        tool = SendToAgentTool(bus=bus)
+    async def test_non_blocking_requires_task_items_with_board(self, bus):
+        board = TaskBoard()
+        tool = SendToAgentTool(bus=bus, task_board=board)
         result = await tool(
             agent_type="data_analysis",
             content="analyze data",
             blocking=False,
         )
+        assert result["status"] == "error"
+        assert "requires task_items" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_non_blocking_with_task_items_delegates(self, bus):
+        board = TaskBoard()
+        tool = SendToAgentTool(bus=bus, task_board=board)
+        result = await tool(
+            agent_type="data_analysis",
+            content="analyze data",
+            blocking=False,
+            task_items=[{"description": "analyze CSV"}],
+        )
         assert result["status"] == "delegated"
         assert result["agent_type"] == "data_analysis"
+        assert "task_ids" in result
 
     @pytest.mark.asyncio
     async def test_task_items_creates_tracked_tasks(self, bus):
@@ -120,7 +136,7 @@ class TestSendToAgentTool:
         assert len(tasks) == 2
 
     @pytest.mark.asyncio
-    async def test_blocking_with_task_items_creates_on_board(self, bus):
+    async def test_blocking_with_task_items_rejected(self, bus):
         board = TaskBoard()
         tool = SendToAgentTool(bus=bus, task_board=board, timeout=0.2)
         result = await tool(
@@ -128,19 +144,23 @@ class TestSendToAgentTool:
             content="compile report",
             task_items=[{"description": "final report"}],
         )
-        assert result["status"] == "timeout"
-        # Task is created on board regardless of timeout
+        assert result["status"] == "error"
+        assert "does not support task_items" in result["error"]
+        # No task created
         tasks = board.get_todolist(AgentType.REPORT)
-        assert len(tasks) == 1
+        assert len(tasks) == 0
 
     @pytest.mark.asyncio
-    async def test_no_task_items_without_board(self, bus):
+    async def test_non_blocking_without_board_ignored(self, bus):
         tool = SendToAgentTool(bus=bus, timeout=0.2)
         result = await tool(
             agent_type="theory",
             content="test",
-            task_items=[{"description": "should be ignored"}],
+            blocking=False,
+            task_items=[{"description": "no board to track"}],
         )
+        # Without task_board, task_items are ignored and allowed
+        assert result["status"] == "delegated"
         assert "task_ids" not in result
 
 
@@ -190,7 +210,49 @@ class TestReportIssueTool:
         assert result["requested_target"] == "theory"
         tasks = board.get_todolist(AgentType.MAIN)
         assert len(tasks) == 1
-        assert tasks[0].description == "derive formulas for overlay"
+        assert tasks[0].brief == "derive formulas for overlay"
+
+    @pytest.mark.asyncio
+    async def test_request_task_auto_dispatches_child_task(self, bus):
+        board = TaskBoard()
+        tool = ReportIssueTool(bus=bus, agent_type=AgentType.PLOTTING, task_board=board)
+
+        result = await tool(
+            content="missing theory curves",
+            issue_type="missing_data",
+            request_task_for="theory",
+            task_description="derive formulas for overlay",
+            task_brief="theory overlay",
+        )
+
+        assert result["status"] == "reported"
+        assert result["requested_target"] == "theory"
+        assert "task_id" in result
+        assert "dispatched_task_id" in result
+
+        parent = board.get_task(result["task_id"], target_agent=AgentType.MAIN)
+        child = board.get_task(result["dispatched_task_id"], target_agent=AgentType.THEORY)
+        assert parent is not None
+        assert child is not None
+        assert parent.source_agent == AgentType.PLOTTING
+        assert parent.target_agent == AgentType.MAIN
+        assert child.source_agent == AgentType.MAIN
+        assert child.target_agent == AgentType.THEORY
+        assert child.task_id == parent.task_id
+        assert child.brief == "theory overlay"
+
+        queued = [await asyncio.wait_for(bus._queue.get(), timeout=1) for _ in range(4)]
+        task_updates = [msg for msg in queued if isinstance(msg, TaskUpdateMessage)]
+        user_messages = [msg for msg in queued if isinstance(msg, UserMessage)]
+        feedbacks = [msg for msg in queued if isinstance(msg, AgentFeedback)]
+
+        assert len(task_updates) == 2
+        assert len(user_messages) == 1
+        assert len(feedbacks) == 1
+        assert user_messages[0].agent_type == AgentType.THEORY
+        assert user_messages[0].source == "main_agent"
+        assert "derive formulas for overlay" in user_messages[0].content
+        assert "missing theory curves" in user_messages[0].content
 
     @pytest.mark.asyncio
     async def test_request_task_invalid_target_defaults_to_main(self, bus):
@@ -202,6 +264,7 @@ class TestReportIssueTool:
             task_description="something",
         )
         assert "task_id" in result
+        assert "dispatched_task_id" not in result
         tasks = board.get_todolist(AgentType.MAIN)
         assert len(tasks) == 1
 

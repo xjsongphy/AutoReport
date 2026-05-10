@@ -37,6 +37,8 @@ class TestManageTasksToolList:
         result = await tool(action="list")
         assert len(result["todolist"]) == 1  # analyze task targets MAIN
         assert len(result["waitlist"]) == 1  # draw task sourced by MAIN
+        assert "description" not in result["todolist"][0]
+        assert "description" not in result["waitlist"][0]
 
 
 class TestManageTasksToolAdd:
@@ -65,6 +67,7 @@ class TestManageTasksToolAdd:
         await bus._notify_subscribers(msg)
         assert len(notifications) == 1
         assert notifications[0].action == "created"
+        assert notifications[0].brief == "local todo"
 
     @pytest.mark.asyncio
     async def test_add_requires_description(self, board, bus):
@@ -85,7 +88,7 @@ class TestManageTasksToolStart:
 
     @pytest.mark.asyncio
     async def test_start_publishes_started_notification(self, board, bus):
-        task = board.create_task(AgentType.MAIN, AgentType.PLOTTING, "draw")
+        task = board.create_task(AgentType.MAIN, AgentType.PLOTTING, "plot summary")
         notifications = []
         bus.subscribe(TaskUpdateMessage, lambda msg: notifications.append(msg))
 
@@ -97,6 +100,7 @@ class TestManageTasksToolStart:
         await bus._notify_subscribers(msg)
         assert len(notifications) == 1
         assert notifications[0].action == "started"
+        assert notifications[0].brief == "plot summary"
 
     @pytest.mark.asyncio
     async def test_start_wrong_agent_rejected(self, board, bus):
@@ -121,9 +125,17 @@ class TestManageTasksToolComplete:
         bus.subscribe(TaskUpdateMessage, lambda msg: notifications.append(msg))
 
         tool = ManageTasksTool(task_board=board, agent_type=AgentType.PLOTTING, bus=bus)
-        result = await tool(action="complete", task_id=task.task_id)
+        result = await tool(
+            action="complete",
+            task_id=task.task_id,
+            completion_summary="completed draw",
+            reply_content="done",
+        )
         assert result["status"] == "ok"
         assert result["chain_affected"] == 1
+        assert result["completion_summary"] == "completed draw"
+        assert result["_ui_summary"] == "completed draw"
+        assert result["_ui_detail"] == "done"
 
         # Process notification
         msg = await asyncio.wait_for(bus._queue.get(), timeout=1)
@@ -133,14 +145,13 @@ class TestManageTasksToolComplete:
 
     @pytest.mark.asyncio
     async def test_complete_chain_notifies_all(self, board, bus):
-        t1 = board.create_task(AgentType.DATA_ANALYSIS, AgentType.MAIN, "delegate")
-        t2 = board.create_task(AgentType.MAIN, AgentType.PLOTTING, "draw",
-                               parent_task_id=t1.task_id)
+        t1 = board.create_task(AgentType.DATA_ANALYSIS, AgentType.MAIN, "delegate", task_id="tk900")
+        t2 = board.create_task(AgentType.MAIN, AgentType.PLOTTING, "draw", task_id="tk900")
         notifications = []
         bus.subscribe(TaskUpdateMessage, lambda msg: notifications.append(msg))
 
         tool = ManageTasksTool(task_board=board, agent_type=AgentType.PLOTTING, bus=bus)
-        result = await tool(action="complete", task_id=t2.task_id)
+        result = await tool(action="complete", task_id=t2.task_id, reply_content="done")
         assert result["chain_affected"] == 2  # t2 + t1
 
         # Process notifications
@@ -148,6 +159,74 @@ class TestManageTasksToolComplete:
             msg = await asyncio.wait_for(bus._queue.get(), timeout=1)
             await bus._notify_subscribers(msg)
         assert len(notifications) == 2
+
+    @pytest.mark.asyncio
+    async def test_complete_delegated_task_requires_response(self, board, bus):
+        task = board.create_task(AgentType.MAIN, AgentType.PLOTTING, "draw")
+        tool = ManageTasksTool(task_board=board, agent_type=AgentType.PLOTTING, bus=bus)
+
+        result = await tool(action="complete", task_id=task.task_id)
+
+        assert result["status"] == "error"
+        assert "reply_content is required" in result["error"]
+        assert board.get_task(task.task_id).status == TaskStatus.PENDING
+
+    @pytest.mark.asyncio
+    async def test_complete_delegated_task_auto_replies(self, board, bus):
+        task = board.create_task(AgentType.MAIN, AgentType.PLOTTING, "draw")
+        tool = ManageTasksTool(task_board=board, agent_type=AgentType.PLOTTING, bus=bus)
+
+        result = await tool(action="complete", task_id=task.task_id, reply_content="plot done")
+
+        assert result["status"] == "ok"
+        assert result["auto_replied"] == 1
+
+        messages = [await asyncio.wait_for(bus._queue.get(), timeout=1) for _ in range(2)]
+        reply = next(msg for msg in messages if hasattr(msg, "source") and getattr(msg, "source", None) == "plotting")
+        assert reply.agent_type == AgentType.MAIN
+        assert reply.content == "plot done"
+
+    @pytest.mark.asyncio
+    async def test_complete_sub_main_sub_chain_auto_replies_to_main_and_origin(self, board, bus):
+        parent = board.create_task(AgentType.DATA_ANALYSIS, AgentType.MAIN, "coordinate theory", task_id="tk901")
+        child = board.create_task(
+            AgentType.MAIN,
+            AgentType.THEORY,
+            "derive formulas",
+            task_id="tk901",
+        )
+        tool = ManageTasksTool(task_board=board, agent_type=AgentType.THEORY, bus=bus)
+
+        result = await tool(
+            action="complete",
+            task_id=child.task_id,
+            completion_summary="theory finished",
+            reply_content="formulas ready",
+        )
+
+        assert result["status"] == "ok"
+        assert result["chain_affected"] == 2
+        assert result["auto_replied"] == 1
+        assert result["completion_summary"] == "theory finished"
+        assert board.get_task(parent.task_id).status == TaskStatus.COMPLETED
+        assert board.get_task(child.task_id).status == TaskStatus.COMPLETED
+
+        messages = [await asyncio.wait_for(bus._queue.get(), timeout=1) for _ in range(3)]
+        replies = [msg for msg in messages if hasattr(msg, "source") and getattr(msg, "source", None) == "theory"]
+        assert len(replies) == 1
+        assert replies[0].agent_type == AgentType.DATA_ANALYSIS
+
+    @pytest.mark.asyncio
+    async def test_complete_response_alias_still_supported(self, board, bus):
+        task = board.create_task(AgentType.MAIN, AgentType.PLOTTING, "draw")
+        tool = ManageTasksTool(task_board=board, agent_type=AgentType.PLOTTING, bus=bus)
+
+        result = await tool(action="complete", task_id=task.task_id, response="legacy alias")
+
+        assert result["status"] == "ok"
+        messages = [await asyncio.wait_for(bus._queue.get(), timeout=1) for _ in range(2)]
+        reply = next(msg for msg in messages if hasattr(msg, "source") and getattr(msg, "source", None) == "plotting")
+        assert reply.content == "legacy alias"
 
 
 class TestManageTasksToolCancel:

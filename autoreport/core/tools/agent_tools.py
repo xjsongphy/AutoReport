@@ -25,10 +25,9 @@ class SendToAgentTool(Tool):
     description = (
         "Send a task instruction to a sub-agent. Use this to dispatch work to: "
         "theory, data_analysis, plotting, report. "
-        "Optionally create tracked tasks with 'task_items' parameter for "
-        "waitlist/todolist tracking. "
-        "Set blocking=False for non-blocking delegation — the task will be "
-        "tracked and you'll be notified when the sub-agent completes it. "
+        "Modes (choose one):\n"
+        "- blocking=True (default): Wait for response, no task tracking.\n"
+        "- blocking=False with task_items: Non-blocking, creates tracked tasks for waitlist/todolist.\n"
         "Returns the sub-agent's full response text."
     )
 
@@ -65,7 +64,19 @@ class SendToAgentTool(Tool):
                 "error": f"Unknown agent type '{agent_type}'. Valid: {valid}",
             }
 
-        # --- Task items: create linked waitlist/todolist entries ---
+        # Validate: blocking and task_items are mutually exclusive by design
+        if blocking and task_items:
+            return {
+                "status": "error",
+                "error": "blocking=True does not support task_items. Use blocking=False with task_items for tracked tasks.",
+            }
+        if not blocking and not task_items and self._task_board:
+            return {
+                "status": "error",
+                "error": "blocking=False requires task_items when task_board is available. Provide task_items to track tasks.",
+            }
+
+        # --- Task items: create linked waitlist/todolist entries (non-blocking only) ---
         created_task_ids: list[str] = []
         if task_items and self._task_board:
             main_type = AgentType.MAIN
@@ -75,7 +86,6 @@ class SendToAgentTool(Tool):
                 task = self._task_board.create_task(
                     source=main_type,
                     target=target,
-                    description=desc,
                     brief=brief,
                     blocking=blocking,
                 )
@@ -89,7 +99,7 @@ class SendToAgentTool(Tool):
                         action="created",
                         source_agent=task.source_agent,
                         target_agent=task.target_agent,
-                        description=task.description,
+                        brief=task.brief,
                         previous_status=None,
                     ))
 
@@ -221,29 +231,71 @@ class ReportIssueTool(Tool):
         if issue_type not in valid_types:
             issue_type = "missing_data"
 
+        requested_target: AgentType | None = None
+        if request_task_for:
+            try:
+                requested_target = AgentType(request_task_for)
+            except ValueError:
+                requested_target = None
+
         # Create task if requested
         created_task_id: str | None = None
+        dispatched_task_id: str | None = None
         if request_task_for and task_description and self._task_board:
-            task = self._task_board.create_task(
+            task_link_id = self._task_board._next_id()
+            parent_task = self._task_board.create_task(
                 source=self._agent_type,
                 target=AgentType.MAIN,
-                description=task_description,
-                brief=task_brief,
+                brief=task_brief or task_description,
                 blocking=False,
+                task_id=task_link_id,
             )
-            created_task_id = task.task_id
+            created_task_id = parent_task.task_id
             logger.info(
                 "ReportIssueTool: {} created task {} for main coordination (requested_target={})",
-                self._agent_type, task.task_id, request_task_for,
+                self._agent_type, parent_task.task_id, request_task_for,
             )
             await self._bus.publish(TaskUpdateMessage(
-                task_id=task.task_id,
+                task_id=parent_task.task_id,
                 action="created",
-                source_agent=task.source_agent,
-                target_agent=task.target_agent,
-                description=task.description,
+                source_agent=parent_task.source_agent,
+                target_agent=parent_task.target_agent,
+                brief=parent_task.brief,
                 previous_status=None,
             ))
+            if requested_target and requested_target != AgentType.MAIN:
+                child_task = self._task_board.create_task(
+                    source=AgentType.MAIN,
+                    target=requested_target,
+                    brief=task_brief or task_description,
+                    blocking=False,
+                    task_id=task_link_id,
+                )
+                dispatched_task_id = child_task.task_id
+                logger.info(
+                    "ReportIssueTool: auto-dispatched child task {} from main to {}",
+                    child_task.task_id, requested_target,
+                )
+                await self._bus.publish(TaskUpdateMessage(
+                    task_id=child_task.task_id,
+                    action="created",
+                    source_agent=child_task.source_agent,
+                    target_agent=child_task.target_agent,
+                    brief=child_task.brief,
+                    previous_status=None,
+                ))
+                dispatch_content = task_description.strip()
+                issue_context = content.strip()
+                if issue_context and issue_context != dispatch_content:
+                    dispatch_content = (
+                        f"{dispatch_content}\n\n"
+                        f"Context from {self._agent_type.value}: {issue_context}"
+                    )
+                await self._bus.publish(UserMessage(
+                    content=dispatch_content,
+                    agent_type=requested_target,
+                    source="main_agent",
+                ))
 
         await self._bus.publish(AgentFeedback(
             agent_type=self._agent_type,
@@ -263,5 +315,9 @@ class ReportIssueTool(Tool):
         }
         if created_task_id:
             result["task_id"] = created_task_id
-            result["requested_target"] = request_task_for
+            result["requested_target"] = (
+                requested_target.value if requested_target else request_task_for
+            )
+        if dispatched_task_id:
+            result["dispatched_task_id"] = dispatched_task_id
         return result
