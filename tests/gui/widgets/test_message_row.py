@@ -74,3 +74,31 @@ def test_multiline_content(qtbot):
     assert "Line 1" in display_text
     assert "Line 2" in display_text
     assert "Line 3" in display_text
+
+
+def test_user_message_can_render_collapsed_summary(qtbot):
+    widget = MessageRow(
+        role="user",
+        content="line 1\nline 2",
+        summary="Message From Main: line 1",
+        detail="line 1\nline 2",
+    )
+    qtbot.addWidget(widget)
+
+    assert not widget.is_expanded()
+    widget._summary_btn.click()
+    assert widget.is_expanded()
+
+
+def test_agent_message_can_render_collapsed_summary(qtbot):
+    widget = MessageRow(
+        role="agent",
+        content="issue detail",
+        summary="Theory reported quality: issue detail",
+        detail="issue detail\nmore",
+    )
+    qtbot.addWidget(widget)
+
+    assert not widget.is_expanded()
+    widget._summary_btn.click()
+    assert widget.is_expanded()

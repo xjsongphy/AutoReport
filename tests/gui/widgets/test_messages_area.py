@@ -41,6 +41,22 @@ def test_add_message_row(qtbot):
     assert widget.message_count() == 2
 
 
+def test_add_collapsed_message_row(qtbot):
+    widget = MessagesArea()
+    qtbot.addWidget(widget)
+
+    widget.add_message_row(
+        role="agent",
+        content="detail line 1\ndetail line 2",
+        summary="Collapsed summary",
+        detail="detail line 1\ndetail line 2",
+    )
+
+    rows = widget.get_message_rows()
+    assert len(rows) == 1
+    assert not rows[0].is_expanded()
+
+
 def test_add_tool_group(qtbot):
     """Adding a ToolCallGroup should increase message count."""
     widget = MessagesArea()

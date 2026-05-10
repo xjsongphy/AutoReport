@@ -37,3 +37,28 @@ def test_expand_collapse_works(qtbot):
     # Click to collapse
     widget._header_btn.click()
     assert not widget.is_expanded()
+
+
+def test_pending_call_can_be_completed(qtbot):
+    """Pending tool calls should update in place when a result arrives."""
+    widget = ToolCallGroup()
+    qtbot.addWidget(widget)
+
+    widget.add_tool_call(
+        "send_to_agent",
+        {"agent_type": "theory"},
+        success=None,
+        summary="Send To Theory",
+        expandable=False,
+    )
+    widget.complete_tool_call(
+        "send_to_agent",
+        result={"status": "success"},
+        summary="Theory replied: done",
+        detail="done\nmore detail",
+        expandable=True,
+    )
+
+    assert "Theory replied: done" in widget.get_summary_text()
+    widget._header_btn.click()
+    assert widget.is_expanded()

@@ -7,7 +7,7 @@
 
 import re
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QClipboard
 
 from ..scale import scaled_size
@@ -97,6 +97,9 @@ class _CodeBlockWidget(QWidget):
 class MessageRow(QWidget):
     """Render a chat message matching VS Code Copilot Chat's visual style."""
 
+    # Signal emitted when user clicks edit button on their message
+    edit_requested = pyqtSignal(str)
+
     def __init__(
         self,
         role: str,
@@ -104,6 +107,9 @@ class MessageRow(QWidget):
         timestamp: str = "",
         is_coordination: bool = False,
         agent_name: str = "Agent",
+        summary: str | None = None,
+        detail: str | None = None,
+        expandable: bool = True,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
@@ -114,7 +120,17 @@ class MessageRow(QWidget):
         self._agent_name = agent_name
         self._complete = False
         self._agent_content_layout: QVBoxLayout | None = None
+        self._user_footer: QWidget | None = None
+        self._editable = False
+        self._user_bubble_container: QWidget | None = None
+        self._summary = summary
+        self._detail = detail
+        self._expandable = expandable
+        self._expanded = False
+        self._summary_btn: QPushButton | None = None
+        self._detail_widget: QWidget | None = None
         self._setup_ui()
+        self._setup_hover_handler()
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -140,19 +156,60 @@ class MessageRow(QWidget):
             rl.setSpacing(0)
             rl.addStretch(1)
 
+            self._user_bubble_container = QWidget()
+            self._user_bubble_container.setObjectName("userMessageBubbleContainer")
+            bcl = QVBoxLayout(self._user_bubble_container)
+            bcl.setContentsMargins(0, 0, 0, 0)
+            bcl.setSpacing(0)
+
             bubble = QWidget()
             bubble.setObjectName("userMessageBubble")
             bl = QVBoxLayout(bubble)
             bl.setContentsMargins(8, 8, 12, 8)
             bl.setSpacing(0)
 
-            text = QLabel(self._content)
-            text.setObjectName("userMessageText")
-            text.setWordWrap(True)
-            text.setTextFormat(Qt.TextFormat.PlainText)
-            bl.addWidget(text)
+            if self._summary is not None:
+                bl.addWidget(self._build_summary_widget("user"))
+                self._detail_widget = self._build_detail_widget("user")
+                bl.addWidget(self._detail_widget)
+                self._detail_widget.setVisible(False)
+            else:
+                text = QLabel(self._content)
+                text.setObjectName("userMessageText")
+                text.setWordWrap(True)
+                text.setTextFormat(Qt.TextFormat.PlainText)
+                bl.addWidget(text)
 
-            rl.addWidget(bubble, 0)
+            bcl.addWidget(bubble)
+
+            # Footer with edit/copy buttons (hover visible)
+            self._user_footer = QWidget()
+            self._user_footer.setObjectName("userMsgFooter")
+            fl = QHBoxLayout(self._user_footer)
+            fl.setContentsMargins(8, 2, 12, 4)
+            fl.setSpacing(4)
+
+            w, h = scaled_size(28, 20)
+            self._edit_btn = QPushButton("✎")
+            self._edit_btn.setObjectName("userEditBtn")
+            self._edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._edit_btn.setToolTip("Edit & Resend")
+            self._edit_btn.setFixedSize(w, h)
+            self._edit_btn.clicked.connect(self._request_edit)
+            fl.addWidget(self._edit_btn)
+
+            self._user_copy_btn = QPushButton("⎘")
+            self._user_copy_btn.setObjectName("userCopyBtn")
+            self._user_copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._user_copy_btn.setToolTip("Copy")
+            self._user_copy_btn.setFixedSize(w, h)
+            self._user_copy_btn.clicked.connect(self._copy_content)
+            fl.addWidget(self._user_copy_btn)
+
+            bcl.addWidget(self._user_footer)
+            self._user_footer.setVisible(False)
+
+            rl.addWidget(self._user_bubble_container, 0)
             self._outer_layout.addWidget(row)
         else:
             # Agent header
@@ -221,6 +278,13 @@ class MessageRow(QWidget):
         if self._agent_content_layout is None:
             return
 
+        if self._summary is not None:
+            self._agent_content_layout.addWidget(self._build_summary_widget("agent"))
+            self._detail_widget = self._build_detail_widget("agent")
+            self._agent_content_layout.addWidget(self._detail_widget)
+            self._detail_widget.setVisible(self._expanded and self._has_detail())
+            return
+
         segments = _parse_code_blocks(self._content)
         for seg_text, seg_lang in segments:
             if seg_lang is not None:
@@ -242,17 +306,118 @@ class MessageRow(QWidget):
         self._content += delta
         self._rebuild_agent_content()
 
+    def _has_detail(self) -> bool:
+        return bool(self._detail)
+
+    def _summary_arrow(self) -> str:
+        if not (self._expandable and self._has_detail()):
+            return "-"
+        return "v" if self._expanded else ">"
+
+    def _build_summary_widget(self, summary_type: str) -> QWidget:
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        self._summary_btn = QPushButton(f"{self._summary_arrow()} {self._summary or ''}")
+        self._summary_btn.setObjectName("toolCallHeader" if summary_type == "agent" else "userCopyBtn")
+        self._summary_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._summary_btn.clicked.connect(self._toggle_summary)
+        self._summary_btn.setEnabled(self._expandable and self._has_detail())
+        layout.addWidget(self._summary_btn)
+        layout.addStretch()
+        return widget
+
+    def _build_detail_widget(self, detail_type: str) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(20, 2, 0, 0)
+        layout.setSpacing(0)
+
+        if detail_type == "agent":
+            html = render_markdown(self._detail or "")
+            label = QLabel(html)
+            label.setObjectName("agentMessageText")
+            label.setWordWrap(True)
+            label.setTextFormat(Qt.TextFormat.RichText)
+            label.setOpenExternalLinks(True)
+            label.setContentsMargins(0, 2, 0, 4)
+        else:
+            label = QLabel(self._detail or "")
+            label.setObjectName("userMessageText")
+            label.setWordWrap(True)
+            label.setTextFormat(Qt.TextFormat.PlainText)
+        layout.addWidget(label)
+        return widget
+
+    def _toggle_summary(self) -> None:
+        if not (self._expandable and self._has_detail()):
+            return
+        self._expanded = not self._expanded
+        if self._detail_widget:
+            self._detail_widget.setVisible(self._expanded)
+        if self._summary_btn:
+            self._summary_btn.setText(f"{self._summary_arrow()} {self._summary or ''}")
+
     def mark_complete(self) -> None:
         """Mark streaming complete — show copy button at bottom."""
         self._complete = True
         if hasattr(self, "_footer"):
             self._footer.setVisible(True)
+        # User footer buttons are shown on hover (via eventFilter)
+        # but we need to mark them as ready
+        if self._user_footer:
+            self._user_copy_btn.setVisible(True)
+            self._edit_btn.setVisible(self._editable)
+            # Initially hide footer - will show on hover
+            self._user_footer.setVisible(False)
+
+    def set_editable(self, editable: bool) -> None:
+        """Set whether this user message can be edited.
+
+        Only the most recent user message should be editable.
+        """
+        if self._role != "user":
+            return
+        self._editable = editable
+        if self._complete and self._user_footer:
+            self._edit_btn.setVisible(editable)
+
+    def _request_edit(self) -> None:
+        """Emit edit_requested signal with current content."""
+        if self._role == "user":
+            self.edit_requested.emit(self._content)
 
     def _copy_content(self) -> None:
         clipboard = QApplication.clipboard()
         if clipboard:
             clipboard.setText(self._content, QClipboard.Mode.Clipboard)
 
+    def _setup_hover_handler(self) -> None:
+        """Setup hover detection for user message buttons."""
+        if self._role != "user" or self._user_footer is None:
+            return
+        self._user_bubble_container.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        """Handle hover events for user message bubble container."""
+        if self._role != "user":
+            return super().eventFilter(obj, event)
+
+        if obj == self._user_bubble_container:
+            if event.type() == event.Type.Enter:
+                if self._complete and self._user_footer:
+                    self._user_footer.setVisible(True)
+            elif event.type() == event.Type.Leave:
+                if self._user_footer:
+                    self._user_footer.setVisible(False)
+
+        return super().eventFilter(obj, event)
+
     def get_display_text(self) -> str:
         role_text = "You" if self._role == "user" else "Agent"
         return f"{role_text}: {self._content}"
+
+    def is_expanded(self) -> bool:
+        return self._expanded

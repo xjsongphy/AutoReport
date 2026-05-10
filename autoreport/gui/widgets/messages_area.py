@@ -15,7 +15,10 @@ class MessagesArea(QScrollArea):
     - Detect user scroll (pause auto-scroll)
     - add_message_row() and add_tool_group() methods
     - Query methods for testing
+    - Track latest user message for editing
     """
+
+    edit_requested = pyqtSignal(str)
 
     def __init__(self, parent: QWidget | None = None):
         """Initialize messages area.
@@ -26,6 +29,7 @@ class MessagesArea(QScrollArea):
         super().__init__(parent)
         self._auto_scroll_enabled = True
         self._user_scrolled = False
+        self._latest_user_row: MessageRow | None = None
 
         self._setup_ui()
         self._connect_scroll_signals()
@@ -124,6 +128,9 @@ class MessagesArea(QScrollArea):
         timestamp: str = "",
         is_coordination: bool = False,
         agent_name: str = "Agent",
+        summary: str | None = None,
+        detail: str | None = None,
+        expandable: bool = True,
     ) -> MessageRow:
         """Add a message row to the container."""
         row = MessageRow(
@@ -132,8 +139,24 @@ class MessagesArea(QScrollArea):
             timestamp=timestamp,
             is_coordination=is_coordination,
             agent_name=agent_name,
+            summary=summary,
+            detail=detail,
+            expandable=expandable,
             parent=None,
         )
+
+        # Connect edit signal for user messages
+        if role == "user":
+            row.edit_requested.connect(self.edit_requested.emit)
+
+        # Handle editable state — only latest user message is editable
+        if role == "user":
+            # Make previous user message non-editable
+            if self._latest_user_row:
+                self._latest_user_row.set_editable(False)
+            # This new message becomes editable
+            self._latest_user_row = row
+            row.set_editable(True)
 
         # Find the stretch item and insert before it
         stretch_index = self._layout.count() - 1
