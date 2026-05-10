@@ -19,6 +19,8 @@ dependencies = [
     "typer>=0.15.0,<1.0.0",
     "rich>=13.0.0,<14.0.0",
     "markdown>=3.5.0,<4.0.0",
+    "pyqt6-qscintilla>=2.14.1",
+    "openpyxl>=3.1.5",
 ]
 
 [project.optional-dependencies]
