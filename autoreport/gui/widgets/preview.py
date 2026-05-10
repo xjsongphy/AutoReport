@@ -126,7 +126,7 @@ def _create_pdf_viewer(path: Path) -> tuple:
     from PyQt6.QtPdfWidgets import QPdfView
 
     c = _theme_colors()
-    doc = QPdfDocument()
+    doc = QPdfDocument(None)
     doc.load(path)
 
     view = QPdfView()
@@ -718,7 +718,7 @@ class PreviewWidget(QWidget):
         """)
         psl.addWidget(pdf_label)
 
-        self._tex_pdf_document = QPdfDocument()
+        self._tex_pdf_document = QPdfDocument(None)
         self._tex_pdf_view = QPdfView()
         self._tex_pdf_view.setObjectName("texPdfView")
         self._tex_pdf_view.setDocument(self._tex_pdf_document)
