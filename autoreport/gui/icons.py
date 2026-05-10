@@ -7,7 +7,7 @@ from PyQt6.QtSvg import QSvgRenderer
 
 # Tabler Icons SVG data (24x24, stroke-width 1.5)
 _SVG_ICONS: dict[str, str] = {
-    "dashboard": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="2"/><path d="M6.4 20a9 9 0 1 1 11.2 0z"/></svg>',
+    "robot": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10a2 2 0 0 1 2 2v1l1 1v3l-1 1v3a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-3l-1 -1v-3l1 -1v-1a2 2 0 0 1 2 -2z"/><path d="M10 16h4"/><circle cx="8.5" cy="11.5" r=".5" fill="currentColor"/><circle cx="15.5" cy="11.5" r=".5" fill="currentColor"/><path d="M9 7l-1 -4"/><path d="M15 7l1 -4"/></svg>',
     "chart-bar": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="12" width="6" height="8" rx="1"/><rect x="9" y="8" width="6" height="12" rx="1"/><rect x="15" y="4" width="6" height="16" rx="1"/><line x1="4" y1="20" x2="18" y2="20"/></svg>',
     "line-chart": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M4 16l4-4 4 4 4-6 4 4"/></svg>',
     "pencil": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4"/><path d="M13.5 6.5l4 4"/></svg>',
@@ -15,7 +15,7 @@ _SVG_ICONS: dict[str, str] = {
 }
 
 _AGENT_ICON_MAP: dict[str, str] = {
-    "main": "dashboard",
+    "main": "robot",
     "data_analysis": "chart-bar",
     "plotting": "line-chart",
     "theory": "pencil",
@@ -34,8 +34,9 @@ _AGENT_COLORS: dict[str, str] = {
 
 def _svg_to_icon(svg_data: str, color: str = "#d4d4d4", size: int = 16) -> QIcon:
     """Convert SVG string to QIcon with specified color and size."""
-    # Inject color into SVG
+    # Inject color into SVG (both stroke and fill)
     colored_svg = svg_data.replace('stroke="currentColor"', f'stroke="{color}"')
+    colored_svg = colored_svg.replace('fill="currentColor"', f'fill="{color}"')
 
     # Create QPixmap and render SVG
     pixmap = QPixmap(size, size)
@@ -60,7 +61,7 @@ def get_agent_icon(agent_type: str, color: str | None = None, size: int = 16) ->
         color: Optional color override. If None, uses agent's theme color.
         size: Icon size in pixels.
     """
-    icon_name = _AGENT_ICON_MAP.get(agent_type, "dashboard")
+    icon_name = _AGENT_ICON_MAP.get(agent_type, "robot")
     # Use agent's theme color if no override provided
     if color is None:
         color = _AGENT_COLORS.get(agent_type, "#0078d4")
