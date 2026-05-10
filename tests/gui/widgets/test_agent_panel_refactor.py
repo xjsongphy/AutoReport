@@ -65,6 +65,36 @@ def test_add_message_with_coordination(agent_panel):
     assert rows[0]._is_coordination is True
 
 
+def test_add_message_with_summary(agent_panel):
+    agent_panel.add_message(
+        role="agent",
+        content="detail line 1\ndetail line 2",
+        summary="Collapsed summary",
+        detail="detail line 1\ndetail line 2",
+    )
+
+    rows = agent_panel._messages_area.get_message_rows()
+    assert len(rows) == 1
+    assert not rows[0].is_expanded()
+
+
+def test_set_queue_preview(agent_panel):
+    agent_panel.set_queue_preview(["First queued", "Second queued"])
+    assert not agent_panel._queue_preview.isHidden()
+    assert "First queued" in agent_panel._queue_items.text()
+
+
+def test_set_queue_preview_empty_hides(agent_panel):
+    agent_panel.set_queue_preview(["Queued"])
+    agent_panel.set_queue_preview([])
+    assert not agent_panel._queue_preview.isVisible()
+
+
+def test_set_agent_type_uses_badged_title(agent_panel):
+    agent_panel.set_agent_type("theory")
+    assert agent_panel._title_label.text() == "[笔] Theory Agent"
+
+
 def test_add_tool_call_creates_group(agent_panel):
     """add_tool_call should create a ToolCallGroup."""
     agent_panel.add_tool_call("read_file", {"path": "test.py"})
@@ -88,6 +118,27 @@ def test_add_tool_result_adds_to_group(agent_panel):
     # The group should have 1 tool call — summary uses display names
     summary = groups[0].get_summary_text()
     assert "Read File" in summary
+
+
+def test_add_tool_result_updates_pending_group_item(agent_panel):
+    """Tool result should complete an existing pending tool call."""
+    agent_panel.add_tool_call(
+        "send_to_agent",
+        {"agent_type": "theory"},
+        summary="Send To Theory",
+        expandable=False,
+    )
+    agent_panel.add_tool_result(
+        "send_to_agent",
+        {"status": "success"},
+        summary="Theory replied: first line",
+        detail="first line\nsecond line",
+        expandable=True,
+    )
+
+    groups = agent_panel._messages_area.get_tool_groups()
+    assert len(groups) == 1
+    assert "Theory replied: first line" in groups[0].get_summary_text()
 
 
 def test_debug_toggle_shows_hides_panel(agent_panel):
@@ -116,6 +167,41 @@ def test_add_error_creates_message(agent_panel):
     assert len(rows) == 1
     assert "Tool" in rows[0]._content
     assert "Failed to execute" in rows[0]._content
+
+
+def test_task_update_shows_summary_only(agent_panel):
+    agent_panel.set_agent_type("plotting")
+    agent_panel.handle_task_update(
+        task_id="tk001",
+        action="created",
+        source="main",
+        target="plotting",
+        brief="plot summary",
+    )
+
+    rows = agent_panel._messages_area.get_message_rows()
+    assert len(rows) == 1
+    assert "plot summary" in rows[0]._content
+    assert "tk001" not in rows[0]._content
+    assert "TODO" in rows[0]._content
+    assert "Main" in rows[0]._content
+
+
+def test_task_update_waitlist_format(agent_panel):
+    agent_panel.set_agent_type("main")
+    agent_panel.handle_task_update(
+        task_id="tk001",
+        action="created",
+        source="main",
+        target="theory",
+        brief="derive formulas",
+    )
+
+    rows = agent_panel._messages_area.get_message_rows()
+    assert len(rows) == 1
+    assert "WAIT" in rows[0]._content
+    assert "Theory" in rows[0]._content
+    assert "derive formulas" in rows[0]._content
 
 
 def test_add_checkpoint_creates_message(agent_panel):

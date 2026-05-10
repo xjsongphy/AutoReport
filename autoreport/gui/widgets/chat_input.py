@@ -229,6 +229,10 @@ class ChatInput(QPlainTextEdit):
     def set_popup_active(self, active: bool) -> None:
         self._popup_active = active
 
+    def set_text(self, text: str) -> None:
+        """Set the input field text content."""
+        self.setPlainText(text)
+
     def get_plain_text(self) -> str:
         return self.toPlainText()
 

@@ -20,11 +20,13 @@ from ..interfaces.types import (
     Checkpoint,
     Error,
     Message,
+    QueueUpdateMessage,
     StatusChange,
     ToolCall,
     ToolResult,
     UserMessage,
 )
+from ..utils.agent_labels import get_agent_badge, get_agent_title
 from .scale import dpi_scale
 from .widgets.agent_panel import AgentPanel
 from .widgets.file_tree import FileTreeWidget
@@ -365,6 +367,40 @@ class MainWindow(QMainWindow):
                 font-size: {px(13)};
                 line-height: 1.5;
             }}
+            #userMessageBubbleContainer {{
+                background-color: transparent;
+            }}
+            #userMsgFooter {{
+                background-color: transparent;
+                padding-top: {px(2)};
+                padding-right: {px(8)};
+            }}
+            #userEditBtn, #userCopyBtn {{
+                background-color: transparent;
+                color: {c["muted"]};
+                border: none;
+                border-radius: {px(4)};
+                padding: {px(1)} {px(5)};
+                font-size: {px(11)};
+            }}
+            #userEditBtn:hover, #userCopyBtn:hover {{
+                background-color: {c["hover"]};
+                color: {c["fg"]};
+            }}
+            #queuePreview {{
+                background-color: {c["surface"]};
+                border-bottom: 1px solid {c["border"]};
+            }}
+            #queueTitle {{
+                font-size: {px(11)};
+                color: {c["muted"]};
+                font-weight: 600;
+            }}
+            #queueItems {{
+                font-size: {px(12)};
+                color: {c["fg"]};
+                line-height: 1.4;
+            }}
 
             /* ---- Agent Message — flat with avatar ---- */
             #agentHeader {{
@@ -510,11 +546,11 @@ class MainWindow(QMainWindow):
         main_splitter.addWidget(self.preview)
 
         # Right: Agent panels side-by-side (Sub Agent | Main Agent)
-        self.sub_agent_panel = AgentPanel("sub", "Sub Agent", self.workspace)
+        self.sub_agent_panel = AgentPanel("sub", get_agent_title("sub"), self.workspace)
         self.sub_agent_panel.setMinimumWidth(280)
         main_splitter.addWidget(self.sub_agent_panel)
 
-        self.main_agent_panel = AgentPanel("main", "Main Agent", self.workspace)
+        self.main_agent_panel = AgentPanel("main", get_agent_title("main"), self.workspace)
         self.main_agent_panel.setMinimumWidth(280)
         main_splitter.addWidget(self.main_agent_panel)
 
@@ -540,6 +576,7 @@ class MainWindow(QMainWindow):
 
         self.preview.selection_changed.connect(self._on_preview_selection_changed)
         self.main_agent_panel.hide_debug_button(hide=True)
+        self.main_agent_panel.set_agent_type("main")
 
         self.main_agent_panel.conversation_cleared.connect(
             lambda: self._on_conversation_cleared("main"))
@@ -557,6 +594,13 @@ class MainWindow(QMainWindow):
         }
         agent_type = agent_map.get(directory, "sub")
 
+        # Clear file context when user switches directories by clicking a folder.
+        # Skip if this was triggered by clicking a file (file_selected fires first).
+        if not getattr(self, "_file_just_selected", False):
+            self.main_agent_panel.clear_file_context()
+            self.sub_agent_panel.clear_file_context()
+        self._file_just_selected = False
+
         if agent_type != self.sub_agent_panel.agent_type:
             self.sub_agent_panel._messages_area.clear()
             self.sub_agent_panel.set_agent_type(agent_type)
@@ -568,6 +612,7 @@ class MainWindow(QMainWindow):
         self.sub_agent_panel.set_preview_context(file_path, selected_text, start_line, end_line)
 
     def _on_file_selected(self, file_path: Path) -> None:
+        self._file_just_selected = True
         self.preview.load_file(file_path)
         rel_path = self._relative_path(file_path)
         self.main_agent_panel.set_opened_file(rel_path)
@@ -590,13 +635,38 @@ class MainWindow(QMainWindow):
                 role = rec.get("role", "")
                 content = rec.get("content", "")
                 if role == "user":
-                    panel.add_message("user", content)
+                    panel.add_message(
+                        "user",
+                        content,
+                        summary=rec.get("summary"),
+                        detail=rec.get("detail"),
+                        expandable=rec.get("expandable", True),
+                    )
                 elif role == "agent":
-                    panel.add_message("agent", content)
+                    panel.add_message(
+                        "agent",
+                        content,
+                        summary=rec.get("summary"),
+                        detail=rec.get("detail"),
+                        expandable=rec.get("expandable", True),
+                    )
                 elif role == "tool_call":
-                    panel.add_tool_call(content, rec.get("arguments", {}))
+                    panel.add_tool_call(
+                        content,
+                        rec.get("arguments", {}),
+                        summary=rec.get("summary"),
+                        detail=rec.get("detail"),
+                        expandable=rec.get("expandable", True),
+                    )
                 elif role == "tool_result":
-                    panel.add_tool_result(content, rec.get("result"), rec.get("error"))
+                    panel.add_tool_result(
+                        content,
+                        rec.get("result"),
+                        rec.get("error"),
+                        summary=rec.get("summary"),
+                        detail=rec.get("detail"),
+                        expandable=rec.get("expandable"),
+                    )
                 elif role == "error":
                     panel.add_error(rec.get("source", ""), content)
             logger.info("Loaded {} messages for agent {}", len(records), agent_type)
@@ -609,13 +679,38 @@ class MainWindow(QMainWindow):
             role = rec.get("role", "")
             content = rec.get("content", "")
             if role == "user":
-                panel.add_message("user", content)
+                panel.add_message(
+                    "user",
+                    content,
+                    summary=rec.get("summary"),
+                    detail=rec.get("detail"),
+                    expandable=rec.get("expandable", True),
+                )
             elif role == "agent":
-                panel.add_message("agent", content)
+                panel.add_message(
+                    "agent",
+                    content,
+                    summary=rec.get("summary"),
+                    detail=rec.get("detail"),
+                    expandable=rec.get("expandable", True),
+                )
             elif role == "tool_call":
-                panel.add_tool_call(content, rec.get("arguments", {}))
+                panel.add_tool_call(
+                    content,
+                    rec.get("arguments", {}),
+                    summary=rec.get("summary"),
+                    detail=rec.get("detail"),
+                    expandable=rec.get("expandable", True),
+                )
             elif role == "tool_result":
-                panel.add_tool_result(content, rec.get("result"), rec.get("error"))
+                panel.add_tool_result(
+                    content,
+                    rec.get("result"),
+                    rec.get("error"),
+                    summary=rec.get("summary"),
+                    detail=rec.get("detail"),
+                    expandable=rec.get("expandable"),
+                )
             elif role == "error":
                 panel.add_error(rec.get("source", ""), content)
         logger.info("Loaded {} messages for agent {}", len(records), agent_type)
@@ -657,6 +752,7 @@ class MainWindow(QMainWindow):
             AgentResponse,
             Checkpoint,
             Error,
+            QueueUpdateMessage,
             StatusChange,
             TaskUpdateMessage,
             ToolCall,
@@ -682,6 +778,8 @@ class MainWindow(QMainWindow):
             self._handle_task_update_msg(message)
         elif isinstance(message, AgentFeedback):
             self._handle_agent_feedback(message)
+        elif isinstance(message, QueueUpdateMessage):
+            self._handle_queue_update(message)
 
     def _handle_agent_response(self, message: AgentResponse) -> None:
         agent_str = str(message.agent_type)
@@ -712,7 +810,18 @@ class MainWindow(QMainWindow):
 
     def _handle_user_message(self, message: UserMessage) -> None:
         agent_str = str(message.agent_type)
-        is_coordination = message.source == "main_agent"
+        source_key = str(message.source or "user")
+        is_agent_message = source_key not in {"user", "system"}
+        is_coordination = source_key == "main_agent"
+        summary = None
+        detail = None
+        expandable = True
+        if is_agent_message:
+            sender = "Main" if source_key == "main_agent" else self._get_agent_display_name(source_key)
+            summary, detail, expandable = self._build_inter_agent_summary(
+                f"Message From {sender}",
+                message.content,
+            )
 
         target_panel = self._get_panel_for_agent(agent_str)
         target_panel.add_message(
@@ -720,44 +829,149 @@ class MainWindow(QMainWindow):
             message.content,
             source=message.source,
             coordination=is_coordination,
+            summary=summary,
+            detail=detail,
+            expandable=expandable,
         )
-
-        if is_coordination:
-            self.main_agent_panel.add_message(
-                "user",
-                f"[→ {self._get_agent_display_name(agent_str)}] {message.content}",
-                source="main_agent",
-                coordination=True,
-            )
 
         self._conv_store.append_message(
             agent_str,
             "user",
             message.content,
-            extra={"source": message.source},
+            extra={
+                "source": message.source,
+                "summary": summary,
+                "detail": detail,
+                "expandable": expandable,
+            },
         )
 
     def _get_agent_display_name(self, agent_type: str) -> str:
-        names = {
-            "data_analysis": "Data Analysis",
-            "plotting": "Plotting",
-            "theory": "Theory",
-            "report": "Report",
-        }
-        return names.get(agent_type, agent_type)
+        return get_agent_badge(agent_type)
 
     def _handle_tool_call(self, message: ToolCall) -> None:
         agent_str = str(message.agent_type)
         panel = self._get_panel_for_agent(agent_str)
-        panel.add_tool_call(message.tool_name, message.arguments)
-        self._conv_store.append_tool_call(agent_str, message.tool_name, message.arguments)
+        summary = None
+        detail = None
+        expandable = True
+        if agent_str == "main" and message.tool_name == "send_to_agent":
+            target = self._get_agent_display_name(str(message.arguments.get("agent_type", "sub")))
+            summary = f"Main To {target}"
+            expandable = False
+
+        panel.add_tool_call(
+            message.tool_name,
+            message.arguments,
+            summary=summary,
+            detail=detail,
+            expandable=expandable,
+        )
+        self._conv_store.append_tool_call(
+            agent_str,
+            message.tool_name,
+            message.arguments,
+            extra={
+                "summary": summary,
+                "detail": detail,
+                "expandable": expandable,
+            },
+        )
 
     def _handle_tool_result(self, message: ToolResult) -> None:
         agent_str = str(message.agent_type)
         panel = self._get_panel_for_agent(agent_str)
         result_str = str(message.result) if message.result else None
-        panel.add_tool_result(message.tool_name, message.result, message.error)
-        self._conv_store.append_tool_result(agent_str, message.tool_name, result_str, message.error)
+        summary = None
+        detail = None
+        expandable = None
+
+        if agent_str == "main" and message.tool_name == "send_to_agent":
+            summary, detail, expandable = self._format_send_to_agent_result(message.result, message.error)
+            result_str = detail or summary
+        elif message.tool_name == "manage_tasks":
+            summary, detail, expandable = self._format_manage_tasks_result(message.result, message.error)
+            if summary or detail:
+                result_str = detail or summary
+
+        panel.add_tool_result(
+            message.tool_name,
+            message.result,
+            message.error,
+            summary=summary,
+            detail=detail,
+            expandable=expandable,
+        )
+        self._conv_store.append_tool_result(
+            agent_str,
+            message.tool_name,
+            result_str,
+            message.error,
+            extra={
+                "summary": summary,
+                "detail": detail,
+                "expandable": expandable,
+            },
+        )
+
+    def _format_send_to_agent_result(self, result, error: str | None) -> tuple[str, str | None, bool]:
+        if error:
+            return ("Send To Agent failed", error, True)
+
+        if not isinstance(result, dict):
+            text = str(result).strip() if result is not None else ""
+            return ("Sub-agent replied", text or None, bool(text))
+
+        target = self._get_agent_display_name(str(result.get("agent_type", "sub")))
+        status = str(result.get("status", "success"))
+        response = str(result.get("response", "") or "").strip()
+
+        if status == "delegated":
+            detail = str(result.get("message", "") or "").strip() or None
+            return (f"Delegated To {target}", detail, bool(detail))
+
+        if status == "timeout":
+            detail = str(result.get("error", "") or "").strip() or None
+            return (f"{target} did not reply in time", detail, bool(detail))
+
+        if status == "error":
+            detail = str(result.get("error", "") or "").strip() or None
+            return (f"Send To {target} failed", detail, bool(detail))
+
+        if not response:
+            return (f"{target} replied", None, False)
+
+        first_line = response.splitlines()[0].strip()
+        summary = f"{target} replied: {first_line}" if first_line else f"{target} replied"
+        detail = response if ("\n" in response or len(response) > len(first_line)) else None
+        return (summary, detail, bool(detail))
+
+    def _format_manage_tasks_result(self, result, error: str | None) -> tuple[str | None, str | None, bool | None]:
+        if error or not isinstance(result, dict):
+            return (None, None, None)
+
+        if str(result.get("status", "")) != "ok":
+            return (None, None, None)
+
+        ui_summary = str(result.get("_ui_summary", "") or "").strip()
+        ui_detail = str(result.get("_ui_detail", "") or "").strip()
+        if not ui_summary and not ui_detail:
+            return (None, None, None)
+
+        summary = ui_summary or "Task completed"
+        detail = ui_detail or None
+        expandable = bool(detail)
+        return (summary, detail, expandable)
+
+    def _build_inter_agent_summary(self, prefix: str, content: str) -> tuple[str, str | None, bool]:
+        response = str(content or "").strip()
+        if not response:
+            return (prefix, None, False)
+
+        first_line = response.splitlines()[0].strip()
+        summary = f"{prefix}: {first_line}" if first_line else prefix
+        detail = response if ("\n" in response or len(response) > len(first_line)) else None
+        return (summary, detail, bool(detail))
 
     def _handle_status_change(self, message: StatusChange) -> None:
         panel = self._get_panel_for_agent(message.agent_type)
@@ -767,15 +981,40 @@ class MainWindow(QMainWindow):
         self.main_agent_panel.add_error(message.source, message.message)
 
     def _handle_agent_feedback(self, message: AgentFeedback) -> None:
-        """Handle AgentFeedback — show sub-agent issue report in main panel."""
+        """Handle AgentFeedback and show collapsed sub-agent issue reports in main."""
         from enum import Enum
+
         agent_str = message.agent_type.value if isinstance(message.agent_type, Enum) else str(message.agent_type)
         issue_type = message.feedback_type or "issue"
+        summary, detail, expandable = self._build_inter_agent_summary(
+            f"{self._get_agent_display_name(agent_str)} reported {issue_type}",
+            message.content,
+        )
         self.main_agent_panel.add_message(
             "agent",
-            f"[{agent_str} reported {issue_type}] {message.content}",
+            message.content,
             source=agent_str,
+            summary=summary,
+            detail=detail,
+            expandable=expandable,
         )
+        self._conv_store.append_message(
+            "main",
+            "agent",
+            message.content,
+            extra={
+                "source": agent_str,
+                "summary": summary,
+                "detail": detail,
+                "expandable": expandable,
+                "feedback_type": issue_type,
+            },
+        )
+
+    def _handle_queue_update(self, message: QueueUpdateMessage) -> None:
+        agent_str = str(message.agent_type)
+        panel = self._get_panel_for_agent(agent_str)
+        panel.set_queue_preview(message.queued_messages)
 
     def _handle_checkpoint(self, message: Checkpoint) -> None:
         agent_str = str(message.agent_type) if hasattr(message, "agent_type") else "main"
@@ -799,7 +1038,7 @@ class MainWindow(QMainWindow):
                 action=message.action,
                 source=src_str,
                 target=tgt_str,
-                description=message.description,
+                brief=getattr(message, "brief", "") or "",
             )
 
     def _get_panel_for_agent(self, agent_type: str) -> AgentPanel:

@@ -15,6 +15,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from autoreport.utils.agent_labels import get_agent_icon, get_agent_title
+
 
 @dataclass
 class FileMatch:
@@ -35,11 +37,8 @@ class FileSearchPopup(QWidget):
     MAX_VISIBLE_ROWS = 10
 
     AGENT_INFO: dict[str, tuple[str, str]] = {
-        "main": ("Main Agent", "✦"),
-        "data_analysis": ("Data Analysis", "📊"),
-        "plotting": ("Plotting", "📈"),
-        "theory": ("Theory", "📐"),
-        "report": ("Report", "📝"),
+        key: (get_agent_title(key), get_agent_icon(key))
+        for key in ("main", "data_analysis", "plotting", "theory", "report")
     }
 
     def __init__(self, parent=None):

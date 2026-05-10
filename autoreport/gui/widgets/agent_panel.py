@@ -21,6 +21,7 @@ from autoreport.gui.widgets.chat_input import ChatInput
 from autoreport.gui.widgets.conversation_history import ConversationHistoryDropdown
 from autoreport.gui.widgets.debug_panel import DebugPanel
 from autoreport.gui.widgets.file_search_popup import FileSearchPopup
+from autoreport.utils.agent_labels import get_agent_badge, get_agent_title
 from autoreport.gui.widgets.messages_area import MessagesArea
 from autoreport.gui.widgets.status_indicator import StatusIndicator
 from autoreport.gui.widgets.working_border import WorkingBorder
@@ -119,8 +120,29 @@ class AgentPanel(QWidget):
         self._history_dropdown.rename_session_requested.connect(self._on_history_rename)
         layout.addWidget(self._history_dropdown)
 
+        # ---- Queued follow-up messages ----
+        self._queue_preview = QWidget()
+        self._queue_preview.setObjectName("queuePreview")
+        self._queue_preview.setVisible(False)
+        ql = QVBoxLayout(self._queue_preview)
+        ql.setContentsMargins(16, 8, 16, 6)
+        ql.setSpacing(2)
+
+        self._queue_title = QLabel("Queued messages")
+        self._queue_title.setObjectName("queueTitle")
+        ql.addWidget(self._queue_title)
+
+        self._queue_items = QLabel("")
+        self._queue_items.setObjectName("queueItems")
+        self._queue_items.setWordWrap(True)
+        self._queue_items.setTextFormat(Qt.TextFormat.PlainText)
+        ql.addWidget(self._queue_items)
+
+        layout.addWidget(self._queue_preview)
+
         # ---- Messages area ----
         self._messages_area = MessagesArea()
+        self._messages_area.edit_requested.connect(self._on_message_edit_requested)
         layout.addWidget(self._messages_area, 1)
 
         # ---- Debug panel (hidden) ----
@@ -304,6 +326,11 @@ class AgentPanel(QWidget):
     def _close_popup(self) -> None:
         self._input_field.set_popup_active(False)
 
+    def _on_message_edit_requested(self, content: str) -> None:
+        """Handle edit request from a user message."""
+        self._input_field.set_text(content)
+        self._input_field.setFocus()
+
     # ---- Command palette (/ commands) ----
 
     SLASH_COMMANDS = [
@@ -393,6 +420,12 @@ class AgentPanel(QWidget):
         self._context_label.setText(f"{lines} line{'s' if lines > 1 else ''} — {Path(file_path).name}")
         self._context_bar.setVisible(True)
 
+    def clear_file_context(self) -> None:
+        """Clear attached file/selection context so next message won't include it."""
+        self._opened_file = None
+        self._preview_context = None
+        self._context_bar.setVisible(False)
+
     def _on_eye_toggled(self) -> None:
         self._context_enabled = self._context_eye.isChecked()
         self._context_eye.setText("👁" if self._context_enabled else "🚫")
@@ -403,15 +436,7 @@ class AgentPanel(QWidget):
 
     def set_agent_type(self, agent_type: str) -> None:
         self._agent_type = agent_type
-        titles = {
-            "data_analysis": "Data Analysis",
-            "plotting": "Plotting",
-            "theory": "Theory",
-            "report": "Report",
-            "main": "Main Agent",
-            "sub": "Select Agent",
-        }
-        self._title_label.setText(titles.get(agent_type, "Agent"))
+        self._title_label.setText(get_agent_title(agent_type))
         if self._file_search_popup:
             self._file_search_popup.set_current_agent(agent_type)
 
@@ -428,6 +453,9 @@ class AgentPanel(QWidget):
         source: str = "user",
         coordination: bool = False,
         streaming: bool = False,
+        summary: str | None = None,
+        detail: str | None = None,
+        expandable: bool = True,
     ) -> None:
         if streaming and role == "agent" and not content:
             return
@@ -446,25 +474,53 @@ class AgentPanel(QWidget):
             timestamp=ts,
             is_coordination=coordination or source == "main_agent",
             agent_name=agent_name,
+            summary=summary,
+            detail=detail,
+            expandable=expandable,
         )
 
-    def add_tool_call(self, tool_name: str, arguments: dict) -> None:
+    def add_tool_call(
+        self,
+        tool_name: str,
+        arguments: dict,
+        summary: str | None = None,
+        detail: str | None = None,
+        expandable: bool = True,
+    ) -> None:
         groups = self._messages_area.get_tool_groups()
         if not groups:
             group = self._messages_area.add_tool_group()
             self._current_tool_group = group
         else:
             self._current_tool_group = groups[-1]
+        self._current_tool_group.add_tool_call(
+            name=tool_name,
+            arguments=arguments,
+            success=None,
+            duration_ms=0,
+            summary=summary,
+            detail=detail,
+            expandable=expandable,
+        )
 
-    def add_tool_result(self, tool_name: str, result: Any, error: str | None = None) -> None:
+    def add_tool_result(
+        self,
+        tool_name: str,
+        result: Any,
+        error: str | None = None,
+        summary: str | None = None,
+        detail: str | None = None,
+        expandable: bool | None = None,
+    ) -> None:
         if hasattr(self, "_current_tool_group") and self._current_tool_group:
-            self._current_tool_group.add_tool_call(
+            self._current_tool_group.complete_tool_call(
                 name=tool_name,
-                arguments={},
-                success=error is None,
-                duration_ms=100,
-                result=result if error is None else None,
+                result=result,
                 error=error,
+                duration_ms=100,
+                summary=summary,
+                detail=detail,
+                expandable=expandable,
             )
 
     def add_error(self, source: str, message: str) -> None:
@@ -490,73 +546,74 @@ class AgentPanel(QWidget):
         action: str,
         source: str,
         target: str,
-        description: str,
+        brief: str,
     ) -> None:
-        """Handle task update for GUI display.
-
-        Text differs by agent perspective:
-        - Sub-agent as source: "等待 <target>：<description>"
-        - Sub-agent as target: "完成 <source> 的任务：<description>"
-        - Main agent: "<source> 等待 <target> 的 <description>"
-        - Completion propagates to source: "检查 <target> 完成的任务：<description>"
-        """
+        """Render task/list updates in a compact, stable format."""
         is_main = self._agent_type in ("main",)
         am_source = self._agent_type == source
         am_target = self._agent_type == target
         is_local = source == target
 
+        summary = str(brief or "").strip() or "task"
+        source_badge = get_agent_badge(source)
+        target_badge = get_agent_badge(target)
+
         if action == "created":
-            if am_source and is_main:
-                text = f"📋 {source} 等待 {target} 的：{description}"
-            elif am_source and not is_main:
-                text = f"⏳ 等待 {target} 完成：{description}"
-            elif am_target and is_local:
-                text = f"📋 本地任务：{description}"
+            if is_local:
+                text = f"TODO ? Local ? {summary}"
+            elif am_source:
+                text = f"WAIT ? {target_badge} ? {summary}"
             elif am_target:
-                text = f"📋 完成 {source} 的任务：{description}"
-            elif is_main and not am_source and not am_target:
-                text = f"📋 {source} → {target}：{description}"
+                text = f"TODO ? From {source_badge} ? {summary}"
+            elif is_main:
+                text = f"TASK ? {source_badge} -> {target_badge} ? {summary}"
             else:
-                text = f"📋 任务 ({task_id})：{description}"
+                text = f"TASK ? {summary}"
 
         elif action == "completed":
             if am_source:
-                text = f"✅ {target} 已完成：{description} → 待检查"
+                text = f"DONE ? {target_badge} ? {summary}"
             elif am_target:
-                text = f"✅ 已完成 {source} 的任务：{description}"
+                text = f"DONE ? From {source_badge} ? {summary}"
             elif is_main:
-                text = f"✅ {source} 等待 {target} 的任务已完成：{description}"
+                text = f"DONE ? {source_badge} -> {target_badge} ? {summary}"
             else:
-                text = f"✅ {source} 完成了 {target} 的任务：{description}"
+                text = f"DONE ? {summary}"
 
         elif action == "failed":
             if am_source:
-                text = f"⚠ {target} 失败：{description} → 待处理"
+                text = f"FAIL ? {target_badge} ? {summary}"
             elif am_target:
-                text = f"⚠ 来自 {source} 的任务失败：{description}"
+                text = f"FAIL ? From {source_badge} ? {summary}"
             elif is_main:
-                text = f"⚠ {source} 等待 {target} 的任务失败：{description}"
+                text = f"FAIL ? {source_badge} -> {target_badge} ? {summary}"
             else:
-                text = f"⚠ {source} 任务失败 ({target})：{description}"
+                text = f"FAIL ? {summary}"
 
         elif action == "cancelled":
             if am_source:
-                text = f"✗ {target} 已取消：{description}"
+                text = f"CANCEL ? {target_badge} ? {summary}"
+            elif am_target:
+                text = f"CANCEL ? From {source_badge} ? {summary}"
             elif is_main:
-                text = f"✗ {source} 等待 {target} 的任务已取消：{description}"
+                text = f"CANCEL ? {source_badge} -> {target_badge} ? {summary}"
             else:
-                text = f"✗ {source} 任务已取消 ({target})：{description}"
+                text = f"CANCEL ? {summary}"
 
         elif action == "started":
-            if am_source:
-                text = f"⏳ {target} 已开始：{description}"
+            if is_local:
+                text = f"RUNNING ? Local ? {summary}"
+            elif am_source:
+                text = f"RUNNING ? {target_badge} ? {summary}"
+            elif am_target:
+                text = f"RUNNING ? From {source_badge} ? {summary}"
             elif is_main:
-                text = f"⏳ {target} 开始了 {source} 的任务：{description}"
+                text = f"RUNNING ? {source_badge} -> {target_badge} ? {summary}"
             else:
-                text = f"⏳ {source} 开始了：{description}"
+                text = f"RUNNING ? {summary}"
 
         else:
-            text = f"📋 任务更新 ({task_id})：{description}"
+            text = f"TASK UPDATE ? {summary}"
 
         ts = datetime.now().strftime("%H:%M")
         self._messages_area.add_message_row(
@@ -601,6 +658,18 @@ class AgentPanel(QWidget):
             self._status_indicator.stop()
             self._working_border.stop()
             self._set_working(False)
+
+    def set_queue_preview(self, queued_messages: list[str]) -> None:
+        if not queued_messages:
+            self._queue_preview.setVisible(False)
+            self._queue_items.setText("")
+            return
+
+        preview_lines = [f"• {msg}" for msg in queued_messages[:3]]
+        if len(queued_messages) > 3:
+            preview_lines.append(f"... and {len(queued_messages) - 3} more")
+        self._queue_items.setText("\n".join(preview_lines))
+        self._queue_preview.setVisible(True)
 
     # ---- Actions ----
 
