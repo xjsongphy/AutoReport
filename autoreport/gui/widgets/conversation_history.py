@@ -1,65 +1,122 @@
-"""Inline conversation history dropdown — Cline-style session switcher."""
+"""Floating conversation history dropdown with hover delete button."""
 
 from datetime import datetime
-from typing import Any
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import (
-    QHBoxLayout,
-    QLabel,
-    QListWidget,
-    QListWidgetItem,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
-)
-
-from ..scale import dpi_scale
+from PyQt6.QtCore import QPoint, Qt, pyqtSignal
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QWidget
 
 
-class ConversationHistoryDropdown(QWidget):
-    """Inline dropdown list showing conversation sessions.
+class SessionListItem(QWidget):
+    """Custom widget for session list item with hover delete button."""
 
-    Slides down below the agent header. Not a popup — remains in the widget tree.
+    delete_requested = pyqtSignal(str)
+
+    def __init__(self, session_id: str, name: str, timestamp: str, preview: str = "", is_current: bool = False, parent=None):
+        super().__init__(parent)
+        self._session_id = session_id
+        self._is_current = is_current
+        self._setup_ui(name, timestamp, preview)
+
+    def _setup_ui(self, name: str, timestamp: str, preview: str) -> None:
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 6, 8, 6)
+        layout.setSpacing(8)
+
+        # Left: name + preview
+        left_layout = QVBoxLayout()
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(1)
+
+        name_label = QLabel(name)
+        name_label.setObjectName("sessionName")
+        if self._is_current:
+            name_label.setStyleSheet("font-weight: 600; color: #0078d4;")
+        left_layout.addWidget(name_label)
+
+        if preview:
+            preview_short = preview[:35] + "…" if len(preview) > 35 else preview
+            preview_label = QLabel(preview_short)
+            preview_label.setObjectName("sessionPreview")
+            preview_label.setStyleSheet("color: #8b949e; font-size: 11px;")
+            left_layout.addWidget(preview_label)
+
+        layout.addLayout(left_layout, 1)
+
+        # Right: time label and delete button (stacked, delete on hover)
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(2)
+
+        # Time label (shown by default, hidden on hover)
+        self._time_label = QLabel()
+        self._time_label.setObjectName("sessionTime")
+        self._time_label.setStyleSheet("color: #8b949e; font-size: 11px;")
+        right_layout.addWidget(self._time_label)
+
+        try:
+            dt = datetime.fromisoformat(timestamp)
+            self._time_label.setText(dt.strftime("%m/%d %H:%M"))
+        except Exception:
+            self._time_label.setText("")
+
+        # Delete button (hidden by default, shown on hover)
+        self._delete_btn = QPushButton("删除")
+        self._delete_btn.setObjectName("sessionDeleteBtn")
+        self._delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._delete_btn.setFixedHeight(18)
+        self._delete_btn.setVisible(False)
+        self._delete_btn.clicked.connect(self._on_delete)
+        right_layout.addWidget(self._delete_btn)
+
+        layout.addWidget(right_widget)
+
+        # Install event filter for hover
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+
+    def _on_delete(self) -> None:
+        self.delete_requested.emit(self._session_id)
+
+    def enterEvent(self, event) -> None:
+        self._time_label.setVisible(False)
+        self._delete_btn.setVisible(True)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._time_label.setVisible(True)
+        self._delete_btn.setVisible(False)
+        super().leaveEvent(event)
+
+
+class ConversationHistoryDropdown(QListWidget):
+    """Floating dropdown list showing conversation sessions.
+
+    Popup window that appears below header, not embedded in layout.
     """
 
     session_selected = pyqtSignal(str)
-    new_conversation_requested = pyqtSignal()
     delete_session_requested = pyqtSignal(str)
     rename_session_requested = pyqtSignal(str, str)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("historyDropdown")
+        self.setWindowFlags(
+            Qt.WindowType.Popup
+            | Qt.WindowType.FramelessWindowHint
+        )
         self.setVisible(False)
         self._setup_ui()
 
     def _setup_ui(self) -> None:
-        s = dpi_scale()
-        self.setFixedHeight(round(260 * s))
-        self.setMaximumWidth(round(300 * s))
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.itemClicked.connect(self._on_item_clicked)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_context_menu)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        # Session list — compact Copilot-style
-        self._session_list = QListWidget()
-        self._session_list.setObjectName("sessionList")
-        self._session_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._session_list.itemClicked.connect(self._on_item_clicked)
-        self._session_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._session_list.customContextMenuRequested.connect(self._show_context_menu)
-        layout.addWidget(self._session_list, 1)
-
-        # Bottom bar: new button
-        new_btn = QPushButton("+ 新建对话")
-        new_btn.setObjectName("newSessionBtn")
-        new_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        new_btn.clicked.connect(self._on_new_conversation)
-        new_btn.setFixedHeight(round(32 * s))
-        layout.addWidget(new_btn)
+        # Set fixed size
+        self.setFixedWidth(320)
+        self.setMaximumHeight(300)
 
         self._apply_style()
 
@@ -67,60 +124,69 @@ class ConversationHistoryDropdown(QWidget):
         from PyQt6.QtWidgets import QApplication
         hints = QApplication.styleHints()
         dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
-        s = dpi_scale()
-
-        def px(v: int) -> str:
-            return f"{round(v * s)}px"
 
         bg = "#1f1f1f" if dark else "#ffffff"
         border = "#2b2b2b" if dark else "#e0e0e0"
         fg = "#cccccc" if dark else "#333333"
-        muted = "#8b949e"
         hover = "#2a2d2e" if dark else "#f5f5f5"
-        new_bg = "#1e3a5f" if dark else "#e8f0fe"
-        new_fg = "#4fc3f7"
         selected_bg = "#094771" if dark else "#e8f0fe"
 
         self.setStyleSheet(f"""
-            QWidget#historyDropdown {{
+            QListWidget#historyDropdown {{
                 background-color: {bg};
                 border: 1px solid {border};
-                border-top: none;
-            }}
-            QListWidget#sessionList {{
-                background-color: transparent;
-                border: none;
+                border-radius: 6px;
                 outline: none;
-                font-size: {px(13)};
-                color: {fg};
             }}
-            QListWidget#sessionList::item {{
-                padding: {px(5)} {px(12)};
-                border-radius: {px(2)};
-                margin: {px(1)} {px(4)};
+            QListWidget#historyDropdown::item {{
+                border-radius: 4px;
+                margin: 1px 4px;
+                padding: 0;
             }}
-            QListWidget#sessionList::item:hover {{
+            QListWidget#historyDropdown::item:hover {{
                 background-color: {hover};
             }}
-            QListWidget#sessionList::item:selected {{
+            QListWidget#historyDropdown::item:selected {{
                 background-color: {selected_bg};
             }}
-            QPushButton#newSessionBtn {{
-                background-color: {new_bg};
+            QPushButton#sessionDeleteBtn {{
+                background-color: #f44747;
                 border: none;
-                border-top: 1px solid {border};
-                color: {new_fg};
-                font-size: {px(12)};
-                font-weight: 600;
-                border-radius: 0;
+                color: #ffffff;
+                font-size: 11px;
+                font-weight: 500;
+                border-radius: 3px;
+                padding: 0 6px;
             }}
-            QPushButton#newSessionBtn:hover {{
-                background-color: {hover};
+            QPushButton#sessionDeleteBtn:hover {{
+                background-color: #d32f2f;
             }}
         """)
 
+    def show_dropdown(self, parent_widget: QWidget) -> None:
+        """Position and show the dropdown below parent widget."""
+        if not parent_widget:
+            return
+
+        self.clear()
+        self.populate_from_store()
+
+        if self.count() == 0:
+            return
+
+        # Position below parent widget
+        global_pos = parent_widget.mapToGlobal(QPoint(0, parent_widget.height()))
+        self.move(global_pos)
+        self.setVisible(True)
+        self.setFocus()
+
+    def populate_from_store(self) -> None:
+        """Populate from conversation store via signal callback."""
+        # This will be called by parent with actual session data
+        pass
+
     def populate(self, sessions: list[dict], current_session_id: str | None = None) -> None:
-        self._session_list.clear()
+        self.clear()
 
         for session in sessions:
             session_id = session.get("id", "")
@@ -128,46 +194,30 @@ class ConversationHistoryDropdown(QWidget):
             timestamp = session.get("timestamp", "")
             preview = session.get("preview", "")
 
-            try:
-                dt = datetime.fromisoformat(timestamp)
-                time_str = dt.strftime("%m/%d %H:%M")
-            except Exception:
-                time_str = timestamp
+            # Create custom widget item
+            item_widget = SessionListItem(
+                session_id, name, timestamp, preview,
+                is_current=(session_id == current_session_id)
+            )
+            item_widget.delete_requested.connect(self.delete_session_requested.emit)
 
-            # Copilot-style: name (bold) — preview below
-            if preview:
-                preview_short = preview[:40] + "…" if len(preview) > 40 else preview
-                item_text = f"{name}  {time_str}\n{preview_short}"
-            else:
-                item_text = f"{name}  {time_str}"
-
-            item = QListWidgetItem(item_text)
+            # Wrap in QListWidgetItem
+            item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, session_id)
+            size_hint = item_widget.sizeHint()
+            item.setSizeHint(size_hint)
 
-            if session_id == current_session_id:
-                font = item.font()
-                font.setBold(True)
-                item.setFont(font)
-
-            self._session_list.addItem(item)
-
-        self.setVisible(True)
+            self.addItem(item)
+            self.setItemWidget(item, item_widget)
 
     def _on_item_clicked(self, item: QListWidgetItem) -> None:
         session_id = item.data(Qt.ItemDataRole.UserRole)
         if session_id:
             self.session_selected.emit(session_id)
-            self.setVisible(False)
-
-    def _on_item_double_clicked(self, item: QListWidgetItem) -> None:
-        pass  # single-click handles selection
-
-    def _on_new_conversation(self) -> None:
-        self.new_conversation_requested.emit()
-        self.setVisible(False)
+            self.hide()
 
     def _show_context_menu(self, pos) -> None:
-        item = self._session_list.itemAt(pos)
+        item = self.itemAt(pos)
         if not item:
             return
         session_id = item.data(Qt.ItemDataRole.UserRole)
@@ -176,8 +226,7 @@ class ConversationHistoryDropdown(QWidget):
 
         from PyQt6.QtWidgets import QInputDialog, QMenu
 
-        from PyQt6.QtWidgets import QApplication
-        hints = QApplication.styleHints()
+        hints = self.styleHints()
         dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
         bg = "#252526" if dark else "#ffffff"
         border = "#3c3c3c" if dark else "#e0e0e0"
@@ -189,14 +238,15 @@ class ConversationHistoryDropdown(QWidget):
             QMenu {{
                 background-color: {bg};
                 border: 1px solid {border};
-                border-radius: 2px;
-                padding: 2px;
+                border-radius: 4px;
+                padding: 4px;
             }}
             QMenu::item {{
                 background-color: transparent;
                 color: {fg};
                 padding: 6px 12px;
                 font-size: 12px;
+                border-radius: 3px;
             }}
             QMenu::item:hover {{
                 background-color: {hover};
@@ -205,13 +255,23 @@ class ConversationHistoryDropdown(QWidget):
 
         rename_action = menu.addAction("重命名")
         delete_action = menu.addAction("删除")
-        action = menu.exec(self._session_list.mapToGlobal(pos))
+        action = menu.exec(self.mapToGlobal(pos))
 
         if action == rename_action:
+            widget = self.itemWidget(item)
+            if widget:
+                name_label = widget.findChild(QLabel, "sessionName")
+                current_name = name_label.text() if name_label else ""
+            else:
+                current_name = ""
             new_name, ok = QInputDialog.getText(
-                self, "重命名对话", "新名称:", text=item.text().split("\n")[0]
+                self, "重命名对话", "新名称:", text=current_name
             )
             if ok and new_name:
                 self.rename_session_requested.emit(session_id, new_name)
         elif action == delete_action:
             self.delete_session_requested.emit(session_id)
+
+    def hideEvent(self, event) -> None:
+        """Hide when clicked outside."""
+        super().hideEvent(event)

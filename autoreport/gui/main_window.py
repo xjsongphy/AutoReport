@@ -230,6 +230,10 @@ class MainWindow(QMainWindow):
                 background-color: {c["bg"]};
                 border-bottom: 1px solid {c["border"]};
             }}
+            /* Agent Panel background */
+            AgentPanel {{
+                background-color: {c["surface"]};
+            }}
             #panelTitle {{
                 font-size: {px(13)};
                 font-weight: 600;
@@ -534,7 +538,7 @@ class MainWindow(QMainWindow):
 
         # Left: File tree
         self.file_tree = FileTreeWidget(self.workspace)
-        self.file_tree.setMinimumWidth(200)
+        self.file_tree.setMinimumWidth(150)
         self.file_tree.setMaximumWidth(400)
         self.file_tree.directory_selected.connect(self._on_directory_selected)
         self.file_tree.file_selected.connect(self._on_file_selected)
@@ -542,19 +546,19 @@ class MainWindow(QMainWindow):
 
         # Center: Preview
         self.preview = PreviewWidget(self.workspace)
-        self.preview.setMinimumWidth(400)
+        self.preview.setMinimumWidth(300)
         main_splitter.addWidget(self.preview)
 
         # Right: Agent panels side-by-side (Sub Agent | Main Agent)
         self.sub_agent_panel = AgentPanel("sub", get_agent_title("sub"), self.workspace)
-        self.sub_agent_panel.setMinimumWidth(280)
+        self.sub_agent_panel.setMinimumWidth(220)
         main_splitter.addWidget(self.sub_agent_panel)
 
         self.main_agent_panel = AgentPanel("main", get_agent_title("main"), self.workspace)
-        self.main_agent_panel.setMinimumWidth(280)
+        self.main_agent_panel.setMinimumWidth(220)
         main_splitter.addWidget(self.main_agent_panel)
 
-        main_splitter.setSizes([250, 500, 350, 350])
+        main_splitter.setSizes([200, 400, 300, 300])
 
         # Connect signals
         self.main_agent_panel.message_sent.connect(self._on_main_agent_message)

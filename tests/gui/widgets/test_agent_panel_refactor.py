@@ -92,7 +92,9 @@ def test_set_queue_preview_empty_hides(agent_panel):
 
 def test_set_agent_type_uses_badged_title(agent_panel):
     agent_panel.set_agent_type("theory")
-    assert agent_panel._title_label.text() == "[笔] Theory Agent"
+    # Title shows agent name, icon is shown separately in _icon_label
+    assert agent_panel._title_label.text() == "Theory Agent"
+    assert agent_panel._icon_label.pixmap() is not None  # Icon is set
 
 
 def test_add_tool_call_creates_group(agent_panel):

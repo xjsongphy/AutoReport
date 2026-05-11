@@ -159,8 +159,44 @@ class ConversationStore:
         return agent_dir / f"{session_id}.jsonl"
 
     def get_sessions(self) -> list[dict]:
-        """Return session metadata ordered newest first."""
-        return self._load_sessions_metadata()
+        """Return session metadata ordered newest first, excluding stale empty sessions.
+
+        Stale empty sessions: created > 5 minutes ago with no messages.
+        Fresh empty sessions (just created) are shown to allow user to start typing.
+        """
+        from datetime import timedelta
+
+        sessions = self._load_sessions_metadata()
+        now = datetime.now()
+        stale_threshold = timedelta(minutes=5)
+        non_empty = []
+
+        for s in sessions:
+            session_id = s.get("id")
+            has_messages = False
+            for agent_type in _AGENT_TYPES:
+                jsonl_path = self._dir / agent_type / f"{session_id}.jsonl"
+                if jsonl_path.exists() and jsonl_path.stat().st_size > 0:
+                    has_messages = True
+                    break
+
+            if has_messages:
+                non_empty.append(s)
+            else:
+                # Check if this is a fresh empty session (created recently)
+                try:
+                    ts_str = s.get("timestamp", "")
+                    if ts_str:
+                        ts = datetime.fromisoformat(ts_str)
+                        if now - ts < stale_threshold:
+                            # Fresh empty session - keep it
+                            non_empty.append(s)
+                        # else: stale empty session - filter it out
+                except Exception:
+                    # If we can't parse timestamp, keep it to be safe
+                    non_empty.append(s)
+
+        return non_empty
 
     def get_current_session_id(self, agent_type: str = "main") -> str:
         self._ensure_session(agent_type)

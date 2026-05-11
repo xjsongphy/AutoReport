@@ -31,68 +31,76 @@ class TestDropdownBasics:
         """Dropdown should be hidden by default."""
         assert dropdown.isVisible() is False
 
-    def test_has_session_list(self, dropdown: ConversationHistoryDropdown):
-        """Should contain a QListWidget."""
-        assert dropdown._session_list is not None
-        assert dropdown._session_list.count() == 0
+    def test_is_a_list_widget(self, dropdown: ConversationHistoryDropdown):
+        """Should be a QListWidget itself."""
+        from PyQt6.QtWidgets import QListWidget
+        assert isinstance(dropdown, QListWidget)
 
-    def test_has_new_button(self, dropdown: ConversationHistoryDropdown):
-        """Should contain a new conversation button."""
+    def test_no_new_button(self, dropdown: ConversationHistoryDropdown):
+        """Should NOT contain a new conversation button (removed)."""
         btn = dropdown.findChild(object, "newSessionBtn")
-        assert btn is not None
+        assert btn is None
 
 
 class TestPopulate:
     """Populating the session list."""
 
     def test_populate_shows_sessions(self, dropdown: ConversationHistoryDropdown, sample_sessions):
-        """populate should add items and show the dropdown."""
+        """populate should add items."""
         dropdown.populate(sample_sessions)
-
-        assert dropdown.isVisible() is True
-        assert dropdown._session_list.count() == 2
+        assert dropdown.count() == 2
 
     def test_populate_highlights_current(self, dropdown: ConversationHistoryDropdown, sample_sessions):
-        """Current session should be bold."""
+        """Current session should have blue text."""
         dropdown.populate(sample_sessions, current_session_id="s1")
-
-        item = dropdown._session_list.item(0)
-        assert item.font().bold() is True
+        item = dropdown.item(0)
+        widget = dropdown.itemWidget(item)
+        assert widget is not None
+        assert widget._is_current is True
 
     def test_populate_empty_sessions(self, dropdown: ConversationHistoryDropdown):
-        """populate with empty list should still show."""
+        """populate with empty list should work."""
         dropdown.populate([])
-        assert dropdown.isVisible() is True
-        assert dropdown._session_list.count() == 0
+        assert dropdown.count() == 0
 
     def test_session_item_has_id(self, dropdown: ConversationHistoryDropdown, sample_sessions):
         """Each item should store the session ID in UserRole data."""
         from PyQt6.QtCore import Qt
 
         dropdown.populate(sample_sessions)
-        item = dropdown._session_list.item(0)
+        item = dropdown.item(0)
         assert item.data(Qt.ItemDataRole.UserRole) == "s1"
+
+    def test_session_item_has_custom_widget(self, dropdown: ConversationHistoryDropdown, sample_sessions):
+        """Each item should have a custom SessionListItem widget."""
+        dropdown.populate(sample_sessions)
+        item = dropdown.item(0)
+        widget = dropdown.itemWidget(item)
+        assert widget is not None
+        assert widget._session_id == "s1"
 
 
 class TestSignals:
     """Signal emission."""
 
-    def test_new_conversation_signal(self, qtbot, dropdown: ConversationHistoryDropdown, sample_sessions):
-        """Clicking new conversation should emit signal and hide."""
+    def test_delete_button_emits_signal(self, qtbot, dropdown: ConversationHistoryDropdown, sample_sessions):
+        """Clicking delete button should emit delete_session_requested signal."""
         dropdown.populate(sample_sessions)
 
-        with qtbot.waitSignal(dropdown.new_conversation_requested, timeout=1000):
-            dropdown._on_new_conversation()
+        item = dropdown.item(0)
+        widget = dropdown.itemWidget(item)
 
-        assert dropdown.isVisible() is False
+        with qtbot.waitSignal(dropdown.delete_session_requested, timeout=1000) as blocker:
+            widget._on_delete()
 
-    def test_double_click_emits_session_selected(self, qtbot, dropdown: ConversationHistoryDropdown, sample_sessions):
-        """Single-clicking a session should emit session_selected."""
+        assert blocker.args == ["s1"]
+
+    def test_click_emits_session_selected(self, qtbot, dropdown: ConversationHistoryDropdown, sample_sessions):
+        """Clicking a session should emit session_selected."""
         dropdown.populate(sample_sessions)
 
         with qtbot.waitSignal(dropdown.session_selected, timeout=1000) as blocker:
-            item = dropdown._session_list.item(0)
+            item = dropdown.item(0)
             dropdown._on_item_clicked(item)
 
         assert blocker.args == ["s1"]
-        assert dropdown.isVisible() is False

@@ -722,7 +722,9 @@ class AgentPanel(QWidget):
         if self._history_dropdown.isVisible():
             self._history_dropdown.hide()
         else:
+            # Request session data and show dropdown
             self.history_requested.emit()
+            # Dropdown will be shown after data is loaded via show_history_dropdown()
 
     def _on_new_conversation(self) -> None:
         self.new_conversation_requested.emit()
