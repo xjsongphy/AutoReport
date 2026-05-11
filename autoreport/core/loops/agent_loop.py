@@ -177,6 +177,10 @@ class AgentLoop:
         self._debug_mode = False
         self._bus_callback = self._handle_user_message
 
+        # Task update batching — coalesce rapid-fire notifications into one queue message
+        self._task_batch: list[str] = []
+        self._task_batch_timer: asyncio.TimerHandle | None = None
+
         # Subscribe to user messages for this agent type
         self.bus.subscribe(UserMessage, self._bus_callback)
         # Subscribe to task updates

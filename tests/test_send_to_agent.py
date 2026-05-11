@@ -111,7 +111,7 @@ class TestSendToAgentTool:
             agent_type="data_analysis",
             content="analyze data",
             blocking=False,
-            task_items=[{"description": "analyze CSV"}],
+            task_items=[{"brief": "analyze CSV"}],
         )
         assert result["status"] == "delegated"
         assert result["agent_type"] == "data_analysis"
@@ -126,8 +126,8 @@ class TestSendToAgentTool:
             content="create scatter",
             blocking=False,
             task_items=[
-                {"description": "scatter plot"},
-                {"description": "histogram"},
+                {"brief": "scatter plot"},
+                {"brief": "histogram"},
             ],
         )
         assert "task_ids" in result
@@ -142,7 +142,7 @@ class TestSendToAgentTool:
         result = await tool(
             agent_type="report",
             content="compile report",
-            task_items=[{"description": "final report"}],
+            task_items=[{"brief": "final report"}],
         )
         assert result["status"] == "error"
         assert "does not support task_items" in result["error"]
@@ -157,7 +157,7 @@ class TestSendToAgentTool:
             agent_type="theory",
             content="test",
             blocking=False,
-            task_items=[{"description": "no board to track"}],
+            task_items=[{"brief": "no board to track"}],
         )
         # Without task_board, task_items are ignored and allowed
         assert result["status"] == "delegated"
@@ -203,7 +203,7 @@ class TestReportIssueTool:
             content="missing theory curves",
             issue_type="missing_data",
             request_task_for="theory",
-            task_description="derive formulas for overlay",
+            task_brief="derive formulas for overlay",
         )
         assert result["status"] == "reported"
         assert "task_id" in result
@@ -221,8 +221,8 @@ class TestReportIssueTool:
             content="missing theory curves",
             issue_type="missing_data",
             request_task_for="theory",
-            task_description="derive formulas for overlay",
             task_brief="theory overlay",
+            task_message="derive formulas for overlay",
         )
 
         assert result["status"] == "reported"
@@ -261,7 +261,7 @@ class TestReportIssueTool:
         result = await tool(
             content="test",
             request_task_for="nonexistent_agent",
-            task_description="something",
+            task_brief="something",
         )
         assert "task_id" in result
         assert "dispatched_task_id" not in result
@@ -274,17 +274,17 @@ class TestReportIssueTool:
         result = await tool(
             content="test",
             request_task_for="main",
-            task_description="help",
+            task_brief="help",
         )
         assert "task_id" not in result
 
     @pytest.mark.asyncio
-    async def test_no_task_without_description(self, bus):
+    async def test_no_task_without_brief(self, bus):
         board = TaskBoard()
         tool = ReportIssueTool(bus=bus, agent_type=AgentType.THEORY, task_board=board)
         result = await tool(
             content="test",
             request_task_for="main",
-            task_description=None,
+            task_brief="",
         )
         assert "task_id" not in result

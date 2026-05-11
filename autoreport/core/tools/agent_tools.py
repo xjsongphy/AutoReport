@@ -48,8 +48,8 @@ class SendToAgentTool(Tool):
         Args:
             agent_type: Target sub-agent type. One of: theory, data_analysis, plotting, report.
             content: Task instruction to send to the sub-agent.
-            task_items: Optional list of task dicts with 'brief' (short UI text) and
-                'description' (detailed API content) keys for tracking.
+            task_items: Optional list of task dicts with 'brief' (short UI text)
+                for waitlist/todolist tracking.
             blocking: If True, wait for response. If False, return immediately after dispatch.
 
         Returns:
@@ -81,8 +81,11 @@ class SendToAgentTool(Tool):
         if task_items and self._task_board:
             main_type = AgentType.MAIN
             for item in task_items:
-                desc = str(item.get("description", content[:120]))
-                brief = str(item.get("brief", desc[:80]))
+                brief = str(
+                    item.get("brief")
+                    or item.get("task_brief")
+                    or content[:80]
+                )
                 task = self._task_board.create_task(
                     source=main_type,
                     target=target,
@@ -210,8 +213,8 @@ class ReportIssueTool(Tool):
         content: str,
         issue_type: str = "missing_data",
         request_task_for: str | None = None,
-        task_description: str | None = None,
         task_brief: str = "",
+        task_message: str | None = None,
     ) -> dict[str, Any]:
         """Report an issue to the Main Agent.
 
@@ -221,8 +224,9 @@ class ReportIssueTool(Tool):
             issue_type: Type of issue. One of: missing_data (prerequisites absent),
                 quality (output is wrong/malformed), query (need clarification).
             request_task_for: Optional agent type to request a task for.
-            task_description: Description for the requested task (detailed, for API).
             task_brief: Short summary for UI list display (optional).
+            task_message: Optional message that should be auto-dispatched to the
+                requested target when routing sub -> main -> sub.
 
         Returns:
             Confirmation dictionary.
@@ -241,12 +245,13 @@ class ReportIssueTool(Tool):
         # Create task if requested
         created_task_id: str | None = None
         dispatched_task_id: str | None = None
-        if request_task_for and task_description and self._task_board:
+        brief_text = str(task_brief or "").strip()
+        if request_task_for and brief_text and self._task_board:
             task_link_id = self._task_board._next_id()
             parent_task = self._task_board.create_task(
                 source=self._agent_type,
                 target=AgentType.MAIN,
-                brief=task_brief or task_description,
+                brief=brief_text,
                 blocking=False,
                 task_id=task_link_id,
             )
@@ -267,7 +272,7 @@ class ReportIssueTool(Tool):
                 child_task = self._task_board.create_task(
                     source=AgentType.MAIN,
                     target=requested_target,
-                    brief=task_brief or task_description,
+                    brief=brief_text,
                     blocking=False,
                     task_id=task_link_id,
                 )
@@ -284,7 +289,7 @@ class ReportIssueTool(Tool):
                     brief=child_task.brief,
                     previous_status=None,
                 ))
-                dispatch_content = task_description.strip()
+                dispatch_content = str(task_message or "").strip() or brief_text
                 issue_context = content.strip()
                 if issue_context and issue_context != dispatch_content:
                     dispatch_content = (
