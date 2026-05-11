@@ -38,120 +38,51 @@ from PyQt6.QtWidgets import (
 
 
 def _draw_codicon_icon(name: str, color: QColor, size: int = 18) -> QIcon:
-    """Draw a VSCode Codicon-style icon as SVG path.
+    """Draw a VSCode Codicon icon using the codicon font.
 
-    Uses actual VSCode SVG paths from microsoft/vscode-codicons repository.
-    Icons use currentColor equivalent - they inherit the theme color.
+    Loads the codicon.ttf font file and renders the appropriate Unicode character.
     """
+    from PyQt6.QtGui import QFont, QFontDatabase
+    from pathlib import Path
+
+    # VSCode codicon Unicode codepoints
+    codicons = {
+        "new-file": "",      # U+EA7F
+        "new-folder": "",    # U+EA80
+        "refresh": "",       # U+EB37
+        "collapse-all": "",  # U+EAC5
+    }
+
+    char = codicons.get(name, "?")
+
+    # Get font file path (relative to this file)
+    font_path = Path(__file__).parent / "codicon.ttf"
+
+    # Load the codicon font
+    font_id = QFontDatabase.addApplicationFont(str(font_path))
+    if font_id < 0:
+        # Fallback: use default font
+        font = QFont("Segoe UI Symbol", int(size * 0.85))
+    else:
+        font_families = QFontDatabase.applicationFontFamilies(font_id)
+        if font_families:
+            font = QFont(font_families[0], int(size * 0.85))
+        else:
+            font = QFont("Segoe UI Symbol", int(size * 0.85))
+
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
+
     p = QPainter(pixmap)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-    pen = QPen(color, 1.2)
-    pen.setCapStyle(Qt.PenCapStyle.SquareCap)
-    pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
-    p.setPen(pen)
-    p.setBrush(Qt.BrushStyle.NoBrush)
+    # Use text color
+    p.setPen(color)
+    p.setFont(font)
 
-    # Scale factor: 18px size from 16px SVG
-    scale = size / 16
-
-    if name == "new-file":
-        # VSCode new-file icon: document with corner fold + plus
-        # File body
-        path = QPainterPath()
-        path.moveTo(1 * scale, 1 * scale)
-        path.lineTo(10 * scale, 1 * scale)
-        path.lineTo(14 * scale, 5 * scale)
-        path.lineTo(14 * scale, 15 * scale)
-        path.lineTo(1 * scale, 15 * scale)
-        path.closeSubpath()
-        p.drawPath(path)
-
-        # Corner fold
-        fold = QPainterPath()
-        fold.moveTo(10 * scale, 1 * scale)
-        fold.lineTo(10 * scale, 5 * scale)
-        fold.lineTo(14 * scale, 5 * scale)
-        p.drawPath(fold)
-
-        # Plus sign (top right corner)
-        p.setBrush(color)
-        plus = QPainterPath()
-        plus.moveTo(13 * scale, 9 * scale)
-        plus.lineTo(13 * scale, 12 * scale)
-        plus.lineTo(16 * scale, 12 * scale)
-        plus.lineTo(16 * scale, 13 * scale)
-        plus.lineTo(13 * scale, 13 * scale)
-        plus.lineTo(13 * scale, 16 * scale)
-        plus.lineTo(12 * scale, 16 * scale)
-        plus.lineTo(12 * scale, 13 * scale)
-        plus.lineTo(9 * scale, 13 * scale)
-        plus.lineTo(9 * scale, 12 * scale)
-        plus.lineTo(12 * scale, 12 * scale)
-        plus.lineTo(12 * scale, 9 * scale)
-        plus.closeSubpath()
-        p.drawPath(plus)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-
-    elif name == "new-folder":
-        # VSCode new-folder icon: folder + plus
-        # Folder back
-        path = QPainterPath()
-        path.moveTo(1 * scale, 2 * scale)
-        path.lineTo(6 * scale, 2 * scale)
-        path.lineTo(7 * scale, 3 * scale)
-        path.lineTo(14.5 * scale, 3 * scale)
-        path.lineTo(15 * scale, 3.5 * scale)
-        path.lineTo(15 * scale, 7 * scale)
-        path.lineTo(1 * scale, 7 * scale)
-        path.closeSubpath()
-        p.drawPath(path)
-
-        # Folder front
-        front = QPainterPath()
-        front.moveTo(0 * scale, 8 * scale)
-        front.lineTo(16 * scale, 8 * scale)
-        front.lineTo(15 * scale, 14 * scale)
-        front.lineTo(1 * scale, 14 * scale)
-        front.closeSubpath()
-        p.drawPath(front)
-
-        # Plus sign (overlay on folder)
-        p.setBrush(color)
-        plus = QPainterPath()
-        plus.moveTo(12 * scale, 9 * scale)
-        plus.lineTo(12 * scale, 11 * scale)
-        plus.lineTo(14 * scale, 11 * scale)
-        plus.lineTo(14 * scale, 12 * scale)
-        plus.lineTo(12 * scale, 12 * scale)
-        plus.lineTo(12 * scale, 14 * scale)
-        plus.lineTo(11 * scale, 14 * scale)
-        plus.lineTo(11 * scale, 12 * scale)
-        plus.lineTo(9 * scale, 12 * scale)
-        plus.lineTo(9 * scale, 11 * scale)
-        plus.lineTo(11 * scale, 11 * scale)
-        plus.lineTo(11 * scale, 9 * scale)
-        plus.closeSubpath()
-        p.drawPath(plus)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-
-    elif name == "refresh":
-        # VSCode refresh icon: circular arrow
-        path = QPainterPath()
-        # Main arc (approximately 3/4 circle)
-        path.moveTo(10 * scale, 2 * scale)
-        path.arcTo(2 * scale, 2 * scale, 11 * scale, 11 * scale, 30, 300)
-        # Arrow head
-        arrow = QPainterPath()
-        arrow.moveTo(10 * scale, 2 * scale)
-        arrow.lineTo(10 * scale, 6 * scale)
-        arrow.lineTo(6 * scale, 4 * scale)
-        arrow.closeSubpath()
-        p.setBrush(color)
-        p.drawPath(arrow)
-        p.setBrush(Qt.BrushStyle.NoBrush)
+    # Draw text centered
+    rect = pixmap.rect()
+    p.drawText(rect, Qt.AlignmentFlag.AlignCenter, char)
 
     p.end()
     return QIcon(pixmap)
