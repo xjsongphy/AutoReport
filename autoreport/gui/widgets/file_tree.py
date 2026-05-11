@@ -40,6 +40,7 @@ from PyQt6.QtWidgets import (
 def _draw_codicon_icon(name: str, color: QColor, size: int = 18) -> QIcon:
     """Draw a VSCode Codicon-style icon as SVG path.
 
+    Uses actual VSCode SVG paths from microsoft/vscode-codicons repository.
     Icons use currentColor equivalent - they inherit the theme color.
     """
     pixmap = QPixmap(size, size)
@@ -47,81 +48,106 @@ def _draw_codicon_icon(name: str, color: QColor, size: int = 18) -> QIcon:
     p = QPainter(pixmap)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-    pen = QPen(color, 1.5)
-    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    pen = QPen(color, 1.2)
+    pen.setCapStyle(Qt.PenCapStyle.SquareCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
     p.setPen(pen)
     p.setBrush(Qt.BrushStyle.NoBrush)
 
+    # Scale factor: 18px size from 16px SVG
+    scale = size / 16
+
     if name == "new-file":
-        # New File icon (file with corner fold)
-        # Main body
+        # VSCode new-file icon: document with corner fold + plus
+        # File body
         path = QPainterPath()
-        path.moveTo(4, 3)
-        path.lineTo(14, 3)
-        path.lineTo(14, 18)
-        path.lineTo(4, 18)
+        path.moveTo(1 * scale, 1 * scale)
+        path.lineTo(10 * scale, 1 * scale)
+        path.lineTo(14 * scale, 5 * scale)
+        path.lineTo(14 * scale, 15 * scale)
+        path.lineTo(1 * scale, 15 * scale)
         path.closeSubpath()
         p.drawPath(path)
 
         # Corner fold
         fold = QPainterPath()
-        fold.moveTo(14, 3)
-        fold.lineTo(18, 7)
-        fold.lineTo(14, 7)
-        fold.closeSubpath()
+        fold.moveTo(10 * scale, 1 * scale)
+        fold.lineTo(10 * scale, 5 * scale)
+        fold.lineTo(14 * scale, 5 * scale)
         p.drawPath(fold)
 
-        # Horizontal lines inside
-        p.drawLine(7, 8, 13, 8)
-        p.drawLine(7, 11, 13, 11)
-        p.drawLine(7, 14, 13, 14)
+        # Plus sign (top right corner)
+        p.setBrush(color)
+        plus = QPainterPath()
+        plus.moveTo(13 * scale, 9 * scale)
+        plus.lineTo(13 * scale, 12 * scale)
+        plus.lineTo(16 * scale, 12 * scale)
+        plus.lineTo(16 * scale, 13 * scale)
+        plus.lineTo(13 * scale, 13 * scale)
+        plus.lineTo(13 * scale, 16 * scale)
+        plus.lineTo(12 * scale, 16 * scale)
+        plus.lineTo(12 * scale, 13 * scale)
+        plus.lineTo(9 * scale, 13 * scale)
+        plus.lineTo(9 * scale, 12 * scale)
+        plus.lineTo(12 * scale, 12 * scale)
+        plus.lineTo(12 * scale, 9 * scale)
+        plus.closeSubpath()
+        p.drawPath(plus)
+        p.setBrush(Qt.BrushStyle.NoBrush)
 
     elif name == "new-folder":
-        # New Folder icon (folder with plus)
-        # Folder body
+        # VSCode new-folder icon: folder + plus
+        # Folder back
         path = QPainterPath()
-        path.moveTo(3, 4)
-        path.lineTo(11, 4)
-        path.lineTo(11, 17)
-        path.lineTo(17, 17)
-        path.lineTo(17, 20)
-        path.lineTo(3, 20)
+        path.moveTo(1 * scale, 2 * scale)
+        path.lineTo(6 * scale, 2 * scale)
+        path.lineTo(7 * scale, 3 * scale)
+        path.lineTo(14.5 * scale, 3 * scale)
+        path.lineTo(15 * scale, 3.5 * scale)
+        path.lineTo(15 * scale, 7 * scale)
+        path.lineTo(1 * scale, 7 * scale)
         path.closeSubpath()
         p.drawPath(path)
 
-        # Tab on top
-        tab = QPainterPath()
-        tab.moveTo(3, 4)
-        tab.lineTo(3, 2)
-        tab.lineTo(11, 2)
-        tab.lineTo(11, 4)
-        p.drawPath(tab)
+        # Folder front
+        front = QPainterPath()
+        front.moveTo(0 * scale, 8 * scale)
+        front.lineTo(16 * scale, 8 * scale)
+        front.lineTo(15 * scale, 14 * scale)
+        front.lineTo(1 * scale, 14 * scale)
+        front.closeSubpath()
+        p.drawPath(front)
 
-        # Plus sign
-        p.drawLine(7, 12, 13, 12)
-        p.drawLine(10, 10, 10, 14)
+        # Plus sign (overlay on folder)
+        p.setBrush(color)
+        plus = QPainterPath()
+        plus.moveTo(12 * scale, 9 * scale)
+        plus.lineTo(12 * scale, 11 * scale)
+        plus.lineTo(14 * scale, 11 * scale)
+        plus.lineTo(14 * scale, 12 * scale)
+        plus.lineTo(12 * scale, 12 * scale)
+        plus.lineTo(12 * scale, 14 * scale)
+        plus.lineTo(11 * scale, 14 * scale)
+        plus.lineTo(11 * scale, 12 * scale)
+        plus.lineTo(9 * scale, 12 * scale)
+        plus.lineTo(9 * scale, 11 * scale)
+        plus.lineTo(11 * scale, 11 * scale)
+        plus.lineTo(11 * scale, 9 * scale)
+        plus.closeSubpath()
+        p.drawPath(plus)
+        p.setBrush(Qt.BrushStyle.NoBrush)
 
     elif name == "refresh":
-        # Refresh icon (circular arrows)
-        # Outer arc
+        # VSCode refresh icon: circular arrow
         path = QPainterPath()
-        path.moveTo(18, 7)
-        path.arcTo(12, 7, 10, 10, 90, 130)
-        path.lineTo(9.5, 14)
-        p.drawPath(path)
-
-        # Inner arc
-        path = QPainterPath()
-        path.moveTo(13, 17)
-        path.arcTo(13, 13, 10, 10, 270, 300)
-        p.drawPath(path)
-
-        # Arrow on outer arc
+        # Main arc (approximately 3/4 circle)
+        path.moveTo(10 * scale, 2 * scale)
+        path.arcTo(2 * scale, 2 * scale, 11 * scale, 11 * scale, 30, 300)
+        # Arrow head
         arrow = QPainterPath()
-        arrow.moveTo(18, 7)
-        arrow.lineTo(15, 4)
-        arrow.lineTo(15, 10)
+        arrow.moveTo(10 * scale, 2 * scale)
+        arrow.lineTo(10 * scale, 6 * scale)
+        arrow.lineTo(6 * scale, 4 * scale)
         arrow.closeSubpath()
         p.setBrush(color)
         p.drawPath(arrow)
@@ -285,12 +311,6 @@ class FileTreeWidget(QWidget):
         layout.setSpacing(0)
 
         # Explorer header (VSCode style) with toolbar
-        header_container = QWidget()
-        header_container.setObjectName("explorerHeaderContainer")
-        header_layout = QVBoxLayout(header_container)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(0)
-
         header = QWidget()
         header.setObjectName("explorerHeader")
         header.setFixedHeight(36)
@@ -333,8 +353,7 @@ class FileTreeWidget(QWidget):
         # Set icons on toolbar buttons
         self._setup_toolbar_icons()
 
-        header_layout.addWidget(header)
-        layout.addWidget(header_container)
+        layout.addWidget(header)
 
         # File tree with custom chevron rendering and drag-drop support
         self.tree = _ChevronTreeWidget(QColor("#cccccc"), file_tree_widget=self)
@@ -390,12 +409,9 @@ class FileTreeWidget(QWidget):
             }}
 
             /* Explorer header */
-            #explorerHeaderContainer {{
-                background-color: {c["bg_header"]};
-                border-bottom: 1px solid {c["border"]};
-            }}
             #explorerHeader {{
                 background-color: {c["bg_header"]};
+                border-bottom: 1px solid {c["border"]};
             }}
 
             #explorerTitle {{

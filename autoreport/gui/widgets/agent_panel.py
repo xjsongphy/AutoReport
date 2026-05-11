@@ -71,7 +71,7 @@ class AgentPanel(QWidget):
         # ---- Header (minimal, Codex-style) ----
         header = QWidget()
         header.setObjectName("panelHeader")
-        header.setFixedHeight(37)
+        header.setFixedHeight(36)
         hl = QHBoxLayout(header)
         hl.setContentsMargins(16, 0, 16, 0)
         hl.setSpacing(8)
