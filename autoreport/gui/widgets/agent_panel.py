@@ -71,7 +71,7 @@ class AgentPanel(QWidget):
         # ---- Header (minimal, Codex-style) ----
         header = QWidget()
         header.setObjectName("panelHeader")
-        header.setFixedHeight(36)
+        header.setFixedHeight(37)
         hl = QHBoxLayout(header)
         hl.setContentsMargins(16, 0, 16, 0)
         hl.setSpacing(8)
@@ -81,11 +81,13 @@ class AgentPanel(QWidget):
         self._icon_label.setObjectName("panelIcon")
         self._icon_label.setFixedSize(24, 24)
         self._icon_label.setScaledContents(True)
+        self._icon_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         hl.addWidget(self._icon_label)
 
         # Title label
         self._title_label = QLabel(title)
         self._title_label.setObjectName("panelTitle")
+        self._title_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         hl.addWidget(self._title_label)
 
         self._status_label = QLabel("idle")

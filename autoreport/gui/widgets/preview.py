@@ -62,7 +62,8 @@ def _dark_mode() -> bool:
 def _theme_colors() -> dict[str, str]:
     dark = _dark_mode()
     return {
-        "bg": "#1f1f1f" if dark else "#ffffff",
+        "bg": "transparent",
+        "editor_bg": "#1f1f1f" if dark else "#ffffff",
         "surface": "#181818" if dark else "#f3f3f3",
         "card": "#252526" if dark else "#e8e8e8",
         "border": "#2b2b2b" if dark else "#e0e0e0",
@@ -70,7 +71,7 @@ def _theme_colors() -> dict[str, str]:
         "muted": "#858585" if dark else "#888888",
         "accent": "#0078d4" if dark else "#0090ff",
         "sel_bg": "#264f78" if dark else "#add6ff",
-        "tab_active_bg": "#1f1f1f" if dark else "#ffffff",
+        "tab_active_bg": "#1f1f1f" if dark else "#f3f3f3",
         "tab_inactive_bg": "#2d2d2d" if dark else "#ececec",
         "tab_active_fg": "#ffffff" if dark else "#1a1a1a",
         "tab_inactive_fg": "#969696" if dark else "#888888",
@@ -104,7 +105,7 @@ def _create_scintilla(path: Path, lexer_name: str) -> tuple:
 
     sci.setStyleSheet(f"""
         QsciScintilla#fileEditor {{
-            background-color: {c["bg"]};
+            background-color: {c["editor_bg"]};
             color: {c["fg"]};
             border: none;
             font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
@@ -135,7 +136,7 @@ def _create_pdf_viewer(path: Path) -> tuple:
     view.setPageMode(QPdfView.PageMode.MultiPage)
     view.setStyleSheet(f"""
         QPdfView#filePdfView {{
-            background-color: {c["bg"]};
+            background-color: {c["editor_bg"]};
             border: none;
         }}
     """)
@@ -151,7 +152,7 @@ def _create_image_viewer(path: Path) -> tuple:
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
     label.setStyleSheet(f"""
         QLabel#fileImageViewer {{
-            background-color: {c["bg"]};
+            background-color: {c["editor_bg"]};
             border: none;
         }}
     """)
@@ -175,7 +176,7 @@ def _create_svg_viewer(path: Path) -> tuple:
     svg.setObjectName("fileSvgViewer")
     svg.setStyleSheet(f"""
         QSvgWidget#fileSvgViewer {{
-            background-color: {c["bg"]};
+            background-color: {c["editor_bg"]};
             border: none;
         }}
     """)
@@ -226,7 +227,7 @@ def _create_spreadsheet_viewer(path: Path) -> tuple:
     table.setAlternatingRowColors(True)
     table.setStyleSheet(f"""
         QTableView#fileTableView {{
-            background-color: {c["bg"]};
+            background-color: {c["editor_bg"]};
             color: {c["fg"]};
             border: none;
             gridline-color: {c["border"]};
@@ -544,7 +545,7 @@ class EditorPanel(QWidget):
             QLabel#editorPlaceholder {{
                 color: {c["muted"]};
                 font-size: 13px;
-                background-color: {c["bg"]};
+                background-color: {c["editor_bg"]};
             }}
         """)
 
@@ -588,11 +589,14 @@ class PreviewWidget(QWidget):
         # Header
         header = QWidget()
         header.setObjectName("previewHeader")
-        hl = QVBoxLayout(header)
-        hl.setContentsMargins(12, 6, 12, 4)
+        header.setFixedHeight(36)
+        hl = QHBoxLayout(header)
+        hl.setContentsMargins(12, 0, 12, 0)
+        hl.setSpacing(4)
 
         self._title_label = QLabel("预览")
         self._title_label.setObjectName("previewTitle")
+        self._title_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         hl.addWidget(self._title_label)
 
         self._file_label = QLabel()
@@ -643,21 +647,28 @@ class PreviewWidget(QWidget):
         tex_layout.setContentsMargins(0, 0, 0, 0)
         tex_layout.setSpacing(0)
 
-        # Tex header with compile controls
-        tex_header = QWidget()
-        tex_header.setObjectName("texHeader")
-        thl = QHBoxLayout(tex_header)
-        thl.setContentsMargins(12, 4, 12, 4)
+        # Horizontal splitter: TeX editor (left) + PDF viewer (right)
+        tex_split = QSplitter(Qt.Orientation.Horizontal)
+        tex_split.setObjectName("texSplitter")
 
-        thl.addWidget(QLabel("TeX 编辑器"))
+        # TeX section with toolbar
+        tex_section = QWidget()
+        tsl = QVBoxLayout(tex_section)
+        tsl.setContentsMargins(0, 0, 0, 0)
+        tsl.setSpacing(0)
 
-        thl.addStretch()
+        # Toolbar inside editor
+        toolbar = QWidget()
+        toolbar.setObjectName("texToolbar")
+        tbl = QHBoxLayout(toolbar)
+        tbl.setContentsMargins(8, 4, 8, 4)
+        tbl.setSpacing(8)
 
         self._engine_combo = QComboBox()
         self._engine_combo.setObjectName("engineCombo")
         self._engine_combo.addItems(["xelatex", "lualatex"])
         self._engine_combo.setFixedWidth(scaled(100))
-        thl.addWidget(self._engine_combo)
+        tbl.addWidget(self._engine_combo)
 
         w, h = scaled_size(80, 26)
         self._compile_btn = QPushButton("编译")
@@ -665,19 +676,10 @@ class PreviewWidget(QWidget):
         self._compile_btn.setFixedSize(w, h)
         self._compile_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._compile_btn.clicked.connect(self._compile_tex)
-        thl.addWidget(self._compile_btn)
+        tbl.addWidget(self._compile_btn)
 
-        tex_layout.addWidget(tex_header)
-
-        # Horizontal splitter: TeX editor (left) + PDF viewer (right)
-        tex_split = QSplitter(Qt.Orientation.Horizontal)
-        tex_split.setObjectName("texSplitter")
-
-        # TeX section
-        tex_section = QWidget()
-        tsl = QVBoxLayout(tex_section)
-        tsl.setContentsMargins(0, 0, 0, 0)
-        tsl.setSpacing(0)
+        tbl.addStretch()
+        tsl.addWidget(toolbar)
 
         self._tex_scintilla = QsciScintilla()
         self._tex_scintilla.setObjectName("texEditor")
@@ -693,11 +695,11 @@ class PreviewWidget(QWidget):
 
         # Set basic colors for lexer
         lexer.setColor(QColor(c["fg"]))
-        lexer.setPaper(QColor(c["bg"]))
+        lexer.setPaper(QColor(c["editor_bg"]))
 
         self._tex_scintilla.setStyleSheet(f"""
             QsciScintilla#texEditor {{
-                background-color: {c["bg"]};
+                background-color: {c["editor_bg"]};
                 color: {c["fg"]};
                 border: none;
                 font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
@@ -708,7 +710,7 @@ class PreviewWidget(QWidget):
                 color: {c["muted"]};
             }}
         """)
-        tsl.addWidget(self._tex_scintilla)
+        tsl.addWidget(self._tex_scintilla, 1)
 
         # PDF section
         pdf_section = QWidget()
@@ -723,7 +725,7 @@ class PreviewWidget(QWidget):
         self._tex_pdf_view.setPageMode(QPdfView.PageMode.MultiPage)
         self._tex_pdf_view.setStyleSheet(f"""
             QPdfView#texPdfView {{
-                background-color: {c["bg"]};
+                background-color: {c["editor_bg"]};
                 border: none;
             }}
         """)
@@ -735,19 +737,15 @@ class PreviewWidget(QWidget):
 
         tex_layout.addWidget(tex_split, 1)
 
-        # Tex header styling
+        # Toolbar styling with dark/light mode support for combo box dropdown
+        dark = _dark_mode()
         tex_header.setStyleSheet(f"""
-            QWidget#texHeader {{
+            QWidget#texToolbar {{
                 background-color: {c["surface"]};
                 border-bottom: 1px solid {c["border"]};
             }}
-            QLabel {{
-                color: {c["fg"]};
-                font-size: 13px;
-                font-weight: 500;
-            }}
             QComboBox#engineCombo {{
-                background-color: {c["bg"]};
+                background-color: {c["editor_bg"]};
                 color: {c["fg"]};
                 border: 1px solid {c["border"]};
                 border-radius: 4px;
@@ -761,6 +759,14 @@ class PreviewWidget(QWidget):
                 border: none;
                 width: 20px;
             }}
+            /* Combo box dropdown list - themed for both modes */
+            QComboBox QAbstractItemView {{
+                background-color: {"#252526" if dark else "#ffffff"};
+                color: {"#cccccc" if dark else "#333333"};
+                border: 1px solid {c["border"]};
+                selection-background-color: {"#094771" if dark else "#add6ff"};
+                selection-color: {"#ffffff" if dark else "#003660"};
+            }}
             QPushButton#compileBtn {{
                 background-color: {c["accent"]};
                 color: #ffffff;
@@ -771,11 +777,11 @@ class PreviewWidget(QWidget):
                 padding: 4px 12px;
             }}
             QPushButton#compileBtn:hover {{
-                background-color: {"#1085d8" if _dark_mode() else "#0078d4"};
+                background-color: {"#1085d8" if dark else "#0078d4"};
             }}
             QPushButton#compileBtn:disabled {{
                 background-color: {c["muted"]};
-                color: {c["bg"]};
+                color: {c["editor_bg"]};
             }}
         """)
 
@@ -794,6 +800,7 @@ class PreviewWidget(QWidget):
             #previewHeader {{
                 background-color: {c["surface"]};
                 border-bottom: 1px solid {c["border"]};
+                padding-right: 1px;
             }}
             #previewTitle {{
                 font-size: 13px;
