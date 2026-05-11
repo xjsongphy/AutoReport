@@ -6,7 +6,7 @@ Based on VSCode explorer design:
 - Flexbox-like layout for icon + text
 - Text overflow ellipsis
 - Subtle hover/focus states
-- Codicon-style chevron branch indicators
+- Qt built-in branch indicators (selection extends to branch area)
 - Drag and drop file import support
 """
 
@@ -116,56 +116,11 @@ DIR_DESCRIPTIONS = {
 
 
 class _ChevronTreeWidget(QTreeWidget):
-    """QTreeWidget that draws VSCode codicon-style chevrons via drawBranches."""
+    """QTreeWidget with drag-drop support for the file tree."""
 
-    def __init__(self, chev_color: QColor, file_tree_widget=None, parent=None):
+    def __init__(self, file_tree_widget=None, parent=None):
         super().__init__(parent)
-        self._chev_color = chev_color
         self._file_tree_widget = file_tree_widget
-
-    def drawBranches(self, painter: QPainter, rect, index):
-        """Override to draw VSCode-style chevron indicators instead of default branch lines.
-
-        Draws chevrons for items with children AND for directory items that have
-        been expanded but contain no children (empty directories). This ensures
-        the chevron stays visible after expanding an empty directory.
-        """
-        if not self.model() or not index.isValid():
-            return
-
-        dir_name = self.model().data(index, Qt.ItemDataRole.UserRole)
-        is_dir = bool(dir_name)
-        has_children = self.model().hasChildren(index)
-
-        if not has_children and not is_dir:
-            return
-
-        painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        pen = QPen(self._chev_color, 1.5)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        painter.setPen(pen)
-
-        level = 0
-        parent = index.parent()
-        while parent.isValid():
-            level += 1
-            parent = parent.parent()
-
-        indent = self.indentation()
-        chev_x = level * indent + indent // 2
-        chev_y = rect.y() + rect.height() // 2
-
-        if self.isExpanded(index):
-            painter.drawLine(int(chev_x - 4), int(chev_y - 2), int(chev_x), int(chev_y + 2))
-            painter.drawLine(int(chev_x), int(chev_y + 2), int(chev_x + 4), int(chev_y - 2))
-        else:
-            painter.drawLine(int(chev_x - 2), int(chev_y - 4), int(chev_x + 2), int(chev_y))
-            painter.drawLine(int(chev_x + 2), int(chev_y), int(chev_x - 2), int(chev_y + 4))
-
-        painter.restore()
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         """Handle drag enter - accept file URLs."""
@@ -290,8 +245,8 @@ class FileTreeWidget(QWidget):
 
         layout.addWidget(header)
 
-        # File tree with custom chevron rendering and drag-drop support
-        self.tree = _ChevronTreeWidget(QColor("#cccccc"), file_tree_widget=self)
+        # File tree with drag-drop support
+        self.tree = _ChevronTreeWidget(file_tree_widget=self)
         self.tree.setObjectName("fileTree")
         self.tree.setHeaderLabels(["名称"])
         self.tree.setDragEnabled(True)
@@ -317,9 +272,6 @@ class FileTreeWidget(QWidget):
         from PyQt6.QtWidgets import QApplication
         hints = QApplication.styleHints()
         dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
-
-        # Update chevron color for current theme
-        self.tree._chev_color = QColor("#cccccc" if dark else "#616161")
 
         # VSCode Dark Modern color palette
         c = {
@@ -404,8 +356,18 @@ class FileTreeWidget(QWidget):
                 background-color: {c["sel_bg"]};
             }}
 
-            /* Branch chevrons — drawn by _ChevronTreeWidget.drawBranches */
+            /* Branch indicators - using Qt built-in branches */
             #fileTree::branch {{
+                background: none;
+                border: none;
+            }}
+
+            #fileTree::branch:has-children {{
+                background: none;
+                border: none;
+            }}
+
+            #fileTree::branch:open {{
                 background: none;
                 border: none;
             }}
