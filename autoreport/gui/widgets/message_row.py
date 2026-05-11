@@ -83,8 +83,11 @@ class _CodeBlockWidget(QWidget):
         # Code content
         code_label = QLabel(self._code)
         code_label.setObjectName("codeBlockContent")
-        code_label.setWordWrap(False)
+        code_label.setWordWrap(True)
         code_label.setTextFormat(Qt.TextFormat.PlainText)
+        code_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
         code_label.setContentsMargins(12, 0, 12, 10)
         layout.addWidget(code_label)
 
@@ -178,6 +181,9 @@ class MessageRow(QWidget):
                 text.setObjectName("userMessageText")
                 text.setWordWrap(True)
                 text.setTextFormat(Qt.TextFormat.PlainText)
+                text.setTextInteractionFlags(
+                    Qt.TextInteractionFlag.TextSelectableByMouse
+                )
                 bl.addWidget(text)
 
             bcl.addWidget(bubble)
@@ -298,6 +304,9 @@ class MessageRow(QWidget):
                 text_label.setWordWrap(True)
                 text_label.setTextFormat(Qt.TextFormat.RichText)
                 text_label.setOpenExternalLinks(True)
+                text_label.setTextInteractionFlags(
+                    Qt.TextInteractionFlag.TextSelectableByMouse
+                )
                 text_label.setContentsMargins(0, 2, 0, 4)
                 self._agent_content_layout.addWidget(text_label)
 
@@ -342,12 +351,18 @@ class MessageRow(QWidget):
             label.setWordWrap(True)
             label.setTextFormat(Qt.TextFormat.RichText)
             label.setOpenExternalLinks(True)
+            label.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+            )
             label.setContentsMargins(0, 2, 0, 4)
         else:
             label = QLabel(self._detail or "")
             label.setObjectName("userMessageText")
             label.setWordWrap(True)
             label.setTextFormat(Qt.TextFormat.PlainText)
+            label.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+            )
         layout.addWidget(label)
         return widget
 

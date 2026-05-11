@@ -51,11 +51,11 @@ class _QtCompatTreeprocessor(Treeprocessor):
             pre.set("style", f"background-color: {code_bg}; border: 1px solid {code_border}; "
                     "border-radius: 6px; padding: 8px 12px; margin: 4px 0; "
                     "font-family: 'Cascadia Code', 'SF Mono', 'Consolas', monospace; "
-                    "font-size: 12px; white-space: pre-wrap;")
+                    "font-size: 12px; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%;")
 
             for code in pre.iter("code"):
                 code.tag = "span"
-                code.set("style", f"color: {code_fg}; font-family: inherit; font-size: inherit;")
+                code.set("style", f"color: {code_fg}; font-family: inherit; font-size: inherit; white-space: pre-wrap; word-wrap: break-word;")
 
         # Qt rich text doesn't support <h1>-<h6>, convert to styled <p>
         for i in range(1, 7):
