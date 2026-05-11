@@ -635,6 +635,7 @@ class PreviewWidget(QWidget):
 
         from PyQt6.Qsci import QsciLexerTeX, QsciScintilla
         from PyQt6.QtPdfWidgets import QPdfView
+        from PyQt6.QtGui import QColor, QFont
 
         c = _theme_colors()
         self._tex_widget = QWidget()
@@ -668,8 +669,8 @@ class PreviewWidget(QWidget):
 
         tex_layout.addWidget(tex_header)
 
-        # Vertical splitter: TeX editor (top) + PDF viewer (bottom)
-        tex_split = QSplitter(Qt.Orientation.Vertical)
+        # Horizontal splitter: TeX editor (left) + PDF viewer (right)
+        tex_split = QSplitter(Qt.Orientation.Horizontal)
         tex_split.setObjectName("texSplitter")
 
         # TeX section
@@ -684,8 +685,24 @@ class PreviewWidget(QWidget):
         self._tex_scintilla.setMarginLineNumbers(1, True)
         self._tex_scintilla.setMarginWidth(1, "0000")
         self._tex_scintilla.setReadOnly(False)
-        self._tex_scintilla.setLexer(QsciLexerTeX(self._tex_scintilla))
+
+        # Configure lexer with theme colors
+        lexer = QsciLexerTeX(self._tex_scintilla)
+        self._tex_scintilla.setLexer(lexer)
         self._tex_scintilla.marginClicked.connect(self._on_tex_margin_clicked)
+
+        # Apply syntax highlighting colors based on theme
+        if _dark_mode():
+            lexer.setColor(QColor("#569cd6"), QsciLexerTEX.Keyword)  # Blue
+            lexer.setColor(QColor("#4ec9b0"), QsciLexerTEX.Command)  # Cyan
+            lexer.setColor(QColor("#dcdcaa"), QsciLexerTEX.Math)  # Yellow
+            lexer.setColor(QColor("#ce9178"), QsciLexerTEX.SpecialCommand)  # Orange
+        else:
+            lexer.setColor(QColor("#0000ff"), QsciLexerTEX.Keyword)  # Blue
+            lexer.setColor(QColor("#a31515"), QsciLexerTEX.Command)  # Red
+            lexer.setColor(QColor("#098658"), QsciLexerTEX.Math)  # Green
+            lexer.setColor(QColor("#795e26"), QsciLexerTEX.SpecialCommand)  # Brown
+
         self._tex_scintilla.setStyleSheet(f"""
             QsciScintilla#texEditor {{
                 background-color: {c["bg"]};
@@ -693,6 +710,10 @@ class PreviewWidget(QWidget):
                 border: none;
                 font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
                 font-size: 13px;
+            }}
+            QsciScintilla#texEditor::margin {{
+                background-color: {c["surface"]};
+                color: {c["muted"]};
             }}
         """)
         tsl.addWidget(self._tex_scintilla)
@@ -702,21 +723,6 @@ class PreviewWidget(QWidget):
         psl = QVBoxLayout(pdf_section)
         psl.setContentsMargins(0, 0, 0, 0)
         psl.setSpacing(0)
-
-        pdf_label = QLabel("PDF 预览")
-        pdf_label.setObjectName("pdfSectionLabel")
-        pdf_label.setStyleSheet(f"""
-            QLabel#pdfSectionLabel {{
-                background-color: {c["surface"]};
-                color: {c["muted"]};
-                font-size: 11px;
-                font-weight: 600;
-                padding: 4px 12px;
-                border-top: 1px solid {c["border"]};
-                border-bottom: 1px solid {c["border"]};
-            }}
-        """)
-        psl.addWidget(pdf_label)
 
         self._tex_pdf_document = QPdfDocument(None)
         self._tex_pdf_view = QPdfView(None)
@@ -733,7 +739,7 @@ class PreviewWidget(QWidget):
 
         tex_split.addWidget(tex_section)
         tex_split.addWidget(pdf_section)
-        tex_split.setSizes([scaled(300), scaled(300)])
+        tex_split.setSizes([scaled(450), scaled(400)])
 
         tex_layout.addWidget(tex_split, 1)
 
@@ -743,28 +749,41 @@ class PreviewWidget(QWidget):
                 background-color: {c["surface"]};
                 border-bottom: 1px solid {c["border"]};
             }}
+            QLabel {{
+                color: {c["fg"]};
+                font-size: 13px;
+                font-weight: 500;
+            }}
             QComboBox#engineCombo {{
-                background-color: {c["card"]};
+                background-color: {c["bg"]};
                 color: {c["fg"]};
                 border: 1px solid {c["border"]};
                 border-radius: 4px;
-                padding: 2px 8px;
+                padding: 3px 8px;
                 font-size: 12px;
+            }}
+            QComboBox#engineCombo:hover {{
+                border: 1px solid {c["accent"]};
+            }}
+            QComboBox#engineCombo::drop-down {{
+                border: none;
+                width: 20px;
             }}
             QPushButton#compileBtn {{
-                background-color: {c["compile_bg"]};
-                color: {c["compile_fg"]};
+                background-color: {c["accent"]};
+                color: #ffffff;
                 border: none;
                 border-radius: 4px;
-                font-weight: 600;
+                font-weight: 500;
                 font-size: 12px;
+                padding: 4px 12px;
             }}
             QPushButton#compileBtn:hover {{
-                background-color: {"#1177bb" if _dark_mode() else "#006abc"};
+                background-color: {"#1085d8" if _dark_mode() else "#0078d4"};
             }}
             QPushButton#compileBtn:disabled {{
-                background-color: {c["card"]};
-                color: {c["muted"]};
+                background-color: {c["muted"]};
+                color: {c["bg"]};
             }}
         """)
 
