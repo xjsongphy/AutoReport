@@ -175,6 +175,7 @@ class FileTreeWidget(QWidget):
         """
         super().__init__()
         self.workspace = Path(workspace).resolve()
+        self._editing_item: QTreeWidgetItem | None = None  # Track item being edited
         self._setup_ui()
         self._init_directories()
 
@@ -232,45 +233,6 @@ class FileTreeWidget(QWidget):
 
         header_layout.addWidget(header)
         layout.addWidget(header_container)
-        header.setObjectName("explorerHeader")
-        header.setFixedHeight(36)
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(12, 0, 12, 0)
-        header_layout.setSpacing(4)
-
-        title = QLabel("EXPLORER")
-        title.setObjectName("explorerTitle")
-        title.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        header_layout.addWidget(title)
-
-        header_layout.addStretch()
-
-        # Toolbar buttons
-        self._new_file_btn = QPushButton("📄")
-        self._new_file_btn.setObjectName("explorerToolbarBtn")
-        self._new_file_btn.setToolTip("新建文件")
-        self._new_file_btn.setFixedSize(22, 22)
-        self._new_file_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._new_file_btn.clicked.connect(self._new_file)
-        header_layout.addWidget(self._new_file_btn)
-
-        self._new_folder_btn = QPushButton("📁")
-        self._new_folder_btn.setObjectName("explorerToolbarBtn")
-        self._new_folder_btn.setToolTip("新建文件夹")
-        self._new_folder_btn.setFixedSize(22, 22)
-        self._new_folder_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._new_folder_btn.clicked.connect(self._new_folder)
-        header_layout.addWidget(self._new_folder_btn)
-
-        self._refresh_btn = QPushButton("🔄")
-        self._refresh_btn.setObjectName("explorerToolbarBtn")
-        self._refresh_btn.setToolTip("刷新")
-        self._refresh_btn.setFixedSize(22, 22)
-        self._refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._refresh_btn.clicked.connect(self.refresh)
-        header_layout.addWidget(self._refresh_btn)
-
-        layout.addWidget(header)
 
         # File tree with custom chevron rendering and drag-drop support
         self.tree = _ChevronTreeWidget(QColor("#cccccc"), file_tree_widget=self)
@@ -372,6 +334,7 @@ class FileTreeWidget(QWidget):
                 border: none;
                 padding: 0 4px;
                 border-radius: 3px;
+                show-decoration-selected: 1;
             }}
 
             #fileTree::item:hover {{
@@ -490,12 +453,17 @@ class FileTreeWidget(QWidget):
 
     def _on_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
         """Handle inline edit completion - create new file/folder or rename."""
+        # Prevent recursive calls during editing
+        if self._editing_item is not None and self._editing_item != item:
+            return
+
         new_name = item.text(0).strip()
         if not new_name:
             # Remove item if name is empty (user cancelled)
             parent = item.parent()
             if parent:
                 parent.removeChild(item)
+            self._editing_item = None
             return
 
         # Check if this is a new item (no UserRole data set yet)
@@ -504,6 +472,7 @@ class FileTreeWidget(QWidget):
 
         if not dir_name and not file_path_str:
             # This is a new item being created
+            self._editing_item = item
             parent = item.parent()
             if parent:
                 parent_dir = parent.data(0, Qt.ItemDataRole.UserRole)
@@ -537,9 +506,26 @@ class FileTreeWidget(QWidget):
                         except Exception as e:
                             QMessageBox.warning(self, "创建失败", f"无法创建文件夹:\n{e}")
                             parent.removeChild(item)
+            self._editing_item = None
             return
 
-        # Existing item rename logic
+        # Existing item rename logic - only proceed if name actually changed
+        original_name = ""
+        if file_path_str:
+            original_name = Path(file_path_str).name
+        elif dir_name:
+            if "/" in dir_name:
+                original_name = dir_name.split("/")[-1]
+            else:
+                original_name = DIR_LABELS.get(dir_name, dir_name)
+
+        if original_name.lower() == new_name.lower():
+            # Name hasn't actually changed (case-insensitive comparison)
+            self._editing_item = None
+            return
+
+        self._editing_item = item
+
         if file_path_str:
             # Renaming a file
             old_path = Path(file_path_str)
@@ -547,14 +533,16 @@ class FileTreeWidget(QWidget):
             if old_path != new_path and new_path.exists():
                 QMessageBox.warning(self, "重命名失败", f"文件名 '{new_name}' 已存在")
                 self._revert_item_name(item)
+                self._editing_item = None
                 return
             try:
                 old_path.rename(new_path)
                 item.setData(0, Qt.ItemDataRole.UserRole + 1, str(new_path))
-                logger.info("Renamed: {} -> {}", old_path, new_path)
+                logger.info("Renamed file: {} -> {}", old_path, new_path)
             except Exception as e:
                 QMessageBox.warning(self, "重命名失败", f"无法重命名:\n{e}")
                 self._revert_item_name(item)
+                self._editing_item = None
         elif dir_name:
             # Renaming a directory
             old_path = self.workspace / dir_name
@@ -562,6 +550,7 @@ class FileTreeWidget(QWidget):
             if old_path != new_path and new_path.exists():
                 QMessageBox.warning(self, "重命名失败", f"文件夹名 '{new_name}' 已存在")
                 self._revert_item_name(item)
+                self._editing_item = None
                 return
             try:
                 old_path.rename(new_path)
@@ -573,10 +562,13 @@ class FileTreeWidget(QWidget):
                 else:
                     new_dir_name = new_name
                 item.setData(0, Qt.ItemDataRole.UserRole, new_dir_name)
-                logger.info("Renamed: {} -> {}", old_path, new_path)
+                logger.info("Renamed directory: {} -> {}", old_path, new_path)
             except Exception as e:
                 QMessageBox.warning(self, "重命名失败", f"无法重命名:\n{e}")
                 self._revert_item_name(item)
+                self._editing_item = None
+
+        self._editing_item = None
 
     def _revert_item_name(self, item: QTreeWidgetItem) -> None:
         """Revert item name to original after failed edit."""
