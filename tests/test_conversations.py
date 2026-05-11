@@ -2,6 +2,7 @@
 
 import json
 import tempfile
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -275,3 +276,106 @@ class TestMigration:
             ConversationStore(workspace)
 
             assert (conv_dir / "main.jsonl").exists()
+
+
+class TestGetSessionsStaleFilter:
+    """get_sessions filters out stale empty sessions while keeping fresh ones."""
+
+    def _write_sessions_json(self, conv_dir: Path, sessions: list[dict]) -> None:
+        """Helper: write sessions.json directly."""
+        with open(conv_dir / "sessions.json", "w", encoding="utf-8") as f:
+            json.dump(sessions, f, ensure_ascii=False, indent=2)
+
+    def test_fresh_empty_session_is_kept(self, tmp_path):
+        """A newly created empty session (recent timestamp) should appear in get_sessions."""
+        store = ConversationStore(tmp_path)
+        store.new_session("Fresh empty session")
+
+        sessions = store.get_sessions()
+        assert len(sessions) == 1
+        assert sessions[0]["name"] == "Fresh empty session"
+
+    def test_stale_empty_session_is_filtered(self, tmp_path):
+        """An empty session created >5 min ago should be excluded from get_sessions."""
+        conv_dir = tmp_path / ".autoreport" / "conversations"
+        conv_dir.mkdir(parents=True, exist_ok=True)
+
+        stale_ts = (datetime.now() - timedelta(minutes=10)).isoformat(timespec="seconds")
+        self._write_sessions_json(conv_dir, [
+            {"id": "stale-session-1", "name": "Old empty", "timestamp": stale_ts, "preview": ""},
+        ])
+
+        store = ConversationStore(tmp_path)
+        sessions = store.get_sessions()
+        assert len(sessions) == 0
+
+    def test_session_with_messages_always_kept(self, tmp_path):
+        """A session with messages should be kept even if its timestamp is old."""
+        conv_dir = tmp_path / ".autoreport" / "conversations"
+        conv_dir.mkdir(parents=True, exist_ok=True)
+
+        stale_ts = (datetime.now() - timedelta(hours=1)).isoformat(timespec="seconds")
+        session_id = "old-but-not-empty"
+        self._write_sessions_json(conv_dir, [
+            {"id": session_id, "name": "Has messages", "timestamp": stale_ts, "preview": ""},
+        ])
+
+        # Create a non-empty jsonl for the main agent
+        main_dir = conv_dir / "main"
+        main_dir.mkdir(parents=True, exist_ok=True)
+        jsonl_path = main_dir / f"{session_id}.jsonl"
+        jsonl_path.write_text(
+            json.dumps({"role": "user", "content": "hello"}) + "\n",
+            encoding="utf-8",
+        )
+
+        store = ConversationStore(tmp_path)
+        sessions = store.get_sessions()
+        assert len(sessions) == 1
+        assert sessions[0]["id"] == session_id
+
+    def test_mix_of_stale_fresh_and_nonempty(self, tmp_path):
+        """Only stale empty sessions should be filtered; fresh empty and non-empty kept."""
+        conv_dir = tmp_path / ".autoreport" / "conversations"
+        conv_dir.mkdir(parents=True, exist_ok=True)
+
+        stale_ts = (datetime.now() - timedelta(minutes=10)).isoformat(timespec="seconds")
+        fresh_ts = datetime.now().isoformat(timespec="seconds")
+        old_ts = (datetime.now() - timedelta(hours=2)).isoformat(timespec="seconds")
+
+        nonempty_id = "nonempty-session"
+        self._write_sessions_json(conv_dir, [
+            {"id": "stale-empty", "name": "Stale", "timestamp": stale_ts, "preview": ""},
+            {"id": "fresh-empty", "name": "Fresh", "timestamp": fresh_ts, "preview": ""},
+            {"id": nonempty_id, "name": "HasMsg", "timestamp": old_ts, "preview": ""},
+        ])
+
+        # Add a message to the non-empty session
+        main_dir = conv_dir / "main"
+        main_dir.mkdir(parents=True, exist_ok=True)
+        (main_dir / f"{nonempty_id}.jsonl").write_text(
+            json.dumps({"role": "user", "content": "msg"}) + "\n",
+            encoding="utf-8",
+        )
+
+        store = ConversationStore(tmp_path)
+        sessions = store.get_sessions()
+        ids = [s["id"] for s in sessions]
+        assert "stale-empty" not in ids
+        assert "fresh-empty" in ids
+        assert nonempty_id in ids
+        assert len(sessions) == 2
+
+    def test_unparseable_timestamp_kept(self, tmp_path):
+        """A session with an invalid timestamp string should be kept (safe fallback)."""
+        conv_dir = tmp_path / ".autoreport" / "conversations"
+        conv_dir.mkdir(parents=True, exist_ok=True)
+
+        self._write_sessions_json(conv_dir, [
+            {"id": "bad-ts", "name": "Bad timestamp", "timestamp": "not-a-date", "preview": ""},
+        ])
+
+        store = ConversationStore(tmp_path)
+        sessions = store.get_sessions()
+        assert len(sessions) == 1
+        assert sessions[0]["id"] == "bad-ts"

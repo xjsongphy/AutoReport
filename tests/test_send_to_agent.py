@@ -288,3 +288,98 @@ class TestReportIssueTool:
             task_brief="",
         )
         assert "task_id" not in result
+
+
+class TestTaskBriefFallback:
+    """task_items brief key resolution and content fallback."""
+
+    @pytest.mark.asyncio
+    async def test_brief_key_used_when_present(self, bus):
+        """When task_items contain 'brief', that value is used for the task."""
+        board = TaskBoard()
+        tool = SendToAgentTool(bus=bus, task_board=board)
+        result = await tool(
+            agent_type="data_analysis",
+            content="analyze the CSV data file",
+            blocking=False,
+            task_items=[{"brief": "Analyze CSV"}],
+        )
+        assert result["status"] == "delegated"
+        tasks = board.get_todolist(AgentType.DATA_ANALYSIS)
+        assert len(tasks) == 1
+        assert tasks[0].brief == "Analyze CSV"
+
+    @pytest.mark.asyncio
+    async def test_content_fallback_when_no_brief(self, bus):
+        """When task_items have no 'brief', falls back to content[:80]."""
+        board = TaskBoard()
+        tool = SendToAgentTool(bus=bus, task_board=board)
+        result = await tool(
+            agent_type="theory",
+            content="Derive the uncertainty formula for single-slit diffraction experiment",
+            blocking=False,
+            task_items=[{}],
+        )
+        assert result["status"] == "delegated"
+        tasks = board.get_todolist(AgentType.THEORY)
+        assert len(tasks) == 1
+        expected = "Derive the uncertainty formula for single-slit diffraction experiment"[:80]
+        assert tasks[0].brief == expected
+
+
+class TestReportIssueTaskMessage:
+    """ReportIssueTool task_message merging and fallback behavior."""
+
+    @pytest.mark.asyncio
+    async def test_task_message_merges_with_content(self, bus):
+        """When task_message differs from content, both are included in the dispatched message."""
+        board = TaskBoard()
+        tool = ReportIssueTool(bus=bus, agent_type=AgentType.PLOTTING, task_board=board)
+
+        result = await tool(
+            content="the theory curves are wrong",
+            issue_type="quality",
+            request_task_for="theory",
+            task_brief="fix theory curves",
+            task_message="please rederive the diffraction formula",
+        )
+
+        assert result["status"] == "reported"
+        assert "dispatched_task_id" in result
+
+        # Drain the bus queue to find the UserMessage dispatched to theory
+        queued = [await asyncio.wait_for(bus._queue.get(), timeout=1) for _ in range(4)]
+        user_messages = [msg for msg in queued if isinstance(msg, UserMessage)]
+        assert len(user_messages) == 1
+        assert user_messages[0].agent_type == AgentType.THEORY
+        # task_message is used as the primary dispatch content
+        assert "please rederive the diffraction formula" in user_messages[0].content
+        # content is merged as context when it differs from the dispatch content
+        assert "the theory curves are wrong" in user_messages[0].content
+
+    @pytest.mark.asyncio
+    async def test_task_message_empty_falls_back_to_brief(self, bus):
+        """When task_message is empty/None, the dispatch uses task_brief as content."""
+        board = TaskBoard()
+        tool = ReportIssueTool(bus=bus, agent_type=AgentType.DATA_ANALYSIS, task_board=board)
+
+        result = await tool(
+            content="raw data has outliers",
+            issue_type="quality",
+            request_task_for="plotting",
+            task_brief="create cleaned scatter plot",
+            task_message=None,
+        )
+
+        assert result["status"] == "reported"
+        assert "dispatched_task_id" in result
+
+        # Drain the bus queue
+        queued = [await asyncio.wait_for(bus._queue.get(), timeout=1) for _ in range(4)]
+        user_messages = [msg for msg in queued if isinstance(msg, UserMessage)]
+        assert len(user_messages) == 1
+        assert user_messages[0].agent_type == AgentType.PLOTTING
+        # Falls back to task_brief when task_message is empty
+        assert "create cleaned scatter plot" in user_messages[0].content
+        # Content is merged as context since it differs
+        assert "raw data has outliers" in user_messages[0].content
