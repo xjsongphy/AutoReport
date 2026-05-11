@@ -538,8 +538,7 @@ class MainWindow(QMainWindow):
 
         # Left: File tree
         self.file_tree = FileTreeWidget(self.workspace)
-        self.file_tree.setMinimumWidth(150)
-        self.file_tree.setMaximumWidth(400)
+        self.file_tree.setMinimumWidth(100)
         self.file_tree.directory_selected.connect(self._on_directory_selected)
         self.file_tree.file_selected.connect(self._on_file_selected)
         main_splitter.addWidget(self.file_tree)
@@ -558,7 +557,15 @@ class MainWindow(QMainWindow):
         self.main_agent_panel.setMinimumWidth(220)
         main_splitter.addWidget(self.main_agent_panel)
 
-        main_splitter.setSizes([180, 500, 240, 240])
+        # Set stretch factors for proportional sizing
+        # file_tree: 15%, preview: 50%, sub_agent: 17.5%, main_agent: 17.5%
+        main_splitter.setStretchFactor(0, 15)   # file_tree
+        main_splitter.setStretchFactor(1, 50)   # preview
+        main_splitter.setStretchFactor(2, 17)   # sub_agent_panel
+        main_splitter.setStretchFactor(3, 18)   # main_agent_panel
+
+        # Store main_splitter for resize handling
+        self._main_splitter = main_splitter
 
         # Connect signals
         self.main_agent_panel.message_sent.connect(self._on_main_agent_message)
@@ -1094,3 +1101,18 @@ class MainWindow(QMainWindow):
     def _subscribe_to_debug_messages(self) -> None:
         self.main_agent_panel.subscribe_to_debug_messages(self.backend.bus)
         self.sub_agent_panel.subscribe_to_debug_messages(self.backend.bus)
+
+    def resizeEvent(self, event):
+        """Handle window resize to maintain proportional layout."""
+        super().resizeEvent(event)
+        # Recalculate sizes based on current window width
+        if hasattr(self, '_main_splitter'):
+            total_width = self._main_splitter.width()
+            # file_tree: 15%, preview: 50%, sub_agent: 17.5%, main_agent: 17.5%
+            sizes = [
+                int(total_width * 0.15),  # file_tree
+                int(total_width * 0.50),  # preview
+                int(total_width * 0.175), # sub_agent_panel
+                int(total_width * 0.175), # main_agent_panel
+            ]
+            self._main_splitter.setSizes(sizes)
