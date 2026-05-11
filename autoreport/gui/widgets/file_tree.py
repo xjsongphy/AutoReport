@@ -31,6 +31,105 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+
+# ================================================================== #
+#  VSCode-style SVG icon rendering
+# ================================================================== #
+
+
+def _draw_codicon_icon(name: str, color: QColor, size: int = 18) -> QIcon:
+    """Draw a VSCode Codicon-style icon as SVG path.
+
+    Icons use currentColor equivalent - they inherit the theme color.
+    """
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pixmap)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+    pen = QPen(color, 1.5)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+
+    if name == "new-file":
+        # New File icon (file with corner fold)
+        # Main body
+        path = QPainterPath()
+        path.moveTo(4, 3)
+        path.lineTo(14, 3)
+        path.lineTo(14, 18)
+        path.lineTo(4, 18)
+        path.closeSubpath()
+        p.drawPath(path)
+
+        # Corner fold
+        fold = QPainterPath()
+        fold.moveTo(14, 3)
+        fold.lineTo(18, 7)
+        fold.lineTo(14, 7)
+        fold.closeSubpath()
+        p.drawPath(fold)
+
+        # Horizontal lines inside
+        p.drawLine(7, 8, 13, 8)
+        p.drawLine(7, 11, 13, 11)
+        p.drawLine(7, 14, 13, 14)
+
+    elif name == "new-folder":
+        # New Folder icon (folder with plus)
+        # Folder body
+        path = QPainterPath()
+        path.moveTo(3, 4)
+        path.lineTo(11, 4)
+        path.lineTo(11, 17)
+        path.lineTo(17, 17)
+        path.lineTo(17, 20)
+        path.lineTo(3, 20)
+        path.closeSubpath()
+        p.drawPath(path)
+
+        # Tab on top
+        tab = QPainterPath()
+        tab.moveTo(3, 4)
+        tab.lineTo(3, 2)
+        tab.lineTo(11, 2)
+        tab.lineTo(11, 4)
+        p.drawPath(tab)
+
+        # Plus sign
+        p.drawLine(7, 12, 13, 12)
+        p.drawLine(10, 10, 10, 14)
+
+    elif name == "refresh":
+        # Refresh icon (circular arrows)
+        # Outer arc
+        path = QPainterPath()
+        path.moveTo(18, 7)
+        path.arcTo(12, 7, 10, 10, 90, 130)
+        path.lineTo(9.5, 14)
+        p.drawPath(path)
+
+        # Inner arc
+        path = QPainterPath()
+        path.moveTo(13, 17)
+        path.arcTo(13, 13, 10, 10, 270, 300)
+        p.drawPath(path)
+
+        # Arrow on outer arc
+        arrow = QPainterPath()
+        arrow.moveTo(18, 7)
+        arrow.lineTo(15, 4)
+        arrow.lineTo(15, 10)
+        arrow.closeSubpath()
+        p.setBrush(color)
+        p.drawPath(arrow)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+
+    p.end()
+    return QIcon(pixmap)
+
 # Fixed directory structure
 FIXED_DIRECTORIES = ["data", "references", "theory", "code", "tex"]
 
@@ -206,8 +305,8 @@ class FileTreeWidget(QWidget):
 
         hlayout.addStretch()
 
-        # Toolbar buttons
-        self._new_file_btn = QPushButton("⋈")
+        # Toolbar buttons (using VSCode Codicons)
+        self._new_file_btn = QPushButton()
         self._new_file_btn.setObjectName("explorerToolbarBtn")
         self._new_file_btn.setToolTip("新建文件")
         self._new_file_btn.setFixedSize(22, 22)
@@ -215,7 +314,7 @@ class FileTreeWidget(QWidget):
         self._new_file_btn.clicked.connect(self._new_file)
         hlayout.addWidget(self._new_file_btn)
 
-        self._new_folder_btn = QPushButton("⊕")
+        self._new_folder_btn = QPushButton()
         self._new_folder_btn.setObjectName("explorerToolbarBtn")
         self._new_folder_btn.setToolTip("新建文件夹")
         self._new_folder_btn.setFixedSize(22, 22)
@@ -223,13 +322,16 @@ class FileTreeWidget(QWidget):
         self._new_folder_btn.clicked.connect(self._new_folder)
         hlayout.addWidget(self._new_folder_btn)
 
-        self._refresh_btn = QPushButton("↻")
+        self._refresh_btn = QPushButton()
         self._refresh_btn.setObjectName("explorerToolbarBtn")
         self._refresh_btn.setToolTip("刷新")
         self._refresh_btn.setFixedSize(22, 22)
         self._refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._refresh_btn.clicked.connect(self.refresh)
         hlayout.addWidget(self._refresh_btn)
+
+        # Set icons on toolbar buttons
+        self._setup_toolbar_icons()
 
         header_layout.addWidget(header)
         layout.addWidget(header_container)
@@ -304,12 +406,13 @@ class FileTreeWidget(QWidget):
                 letter-spacing: 1px;
             }}
 
-            /* Explorer toolbar buttons */
+            /* Explorer toolbar buttons (VSCode Codicons) */
             #explorerToolbarBtn {{
                 background-color: transparent;
                 border: none;
                 border-radius: 3px;
-                font-size: 16px;
+                font-family: "codicon", "Segoe UI Symbol", "Apple Symbols", sans-serif;
+                font-size: 18px;
                 padding: 0;
                 color: {c["fg"]};
             }}
@@ -398,6 +501,20 @@ class FileTreeWidget(QWidget):
         # Set row height
         self.tree.setIconSize(QSize(16, 16))
 
+        # Update toolbar icons for current theme
+        self._setup_toolbar_icons()
+
+    def _setup_toolbar_icons(self) -> None:
+        """Set icons on toolbar buttons using VSCode Codicon style."""
+        from PyQt6.QtWidgets import QApplication
+        hints = QApplication.styleHints()
+        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
+        icon_color = QColor("#cccccc" if dark else "#616161")
+
+        self._new_file_btn.setIcon(_draw_codicon_icon("new-file", icon_color))
+        self._new_folder_btn.setIcon(_draw_codicon_icon("new-folder", icon_color))
+        self._refresh_btn.setIcon(_draw_codicon_icon("refresh", icon_color))
+
     def _init_directories(self) -> None:
         """Initialize fixed directory structure."""
         from PyQt6.QtWidgets import QApplication
@@ -448,8 +565,7 @@ class FileTreeWidget(QWidget):
             self.directory_selected.emit(dir_name)
 
         # Toggle expand/collapse (VSCode behavior)
-        if not item.isExpanded():
-            item.setExpanded(True)
+        item.setExpanded(not item.isExpanded())
 
     def _on_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
         """Handle inline edit completion - create new file/folder or rename."""
