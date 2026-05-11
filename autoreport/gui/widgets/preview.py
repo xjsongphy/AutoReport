@@ -691,17 +691,9 @@ class PreviewWidget(QWidget):
         self._tex_scintilla.setLexer(lexer)
         self._tex_scintilla.marginClicked.connect(self._on_tex_margin_clicked)
 
-        # Apply syntax highlighting colors based on theme
-        if _dark_mode():
-            lexer.setColor(QColor("#569cd6"), QsciLexerTEX.Keyword)  # Blue
-            lexer.setColor(QColor("#4ec9b0"), QsciLexerTEX.Command)  # Cyan
-            lexer.setColor(QColor("#dcdcaa"), QsciLexerTEX.Math)  # Yellow
-            lexer.setColor(QColor("#ce9178"), QsciLexerTEX.SpecialCommand)  # Orange
-        else:
-            lexer.setColor(QColor("#0000ff"), QsciLexerTEX.Keyword)  # Blue
-            lexer.setColor(QColor("#a31515"), QsciLexerTEX.Command)  # Red
-            lexer.setColor(QColor("#098658"), QsciLexerTEX.Math)  # Green
-            lexer.setColor(QColor("#795e26"), QsciLexerTEX.SpecialCommand)  # Brown
+        # Set basic colors for lexer
+        lexer.setColor(QColor(c["fg"]))
+        lexer.setPaper(QColor(c["bg"]))
 
         self._tex_scintilla.setStyleSheet(f"""
             QsciScintilla#texEditor {{

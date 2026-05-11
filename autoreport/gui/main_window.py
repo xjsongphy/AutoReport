@@ -558,7 +558,7 @@ class MainWindow(QMainWindow):
         self.main_agent_panel.setMinimumWidth(220)
         main_splitter.addWidget(self.main_agent_panel)
 
-        main_splitter.setSizes([180, 420, 300, 300])
+        main_splitter.setSizes([180, 500, 240, 240])
 
         # Connect signals
         self.main_agent_panel.message_sent.connect(self._on_main_agent_message)
