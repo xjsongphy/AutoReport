@@ -1,24 +1,33 @@
-"""Animated status indicator — VS Code Copilot Chat style progress.
-
-VS Code uses a spinner icon with descriptive text during tool/thinking state.
-The spinner is small (12px) with muted color (--vscode-descriptionForeground).
-"""
+"""Status badge — compact, boxed, centered status indicator."""
 
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QWidget, QPushButton
 
 
 _SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 
-class StatusIndicator(QWidget):
-    """Minimal spinner + status text row matching VS Code chat progress."""
+class StatusIndicator(QPushButton):
+    """Status badge with spinner, boxed style, centered text.
+
+    States:
+    - Idle: gray badge, "Idle"
+    - Thinking: blue spinner + "Thinking"
+    - Tool: amber spinner + "Running Tool"
+    - Error: red badge, "Error"
+    - Debug: purple badge, "Debug"
+    """
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._visible = False
         self._frame_idx = 0
-        self._header = "Working"
+        self._status = "idle"
+        self._clickable = False
+
+        self.setCheckable(False)
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.clicked.connect(self._on_clicked)
 
         self._setup_ui()
 
@@ -28,46 +37,101 @@ class StatusIndicator(QWidget):
 
     def _setup_ui(self) -> None:
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 4, 16, 4)
+        layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(6)
 
         self._spinner_label = QLabel()
         self._spinner_label.setObjectName("statusSpinner")
-        self._spinner_label.setFixedWidth(14)
+        self._spinner_label.setFixedWidth(12)
         self._spinner_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._spinner_label)
 
-        self._header_label = QLabel(self._header)
-        self._header_label.setObjectName("statusHeader")
-        layout.addWidget(self._header_label)
+        self._status_label = QLabel()
+        self._status_label.setObjectName("statusLabel")
+        self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._status_label)
 
-        layout.addStretch()
+        self._update_style()
         self.setVisible(False)
 
-    def start(self, header: str = "Working") -> None:
-        self._header = header
-        self._header_label.setText(header)
-        self._frame_idx = 0
-        self._visible = True
+    def _update_style(self) -> None:
+        from PyQt6.QtWidgets import QApplication
+        hints = QApplication.styleHints()
+        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
+
+        # Status colors
+        colors = {
+            "idle": ("#3c3c3c", "#737373"),      # bg, fg
+            "thinking": ("#1a3a5a", "#0078d4"),
+            "tool": ("#5a4a1a", "#cca700"),
+            "error": ("#5a1a1a", "#f44747"),
+            "debug": ("#3a1a5a", "#b180d7"),
+        }
+
+        bg, fg = colors.get(self._status, colors["idle"])
+
+        self.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {bg};
+                color: {fg};
+                border: 1px solid {bg};
+                border-radius: 4px;
+                padding: 2px 8px;
+                font-size: 11px;
+                font-weight: 500;
+                text-align: center;
+            }}
+            QPushButton:hover {{
+                border: 1px solid {fg};
+            }}
+            QLabel#statusSpinner {{
+                color: {fg};
+                font-size: 11px;
+            }}
+            QLabel#statusLabel {{
+                color: {fg};
+                font-size: 11px;
+            }}
+        """)
+
+    def start(self, status: str = "thinking") -> None:
+        status_map = {
+            "thinking": ("Thinking", True),
+            "running_tool": ("Running Tool", True),
+            "tool": ("Running Tool", True),
+        }
+        text, spin = status_map.get(status, ("Working", True))
+        self.set_status(status, text)
+        if spin:
+            self._timer.start()
         self.setVisible(True)
-        self._update_display()
-        self._timer.start()
 
     def stop(self) -> None:
         self._timer.stop()
-        self._visible = False
+        self.set_status("idle", "Idle")
         self.setVisible(False)
 
-    def set_header(self, header: str) -> None:
-        self._header = header
-        self._header_label.setText(header)
+    def set_status(self, status: str, text: str | None = None) -> None:
+        self._status = status
+        if text is None:
+            text_map = {
+                "idle": "Idle",
+                "thinking": "Thinking",
+                "running_tool": "Running Tool",
+                "tool": "Running Tool",
+                "error": "Error",
+                "debug_mode": "Debug",
+            }
+            text = text_map.get(status, status.title())
+        self._status_label.setText(text)
+        self._update_style()
 
     def _tick(self) -> None:
         self._frame_idx = (self._frame_idx + 1) % len(_SPINNER_FRAMES)
-        self._update_display()
-
-    def _update_display(self) -> None:
         self._spinner_label.setText(_SPINNER_FRAMES[self._frame_idx])
 
+    def _on_clicked(self) -> None:
+        pass  # Can add click handler later (e.g., show debug panel)
+
     def is_running(self) -> bool:
-        return self._visible
+        return self._timer.isActive()
