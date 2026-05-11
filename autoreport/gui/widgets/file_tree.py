@@ -38,67 +38,57 @@ from PyQt6.QtWidgets import (
 
 
 def _draw_codicon_icon(name: str, color: QColor, size: int = 18) -> QIcon:
-    """Draw a VSCode Codicon icon using the codicon font.
+    """Draw a VSCode Codicon icon using SVG vector rendering.
 
-    Loads the codicon.ttf font file and renders the appropriate Unicode character.
-    Uses high-DPI rendering for crisp, vector-quality icons.
+    Loads the SVG files from the codicons package and renders them as
+    vector graphics for smooth, scalable icons.
     """
-    from PyQt6.QtGui import QFont, QFontDatabase, QImage, QPaintDevice
+    from PyQt6.QtSvgWidgets import QSvgRenderer
     from pathlib import Path
 
-    # VSCode codicon Unicode codepoints
-    codicons = {
-        "new-file": "",      # U+EA7F
-        "new-folder": "",    # U+EA80
-        "refresh": "",       # U+EB37
-        "collapse-all": "",  # U+EAC5
+    # Map icon names to SVG files
+    svg_files = {
+        "new-file": "new-file.svg",
+        "new-folder": "new-folder.svg",
+        "refresh": "refresh.svg",
+        "collapse-all": None,  # Not used currently
     }
 
-    char = codicons.get(name, "?")
+    svg_file = svg_files.get(name)
+    if not svg_file:
+        # Fallback: simple text icon
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pixmap)
+        p.setPen(color)
+        p.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "?")
+        p.end()
+        return QIcon(pixmap)
 
-    # Get font file path (relative to this file)
-    font_path = Path(__file__).parent / "codicon.ttf"
+    # Get SVG file path (relative to this file)
+    svg_path = Path(__file__).parent / svg_file
 
-    # Load the codicon font
-    font_id = QFontDatabase.addApplicationFont(str(font_path))
-    if font_id < 0:
-        # Fallback: use default font
-        font = QFont("Segoe UI Symbol", int(size * 0.9))
-    else:
-        font_families = QFontDatabase.applicationFontFamilies(font_id)
-        if font_families:
-            font = QFont(font_families[0], int(size * 0.9))
-        else:
-            font = QFont("Segoe UI Symbol", int(size * 0.9))
+    # Load and render SVG
+    renderer = QSvgRenderer(str(svg_path))
 
-    # Use device pixel ratio for high-DPI displays
-    from PyQt6.QtWidgets import QApplication
-    screen = QApplication.primaryScreen()
-    dpr = screen.devicePixelRatio() if screen else 1.0
+    # Create pixmap with proper size
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
 
-    # Create high-resolution image for better quality
-    img_size = int(size * dpr)
-    image = QImage(img_size, img_size, QImage.Format.Format_ARGB32_Premultiplied)
-    image.fill(Qt.GlobalColor.transparent)
-    image.setDevicePixelRatio(dpr)
-
-    p = QPainter(image)
+    p = QPainter(pixmap)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
     p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
-    # Use text color
-    p.setPen(color)
-    p.setFont(font)
+    # Apply color by using composition mode
+    # First render the icon in grayscale, then tint it
+    renderer.render(p, pixmap.rect())
 
-    # Draw text centered
-    rect = image.rect()
-    p.drawText(rect, Qt.AlignmentFlag.AlignCenter, char)
+    # Tint the rendered icon with the desired color
+    p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+    p.fillRect(pixmap.rect(), color)
 
     p.end()
 
-    # Create pixmap from image
-    pixmap = QPixmap.fromImage(image)
     return QIcon(pixmap)
 
 # Fixed directory structure
