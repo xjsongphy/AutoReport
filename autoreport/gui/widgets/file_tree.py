@@ -41,8 +41,9 @@ def _draw_codicon_icon(name: str, color: QColor, size: int = 18) -> QIcon:
     """Draw a VSCode Codicon icon using the codicon font.
 
     Loads the codicon.ttf font file and renders the appropriate Unicode character.
+    Uses high-DPI rendering for crisp, vector-quality icons.
     """
-    from PyQt6.QtGui import QFont, QFontDatabase
+    from PyQt6.QtGui import QFont, QFontDatabase, QImage, QPaintDevice
     from pathlib import Path
 
     # VSCode codicon Unicode codepoints
@@ -62,29 +63,42 @@ def _draw_codicon_icon(name: str, color: QColor, size: int = 18) -> QIcon:
     font_id = QFontDatabase.addApplicationFont(str(font_path))
     if font_id < 0:
         # Fallback: use default font
-        font = QFont("Segoe UI Symbol", int(size * 0.85))
+        font = QFont("Segoe UI Symbol", int(size * 0.9))
     else:
         font_families = QFontDatabase.applicationFontFamilies(font_id)
         if font_families:
-            font = QFont(font_families[0], int(size * 0.85))
+            font = QFont(font_families[0], int(size * 0.9))
         else:
-            font = QFont("Segoe UI Symbol", int(size * 0.85))
+            font = QFont("Segoe UI Symbol", int(size * 0.9))
 
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.GlobalColor.transparent)
+    # Use device pixel ratio for high-DPI displays
+    from PyQt6.QtWidgets import QApplication
+    screen = QApplication.primaryScreen()
+    dpr = screen.devicePixelRatio() if screen else 1.0
 
-    p = QPainter(pixmap)
+    # Create high-resolution image for better quality
+    img_size = int(size * dpr)
+    image = QImage(img_size, img_size, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.transparent)
+    image.setDevicePixelRatio(dpr)
+
+    p = QPainter(image)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+    p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
     # Use text color
     p.setPen(color)
     p.setFont(font)
 
     # Draw text centered
-    rect = pixmap.rect()
+    rect = image.rect()
     p.drawText(rect, Qt.AlignmentFlag.AlignCenter, char)
 
     p.end()
+
+    # Create pixmap from image
+    pixmap = QPixmap.fromImage(image)
     return QIcon(pixmap)
 
 # Fixed directory structure
