@@ -43,7 +43,7 @@ def _draw_codicon_icon(name: str, color: QColor, size: int = 18) -> QIcon:
     Loads the SVG files from the codicons package and renders them as
     vector graphics for smooth, scalable icons.
     """
-    from PyQt6.QtSvgWidgets import QSvgRenderer
+    from PyQt6.QtSvg import QSvgRenderer
     from pathlib import Path
 
     # Map icon names to SVG files
