@@ -227,8 +227,9 @@ class MainWindow(QMainWindow):
 
             /* ---- Panel Header ---- */
             #panelHeader {{
-                background-color: {c["bg"]};
+                background-color: {c["surface"]};
                 border-bottom: 1px solid {c["border"]};
+                padding-right: 1px;
             }}
             /* Agent Panel background */
             AgentPanel {{
@@ -558,11 +559,11 @@ class MainWindow(QMainWindow):
         main_splitter.addWidget(self.main_agent_panel)
 
         # Set stretch factors for proportional sizing
-        # file_tree: 15%, preview: 50%, sub_agent: 17.5%, main_agent: 17.5%
-        main_splitter.setStretchFactor(0, 15)   # file_tree
-        main_splitter.setStretchFactor(1, 50)   # preview
-        main_splitter.setStretchFactor(2, 17)   # sub_agent_panel
-        main_splitter.setStretchFactor(3, 18)   # main_agent_panel
+        # file_tree: 10%, preview: 40%, sub_agent: 25%, main_agent: 25%
+        main_splitter.setStretchFactor(0, 10)   # file_tree
+        main_splitter.setStretchFactor(1, 40)   # preview
+        main_splitter.setStretchFactor(2, 25)   # sub_agent_panel
+        main_splitter.setStretchFactor(3, 25)   # main_agent_panel
 
         # Store main_splitter for resize handling
         self._main_splitter = main_splitter
@@ -1108,11 +1109,11 @@ class MainWindow(QMainWindow):
         # Recalculate sizes based on current window width
         if hasattr(self, '_main_splitter'):
             total_width = self._main_splitter.width()
-            # file_tree: 15%, preview: 50%, sub_agent: 17.5%, main_agent: 17.5%
+            # file_tree: 10%, preview: 40%, sub_agent: 25%, main_agent: 25%
             sizes = [
-                int(total_width * 0.15),  # file_tree
-                int(total_width * 0.50),  # preview
-                int(total_width * 0.175), # sub_agent_panel
-                int(total_width * 0.175), # main_agent_panel
+                int(total_width * 0.10),  # file_tree
+                int(total_width * 0.40),  # preview
+                int(total_width * 0.25),  # sub_agent_panel
+                int(total_width * 0.25),  # main_agent_panel
             ]
             self._main_splitter.setSizes(sizes)
