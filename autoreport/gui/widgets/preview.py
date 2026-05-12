@@ -31,6 +31,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..scale import scaled, scaled_size
+from ..theme import get_theme_colors
 
 # ================================================================== #
 #  File-type routing
@@ -52,34 +53,6 @@ _IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".bmp", ".svg"})
 _SPREADSHEET_SUFFIXES = frozenset({".xlsx", ".xls"})
 
 
-def _dark_mode() -> bool:
-    from PyQt6.QtWidgets import QApplication
-
-    hints = QApplication.styleHints()
-    return hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
-
-
-def _theme_colors() -> dict[str, str]:
-    dark = _dark_mode()
-    return {
-        "bg": "transparent",
-        "editor_bg": "#1f1f1f" if dark else "#ffffff",
-        "surface": "#181818" if dark else "#f3f3f3",
-        "card": "#252526" if dark else "#e8e8e8",
-        "border": "#2b2b2b" if dark else "#e0e0e0",
-        "fg": "#d4d4d4" if dark else "#333333",
-        "muted": "#858585" if dark else "#888888",
-        "accent": "#0078d4" if dark else "#0090ff",
-        "sel_bg": "#264f78" if dark else "#add6ff",
-        "tab_active_bg": "#1f1f1f" if dark else "#f3f3f3",
-        "tab_inactive_bg": "#2d2d2d" if dark else "#ececec",
-        "tab_active_fg": "#ffffff" if dark else "#1a1a1a",
-        "tab_inactive_fg": "#969696" if dark else "#888888",
-        "compile_bg": "#0e639c" if dark else "#0078d4",
-        "compile_fg": "#ffffff" if dark else "#ffffff",
-    }
-
-
 # ================================================================== #
 #  Viewer factory
 # ================================================================== #
@@ -89,7 +62,7 @@ def _create_scintilla(path: Path, lexer_name: str) -> tuple:
     """Create a QScintilla editor for the given file."""
     from PyQt6.Qsci import QsciScintilla
 
-    c = _theme_colors()
+    c = get_theme_colors()
     sci = QsciScintilla()
     sci.setObjectName("fileEditor")
     sci.setUtf8(True)
@@ -126,7 +99,7 @@ def _create_pdf_viewer(path: Path) -> tuple:
     """Create an embedded QPdfView for the given PDF file."""
     from PyQt6.QtPdfWidgets import QPdfView
 
-    c = _theme_colors()
+    c = get_theme_colors()
     doc = QPdfDocument(None)
     doc.load(path)
 
@@ -146,7 +119,7 @@ def _create_pdf_viewer(path: Path) -> tuple:
 
 def _create_image_viewer(path: Path) -> tuple:
     """Create an image viewer with QPixmap."""
-    c = _theme_colors()
+    c = get_theme_colors()
     label = QLabel()
     label.setObjectName("fileImageViewer")
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -171,7 +144,7 @@ def _create_svg_viewer(path: Path) -> tuple:
     """Create an SVG viewer."""
     from PyQt6.QtSvgWidgets import QSvgWidget
 
-    c = _theme_colors()
+    c = get_theme_colors()
     svg = QSvgWidget(str(path))
     svg.setObjectName("fileSvgViewer")
     svg.setStyleSheet(f"""
@@ -185,7 +158,7 @@ def _create_svg_viewer(path: Path) -> tuple:
 
 def _create_spreadsheet_viewer(path: Path) -> tuple:
     """Create a table viewer for xlsx/xls files using pandas."""
-    c = _theme_colors()
+    c = get_theme_colors()
 
     try:
         df = pd.read_excel(path, engine="openpyxl" if path.suffix == ".xlsx" else None)
@@ -515,7 +488,7 @@ class EditorPanel(QWidget):
             self.split_requested.emit(key)
 
     def apply_style(self) -> None:
-        c = _theme_colors()
+        c = get_theme_colors()
         self._tab_bar.setStyleSheet(f"""
             QTabBar#editorTabBar {{
                 background-color: {c["surface"]};
@@ -641,7 +614,7 @@ class PreviewWidget(QWidget):
         from PyQt6.QtPdfWidgets import QPdfView
         from PyQt6.QtGui import QColor, QFont
 
-        c = _theme_colors()
+        c = get_theme_colors()
         self._tex_widget = QWidget()
         tex_layout = QVBoxLayout(self._tex_widget)
         tex_layout.setContentsMargins(0, 0, 0, 0)
@@ -739,7 +712,7 @@ class PreviewWidget(QWidget):
 
         # Toolbar styling with dark/light mode support for combo box dropdown
         dark = _dark_mode()
-        tex_header.setStyleSheet(f"""
+        toolbar.setStyleSheet(f"""
             QWidget#texToolbar {{
                 background-color: {c["surface"]};
                 border-bottom: 1px solid {c["border"]};
@@ -792,7 +765,7 @@ class PreviewWidget(QWidget):
     # ------------------------------------------------------------------ #
 
     def _apply_style(self) -> None:
-        c = _theme_colors()
+        c = get_theme_colors()
         self.setStyleSheet(f"""
             QWidget {{
                 background-color: {c["bg"]};

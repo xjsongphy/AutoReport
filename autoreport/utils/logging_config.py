@@ -6,6 +6,9 @@ from pathlib import Path
 
 from loguru import logger
 
+# Dedicated UI action logger — records user interactions for debugging
+ui_logger = logger.bind(ui_action=True)
+
 
 def setup_logging(
     log_level: str = "INFO",
@@ -54,6 +57,18 @@ def setup_logging(
             encoding="utf-8",
             backtrace=True,
             diagnose=True,
+        )
+
+        # UI actions log file — records user interactions for debugging
+        logger.add(
+            log_dir / "ui_actions_{time:YYYY-MM-DD}.log",
+            level="DEBUG",
+            format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>UI_ACTION</level> | {message}",
+            rotation="50 MB",
+            retention="7 days",
+            compression="zip",
+            encoding="utf-8",
+            filter=lambda record: "ui_action" in record["extra"],
         )
 
     logger.info("Logging configured: level={}, log_to_file={}", log_level, log_to_file)
@@ -157,8 +172,8 @@ def setup_exception_handler() -> None:
         # Also print to stderr directly so it's always visible
         traceback.print_exception(exc_type, exc_value, exc_traceback, file=sys.stderr)
 
-        # Log with full traceback in message
-        tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-        logger.error("Uncaught exception\n{}", tb_str)
+        # Use exception-aware logging to avoid markup parsing issues
+        # when traceback text contains angle brackets like "<module>".
+        logger.opt(exception=(exc_type, exc_value, exc_traceback)).error("Uncaught exception")
 
     sys.excepthook = handle_exception

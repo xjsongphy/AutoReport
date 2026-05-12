@@ -14,7 +14,9 @@ import shutil
 from pathlib import Path
 
 from loguru import logger
-from PyQt6.QtCore import QMimeData, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QFileSystemWatcher, QMimeData, QRectF, QSize, Qt, pyqtSignal
+
+from autoreport.utils.logging_config import ui_logger
 from PyQt6.QtGui import QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
@@ -31,13 +33,15 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from ..theme import get_theme_colors
+
 
 # ================================================================== #
 #  VSCode-style SVG icon rendering
 # ================================================================== #
 
 
-def _draw_codicon_icon(name: str, color: QColor, size: int = 18) -> QIcon:
+def _draw_codicon_icon(name: str, color: QColor, size: int = 16) -> QIcon:
     """Draw a VSCode Codicon icon using SVG vector rendering.
 
     Loads the SVG files from the codicons package and renders them as
@@ -71,9 +75,13 @@ def _draw_codicon_icon(name: str, color: QColor, size: int = 18) -> QIcon:
     # Load and render SVG
     renderer = QSvgRenderer(str(svg_path))
 
-    # Create pixmap with proper size
-    pixmap = QPixmap(size, size)
+    # Create high-DPI pixmap using device pixel ratio for crisp rendering
+    app = QApplication.instance()
+    dpr = float(app.devicePixelRatio() if app else 1.0)
+    px_size = max(1, int(round(size * dpr)))
+    pixmap = QPixmap(px_size, px_size)
     pixmap.fill(Qt.GlobalColor.transparent)
+    pixmap.setDevicePixelRatio(dpr)
 
     p = QPainter(pixmap)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -81,7 +89,7 @@ def _draw_codicon_icon(name: str, color: QColor, size: int = 18) -> QIcon:
 
     # Apply color by using composition mode
     # First render the icon in grayscale, then tint it
-    renderer.render(p, pixmap.rect())
+    renderer.render(p, QRectF(0.0, 0.0, float(px_size), float(px_size)))
 
     # Tint the rendered icon with the desired color
     p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
@@ -193,6 +201,7 @@ class FileTreeWidget(QWidget):
         self._editing_item: QTreeWidgetItem | None = None  # Track item being edited
         self._setup_ui()
         self._init_directories()
+        self._setup_file_watcher()
 
     def _setup_ui(self) -> None:
         """Setup user interface (VSCode explorer style)."""
@@ -204,6 +213,7 @@ class FileTreeWidget(QWidget):
         header = QWidget()
         header.setObjectName("explorerHeader")
         header.setFixedHeight(36)
+        header.setMinimumWidth(180)  # Ensure enough space for title + buttons
         hlayout = QHBoxLayout(header)
         hlayout.setContentsMargins(12, 0, 12, 0)
         hlayout.setSpacing(4)
@@ -220,6 +230,7 @@ class FileTreeWidget(QWidget):
         self._new_file_btn.setObjectName("explorerToolbarBtn")
         self._new_file_btn.setToolTip("新建文件")
         self._new_file_btn.setFixedSize(22, 22)
+        self._new_file_btn.setIconSize(QSize(16, 16))
         self._new_file_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._new_file_btn.clicked.connect(self._new_file)
         hlayout.addWidget(self._new_file_btn)
@@ -228,6 +239,7 @@ class FileTreeWidget(QWidget):
         self._new_folder_btn.setObjectName("explorerToolbarBtn")
         self._new_folder_btn.setToolTip("新建文件夹")
         self._new_folder_btn.setFixedSize(22, 22)
+        self._new_folder_btn.setIconSize(QSize(16, 16))
         self._new_folder_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._new_folder_btn.clicked.connect(self._new_folder)
         hlayout.addWidget(self._new_folder_btn)
@@ -236,6 +248,7 @@ class FileTreeWidget(QWidget):
         self._refresh_btn.setObjectName("explorerToolbarBtn")
         self._refresh_btn.setToolTip("刷新")
         self._refresh_btn.setFixedSize(22, 22)
+        self._refresh_btn.setIconSize(QSize(16, 16))
         self._refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._refresh_btn.clicked.connect(self.refresh)
         hlayout.addWidget(self._refresh_btn)
@@ -253,6 +266,8 @@ class FileTreeWidget(QWidget):
         self.tree.setAcceptDrops(True)
         self.tree.setDropIndicatorShown(True)
         self.tree.setIndentation(12)  # VSCode: 12px indentation
+        self.tree.setRootIsDecorated(True)
+        self.tree.setItemsExpandable(True)
         self.tree.setAnimated(False)  # Disable expand/collapse animation
         self.tree.itemClicked.connect(self._on_item_clicked)
         self.tree.itemExpanded.connect(self._on_item_expanded)
@@ -269,42 +284,25 @@ class FileTreeWidget(QWidget):
 
     def _apply_style(self) -> None:
         """Apply VSCode explorer style."""
-        from PyQt6.QtWidgets import QApplication
-        hints = QApplication.styleHints()
-        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
-
-        # VSCode Dark Modern color palette
-        c = {
-            "bg": "#181818" if dark else "#f3f3f3",
-            "bg_header": "#181818" if dark else "#f3f3f3",
-            "bg_header_alt": "#1f1f1f" if dark else "#ececec",
-            "fg": "#cccccc" if dark else "#616161",
-            "fg_dim": "#858585" if dark else "#858585",
-            "title": "#bbbbbb" if dark else "#616161",
-            "border": "#2b2b2b" if dark else "#e0e0e0",
-            "hover": "#2a2d2e" if dark else "#e8e8e8",
-            "sel_bg": "#094771" if dark else "#cce4f7",
-            "sel_fg": "#ffffff" if dark else "#003660",
-            "focus_border": "#0078d4" if dark else "#0066bf",
-        }
+        c = get_theme_colors()
 
         self.setStyleSheet(f"""
             /* Base styles */
             QWidget {{
-                background-color: {c["bg"]};
+                background-color: {c["surface"]};
                 color: {c["fg"]};
             }}
 
             /* Explorer header */
             #explorerHeader {{
-                background-color: {c["bg_header"]};
+                background-color: {c["surface"]};
                 border-bottom: 1px solid {c["border"]};
             }}
 
             #explorerTitle {{
                 font-size: 11px;
                 font-weight: 600;
-                color: {c["title"]};
+                color: {c["fg"]};
                 text-transform: uppercase;
                 letter-spacing: 1px;
             }}
@@ -320,18 +318,18 @@ class FileTreeWidget(QWidget):
                 color: {c["fg"]};
             }}
             #explorerToolbarBtn:hover {{
-                background-color: {c["hover"]};
+                background-color: {c["tree_hover"]};
             }}
 
             /* File tree */
             #fileTree {{
-                background-color: {c["bg"]};
+                background-color: {c["surface"]};
                 border: none;
                 outline: none;
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
                 font-size: 13px;
-                selection-background-color: {c["sel_bg"]};
-                selection-color: {c["sel_fg"]};
+                selection-background-color: {c["tree_sel_bg"]};
+                selection-color: {c["tree_sel_fg"]};
             }}
 
             /* Tree items - VSCode 22px row height */
@@ -344,43 +342,31 @@ class FileTreeWidget(QWidget):
             }}
 
             #fileTree::item:hover {{
-                background-color: {c["hover"]};
+                background-color: {c["tree_hover"]};
             }}
 
             #fileTree::item:selected {{
-                background-color: {c["sel_bg"]};
-                color: {c["sel_fg"]};
+                background-color: {c["tree_sel_bg"]};
+                color: {c["tree_sel_fg"]};
+                border-left: none;
+                border-right: none;
+                border-top: none;
+                border-bottom: none;
             }}
 
             #fileTree::item:selected:hover {{
-                background-color: {c["sel_bg"]};
-            }}
-
-            /* Branch indicators - using Qt built-in branches */
-            #fileTree::branch {{
-                background: none;
-                border: none;
-            }}
-
-            #fileTree::branch:has-children {{
-                background: none;
-                border: none;
-            }}
-
-            #fileTree::branch:open {{
-                background: none;
-                border: none;
+                background-color: {c["tree_sel_bg"]};
             }}
 
             /* Scrollbar */
             QScrollBar:vertical {{
-                background-color: {c["bg"]};
+                background-color: {c["surface"]};
                 width: 10px;
                 border: none;
             }}
 
             QScrollBar::handle:vertical {{
-                background-color: {c["fg_dim"]};
+                background-color: {c["muted"]};
                 min-height: 30px;
                 border-radius: 5px;
             }}
@@ -396,7 +382,7 @@ class FileTreeWidget(QWidget):
 
             /* Context Menu */
             #explorerContextMenu {{
-                background-color: {c["bg_header_alt"]};
+                background-color: {c["bg"]};
                 border: 1px solid {c["border"]};
                 border-radius: 6px;
                 padding: 4px;
@@ -406,8 +392,8 @@ class FileTreeWidget(QWidget):
                 border-radius: 3px;
             }}
             #explorerContextMenu::item:selected {{
-                background-color: {c["sel_bg"]};
-                color: {c["sel_fg"]};
+                background-color: {c["tree_sel_bg"]};
+                color: {c["tree_sel_fg"]};
             }}
         """)
 
@@ -419,10 +405,8 @@ class FileTreeWidget(QWidget):
 
     def _setup_toolbar_icons(self) -> None:
         """Set icons on toolbar buttons using VSCode Codicon style."""
-        from PyQt6.QtWidgets import QApplication
-        hints = QApplication.styleHints()
-        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
-        icon_color = QColor("#cccccc" if dark else "#616161")
+        theme = get_theme_colors()
+        icon_color = QColor(theme["fg"])
 
         self._new_file_btn.setIcon(_draw_codicon_icon("new-file", icon_color))
         self._new_folder_btn.setIcon(_draw_codicon_icon("new-folder", icon_color))
@@ -454,27 +438,74 @@ class FileTreeWidget(QWidget):
                 processed_item.setData(0, Qt.ItemDataRole.UserRole, "data/processed")
                 processed_item.setToolTip(0, DIR_DESCRIPTIONS.get("processed", ""))
 
+    def _setup_file_watcher(self) -> None:
+        """Setup QFileSystemWatcher to detect external file changes."""
+        self._file_watcher = QFileSystemWatcher(self)
+        # Watch all fixed directories
+        for dir_name in FIXED_DIRECTORIES:
+            dir_path = str(self.workspace / dir_name)
+            self._file_watcher.addPath(dir_path)
+        # Watch data/processed subdirectory
+        self._file_watcher.addPath(str(self.workspace / "data" / "processed"))
+        # Connect signal to refresh on change
+        self._file_watcher.directoryChanged.connect(self._on_directory_changed)
+
+    def _on_directory_changed(self, path: str) -> None:
+        """Handle directory change - refresh the tree if directory is currently expanded."""
+        path_obj = Path(path)
+        # Find which directory changed
+        rel_path = str(path_obj.relative_to(self.workspace))
+
+        # Check if this directory is currently expanded
+        root = self.tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            item = root.child(i)
+            item_dir = item.data(0, Qt.ItemDataRole.UserRole)
+            if item_dir == rel_path and item.isExpanded():
+                # Refresh this specific directory
+                item.setExpanded(False)
+                item.setExpanded(True)
+                break
+            # Check subdirectories (like data/processed)
+            for j in range(item.childCount()):
+                child = item.child(j)
+                child_dir = child.data(0, Qt.ItemDataRole.UserRole)
+                if child_dir == rel_path and child.isExpanded():
+                    child.setExpanded(False)
+                    child.setExpanded(True)
+                    break
+
     def _on_item_clicked(self, item: QTreeWidgetItem, column: int) -> None:
         """Handle item click - toggle folder expansion or select file."""
         dir_name = item.data(0, Qt.ItemDataRole.UserRole)
+        logger.debug("FileTree: clicked item, dir_name={}", dir_name)
         if not dir_name:
+            ui_logger.debug("FileTree: clicked item without dir_name")
             return
 
         file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
         if file_path_str:
             file_path = Path(file_path_str)
             if file_path.is_file():
+                ui_logger.debug("FileTree: selected file {}", file_path.name)
+                logger.debug("FileTree: selected file: {}", file_path)
                 self.file_selected.emit(file_path)
                 top_level = dir_name.split("/")[0]
                 if top_level in FIXED_DIRECTORIES:
+                    ui_logger.debug("FileTree: switched to directory {}", top_level)
+                    logger.debug("FileTree: emitting directory_selected: {}", top_level)
                     self.directory_selected.emit(top_level)
             return
 
         # Directory clicked - toggle expansion
         top_level = dir_name.split("/")[0]
         if "/" in dir_name:
+            ui_logger.debug("FileTree: clicked sub-directory {}, emitting {}", dir_name, top_level)
+            logger.debug("FileTree: sub-directory clicked: {}, emitting: {}", dir_name, top_level)
             self.directory_selected.emit(top_level)
         elif dir_name in FIXED_DIRECTORIES:
+            ui_logger.debug("FileTree: clicked directory {}, emitting {}", dir_name, dir_name)
+            logger.debug("FileTree: directory clicked: {}, emitting: {}", dir_name, dir_name)
             self.directory_selected.emit(dir_name)
 
         # Toggle expand/collapse (VSCode behavior)
@@ -857,9 +888,9 @@ class FileTreeWidget(QWidget):
                 item.setExpanded(True)
                 break
 
-        # Create placeholder item with inline edit
+        # Create placeholder item with inline edit (no default name for VSCode-style auto-cancel)
         new_item = QTreeWidgetItem()
-        new_item.setText(0, "untitled.txt")
+        new_item.setText(0, "")
         new_item.setIcon(0, _get_file_icon(".txt", style))
         new_item.setFlags(new_item.flags() | Qt.ItemFlag.ItemIsEditable)
 
@@ -888,9 +919,9 @@ class FileTreeWidget(QWidget):
                 item.setExpanded(True)
                 break
 
-        # Create placeholder item with inline edit
+        # Create placeholder item with inline edit (no default name for VSCode-style auto-cancel)
         new_item = QTreeWidgetItem()
-        new_item.setText(0, "new_folder")
+        new_item.setText(0, "")
         # Folders don't show icons
         new_item.setFlags(new_item.flags() | Qt.ItemFlag.ItemIsEditable)
 

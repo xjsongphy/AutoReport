@@ -26,6 +26,7 @@ from autoreport.gui.widgets.messages_area import MessagesArea
 from autoreport.gui.widgets.status_indicator import StatusIndicator
 from autoreport.gui.widgets.working_border import WorkingBorder
 from autoreport.interfaces.types import ApiDebugMessage
+from autoreport.utils.logging_config import ui_logger
 
 
 class AgentPanel(QWidget):
@@ -172,6 +173,7 @@ class AgentPanel(QWidget):
         self._context_label = QLabel()
         self._context_label.setObjectName("contextLabel")
         self._context_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._context_label.setWordWrap(True)
         cl.addWidget(self._context_label, 1)
 
         self._context_eye = QPushButton("👁")
@@ -692,6 +694,7 @@ class AgentPanel(QWidget):
         # Handle slash commands (manual type + Enter without popup selection)
         if content.startswith("/"):
             cmd = content.split()[0].lower()
+            ui_logger.debug("AgentPanel[{}]: slash command {}", self.panel_id, cmd)
             self._execute_slash_command(cmd, content)
             return
 
@@ -705,6 +708,7 @@ class AgentPanel(QWidget):
                 ctx = f"\n\n<!-- context -->\n**File**: {self._opened_file}\n"
                 final_message = content + ctx
 
+        ui_logger.debug("AgentPanel[{}]: sending message ({} chars)", self.panel_id, len(final_message))
         self._input_field.clear_text()
         self._set_working(True)
         self.message_sent.emit(final_message)
@@ -721,6 +725,7 @@ class AgentPanel(QWidget):
             self._on_send()
 
     def _on_history(self) -> None:
+        ui_logger.debug("AgentPanel[{}]: history button clicked", self.panel_id)
         if self._history_dropdown.isVisible():
             self._history_dropdown.hide()
         else:
@@ -729,6 +734,7 @@ class AgentPanel(QWidget):
             # Dropdown will be shown after data is loaded via show_history_dropdown()
 
     def _on_new_conversation(self) -> None:
+        ui_logger.debug("AgentPanel[{}]: new conversation button clicked", self.panel_id)
         self.new_conversation_requested.emit()
 
     def show_history_dropdown(self, sessions: list[dict], current_id: str | None = None) -> None:

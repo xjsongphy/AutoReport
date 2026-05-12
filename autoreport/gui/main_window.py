@@ -27,7 +27,9 @@ from ..interfaces.types import (
     UserMessage,
 )
 from ..utils.agent_labels import get_agent_badge, get_agent_title
+from ..utils.logging_config import ui_logger
 from .scale import dpi_scale
+from .theme import get_theme_colors
 from .widgets.agent_panel import AgentPanel
 from .widgets.file_tree import FileTreeWidget
 from .widgets.preview import PreviewWidget
@@ -65,105 +67,14 @@ class MainWindow(QMainWindow):
 
     def _apply_theme(self) -> None:
         """Apply theme matching VS Code Copilot Chat color variables."""
-        from PyQt6.QtWidgets import QApplication
-
-        hints = QApplication.styleHints()
-        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
         s = dpi_scale()
 
         # Helper: scale pixel value for DPI
         def px(v: int) -> str:
             return f"{round(v * s)}px"
 
-        if dark:
-            c = {
-                # VSCode Dark Modern: only 2 bg colors for large panels
-                # #1F1F1F = content area  |  #181818 = chrome (sidebar/file tree)
-                "bg": "#1f1f1f",
-                "surface": "#181818",
-                # code block / small elevated card
-                "card": "#252526",
-                # VSCode Dark Modern: subtle borders
-                "border": "#2b2b2b",
-                # --vscode-foreground
-                "fg": "#cccccc",
-                # --vscode-descriptionForeground
-                "muted": "#737373",
-                # --vscode-focusBorder
-                "focus": "#0078d4",
-                # --vscode-input-background
-                "input_bg": "#313131",
-                "input_border": "#3c3c3c",
-                # --vscode-chat-requestBubbleBackground
-                "bubble_bg": "#2a2a2a",
-                "bubble_hover": "#333333",
-                # --vscode-button-background
-                "send_bg": "#0078d4",
-                "send_hover": "#026ec1",
-                "stop_bg": "#f44747",
-                "stop_hover": "#d32f2f",
-                # subtle scrollbar (VSCode: transparent track, barely visible handle)
-                "scrollbar": "#ffffff1a",
-                "scrollbar_hover": "#ffffff33",
-                # --vscode-toolbar-hoverBackground
-                "hover": "#2a2d2e",
-                "selection": "#264f78",
-                "status_think": "#0078d4",
-                "status_tool": "#cca700",
-                "status_error": "#f44747",
-                "status_debug": "#b180d7",
-                "status_idle": "#737373",
-                "header_action": "#737373",
-                "header_action_hover": "#cccccc",
-                "context_bg": "#1f1f1f",
-                "context_border": "#2b2b2b",
-                "spinner_fg": "#0078d4",
-                # --vscode-chat-avatarBackground
-                "avatar_bg": "#3c3c3c",
-                "avatar_fg": "#cccccc",
-                # --vscode-textPreformat-foreground
-                "tool_fg": "#cccccc",
-                "tool_border": "#2b2b2b",
-                "tool_detail": "#737373",
-            }
-        else:
-            c = {
-                "bg": "#ffffff",
-                "surface": "#f3f3f3",
-                "card": "#f5f5f5",
-                "border": "#e0e0e0",
-                "fg": "#616161",
-                "muted": "#9e9e9e",
-                "focus": "#0090ff",
-                "input_bg": "#ffffff",
-                "input_border": "#e0e0e0",
-                "bubble_bg": "#f0f0f0",
-                "bubble_hover": "#e8e8e8",
-                "send_bg": "#0078d4",
-                "send_hover": "#006cbe",
-                "stop_bg": "#d32f2f",
-                "stop_hover": "#b71c1c",
-                "scrollbar": "#c1c1c1",
-                "scrollbar_hover": "#a8a8a8",
-                "hover": "#e8e8e8",
-                "selection": "#0090ff",
-                "status_think": "#0090ff",
-                "status_tool": "#bf8900",
-                "status_error": "#d32f2f",
-                "status_debug": "#7b1fa2",
-                "status_idle": "#9e9e9e",
-                "header_action": "#9e9e9e",
-                "header_action_hover": "#616161",
-                "context_bg": "#f3f3f3",
-                "context_border": "#e0e0e0",
-                "spinner_fg": "#0090ff",
-                "avatar_bg": "#e0e0e0",
-                "avatar_fg": "#616161",
-                "tool_fg": "#616161",
-                "tool_border": "#e0e0e0",
-                "tool_detail": "#9e9e9e",
-            }
-
+        # Get unified theme colors
+        c = get_theme_colors()
         self._theme_colors = c
 
         self.setStyleSheet(f"""
@@ -596,6 +507,7 @@ class MainWindow(QMainWindow):
             lambda: self._on_conversation_cleared(self.sub_agent_panel.agent_type))
 
     def _on_directory_selected(self, directory: str) -> None:
+        ui_logger.debug("MainWindow: directory selected {}", directory)
         self.preview.set_directory(directory)
         agent_map = {
             "data": "data_analysis",
@@ -614,6 +526,7 @@ class MainWindow(QMainWindow):
         self._file_just_selected = False
 
         if agent_type != self.sub_agent_panel.agent_type:
+            ui_logger.debug("MainWindow: switching sub-agent panel to {}", agent_type)
             self.sub_agent_panel._messages_area.clear()
             self.sub_agent_panel.set_agent_type(agent_type)
             if agent_type != "sub":
@@ -624,6 +537,7 @@ class MainWindow(QMainWindow):
         self.sub_agent_panel.set_preview_context(file_path, selected_text, start_line, end_line)
 
     def _on_file_selected(self, file_path: Path) -> None:
+        ui_logger.debug("MainWindow: file selected {}", file_path.name)
         self._file_just_selected = True
         self.preview.load_file(file_path)
         rel_path = self._relative_path(file_path)
