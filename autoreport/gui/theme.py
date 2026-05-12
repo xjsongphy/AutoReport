@@ -52,6 +52,7 @@ def get_theme_colors() -> dict[str, str]:
         # === Interactive ===
         "hover": "#2a2d2e" if dark else "#e8e8e8",  # --vscode-toolbar-hoverBackground
         "selection": "#264f78" if dark else "#add6ff",
+        "focus": focus,  # Focus color for UI elements
 
         # === Input ===
         "input_bg": "#313131" if dark else "#ffffff",
@@ -120,6 +121,88 @@ def get_theme_colors() -> dict[str, str]:
         "tool_fg": "#cccccc" if dark else "#616161",
         "tool_border": "#2b2b2b" if dark else "#e0e0e0",
         "tool_detail": "#737373" if dark else "#9e9e9e",
+
+        # === Dialog/Config Specific ===
+        "bodyBg": bg,
+        "headerBg": surface,
+        "headerBorder": border,
+        "footerBg": surface,
+        "footerBorder": border,
+        "cardBg": "#252526" if dark else "#f5f5f5",
+        "cardBorder": border,
+        "titleFg": fg,
+        "subtitleFg": muted,
+        "categoryFg": fg,
+        "sectionFg": fg,
+        "activeFg": "#ffffff" if dark else "#202020",
+        "checkFg": "#4ec9b0" if dark else "#008000",
+
+        # === Input Variations ===
+        "inputBg": "#313131" if dark else "#ffffff",
+        "inputBorder": "#3c3c3c" if dark else "#e0e0e0",
+        "inputFg": "#cccccc" if dark else "#333333",
+        "inputFocusBorder": focus,
+        "inputDisabledBg": "#1f1f1f" if dark else "#f3f3f3",
+        "inputDisabledFg": "#737373" if dark else "#9e9e9e",
+
+        # === Primary Button Variations ===
+        "primaryBg": "#0078d4" if dark else "#0090ff",
+        "primaryFg": "#ffffff",
+        "primaryHover": "#026ec1" if dark else "#006cbe",
+        "primaryBtnBg": "#0078d4" if dark else "#0090ff",
+        "primaryBtnFg": "#ffffff",
+        "primaryBtnHover": "#026ec1" if dark else "#006cbe",
+        "primaryBtnPressed": "#005a9e" if dark else "#005a9e",
+
+        # === Secondary Button ===
+        "secondaryBorder": "#3c3c3c" if dark else "#c5c5c5",
+        "secondaryFg": fg,
+        "secondaryHoverBg": hover,
+        "secondaryBtnBg": "#3c3c3c" if dark else "#e0e0e0",
+        "secondaryBtnBorder": "#3c3c3c" if dark else "#c5c5c5",
+        "secondaryBtnFg": fg,
+        "secondaryBtnHoverBg": hover,
+        "secondaryBtnHoverBorder": "#4c4c4c" if dark else "#b5b5b5",
+
+        # === Action Buttons ===
+        "addBtnBorder": "#3c3c3c" if dark else "#c5c5c5",
+        "addBtnFg": fg,
+        "addBtnHoverBg": hover,
+        "deleteFg": "#f44747" if dark else "#d32f2f",
+        "deleteHoverBg": "#f44747" if dark else "#d32f2f",
+        "deleteHoverFg": "#ffffff",
+        "resetFg": fg,
+        "resetHoverFg": "#ffffff" if dark else "#202020",
+
+        # === Test/Connection Buttons ===
+        "testBorder": "#3c3c3c" if dark else "#c5c5c5",
+        "testFg": fg,
+        "testHoverBg": hover,
+        "testDisabledBorder": "#1f1f1f" if dark else "#f3f3f3",
+        "testDisabledFg": "#737373" if dark else "#9e9e9e",
+
+        # === Preset/Sync Buttons ===
+        "presetBtnBg": "#3c3c3c" if dark else "#e0e0e0",
+        "presetBtnBorder": "#3c3c3c" if dark else "#c5c5c5",
+        "presetBtnFg": fg,
+        "presetBtnHoverBg": hover,
+        "syncBtnBorder": "#3c3c3c" if dark else "#c5c5c5",
+        "syncBtnFg": fg,
+        "syncBtnHoverBg": hover,
+
+        # === Cancel Button ===
+        "cancelFg": fg,
+        "cancelHoverFg": "#ffffff" if dark else "#202020",
+
+        # === Path/Link ===
+        "pathFg": "#cccccc" if dark else "#616161",
+        "link": "#0078d4" if dark else "#0090ff",
+        "linkHover": "#026ec1" if dark else "#006cbe",
+
+        # === Warning ===
+        "warningBg": "#4c3c26" if dark else "#fff4e5",
+        "warningBorder": "#cca700" if dark else "#bf8900",
+        "warningFg": "#ffd866" if dark else "#7b5000",
     }
 
 
