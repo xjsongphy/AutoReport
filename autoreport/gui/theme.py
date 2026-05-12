@@ -30,6 +30,9 @@ def get_theme_colors() -> dict[str, str]:
     fg = "#cccccc" if dark else "#616161"
     muted = "#737373" if dark else "#9e9e9e"
 
+    # Pre-define focus value before using in aliases
+    focus = "#0078d4" if dark else "#0090ff"
+
     return {
         # === Layout ===
         "bg": bg,  # Main content area
@@ -47,7 +50,6 @@ def get_theme_colors() -> dict[str, str]:
         "focus_border": focus,  # Focus border
 
         # === Interactive ===
-        "focus": "#0078d4" if dark else "#0090ff",  # --vscode-focusBorder
         "hover": "#2a2d2e" if dark else "#e8e8e8",  # --vscode-toolbar-hoverBackground
         "selection": "#264f78" if dark else "#add6ff",
 
