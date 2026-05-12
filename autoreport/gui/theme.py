@@ -63,6 +63,12 @@ def get_theme_colors() -> dict[str, str]:
         "danger": "#f44747" if dark else "#d32f2f",
         "danger_hover": "#d32f2f" if dark else "#b71c1c",
 
+        # === Chat Action Buttons ===
+        "send_bg": "#0078d4" if dark else "#0090ff",
+        "send_hover": "#026ec1" if dark else "#006cbe",
+        "stop_bg": "#f44747" if dark else "#d32f2f",
+        "stop_hover": "#d32f2f" if dark else "#b71c1c",
+
         # === Scrollbar ===
         "scrollbar": "#ffffff1a" if dark else "#c1c1c1",  # Transparent track
         "scrollbar_hover": "#ffffff33" if dark else "#a8a8a8",
