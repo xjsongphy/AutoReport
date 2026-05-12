@@ -75,21 +75,16 @@ def _draw_codicon_icon(name: str, color: QColor, size: int = 16) -> QIcon:
     # Load and render SVG
     renderer = QSvgRenderer(str(svg_path))
 
-    # Create high-DPI pixmap using device pixel ratio for crisp rendering
-    app = QApplication.instance()
-    dpr = float(app.devicePixelRatio() if app else 1.0)
-    px_size = max(1, int(round(size * dpr)))
-    pixmap = QPixmap(px_size, px_size)
+    # Create pixmap at actual size (no oversampling)
+    pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
-    pixmap.setDevicePixelRatio(dpr)
 
     p = QPainter(pixmap)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
-    # Apply color by using composition mode
-    # First render the icon in grayscale, then tint it
-    renderer.render(p, QRectF(0.0, 0.0, float(px_size), float(px_size)))
+    # Render SVG to fill the entire pixmap
+    renderer.render(p, QRectF(0.0, 0.0, float(size), float(size)))
 
     # Tint the rendered icon with the desired color
     p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
@@ -320,6 +315,13 @@ class FileTreeWidget(QWidget):
             #explorerToolbarBtn:hover {{
                 background-color: {c["tree_hover"]};
             }}
+            /* Ensure icon is centered in button */
+            #explorerToolbarBtn QAbstractButton {{
+                background-color: transparent;
+                border: none;
+                padding: 0;
+                margin: 0;
+            }}
 
             /* File tree */
             #fileTree {{
@@ -380,6 +382,16 @@ class FileTreeWidget(QWidget):
                 height: 0px;
             }}
 
+            /* Tooltips - compact padding */
+            QToolTip {{
+                background-color: {c["bg"]};
+                color: {c["fg"]};
+                border: 1px solid {c["border"]};
+                padding: 2px 6px;
+                font-size: 12px;
+                border-radius: 3px;
+            }}
+
             /* Context Menu */
             #explorerContextMenu {{
                 background-color: {c["bg"]};
@@ -400,6 +412,9 @@ class FileTreeWidget(QWidget):
         # Set row height
         self.tree.setIconSize(QSize(16, 16))
 
+        # Set adaptive width: max(minimum_width, calculated_proportional_width)
+        self._update_width()
+
         # Update toolbar icons for current theme
         self._setup_toolbar_icons()
 
@@ -411,6 +426,23 @@ class FileTreeWidget(QWidget):
         self._new_file_btn.setIcon(_draw_codicon_icon("new-file", icon_color))
         self._new_folder_btn.setIcon(_draw_codicon_icon("new-folder", icon_color))
         self._refresh_btn.setIcon(_draw_codicon_icon("refresh", icon_color))
+
+    def _update_width(self) -> None:
+        """Update widget width to be adaptive."""
+        # Calculate minimum width needed for content
+        min_width = 200  # Minimum width for file tree
+
+        # Calculate proportional width (20% of parent width)
+        parent = self.parent()
+        if parent:
+            proportional_width = int(parent.width() * 0.2)
+        else:
+            proportional_width = 250  # Default width
+
+        # Use max of min_width and proportional_width
+        final_width = max(min_width, proportional_width)
+        self.setMinimumWidth(min_width)
+        self.setMaximumWidth(final_width)
 
     def _init_directories(self) -> None:
         """Initialize fixed directory structure."""
