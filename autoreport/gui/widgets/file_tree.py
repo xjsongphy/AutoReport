@@ -45,9 +45,10 @@ def _draw_codicon_icon(name: str, color: QColor, size: int = 16) -> QIcon:
     """Draw a VSCode Codicon icon using SVG vector rendering.
 
     Loads the SVG files from the codicons package and renders them as
-    vector graphics for smooth, scalable icons.
+    vector graphics for smooth, scalable icons with high-DPI support.
     """
     from PyQt6.QtSvg import QSvgRenderer
+    from PyQt6.QtWidgets import QApplication
     from pathlib import Path
 
     # Map icon names to SVG files
@@ -75,9 +76,16 @@ def _draw_codicon_icon(name: str, color: QColor, size: int = 16) -> QIcon:
     # Load and render SVG
     renderer = QSvgRenderer(str(svg_path))
 
-    # Create pixmap at actual size (no oversampling)
-    pixmap = QPixmap(size, size)
+    # Get device pixel ratio for high-DPI displays
+    dpr = QApplication.primaryScreen().devicePixelRatio()
+
+    # Render at high resolution for sharpness
+    actual_size = int(size * dpr)
+    pixmap = QPixmap(actual_size, actual_size)
     pixmap.fill(Qt.GlobalColor.transparent)
+
+    # Set device pixel ratio on pixmap
+    pixmap.setDevicePixelRatio(dpr)
 
     p = QPainter(pixmap)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -284,13 +292,17 @@ class FileTreeWidget(QWidget):
         self.setStyleSheet(f"""
             /* Base styles */
             QWidget {{
-                background-color: {c["surface"]};
                 color: {c["fg"]};
+            }}
+
+            /* Explorer widget background */
+            FileTreeWidget {{
+                background-color: {c["surface"]};
             }}
 
             /* Explorer header */
             #explorerHeader {{
-                background-color: {c["surface"]};
+                background-color: transparent;
                 border-bottom: 1px solid {c["border"]};
             }}
 

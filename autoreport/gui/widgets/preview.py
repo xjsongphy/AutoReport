@@ -771,7 +771,7 @@ class PreviewWidget(QWidget):
                 background-color: {c["bg"]};
             }}
             #previewHeader {{
-                background-color: {c["surface"]};
+                background-color: transparent;
                 border-bottom: 1px solid {c["border"]};
                 padding-right: 1px;
             }}
