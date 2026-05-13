@@ -279,7 +279,7 @@ class MainWindow(QMainWindow):
                 background-color: {c["bubble_hover"]};
             }}
             #userMessageText {{
-                color: {c["fg"]};
+                color: {c["editor_fg"]};
                 font-size: {px(13)};
                 line-height: 1.5;
             }}
@@ -337,7 +337,7 @@ class MainWindow(QMainWindow):
                 background-color: transparent;
             }}
             #agentMessageText {{
-                color: {c["fg"]};
+                color: {c["editor_fg"]};
                 font-size: {px(13)};
                 line-height: 1.5;
                 background-color: transparent;
@@ -462,11 +462,9 @@ class MainWindow(QMainWindow):
 
         # Right: Agent panels side-by-side (Sub Agent | Main Agent)
         self.sub_agent_panel = AgentPanel("sub", get_agent_title("sub"), self.workspace)
-        self.sub_agent_panel.setMinimumWidth(220)
         main_splitter.addWidget(self.sub_agent_panel)
 
         self.main_agent_panel = AgentPanel("main", get_agent_title("main"), self.workspace)
-        self.main_agent_panel.setMinimumWidth(220)
         main_splitter.addWidget(self.main_agent_panel)
 
         # Set stretch factors for proportional sizing

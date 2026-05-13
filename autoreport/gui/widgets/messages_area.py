@@ -3,6 +3,7 @@
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QScrollArea, QVBoxLayout, QWidget
 
+from ..theme import get_theme_colors
 from .message_row import MessageRow
 from .tool_call_group import ToolCallGroup
 
@@ -51,15 +52,33 @@ class MessagesArea(QScrollArea):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
         # Minimal styling
+        c = get_theme_colors()
         self.setObjectName("messagesArea")
-        self.setStyleSheet("""
-            QScrollArea#messagesArea {
+        self.setStyleSheet(f"""
+            QScrollArea#messagesArea {{
                 border: none;
                 background-color: transparent;
-            }
-            QWidget#messagesContainer {
+            }}
+            QWidget#messagesContainer {{
                 background-color: transparent;
-            }
+            }}
+            QScrollBar:vertical {{
+                background-color: transparent;
+                width: 8px;
+                border: none;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {c["scrollbar"]};
+                min-height: 30px;
+                border-radius: 4px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background-color: {c["scrollbar_hover"]};
+            }}
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {{
+                height: 0;
+            }}
         """)
 
     def _connect_scroll_signals(self) -> None:

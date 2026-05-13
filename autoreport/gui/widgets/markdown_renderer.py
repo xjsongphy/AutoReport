@@ -16,8 +16,20 @@ from xml.etree import ElementTree as etree
 def _is_dark_mode() -> bool:
     from PyQt6.QtCore import Qt
     from PyQt6.QtWidgets import QApplication
-    hints = QApplication.styleHints()
-    return hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
+    app = QApplication.instance()
+    if app is None:
+        return False
+    hints = app.styleHints()
+    if hasattr(hints, "colorScheme"):
+        try:
+            if hints.colorScheme() == Qt.ColorScheme.Dark:
+                return True
+            if hints.colorScheme() == Qt.ColorScheme.Light:
+                return False
+        except Exception:
+            pass
+    window = app.palette().window().color()
+    return window.lightness() < 128
 
 
 class _QtCompatTreeprocessor(Treeprocessor):
@@ -119,4 +131,8 @@ def render_markdown(text: str) -> str:
     html = re.sub(r'(</div>)\s*</p>', r'\1', html)
 
     # Wrap in a div for proper rendering
-    return f"<div>{html}</div>"
+    root_fg = "#d4d4d4" if _is_dark_mode() else "#333333"
+    return (
+        "<div style=\"white-space: normal; overflow-wrap: anywhere; "
+        f"word-wrap: break-word; word-break: break-word; color: {root_fg};\">{html}</div>"
+    )

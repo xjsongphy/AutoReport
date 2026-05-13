@@ -20,6 +20,7 @@ from autoreport.utils.logging_config import ui_logger
 from PyQt6.QtGui import QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QMenu,
@@ -142,21 +143,15 @@ class _FullRowDelegate(QStyledItemDelegate):
                 self._draw_guide_lines(painter, option, item, tree_widget)
 
         # Draw full-width background for selected/hover items
-        if option.state & QStyleOptionViewItem.StateFlag.State_Selected:
-            # Selected item - extend background to left edge
+        if option.state & QStyle.StateFlag.State_Selected:
+            # Keep branch/twisty area untouched, otherwise the arrow can disappear.
             painter.save()
             bg_rect = option.rect
-            bg_rect.setLeft(0)  # Extend to left edge
             painter.fillRect(bg_rect, QColor(c["tree_sel_bg"]))
             painter.restore()
 
-        elif option.state & QStyleOptionViewItem.StateFlag.State_MouseOver:
-            # Hovered item - extend hover to left edge
-            painter.save()
-            bg_rect = option.rect
-            bg_rect.setLeft(0)  # Extend to left edge
-            painter.fillRect(bg_rect, QColor(c["tree_hover"]))
-            painter.restore()
+        # Hover is intentionally not custom-painted here.
+        # Let stylesheet handle both item and branch hover to avoid erasing twisty arrows.
 
         # Call base class to draw the actual item content
         super().paint(painter, option, index)
@@ -174,7 +169,7 @@ class _FullRowDelegate(QStyledItemDelegate):
         c = get_theme_colors()
         # Use a subtle border color for guide lines
         guide_color = QColor(c["border"])
-        guide_color.setAlpha(80)  # Make it semi-transparent
+        guide_color.setAlpha(56)  # VSCode-like subtle tree guide lines
 
         # Get indentation level
         indentation = tree_widget.indentation()
@@ -185,27 +180,13 @@ class _FullRowDelegate(QStyledItemDelegate):
         for level in range(depth):
             x_pos = indentation * (level + 1) - (indentation // 2)
 
-            # Check if we should draw a line at this level
-            # Only draw if this level has siblings or is an expanded parent
-            should_draw = False
+            # Draw a consistent guide for each depth level.
+            line_x = x_pos
+            top_y = option.rect.top()
+            bottom_y = option.rect.bottom()
 
-            # Get the ancestor at this level
-            ancestor = self._get_ancestor_at_level(item, level)
-            if ancestor:
-                # Draw line if ancestor has children (visible or not)
-                # or if this ancestor's parent exists (meaning ancestor is not root)
-                ancestor_parent = ancestor.parent()
-                if ancestor_parent or ancestor.childCount() > 0:
-                    should_draw = True
-
-            if should_draw:
-                # Draw vertical line from top to bottom of the item
-                line_x = x_pos
-                top_y = option.rect.top()
-                bottom_y = option.rect.bottom()
-
-                painter.setPen(QPen(guide_color, 1))
-                painter.drawLine(int(line_x), int(top_y), int(line_x), int(bottom_y))
+            painter.setPen(QPen(guide_color, 1))
+            painter.drawLine(int(line_x), int(top_y), int(line_x), int(bottom_y))
 
     def _get_item_depth(self, item):
         """Get the depth level of an item (0 for root items)."""
@@ -336,7 +317,6 @@ class FileTreeWidget(QWidget):
         header = QWidget()
         header.setObjectName("explorerHeader")
         header.setFixedHeight(36)
-        header.setMinimumWidth(180)  # Ensure enough space for title + buttons
         hlayout = QHBoxLayout(header)
         hlayout.setContentsMargins(12, 0, 12, 0)
         hlayout.setSpacing(4)
@@ -386,6 +366,8 @@ class FileTreeWidget(QWidget):
         self.tree.setObjectName("fileTree")
         self.tree.setItemDelegate(_FullRowDelegate(self.tree))
         self.tree.setHeaderLabels(["名称"])
+        self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.tree.header().setStretchLastSection(True)
         self.tree.setDragEnabled(True)
         self.tree.setAcceptDrops(True)
         self.tree.setDropIndicatorShown(True)
@@ -423,7 +405,7 @@ class FileTreeWidget(QWidget):
 
             /* Explorer header */
             #explorerHeader {{
-                background-color: transparent;
+                background-color: {c["surface"]};
                 border-bottom: 1px solid {c["border"]};
             }}
 
@@ -471,13 +453,13 @@ class FileTreeWidget(QWidget):
             #fileTree::item {{
                 height: 22px;
                 border: none;
-                padding: 0 4px;
+                padding: 0 12px 0 0;
                 border-radius: 3px;
                 show-decoration-selected: 1;
             }}
 
             #fileTree::item:hover {{
-                background-color: transparent;  /* Delegate handles background */
+                background-color: {c["tree_hover"]};
             }}
 
             #fileTree::item:selected {{
@@ -489,6 +471,10 @@ class FileTreeWidget(QWidget):
                 background-color: transparent;  /* Delegate handles background */
             }}
 
+            #fileTree::branch:hover {{
+                background-color: {c["tree_hover"]};
+            }}
+
             /* Scrollbar */
             QScrollBar:vertical {{
                 background-color: {c["surface"]};
@@ -497,13 +483,13 @@ class FileTreeWidget(QWidget):
             }}
 
             QScrollBar::handle:vertical {{
-                background-color: {c["muted"]};
+                background-color: {c["scrollbar"]};
                 min-height: 30px;
                 border-radius: 5px;
             }}
 
             QScrollBar::handle:vertical:hover {{
-                background-color: {c["fg"]};
+                background-color: {c["scrollbar_hover"]};
             }}
 
             QScrollBar::add-line:vertical,
@@ -562,15 +548,12 @@ class FileTreeWidget(QWidget):
         Calculate minimum width needed for header content (title + 3 buttons).
         Let splitter control actual width through stretch factor.
         """
-        # Calculate minimum width for header:
-        # - Left margin: 12px
-        # - Title "EXPLORER": ~70px
-        # - 3 buttons: 22px * 3 = 66px
-        # - Button spacing: 4px * 2 = 8px
-        # - Right margin: 12px
-        # - Total: ~180px
-        # Add some padding for tree content
-        min_width = 200
+        # Width policy: max(preset proportional width handled by splitter, computed minimum).
+        # We only enforce the computed minimum needed to keep header controls fully visible.
+        fm = self.fontMetrics()
+        title_width = fm.horizontalAdvance("EXPLORER")
+        # Header margins + title + stretch + 3 toolbar buttons + spacing between buttons.
+        min_width = 12 + title_width + 12 + (22 * 3) + (4 * 2) + 12
 
         # Only set minimum width, let splitter control actual width
         self.setMinimumWidth(min_width)
@@ -849,6 +832,8 @@ class FileTreeWidget(QWidget):
                     # Folders don't show icons
                     rel = str(entry.relative_to(self.workspace))
                     child.setData(0, Qt.ItemDataRole.UserRole, rel)
+                    child.setText(0, entry.name)
+                    child.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
                 else:
                     # Files show type-specific icons
                     child.setIcon(0, _get_file_icon(entry.suffix, style))

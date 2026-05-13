@@ -16,11 +16,13 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from .markdown_renderer import render_markdown
+from ..theme import get_theme_colors
 
 
 def _parse_code_blocks(content: str) -> list[tuple[str, str | None]]:
@@ -130,6 +132,7 @@ class MessageRow(QWidget):
         self._detail = detail
         self._expandable = expandable
         self._expanded = False
+        self._wrapping_labels: list[QLabel] = []
         self._summary_btn: QPushButton | None = None
         self._detail_widget: QWidget | None = None
         self._setup_ui()
@@ -180,10 +183,14 @@ class MessageRow(QWidget):
                 text = QLabel(self._content)
                 text.setObjectName("userMessageText")
                 text.setWordWrap(True)
+                text.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
                 text.setTextFormat(Qt.TextFormat.PlainText)
                 text.setTextInteractionFlags(
                     Qt.TextInteractionFlag.TextSelectableByMouse
                 )
+                text.setMinimumWidth(0)
+                c = get_theme_colors()
+                text.setStyleSheet(f"color: {c['editor_fg']}; background-color: transparent;")
                 bl.addWidget(text)
 
             bcl.addWidget(bubble)
@@ -266,6 +273,7 @@ class MessageRow(QWidget):
         layout.addWidget(outer)
 
     def _clear_agent_content(self) -> None:
+        self._wrapping_labels = []
         if self._agent_content_layout is None:
             return
         while self._agent_content_layout.count():
@@ -302,18 +310,23 @@ class MessageRow(QWidget):
                 text_label = QLabel(html)
                 text_label.setObjectName("agentMessageText")
                 text_label.setWordWrap(True)
+                text_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
                 text_label.setTextFormat(Qt.TextFormat.RichText)
                 text_label.setOpenExternalLinks(True)
                 text_label.setTextInteractionFlags(
                     Qt.TextInteractionFlag.TextSelectableByMouse
                 )
                 text_label.setContentsMargins(0, 2, 0, 4)
+                text_label.setMinimumWidth(0)
+                self._wrapping_labels.append(text_label)
                 self._agent_content_layout.addWidget(text_label)
+        self._apply_text_width_constraints()
 
     def append_content(self, delta: str) -> None:
         """Append streaming text delta and rebuild content area."""
         self._content += delta
         self._rebuild_agent_content()
+        self._apply_text_width_constraints()
 
     def _has_detail(self) -> bool:
         return bool(self._detail)
@@ -349,20 +362,27 @@ class MessageRow(QWidget):
             label = QLabel(html)
             label.setObjectName("agentMessageText")
             label.setWordWrap(True)
+            label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
             label.setTextFormat(Qt.TextFormat.RichText)
             label.setOpenExternalLinks(True)
             label.setTextInteractionFlags(
                 Qt.TextInteractionFlag.TextSelectableByMouse
             )
             label.setContentsMargins(0, 2, 0, 4)
+            label.setMinimumWidth(0)
+            self._wrapping_labels.append(label)
         else:
             label = QLabel(self._detail or "")
             label.setObjectName("userMessageText")
             label.setWordWrap(True)
+            label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
             label.setTextFormat(Qt.TextFormat.PlainText)
             label.setTextInteractionFlags(
                 Qt.TextInteractionFlag.TextSelectableByMouse
             )
+            label.setMinimumWidth(0)
+            c = get_theme_colors()
+            label.setStyleSheet(f"color: {c['editor_fg']}; background-color: transparent;")
         layout.addWidget(label)
         return widget
 
@@ -429,6 +449,21 @@ class MessageRow(QWidget):
                     self._user_footer.setVisible(False)
 
         return super().eventFilter(obj, event)
+
+    def resizeEvent(self, event) -> None:
+        """Keep message content constrained to current panel width."""
+        super().resizeEvent(event)
+        self._apply_text_width_constraints()
+        if self._role == "user" and self._user_bubble_container is not None:
+            self._user_bubble_container.setMaximumWidth(max(80, int(self.width() * 0.95)))
+
+    def _apply_text_width_constraints(self) -> None:
+        max_w = max(40, self._content_width_limit())
+        for label in self._wrapping_labels:
+            label.setMaximumWidth(max_w)
+
+    def _content_width_limit(self) -> int:
+        return self.width() - 56
 
     def get_display_text(self) -> str:
         role_text = "You" if self._role == "user" else "Agent"

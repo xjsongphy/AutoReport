@@ -10,8 +10,24 @@ from PyQt6.QtWidgets import QApplication
 
 def is_dark_mode() -> bool:
     """Detect if system is in dark mode."""
-    hints = QApplication.styleHints()
-    return hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
+    app = QApplication.instance()
+    if app is None:
+        return False
+
+    hints = app.styleHints()
+    if hasattr(hints, "colorScheme"):
+        try:
+            if hints.colorScheme() == Qt.ColorScheme.Dark:
+                return True
+            if hints.colorScheme() == Qt.ColorScheme.Light:
+                return False
+        except Exception:
+            pass
+
+    # Fallback for platforms where colorScheme is unavailable/unreliable.
+    # Compare window/background luminance from current palette.
+    window = app.palette().window().color()
+    return window.lightness() < 128
 
 
 def get_theme_colors() -> dict[str, str]:
@@ -94,7 +110,7 @@ def get_theme_colors() -> dict[str, str]:
 
         # === File Tree ===
         "tree_hover": "#2a2d2e" if dark else "#e8e8e8",
-        "tree_sel_bg": "#2a2d2e" if dark else "#dcdcdc",
+        "tree_sel_bg": "#094771" if dark else "#cce8ff",
         "tree_sel_fg": "#ffffff" if dark else "#202020",
 
         # === Editor/Preview ===
