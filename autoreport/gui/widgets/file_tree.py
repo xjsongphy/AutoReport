@@ -6,7 +6,7 @@ Based on VSCode explorer design:
 - Flexbox-like layout for icon + text
 - Text overflow ellipsis
 - Subtle hover/focus states
-- Qt built-in branch indicators (selection extends to branch area)
+- Full-width selection background (via custom delegate)
 - Drag and drop file import support
 """
 
@@ -27,6 +27,8 @@ from PyQt6.QtWidgets import (
     QProgressDialog,
     QPushButton,
     QStyle,
+    QStyleOptionViewItem,
+    QStyledItemDelegate,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -104,6 +106,51 @@ def _draw_codicon_icon(name: str, color: QColor, size: int = 16) -> QIcon:
 
 # Fixed directory structure
 FIXED_DIRECTORIES = ["data", "references", "theory", "code", "tex"]
+
+
+# ================================================================== #
+#  Custom Delegate for Full-Width Selection
+# ================================================================== #
+
+
+class _FullRowDelegate(QStyledItemDelegate):
+    """Delegate that paints selection background across full row width.
+
+    This creates VSCode-style selection where the background extends
+    from the left edge (including branch area) to the right edge.
+    """
+
+    def paint(self, painter, option, index):
+        """Paint the item with full-width selection background.
+
+        Args:
+            painter: QPainter instance.
+            option: Style option for the item.
+            index: Model index being painted.
+        """
+        # Get theme colors
+        c = get_theme_colors()
+
+        # Save painter state
+        painter.save()
+
+        # Draw full-width background for selected/hover items
+        if option.state & QStyleOptionViewItem.StateFlag.State_Selected:
+            # Selected item - extend background to left edge
+            bg_rect = option.rect
+            bg_rect.setLeft(0)  # Extend to left edge
+            painter.fillRect(bg_rect, QColor(c["tree_sel_bg"]))
+        elif option.state & QStyleOptionViewItem.StateFlag.State_MouseOver:
+            # Hovered item - extend hover to left edge
+            bg_rect = option.rect
+            bg_rect.setLeft(0)  # Extend to left edge
+            painter.fillRect(bg_rect, QColor(c["tree_hover"]))
+
+        # Restore painter and let base class draw the rest
+        painter.restore()
+
+        # Call base class to draw the actual item content
+        super().paint(painter, option, index)
 
 # Directory display labels (VSCode style: concise, title case)
 DIR_LABELS = {
@@ -264,6 +311,7 @@ class FileTreeWidget(QWidget):
         # File tree with drag-drop support
         self.tree = _ChevronTreeWidget(file_tree_widget=self)
         self.tree.setObjectName("fileTree")
+        self.tree.setItemDelegate(_FullRowDelegate(self.tree))
         self.tree.setHeaderLabels(["名称"])
         self.tree.setDragEnabled(True)
         self.tree.setAcceptDrops(True)
@@ -356,20 +404,16 @@ class FileTreeWidget(QWidget):
             }}
 
             #fileTree::item:hover {{
-                background-color: {c["tree_hover"]};
+                background-color: transparent;  /* Delegate handles background */
             }}
 
             #fileTree::item:selected {{
-                background-color: {c["tree_sel_bg"]};
+                background-color: transparent;  /* Delegate handles background */
                 color: {c["tree_sel_fg"]};
-                border-left: none;
-                border-right: none;
-                border-top: none;
-                border-bottom: none;
             }}
 
             #fileTree::item:selected:hover {{
-                background-color: {c["tree_sel_bg"]};
+                background-color: transparent;  /* Delegate handles background */
             }}
 
             /* Scrollbar */
