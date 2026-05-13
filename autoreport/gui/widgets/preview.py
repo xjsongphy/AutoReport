@@ -31,7 +31,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..scale import scaled, scaled_size
-from ..theme import get_theme_colors
+from ..theme import get_theme_colors, is_dark_mode
 
 # ================================================================== #
 #  File-type routing
@@ -711,7 +711,7 @@ class PreviewWidget(QWidget):
         tex_layout.addWidget(tex_split, 1)
 
         # Toolbar styling with dark/light mode support for combo box dropdown
-        dark = _dark_mode()
+        dark = is_dark_mode()
         toolbar.setStyleSheet(f"""
             QWidget#texToolbar {{
                 background-color: {c["surface"]};
