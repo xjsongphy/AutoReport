@@ -118,10 +118,12 @@ class _FullRowDelegate(QStyledItemDelegate):
 
     This creates VSCode-style selection where the background extends
     from the left edge (including branch area) to the right edge.
+
+    Also draws VSCode-style guide lines for nested items.
     """
 
     def paint(self, painter, option, index):
-        """Paint the item with full-width selection background.
+        """Paint the item with full-width selection background and guide lines.
 
         Args:
             painter: QPainter instance.
@@ -133,6 +135,14 @@ class _FullRowDelegate(QStyledItemDelegate):
 
         # Save painter state
         painter.save()
+
+        # Draw VSCode-style guide lines for nested items
+        tree_widget = option.widget
+        if tree_widget:
+            item = tree_widget.itemFromIndex(index)
+            if item and item.parent():
+                # This is a nested item - draw guide line
+                self._draw_guide_lines(painter, option, item, tree_widget)
 
         # Draw full-width background for selected/hover items
         if option.state & QStyleOptionViewItem.StateFlag.State_Selected:
@@ -151,6 +161,70 @@ class _FullRowDelegate(QStyledItemDelegate):
 
         # Call base class to draw the actual item content
         super().paint(painter, option, index)
+
+    def _draw_guide_lines(self, painter, option, item, tree_widget):
+        """Draw VSCode-style vertical guide lines for nested items.
+
+        Args:
+            painter: QPainter instance.
+            option: Style option for the item.
+            item: Tree item being painted.
+            tree_widget: The tree widget.
+        """
+        # Get theme colors for guide line
+        c = get_theme_colors()
+        # Use a subtle border color for guide lines
+        guide_color = QColor(c["border"])
+        guide_color.setAlpha(80)  # Make it semi-transparent
+
+        # Get indentation level
+        indentation = tree_widget.indentation()
+        depth = self._get_item_depth(item)
+
+        # Draw guide line for each level of nesting
+        # VSCode shows guide lines on the left side of nested items
+        for level in range(depth):
+            x_pos = indentation * (level + 1) - (indentation // 2)
+
+            # Check if we should draw a line at this level
+            # Only draw if this level has siblings or is an expanded parent
+            should_draw = False
+
+            # Get the ancestor at this level
+            ancestor = self._get_ancestor_at_level(item, level)
+            if ancestor:
+                # Draw line if ancestor has children (visible or not)
+                # or if this ancestor's parent exists (meaning ancestor is not root)
+                ancestor_parent = ancestor.parent()
+                if ancestor_parent or ancestor.childCount() > 0:
+                    should_draw = True
+
+            if should_draw:
+                # Draw vertical line from top to bottom of the item
+                line_x = x_pos
+                top_y = option.rect.top()
+                bottom_y = option.rect.bottom()
+
+                painter.setPen(QPen(guide_color, 1))
+                painter.drawLine(int(line_x), int(top_y), int(line_x), int(bottom_y))
+
+    def _get_item_depth(self, item):
+        """Get the depth level of an item (0 for root items)."""
+        depth = 0
+        parent = item.parent()
+        while parent is not None:
+            depth += 1
+            parent = parent.parent()
+        return depth
+
+    def _get_ancestor_at_level(self, item, level):
+        """Get the ancestor at the given level (0 = parent, 1 = grandparent, etc.)."""
+        ancestor = item
+        for _ in range(level + 1):
+            if ancestor is None:
+                return None
+            ancestor = ancestor.parent()
+        return ancestor
 
 # Directory display labels (VSCode style: concise, title case)
 DIR_LABELS = {
