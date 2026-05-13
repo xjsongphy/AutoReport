@@ -593,7 +593,7 @@ class FileTreeWidget(QWidget):
             item.setData(0, Qt.ItemDataRole.UserRole, dir_name)
             item.setToolTip(0, DIR_DESCRIPTIONS.get(dir_name, dir_name))
             # Always show expand arrow even if empty (VSCode style)
-            item.setChildIndicatorPolicy(QTreeWidget.ChildIndicatorPolicy.ShowIndicator)
+            item.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
 
             # Add subdirectory for data/processed
             if dir_name == "data":
@@ -606,7 +606,7 @@ class FileTreeWidget(QWidget):
                 processed_item.setData(0, Qt.ItemDataRole.UserRole, "data/processed")
                 processed_item.setToolTip(0, DIR_DESCRIPTIONS.get("processed", ""))
                 # Always show expand arrow even if empty
-                processed_item.setChildIndicatorPolicy(QTreeWidget.ChildIndicatorPolicy.ShowIndicator)
+                processed_item.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
 
     def _setup_file_watcher(self) -> None:
         """Setup QFileSystemWatcher to detect external file changes."""
