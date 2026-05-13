@@ -133,9 +133,6 @@ class _FullRowDelegate(QStyledItemDelegate):
         # Get theme colors
         c = get_theme_colors()
 
-        # Save painter state
-        painter.save()
-
         # Draw VSCode-style guide lines for nested items
         tree_widget = option.widget
         if tree_widget:
@@ -147,17 +144,19 @@ class _FullRowDelegate(QStyledItemDelegate):
         # Draw full-width background for selected/hover items
         if option.state & QStyleOptionViewItem.StateFlag.State_Selected:
             # Selected item - extend background to left edge
+            painter.save()
             bg_rect = option.rect
             bg_rect.setLeft(0)  # Extend to left edge
             painter.fillRect(bg_rect, QColor(c["tree_sel_bg"]))
+            painter.restore()
+
         elif option.state & QStyleOptionViewItem.StateFlag.State_MouseOver:
             # Hovered item - extend hover to left edge
+            painter.save()
             bg_rect = option.rect
             bg_rect.setLeft(0)  # Extend to left edge
             painter.fillRect(bg_rect, QColor(c["tree_hover"]))
-
-        # Restore painter and let base class draw the rest
-        painter.restore()
+            painter.restore()
 
         # Call base class to draw the actual item content
         super().paint(painter, option, index)
