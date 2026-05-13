@@ -767,11 +767,11 @@ class PreviewWidget(QWidget):
     def _apply_style(self) -> None:
         c = get_theme_colors()
         self.setStyleSheet(f"""
-            QWidget {{
+            PreviewWidget {{
                 background-color: {c["bg"]};
             }}
             #previewHeader {{
-                background-color: transparent;
+                background-color: {c["bg"]};
                 border-bottom: 1px solid {c["border"]};
                 padding-right: 1px;
             }}

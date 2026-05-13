@@ -440,21 +440,25 @@ class FileTreeWidget(QWidget):
         self._refresh_btn.setIcon(_draw_codicon_icon("refresh", icon_color))
 
     def _update_width(self) -> None:
-        """Update widget width to be adaptive."""
-        # Calculate minimum width needed for content
-        min_width = 200  # Minimum width for file tree
+        """Update widget width to be adaptive.
 
-        # Calculate proportional width (20% of parent width)
-        parent = self.parent()
-        if parent:
-            proportional_width = int(parent.width() * 0.2)
-        else:
-            proportional_width = 250  # Default width
+        Calculate minimum width needed for header content (title + 3 buttons).
+        Let splitter control actual width through stretch factor.
+        """
+        # Calculate minimum width for header:
+        # - Left margin: 12px
+        # - Title "EXPLORER": ~70px
+        # - 3 buttons: 22px * 3 = 66px
+        # - Button spacing: 4px * 2 = 8px
+        # - Right margin: 12px
+        # - Total: ~180px
+        # Add some padding for tree content
+        min_width = 200
 
-        # Use max of min_width and proportional_width
-        final_width = max(min_width, proportional_width)
+        # Only set minimum width, let splitter control actual width
         self.setMinimumWidth(min_width)
-        self.setMaximumWidth(final_width)
+        # Remove maximum width constraint - let splitter handle it
+        self.setMaximumWidth(16777215)  # QWIDGETSIZE_MAX
 
     def _init_directories(self) -> None:
         """Initialize fixed directory structure."""
@@ -470,6 +474,8 @@ class FileTreeWidget(QWidget):
             # Folders don't show icons (only chevron arrows)
             item.setData(0, Qt.ItemDataRole.UserRole, dir_name)
             item.setToolTip(0, DIR_DESCRIPTIONS.get(dir_name, dir_name))
+            # Always show expand arrow even if empty (VSCode style)
+            item.setChildIndicatorPolicy(QTreeWidget.ChildIndicatorPolicy.ShowIndicator)
 
             # Add subdirectory for data/processed
             if dir_name == "data":
@@ -481,6 +487,8 @@ class FileTreeWidget(QWidget):
                 # Folders don't show icons
                 processed_item.setData(0, Qt.ItemDataRole.UserRole, "data/processed")
                 processed_item.setToolTip(0, DIR_DESCRIPTIONS.get("processed", ""))
+                # Always show expand arrow even if empty
+                processed_item.setChildIndicatorPolicy(QTreeWidget.ChildIndicatorPolicy.ShowIndicator)
 
     def _setup_file_watcher(self) -> None:
         """Setup QFileSystemWatcher to detect external file changes."""
