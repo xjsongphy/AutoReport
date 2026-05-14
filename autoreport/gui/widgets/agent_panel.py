@@ -35,7 +35,6 @@ class AgentPanel(QWidget):
 
     message_sent = pyqtSignal(str)
     interrupt_requested = pyqtSignal()
-    debug_mode_toggled = pyqtSignal(bool)
     _debug_msg_signal = pyqtSignal(object)
     history_requested = pyqtSignal()
     new_conversation_requested = pyqtSignal()
@@ -117,13 +116,6 @@ class AgentPanel(QWidget):
             on_click=self._on_history,
         )
         hl.addWidget(self._history_btn)
-
-        self._debug_button = QPushButton("Debug")
-        self._debug_button.setObjectName("debugBtn")
-        self._debug_button.setCheckable(True)
-        self._debug_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._debug_button.clicked.connect(self._on_debug_toggled)
-        hl.addWidget(self._debug_button)
 
         layout.addWidget(header)
 
@@ -765,11 +757,6 @@ class AgentPanel(QWidget):
     def _on_history_rename(self, session_id: str, new_name: str) -> None:
         self.rename_session_requested.emit(session_id, new_name)
 
-    def _on_debug_toggled(self) -> None:
-        enabled = self._debug_button.isChecked()
-        self._debug_panel.setVisible(enabled)
-        self.debug_mode_toggled.emit(enabled)
-
     def subscribe_to_debug_messages(self, bus) -> None:
         async def on_debug_message(msg):
             if isinstance(msg, ApiDebugMessage):
@@ -789,10 +776,7 @@ class AgentPanel(QWidget):
         )
 
     def set_debug_mode(self, enabled: bool) -> None:
-        self._debug_button.setChecked(enabled)
-
-    def hide_debug_button(self, hide: bool = True) -> None:
-        self._debug_button.setHidden(hide)
+        self._debug_panel.setVisible(enabled)
 
     def hide_conv_buttons(self, hide: bool = True) -> None:
         self._history_btn.setHidden(hide)

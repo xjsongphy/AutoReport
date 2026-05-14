@@ -45,11 +45,17 @@ class MainWindow(QMainWindow):
 
     _message_signal = pyqtSignal(object)
 
-    def __init__(self, backend: BackendAPI, workspace: Path):
+    def __init__(
+        self,
+        backend: BackendAPI,
+        workspace: Path,
+        debug_agents: list[str] | None = None,
+    ):
         super().__init__()
         self.backend = backend
         self.workspace = Path(workspace).resolve()
         self._async_loop: asyncio.AbstractEventLoop | None = None
+        self._debug_agents = {str(a) for a in (debug_agents or [])}
 
         self.setWindowTitle("AutoReport")
         self.resize(1400, 900)
@@ -167,23 +173,6 @@ class MainWindow(QMainWindow):
                 background-color: {c["hover"]};
                 color: {c["header_action_hover"]};
             }}
-            #debugBtn {{
-                background-color: transparent;
-                color: {c["muted"]};
-                border: 1px solid {c["border"]};
-                border-radius: {px(4)};
-                padding: {px(2)} {px(10)};
-                font-size: {px(11)};
-            }}
-            #debugBtn:hover {{
-                background-color: {c["hover"]};
-            }}
-            #debugBtn:checked {{
-                background-color: {c["status_error"]};
-                color: #ffffff;
-                border-color: transparent;
-            }}
-
             /* ---- Input Container (with working border space) ---- */
             #inputContainer {{
                 background-color: {c["bg"]};
@@ -486,7 +475,6 @@ class MainWindow(QMainWindow):
         # Connect signals
         self.main_agent_panel.message_sent.connect(self._on_main_agent_message)
         self.sub_agent_panel.message_sent.connect(self._on_sub_agent_message)
-        self.sub_agent_panel.debug_mode_toggled.connect(self._on_debug_mode_toggled)
 
         self.main_agent_panel.history_requested.connect(lambda: self._on_history_requested("main"))
         self.main_agent_panel.new_conversation_requested.connect(lambda: self._on_new_conversation_requested("main"))
@@ -502,8 +490,9 @@ class MainWindow(QMainWindow):
         self.sub_agent_panel.interrupt_requested.connect(lambda: self._on_interrupt(self.sub_agent_panel.agent_type))
 
         self.preview.selection_changed.connect(self._on_preview_selection_changed)
-        self.main_agent_panel.hide_debug_button(hide=True)
         self.main_agent_panel.set_agent_type("main")
+        self.main_agent_panel.set_debug_mode("main" in self._debug_agents)
+        self.sub_agent_panel.set_debug_mode(self.sub_agent_panel.agent_type in self._debug_agents)
 
         self.main_agent_panel.conversation_cleared.connect(
             lambda: self._on_conversation_cleared("main"))
@@ -534,6 +523,7 @@ class MainWindow(QMainWindow):
             ui_logger.debug("MainWindow: switching sub-agent panel to {}", agent_type)
             self.sub_agent_panel._messages_area.clear()
             self.sub_agent_panel.set_agent_type(agent_type)
+            self.sub_agent_panel.set_debug_mode(agent_type in self._debug_agents)
             if agent_type != "sub":
                 self._load_conversations_for_agent(agent_type, self.sub_agent_panel)
             if sizes:
@@ -672,10 +662,6 @@ class MainWindow(QMainWindow):
     def _on_interrupt(self, agent_type: str) -> None:
         """Handle interrupt request from GUI."""
         self._submit_coroutine(self.backend.interrupt_current_message(agent_type))
-
-    def _on_debug_mode_toggled(self, enabled: bool) -> None:
-        agent_type = self.sub_agent_panel.agent_type
-        self.backend.set_agent_debug_mode(agent_type, enabled)
 
     def _on_bus_message(self, message: Message) -> None:
         self._message_signal.emit(message)

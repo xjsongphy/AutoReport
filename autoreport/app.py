@@ -212,6 +212,7 @@ class AutoReportApp:
         self.main_window = MainWindow(
             backend=self.backend,
             workspace=workspace,
+            debug_agents=list(getattr(self, "_debug_agents_on_start", [])),
         )
         self.main_window.set_async_loop(self._async_loop)
         self.main_window.show()

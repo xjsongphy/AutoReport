@@ -143,21 +143,18 @@ def test_add_tool_result_updates_pending_group_item(agent_panel):
     assert "Theory replied: first line" in groups[0].get_summary_text()
 
 
-def test_debug_toggle_shows_hides_panel(agent_panel):
-    """Debug button toggle should show/hide debug panel."""
+def test_set_debug_mode_shows_hides_panel(agent_panel):
+    """Debug panel visibility should follow set_debug_mode()."""
     # Initially hidden
     assert agent_panel._debug_panel.isVisibleTo(agent_panel) is False
-    assert agent_panel._debug_button.isChecked() is False
 
-    # Toggle on by clicking the button
-    agent_panel._debug_button.setChecked(True)  # Manually set checked state
-    agent_panel._on_debug_toggled()  # Call the toggle handler directly
+    # Toggle on via API (CLI-driven)
+    agent_panel.set_debug_mode(True)
     # Check if the panel's visible property is set to True (even if not actually rendered)
     assert agent_panel._debug_panel.isVisible() is True or agent_panel._debug_panel.isVisibleTo(agent_panel) is True
 
     # Toggle off
-    agent_panel._debug_button.setChecked(False)
-    agent_panel._on_debug_toggled()
+    agent_panel.set_debug_mode(False)
     assert agent_panel._debug_panel.isVisible() is False
 
 
