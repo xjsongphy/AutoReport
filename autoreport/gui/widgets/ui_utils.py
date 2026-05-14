@@ -41,7 +41,7 @@ def render_svg_icon(name: str, color: QColor, size: int = 16) -> QIcon:
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-    QSvgRenderer(str(svg_path)).render(painter, QRectF(0.0, 0.0, float(size), float(size)))
+    QSvgRenderer(str(svg_path)).render(painter, QRectF(0.0, 0.0, float(actual_size), float(actual_size)))
     painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
     painter.fillRect(pixmap.rect(), color)
     painter.end()
