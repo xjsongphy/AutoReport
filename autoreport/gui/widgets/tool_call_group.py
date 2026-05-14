@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 
 @dataclass
@@ -18,6 +18,18 @@ class ToolCall:
     summary: str | None = None
     detail: str | None = None
     expandable: bool = True
+
+
+class _ClickableHeaderLabel(QLabel):
+    clicked = pyqtSignal()
+
+    def mousePressEvent(self, event):  # noqa: N802
+        super().mousePressEvent(event)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+
+    def click(self) -> None:
+        self.clicked.emit()
 
 
 class ToolCallGroup(QWidget):
@@ -40,9 +52,13 @@ class ToolCallGroup(QWidget):
         layout.setContentsMargins(32, 4, 16, 4)
         layout.setSpacing(0)
 
-        self._header_btn = QPushButton()
+        self._header_btn = _ClickableHeaderLabel()
         self._header_btn.setObjectName("toolCallHeader")
         self._header_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._header_btn.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self._header_btn.setWordWrap(True)
+        self._header_btn.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._header_btn.setMinimumWidth(0)
         self._header_btn.clicked.connect(self._on_toggle)
         layout.addWidget(self._header_btn)
 
@@ -144,7 +160,7 @@ class ToolCallGroup(QWidget):
     def _header_arrow(self) -> str:
         if not self._any_expandable():
             return "-"
-        return "v" if self._expanded else ">"
+        return "▾" if self._expanded else "▸"
 
     def _duration_text(self, duration_ms: int) -> str:
         if duration_ms <= 0:

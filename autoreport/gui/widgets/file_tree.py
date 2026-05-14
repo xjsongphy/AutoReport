@@ -14,15 +14,17 @@ import shutil
 from pathlib import Path
 
 from loguru import logger
-from PyQt6.QtCore import QFileSystemWatcher, QMimeData, QRectF, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QFileSystemWatcher, QMimeData, QRect, QRectF, QSize, Qt, QTimer, pyqtSignal
 
 from autoreport.utils.logging_config import ui_logger
 from PyQt6.QtGui import QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (
+    QAbstractItemDelegate,
     QApplication,
     QHeaderView,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMenu,
     QMessageBox,
     QProgressDialog,
@@ -37,6 +39,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..theme import get_theme_colors
+from .ui_utils import IconActionButton
 
 
 # ================================================================== #
@@ -142,18 +145,8 @@ class _FullRowDelegate(QStyledItemDelegate):
                 # This is a nested item - draw guide line
                 self._draw_guide_lines(painter, option, item, tree_widget)
 
-        # Draw full-width background for selected/hover items
-        if option.state & QStyle.StateFlag.State_Selected:
-            # Keep branch/twisty area untouched, otherwise the arrow can disappear.
-            painter.save()
-            bg_rect = option.rect
-            painter.fillRect(bg_rect, QColor(c["tree_sel_bg"]))
-            painter.restore()
-
-        # Hover is intentionally not custom-painted here.
-        # Let stylesheet handle both item and branch hover to avoid erasing twisty arrows.
-
-        # Call base class to draw the actual item content
+        # Let Qt own hover/selected backgrounds via stylesheet for both item and branch
+        # so arrows and text stay visually in sync.
         super().paint(painter, option, index)
 
     def _draw_guide_lines(self, painter, option, item, tree_widget):
@@ -233,6 +226,48 @@ class _ChevronTreeWidget(QTreeWidget):
     def __init__(self, file_tree_widget=None, parent=None):
         super().__init__(parent)
         self._file_tree_widget = file_tree_widget
+        self._hovered_item: QTreeWidgetItem | None = None
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        self._hovered_item = self.itemAt(event.pos())
+        self.viewport().update()
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        self._hovered_item = None
+        self.viewport().update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        c = get_theme_colors()
+        painter = QPainter(self.viewport())
+        try:
+            for item in self._visible_items():
+                rect = self.visualItemRect(item)
+                if not rect.isValid():
+                    continue
+                row_rect = QRect(0, rect.top(), self.viewport().width(), rect.height())
+                if item.isSelected():
+                    painter.fillRect(row_rect, QColor(c["tree_sel_bg"]))
+                elif item is self._hovered_item:
+                    painter.fillRect(row_rect, QColor(c["tree_hover"]))
+        finally:
+            painter.end()
+        super().paintEvent(event)
+
+    def _visible_items(self) -> list[QTreeWidgetItem]:
+        root = self.invisibleRootItem()
+        items: list[QTreeWidgetItem] = []
+
+        def walk(parent: QTreeWidgetItem) -> None:
+            for i in range(parent.childCount()):
+                child = parent.child(i)
+                items.append(child)
+                if child.isExpanded():
+                    walk(child)
+
+        walk(root)
+        return items
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         """Handle drag enter - accept file URLs."""
@@ -303,6 +338,8 @@ class FileTreeWidget(QWidget):
         super().__init__()
         self.workspace = Path(workspace).resolve()
         self._editing_item: QTreeWidgetItem | None = None  # Track item being edited
+        self._pending_new_item: QTreeWidgetItem | None = None
+        self._pending_new_kind: str | None = None  # "file" | "folder"
         self._setup_ui()
         self._init_directories()
         self._setup_file_watcher()
@@ -329,31 +366,31 @@ class FileTreeWidget(QWidget):
         hlayout.addStretch()
 
         # Toolbar buttons (using VSCode Codicons)
-        self._new_file_btn = QPushButton()
-        self._new_file_btn.setObjectName("explorerToolbarBtn")
-        self._new_file_btn.setToolTip("新建文件")
-        self._new_file_btn.setFixedSize(22, 22)
-        self._new_file_btn.setIconSize(QSize(16, 16))
-        self._new_file_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._new_file_btn.clicked.connect(self._new_file)
+        self._new_file_btn = IconActionButton(
+            tooltip="新建文件",
+            object_name="explorerToolbarBtn",
+            button_size=(22, 22),
+            icon_size=(16, 16),
+            on_click=self._new_file,
+        )
         hlayout.addWidget(self._new_file_btn)
 
-        self._new_folder_btn = QPushButton()
-        self._new_folder_btn.setObjectName("explorerToolbarBtn")
-        self._new_folder_btn.setToolTip("新建文件夹")
-        self._new_folder_btn.setFixedSize(22, 22)
-        self._new_folder_btn.setIconSize(QSize(16, 16))
-        self._new_folder_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._new_folder_btn.clicked.connect(self._new_folder)
+        self._new_folder_btn = IconActionButton(
+            tooltip="新建文件夹",
+            object_name="explorerToolbarBtn",
+            button_size=(22, 22),
+            icon_size=(16, 16),
+            on_click=self._new_folder,
+        )
         hlayout.addWidget(self._new_folder_btn)
 
-        self._refresh_btn = QPushButton()
-        self._refresh_btn.setObjectName("explorerToolbarBtn")
-        self._refresh_btn.setToolTip("刷新")
-        self._refresh_btn.setFixedSize(22, 22)
-        self._refresh_btn.setIconSize(QSize(16, 16))
-        self._refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._refresh_btn.clicked.connect(self.refresh)
+        self._refresh_btn = IconActionButton(
+            tooltip="刷新",
+            object_name="explorerToolbarBtn",
+            button_size=(22, 22),
+            icon_size=(16, 16),
+            on_click=self.refresh,
+        )
         hlayout.addWidget(self._refresh_btn)
 
         # Set icons on toolbar buttons
@@ -364,13 +401,16 @@ class FileTreeWidget(QWidget):
         # File tree with drag-drop support
         self.tree = _ChevronTreeWidget(file_tree_widget=self)
         self.tree.setObjectName("fileTree")
-        self.tree.setItemDelegate(_FullRowDelegate(self.tree))
+        # Keep native branch/twisty rendering stable; custom delegate can interfere
+        # with unselected arrow visibility on some platforms/styles.
         self.tree.setHeaderLabels(["名称"])
         self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.tree.header().setStretchLastSection(True)
         self.tree.setDragEnabled(True)
         self.tree.setAcceptDrops(True)
         self.tree.setDropIndicatorShown(True)
+        self.tree.setMouseTracking(True)
+        self.tree.viewport().setMouseTracking(True)
         self.tree.setIndentation(12)  # VSCode: 12px indentation
         self.tree.setRootIsDecorated(True)
         self.tree.setItemsExpandable(True)
@@ -381,7 +421,9 @@ class FileTreeWidget(QWidget):
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
         # Enable inline editing
         self.tree.setEditTriggers(QTreeWidget.EditTrigger.EditKeyPressed)
+        self.tree.setItemDelegate(_FullRowDelegate(self.tree))
         self.tree.itemChanged.connect(self._on_item_changed)
+        self.tree.itemDelegate().closeEditor.connect(self._on_close_editor)
         layout.addWidget(self.tree)
 
         self.tree.header().hide()
@@ -454,25 +496,21 @@ class FileTreeWidget(QWidget):
                 height: 22px;
                 border: none;
                 padding: 0 12px 0 0;
-                border-radius: 3px;
+                border-radius: 0px;
                 show-decoration-selected: 1;
             }}
 
             #fileTree::item:hover {{
-                background-color: {c["tree_hover"]};
+                background-color: transparent;
             }}
 
             #fileTree::item:selected {{
-                background-color: transparent;  /* Delegate handles background */
+                background-color: transparent;
                 color: {c["tree_sel_fg"]};
             }}
 
             #fileTree::item:selected:hover {{
-                background-color: transparent;  /* Delegate handles background */
-            }}
-
-            #fileTree::branch:hover {{
-                background-color: {c["tree_hover"]};
+                background-color: transparent;
             }}
 
             /* Scrollbar */
@@ -552,8 +590,9 @@ class FileTreeWidget(QWidget):
         # We only enforce the computed minimum needed to keep header controls fully visible.
         fm = self.fontMetrics()
         title_width = fm.horizontalAdvance("EXPLORER")
-        # Header margins + title + stretch + 3 toolbar buttons + spacing between buttons.
-        min_width = 12 + title_width + 12 + (22 * 3) + (4 * 2) + 12
+        # Header minimum: left/right margins + title + 3 toolbar buttons + internal spacing.
+        # Add extra pixels for title letter-spacing to avoid clipping trailing chars.
+        min_width = 12 + title_width + (22 * 3) + (4 * 2) + 12 + 10
 
         # Only set minimum width, let splitter control actual width
         self.setMinimumWidth(min_width)
@@ -672,10 +711,11 @@ class FileTreeWidget(QWidget):
         new_name = item.text(0).strip()
         if not new_name:
             # Remove item if name is empty (user cancelled)
-            parent = item.parent()
-            if parent:
-                parent.removeChild(item)
+            self._remove_item(item)
             self._editing_item = None
+            if self._pending_new_item == item:
+                self._pending_new_item = None
+                self._pending_new_kind = None
             return
 
         # Check if this is a new item (no UserRole data set yet)
@@ -705,19 +745,22 @@ class FileTreeWidget(QWidget):
                             logger.info("Created file: {}", new_file)
                         except Exception as e:
                             QMessageBox.warning(self, "创建失败", f"无法创建文件:\n{e}")
-                            parent.removeChild(item)
+                            self._remove_item(item)
                     else:
                         # It's a folder
                         new_folder = parent_path / new_name
                         try:
                             new_folder.mkdir(exist_ok=True)
                             # Update item data
-                            new_dir_name = f"{parent_dir}/{new_name}" if "/" in parent_dir else new_name
+                            new_dir_name = f"{parent_dir}/{new_name}"
                             item.setData(0, Qt.ItemDataRole.UserRole, new_dir_name)
                             logger.info("Created folder: {}", new_folder)
                         except Exception as e:
                             QMessageBox.warning(self, "创建失败", f"无法创建文件夹:\n{e}")
-                            parent.removeChild(item)
+                            self._remove_item(item)
+            if self._pending_new_item == item:
+                self._pending_new_item = None
+                self._pending_new_kind = None
             self._editing_item = None
             return
 
@@ -781,6 +824,44 @@ class FileTreeWidget(QWidget):
                 self._editing_item = None
 
         self._editing_item = None
+
+    def _remove_item(self, item: QTreeWidgetItem) -> None:
+        parent = item.parent()
+        if parent:
+            parent.removeChild(item)
+        else:
+            self.tree.invisibleRootItem().removeChild(item)
+        if self.tree.currentItem() == item:
+            self.tree.setCurrentItem(None)
+
+    def _on_close_editor(self, editor, hint: QAbstractItemDelegate.EndEditHint) -> None:
+        """Finalize placeholder create items on focus-out / Esc, VSCode-like behavior."""
+        if self._pending_new_item is None:
+            return
+        item = self._pending_new_item
+        text = item.text(0).strip()
+        if not text:
+            self._remove_item(item)
+        self._pending_new_item = None
+        self._pending_new_kind = None
+
+    def _bind_create_editor_live_updates(self, item: QTreeWidgetItem) -> None:
+        """Bind live name/type UI updates while inline creating a new item."""
+        if self._pending_new_kind != "file":
+            return
+
+        def _attach() -> None:
+            editor = self.tree.focusWidget()
+            if isinstance(editor, QLineEdit):
+                def _on_text_changed(text: str) -> None:
+                    if self._pending_new_item is not item:
+                        return
+                    ext = Path(text.strip()).suffix or ".txt"
+                    item.setIcon(0, _get_file_icon(ext, QApplication.style()))
+
+                editor.textChanged.connect(_on_text_changed)
+
+        QTimer.singleShot(0, _attach)
 
     def _revert_item_name(self, item: QTreeWidgetItem) -> None:
         """Revert item name to original after failed edit."""
@@ -1042,21 +1123,7 @@ class FileTreeWidget(QWidget):
                 item.setExpanded(True)
                 break
 
-        # Create placeholder item with inline edit (no default name for VSCode-style auto-cancel)
-        new_item = QTreeWidgetItem()
-        new_item.setText(0, "")
-        new_item.setIcon(0, _get_file_icon(".txt", style))
-        new_item.setFlags(new_item.flags() | Qt.ItemFlag.ItemIsEditable)
-
-        # Find the directory item
-        for i in range(root.childCount()):
-            item = root.child(i)
-            item_dir = item.data(0, Qt.ItemDataRole.UserRole)
-            if item_dir == dir_name:
-                item.addChild(new_item)
-                self.tree.setCurrentItem(new_item)
-                self.tree.editItem(new_item, 0)
-                break
+        self._start_inline_create(dir_name=dir_name, is_folder=False, style=style)
 
     def _new_folder_in_dir(self, dir_name: str) -> None:
         """Create new folder in specified directory using inline edit."""
@@ -1073,21 +1140,34 @@ class FileTreeWidget(QWidget):
                 item.setExpanded(True)
                 break
 
-        # Create placeholder item with inline edit (no default name for VSCode-style auto-cancel)
-        new_item = QTreeWidgetItem()
-        new_item.setText(0, "")
-        # Folders don't show icons
-        new_item.setFlags(new_item.flags() | Qt.ItemFlag.ItemIsEditable)
+        self._start_inline_create(dir_name=dir_name, is_folder=True, style=QApplication.style())
 
-        # Find the directory item
+    def _start_inline_create(self, dir_name: str, is_folder: bool, style: QStyle) -> None:
+        """Create a VSCode-like inline creation placeholder item and start editing."""
+        root = self.tree.invisibleRootItem()
         for i in range(root.childCount()):
-            item = root.child(i)
-            item_dir = item.data(0, Qt.ItemDataRole.UserRole)
-            if item_dir == dir_name:
-                item.addChild(new_item)
-                self.tree.setCurrentItem(new_item)
-                self.tree.editItem(new_item, 0)
-                break
+            parent_item = root.child(i)
+            item_dir = parent_item.data(0, Qt.ItemDataRole.UserRole)
+            if item_dir != dir_name:
+                continue
+
+            new_item = QTreeWidgetItem()
+            new_item.setText(0, "")
+            new_item.setFlags(new_item.flags() | Qt.ItemFlag.ItemIsEditable)
+            if is_folder:
+                # VSCode-like: new folder line shows twisty arrow placeholder + input box.
+                new_item.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
+            else:
+                # VSCode-like: new file defaults to text-file icon; updates with suffix while typing.
+                new_item.setIcon(0, _get_file_icon(".txt", style))
+            parent_item.addChild(new_item)
+            parent_item.setExpanded(True)
+            self.tree.setCurrentItem(new_item)
+            self._pending_new_item = new_item
+            self._pending_new_kind = "folder" if is_folder else "file"
+            self.tree.editItem(new_item, 0)
+            self._bind_create_editor_live_updates(new_item)
+            return
 
     def _rename_file(self, file_path: Path, item: QTreeWidgetItem) -> None:
         """Rename a file using inline edit."""

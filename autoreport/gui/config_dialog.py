@@ -6,7 +6,6 @@ from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
-    QComboBox,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -24,6 +23,7 @@ from ..config.manager import ConfigManager
 from ..config.presets import ProviderPreset, get_presets_by_category, load_presets
 from ..config.schema import ApiConfig
 from ..core.preset_sync import is_cached, sync_presets
+from .widgets.ui_utils import NoWheelComboBox, combo_box_qss
 
 CATEGORY_LABELS = {
     "official": "官方",
@@ -44,40 +44,6 @@ PROVIDER_LABELS = {
     "groq": "Groq",
     "custom": "自定义 / 兼容",
 }
-
-
-class NoWheelComboBox(QComboBox):
-    """QComboBox that ignores mouse wheel events and paints a clean arrow."""
-
-    def wheelEvent(self, event) -> None:  # noqa: N802
-        event.ignore()
-
-    def paintEvent(self, event) -> None:  # noqa: N802
-        super().paintEvent(event)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        x = self.width() - 16
-        y = self.height() // 2 - 2
-        hints = QApplication.styleHints()
-        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
-        color = QColor("#999") if dark else QColor("#666")
-
-        pen = QPen(color, 1.5)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        painter.setPen(pen)
-        painter.drawLine(x, y, x + 5, y + 5)
-        painter.drawLine(x + 5, y + 5, x + 10, y)
-        painter.end()
-
-    def showPopup(self) -> None:  # noqa: N802
-        if self.count() == 0:
-            self.addItem("（无可用项）")
-            self.model().item(0).setEnabled(False)
-            super().showPopup()
-        else:
-            super().showPopup()
 
 
 class ConfigCard(QFrame):
@@ -941,36 +907,17 @@ class ConfigDialog(QDialog):
                 color: {c["inputDisabledFg"]};
             }}
             QCheckBox {{ font-size: 13px; color: {c["checkFg"]}; }}
-            QComboBox {{
-                border: 1px solid {c["inputBorder"]};
-                border-radius: 4px;
-                padding: 6px 30px 6px 10px;
-                font-size: 13px;
-                background-color: {c["inputBg"]};
-                color: {c["inputFg"]};
-            }}
-            QComboBox::drop-down {{
-                subcontrol-origin: padding;
-                subcontrol-position: top right;
-                width: 0px;
-                border: none;
-                background: transparent;
-            }}
-            QComboBox::down-arrow {{
-                image: none;
-                width: 0px;
-                height: 0px;
-                border: none;
-            }}
-            QComboBox QAbstractItemView {{
-                border: 1px solid {c["inputBorder"]};
-                border-radius: 4px;
-                background-color: {c["inputBg"]};
-                color: {c["inputFg"]};
-                selection-background-color: {c["primaryBtnBg"]};
-                selection-color: {c["primaryBtnFg"]};
-                padding: 4px;
-            }}
+            {combo_box_qss(
+                "",
+                border_color=c["inputBorder"],
+                background_color=c["inputBg"],
+                foreground_color=c["inputFg"],
+                hover_border_color=c["inputFocusBorder"],
+                selection_bg=c["primaryBtnBg"],
+                selection_fg=c["primaryBtnFg"],
+                font_size=13,
+                padding="6px 30px 6px 10px",
+            )}
             QScrollArea {{
                 background-color: {c["bodyBg"]};
                 border: none;

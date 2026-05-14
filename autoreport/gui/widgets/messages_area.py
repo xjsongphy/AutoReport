@@ -75,6 +75,9 @@ class MessagesArea(QScrollArea):
             QScrollBar::handle:vertical:hover {{
                 background-color: {c["scrollbar_hover"]};
             }}
+            QScrollBar::handle:vertical:pressed {{
+                background-color: {c["scrollbar_hover"]};
+            }}
             QScrollBar::add-line:vertical,
             QScrollBar::sub-line:vertical {{
                 height: 0;
@@ -176,6 +179,9 @@ class MessagesArea(QScrollArea):
             # This new message becomes editable
             self._latest_user_row = row
             row.set_editable(True)
+            # User messages are immediately complete (non-streaming),
+            # so hover toolbar and context actions should be available.
+            row.mark_complete()
 
         # Find the stretch item and insert before it
         stretch_index = self._layout.count() - 1
@@ -240,6 +246,8 @@ class MessagesArea(QScrollArea):
             item = self._layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+        # Reset latest-user pointer to avoid accessing deleted row widgets.
+        self._latest_user_row = None
 
     # ---- Query methods for testing ----
 

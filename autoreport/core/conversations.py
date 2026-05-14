@@ -130,11 +130,11 @@ class ConversationStore:
         if not self._sessions_file.exists():
             return []
         try:
-            with open(self._sessions_file, "r", encoding="utf-8") as f:
+            with open(self._sessions_file, "r", encoding="utf-8", errors="replace") as f:
                 sessions = json.load(f)
             sessions.sort(key=lambda s: s.get("timestamp", ""), reverse=True)
             return sessions
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
             return []
 
     def _save_sessions_metadata(self, sessions: list[dict]) -> None:
@@ -343,7 +343,7 @@ class ConversationStore:
             return []
         records: list[dict[str, Any]] = []
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -352,7 +352,7 @@ class ConversationStore:
                         records.append(json.loads(line))
                     except json.JSONDecodeError:
                         continue
-        except OSError as e:
+        except (OSError, UnicodeDecodeError) as e:
             logger.warning("Failed to load conversation: {}", e)
             return []
         if len(records) > limit:

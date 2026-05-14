@@ -109,6 +109,9 @@ class MainWindow(QMainWindow):
             QScrollBar::handle:vertical:hover {{
                 background-color: {c["scrollbar_hover"]};
             }}
+            QScrollBar::handle:vertical:pressed {{
+                background-color: {c["scrollbar_hover"]};
+            }}
             QScrollBar::add-line:vertical,
             QScrollBar::sub-line:vertical {{
                 height: 0;
@@ -122,6 +125,10 @@ class MainWindow(QMainWindow):
                 background-color: {c["scrollbar"]};
                 min-width: {px(30)};
                 border-radius: {px(4)};
+            }}
+            QScrollBar::handle:horizontal:hover,
+            QScrollBar::handle:horizontal:pressed {{
+                background-color: {c["scrollbar_hover"]};
             }}
             QScrollBar::add-line:horizontal,
             QScrollBar::sub-line:horizontal {{
@@ -410,21 +417,22 @@ class MainWindow(QMainWindow):
                 background-color: transparent;
                 border: none;
                 color: {c["tool_fg"]};
-                font-family: "Cascadia Code", "SF Mono", "Consolas", monospace;
+                font-family: "Segoe UI", "SF Pro", -apple-system, sans-serif;
                 font-size: {px(12)};
+                font-weight: 500;
                 text-align: left;
-                padding: 0;
+                padding: {px(2)} 0;
                 border-radius: {px(4)};
             }}
             #toolCallHeader:hover {{
                 background-color: {c["hover"]};
-                color: {c["focus"]};
+                color: {c["fg"]};
             }}
             #toolCallDetail {{
                 color: {c["tool_detail"]};
-                font-family: "Cascadia Code", "SF Mono", "Consolas", monospace;
+                font-family: "Segoe UI", "SF Pro", -apple-system, sans-serif;
                 font-size: {px(11)};
-                padding: {px(2)} 0;
+                padding: {px(1)} 0 {px(2)} {px(12)};
             }}
 
             /* ---- Status Indicator ---- */
@@ -462,9 +470,11 @@ class MainWindow(QMainWindow):
 
         # Right: Agent panels side-by-side (Sub Agent | Main Agent)
         self.sub_agent_panel = AgentPanel("sub", get_agent_title("sub"), self.workspace)
+        self.sub_agent_panel.setMinimumWidth(0)
         main_splitter.addWidget(self.sub_agent_panel)
 
         self.main_agent_panel = AgentPanel("main", get_agent_title("main"), self.workspace)
+        self.main_agent_panel.setMinimumWidth(0)
         main_splitter.addWidget(self.main_agent_panel)
 
         # Set stretch factors for proportional sizing
@@ -476,6 +486,7 @@ class MainWindow(QMainWindow):
 
         # Store main_splitter for resize handling
         self._main_splitter = main_splitter
+        self._apply_splitter_sizes()
 
         # Connect signals
         self.main_agent_panel.message_sent.connect(self._on_main_agent_message)
@@ -524,11 +535,14 @@ class MainWindow(QMainWindow):
         self._file_just_selected = False
 
         if agent_type != self.sub_agent_panel.agent_type:
+            sizes = self._main_splitter.sizes() if hasattr(self, "_main_splitter") else None
             ui_logger.debug("MainWindow: switching sub-agent panel to {}", agent_type)
             self.sub_agent_panel._messages_area.clear()
             self.sub_agent_panel.set_agent_type(agent_type)
             if agent_type != "sub":
                 self._load_conversations_for_agent(agent_type, self.sub_agent_panel)
+            if sizes:
+                self._main_splitter.setSizes(sizes)
 
     def _on_preview_selection_changed(self, file_path: str, selected_text: str, start_line: int, end_line: int) -> None:
         self.main_agent_panel.set_preview_context(file_path, selected_text, start_line, end_line)
@@ -1018,14 +1032,22 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event):
         """Handle window resize to maintain proportional layout."""
         super().resizeEvent(event)
-        # Recalculate sizes based on current window width
-        if hasattr(self, '_main_splitter'):
-            total_width = self._main_splitter.width()
-            # file_tree: 20%, preview: 35%, sub_agent: 22.5%, main_agent: 22.5%
-            sizes = [
-                int(total_width * 0.20),  # file_tree
-                int(total_width * 0.35),  # preview
-                int(total_width * 0.225),  # sub_agent_panel
-                int(total_width * 0.225),  # main_agent_panel
-            ]
-            self._main_splitter.setSizes(sizes)
+        self._apply_splitter_sizes()
+
+    def _apply_splitter_sizes(self) -> None:
+        if not hasattr(self, "_main_splitter"):
+            return
+        total_width = self._main_splitter.width()
+        if total_width <= 0:
+            return
+
+        # Explorer keeps its minimal complete width by default.
+        file_target = self.file_tree.minimumWidth()
+        remaining = max(0, total_width - file_target)
+        sizes = [
+            file_target,
+            int(remaining * 0.4375),   # preview (35 / 80)
+            int(remaining * 0.28125),  # sub agent (22.5 / 80)
+            int(remaining * 0.28125),  # main agent (22.5 / 80)
+        ]
+        self._main_splitter.setSizes(sizes)

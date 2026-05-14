@@ -16,7 +16,6 @@ from PyQt6.QtGui import QPixmap
 from PyQt6.QtPdf import QPdfDocument
 from PyQt6.QtWidgets import (
     QAbstractItemView,
-    QComboBox,
     QHBoxLayout,
     QLabel,
     QMenu,
@@ -31,7 +30,8 @@ from PyQt6.QtWidgets import (
 )
 
 from ..scale import scaled, scaled_size
-from ..theme import get_theme_colors, is_dark_mode
+from ..theme import get_theme_colors
+from .ui_utils import NoWheelComboBox, combo_box_qss, filled_button_qss
 
 # ================================================================== #
 #  File-type routing
@@ -577,6 +577,26 @@ class PreviewWidget(QWidget):
         self._file_label.setVisible(False)
         hl.addWidget(self._file_label)
 
+        hl.addStretch()
+
+        self._engine_combo = NoWheelComboBox()
+        self._engine_combo.setObjectName("engineCombo")
+        self._engine_combo.addItems(["xelatex", "lualatex"])
+        self._engine_combo.setFixedWidth(scaled(100))
+        self._engine_combo.setFixedHeight(scaled(24))
+        self._engine_combo.setVisible(False)
+        hl.addWidget(self._engine_combo)
+
+        w, h = scaled_size(80, 26)
+        self._compile_btn = QPushButton("编译")
+        self._compile_btn.setObjectName("compileBtn")
+        self._compile_btn.setFixedHeight(scaled(24))
+        self._compile_btn.setMinimumWidth(scaled(68))
+        self._compile_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._compile_btn.clicked.connect(self._compile_tex)
+        self._compile_btn.setVisible(False)
+        hl.addWidget(self._compile_btn)
+
         layout.addWidget(header)
 
         # Mode stack
@@ -620,45 +640,17 @@ class PreviewWidget(QWidget):
         tex_layout.setContentsMargins(0, 0, 0, 0)
         tex_layout.setSpacing(0)
 
-        # Horizontal splitter: TeX editor (left) + PDF viewer (right)
-        tex_split = QSplitter(Qt.Orientation.Horizontal)
-        tex_split.setObjectName("texSplitter")
-
-        # TeX section with toolbar
+        # TeX section (single editor pane by default)
         tex_section = QWidget()
         tsl = QVBoxLayout(tex_section)
         tsl.setContentsMargins(0, 0, 0, 0)
         tsl.setSpacing(0)
 
-        # Toolbar inside editor
-        toolbar = QWidget()
-        toolbar.setObjectName("texToolbar")
-        tbl = QHBoxLayout(toolbar)
-        tbl.setContentsMargins(8, 4, 8, 4)
-        tbl.setSpacing(8)
-
-        self._engine_combo = QComboBox()
-        self._engine_combo.setObjectName("engineCombo")
-        self._engine_combo.addItems(["xelatex", "lualatex"])
-        self._engine_combo.setFixedWidth(scaled(100))
-        tbl.addWidget(self._engine_combo)
-
-        w, h = scaled_size(80, 26)
-        self._compile_btn = QPushButton("编译")
-        self._compile_btn.setObjectName("compileBtn")
-        self._compile_btn.setFixedSize(w, h)
-        self._compile_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._compile_btn.clicked.connect(self._compile_tex)
-        tbl.addWidget(self._compile_btn)
-
-        tbl.addStretch()
-        tsl.addWidget(toolbar)
-
         self._tex_scintilla = QsciScintilla()
         self._tex_scintilla.setObjectName("texEditor")
         self._tex_scintilla.setUtf8(True)
         self._tex_scintilla.setMarginLineNumbers(1, True)
-        self._tex_scintilla.setMarginWidth(1, "0000")
+        self._tex_scintilla.setMarginWidth(1, "000")
         self._tex_scintilla.setReadOnly(False)
 
         # Configure lexer with theme colors
@@ -669,6 +661,8 @@ class PreviewWidget(QWidget):
         # Set basic colors for lexer
         lexer.setColor(QColor(c["fg"]))
         lexer.setPaper(QColor(c["editor_bg"]))
+        self._tex_scintilla.setMarginsBackgroundColor(QColor(c["surface"]))
+        self._tex_scintilla.setMarginsForegroundColor(QColor(c["muted"]))
 
         self._tex_scintilla.setStyleSheet(f"""
             QsciScintilla#texEditor {{
@@ -685,12 +679,7 @@ class PreviewWidget(QWidget):
         """)
         tsl.addWidget(self._tex_scintilla, 1)
 
-        # PDF section
-        pdf_section = QWidget()
-        psl = QVBoxLayout(pdf_section)
-        psl.setContentsMargins(0, 0, 0, 0)
-        psl.setSpacing(0)
-
+        # PDF viewer kept for compile preview refresh, but not shown side-by-side by default.
         self._tex_pdf_document = QPdfDocument(None)
         self._tex_pdf_view = QPdfView(None)
         self._tex_pdf_view.setObjectName("texPdfView")
@@ -702,61 +691,8 @@ class PreviewWidget(QWidget):
                 border: none;
             }}
         """)
-        psl.addWidget(self._tex_pdf_view, 1)
 
-        tex_split.addWidget(tex_section)
-        tex_split.addWidget(pdf_section)
-        tex_split.setSizes([scaled(450), scaled(400)])
-
-        tex_layout.addWidget(tex_split, 1)
-
-        # Toolbar styling with dark/light mode support for combo box dropdown
-        dark = is_dark_mode()
-        toolbar.setStyleSheet(f"""
-            QWidget#texToolbar {{
-                background-color: {c["surface"]};
-                border-bottom: 1px solid {c["border"]};
-            }}
-            QComboBox#engineCombo {{
-                background-color: {c["editor_bg"]};
-                color: {c["fg"]};
-                border: 1px solid {c["border"]};
-                border-radius: 4px;
-                padding: 3px 8px;
-                font-size: 12px;
-            }}
-            QComboBox#engineCombo:hover {{
-                border: 1px solid {c["accent"]};
-            }}
-            QComboBox#engineCombo::drop-down {{
-                border: none;
-                width: 20px;
-            }}
-            /* Combo box dropdown list - themed for both modes */
-            QComboBox QAbstractItemView {{
-                background-color: {"#252526" if dark else "#ffffff"};
-                color: {"#cccccc" if dark else "#333333"};
-                border: 1px solid {c["border"]};
-                selection-background-color: {"#094771" if dark else "#add6ff"};
-                selection-color: {"#ffffff" if dark else "#003660"};
-            }}
-            QPushButton#compileBtn {{
-                background-color: {c["accent"]};
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                font-weight: 500;
-                font-size: 12px;
-                padding: 4px 12px;
-            }}
-            QPushButton#compileBtn:hover {{
-                background-color: {"#1085d8" if dark else "#0078d4"};
-            }}
-            QPushButton#compileBtn:disabled {{
-                background-color: {c["muted"]};
-                color: {c["editor_bg"]};
-            }}
-        """)
+        tex_layout.addWidget(tex_section, 1)
 
         self._mode_stack.addWidget(self._tex_widget)  # page 1
 
@@ -785,6 +721,25 @@ class PreviewWidget(QWidget):
                 color: {c["muted"]};
                 font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
             }}
+            {combo_box_qss(
+                "#engineCombo",
+                border_color=c["input_border"],
+                background_color=c["input_bg"],
+                foreground_color=c["fg"],
+                hover_border_color=c["accent"],
+                selection_bg=c["send_bg"],
+                selection_fg="#ffffff",
+                font_size=12,
+                padding="4px 24px 4px 8px",
+            )}
+            {filled_button_qss(
+                "#compileBtn",
+                bg=c["send_bg"],
+                fg="#ffffff",
+                hover_bg=c["send_hover"],
+                disabled_bg=c["muted"],
+                disabled_fg=c["editor_bg"],
+            )}
             QSplitter#editorSplitter::handle {{
                 background-color: {c["border"]};
                 width: 2px;
@@ -807,9 +762,13 @@ class PreviewWidget(QWidget):
             self._ensure_tex_mode()
             self._mode_stack.setCurrentIndex(1)
             self._title_label.setText("LaTeX 编辑器")
+            self._engine_combo.setVisible(True)
+            self._compile_btn.setVisible(True)
         else:
             self._mode_stack.setCurrentIndex(0)
             self._title_label.setText("预览")
+            self._engine_combo.setVisible(False)
+            self._compile_btn.setVisible(False)
             if not self._panels[0].tab_count():
                 pass  # Placeholder already visible
 

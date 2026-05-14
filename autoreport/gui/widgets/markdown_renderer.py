@@ -97,12 +97,12 @@ class _QtCompatTreeprocessor(Treeprocessor):
             table.set("border", "1")
             table.set("cellpadding", "6")
             table.set("cellspacing", "0")
-            table.set("style", "margin: 8px 0;")
+            table.set("style", "margin: 8px 0; width: 100%; table-layout: fixed;")
         for th in root.iter("th"):
             th.set("bgcolor", th_bg)
-            th.set("style", "font-weight: bold;")
+            th.set("style", "font-weight: bold; word-wrap: break-word; overflow-wrap: anywhere;")
         for td in root.iter("td"):
-            td.set("style", "")
+            td.set("style", "word-wrap: break-word; overflow-wrap: anywhere;")
 
         return root
 

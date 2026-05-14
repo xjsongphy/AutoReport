@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QApplication,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -429,6 +430,40 @@ class MessageRow(QWidget):
         if clipboard:
             clipboard.setText(self._content, QClipboard.Mode.Clipboard)
 
+    def contextMenuEvent(self, event) -> None:
+        """Show VS Code-like context menu for message actions."""
+        menu = QMenu(self)
+        c = get_theme_colors()
+        menu.setStyleSheet(
+            f"""
+            QMenu {{
+                background-color: {c["surface"]};
+                color: {c["fg"]};
+                border: 1px solid {c["border"]};
+                padding: 4px;
+            }}
+            QMenu::item {{
+                background-color: transparent;
+                padding: 6px 10px;
+                border-radius: 4px;
+            }}
+            QMenu::item:selected {{
+                background-color: {c["hover"]};
+                color: {c["fg"]};
+            }}
+            """
+        )
+
+        copy_action = menu.addAction("Copy")
+        copy_action.triggered.connect(self._copy_content)
+
+        if self._role == "user" and self._editable:
+            edit_action = menu.addAction("Edit & Resend")
+            edit_action.triggered.connect(self._request_edit)
+
+        menu.exec(event.globalPos())
+        event.accept()
+
     def _setup_hover_handler(self) -> None:
         """Setup hover detection for user message buttons."""
         if self._role != "user" or self._user_footer is None:
@@ -450,12 +485,22 @@ class MessageRow(QWidget):
 
         return super().eventFilter(obj, event)
 
+    def enterEvent(self, event) -> None:
+        super().enterEvent(event)
+        if self._role == "user" and self._complete and self._user_footer:
+            self._user_footer.setVisible(True)
+
+    def leaveEvent(self, event) -> None:
+        super().leaveEvent(event)
+        if self._role == "user" and self._user_footer:
+            self._user_footer.setVisible(False)
+
     def resizeEvent(self, event) -> None:
         """Keep message content constrained to current panel width."""
         super().resizeEvent(event)
         self._apply_text_width_constraints()
         if self._role == "user" and self._user_bubble_container is not None:
-            self._user_bubble_container.setMaximumWidth(max(80, int(self.width() * 0.95)))
+            self._user_bubble_container.setMaximumWidth(max(80, int(self.width() * 0.35)))
 
     def _apply_text_width_constraints(self) -> None:
         max_w = max(40, self._content_width_limit())

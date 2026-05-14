@@ -21,6 +21,7 @@ from autoreport.gui.widgets.chat_input import ChatInput
 from autoreport.gui.widgets.conversation_history import ConversationHistoryDropdown
 from autoreport.gui.widgets.debug_panel import DebugPanel
 from autoreport.gui.widgets.file_search_popup import FileSearchPopup
+from autoreport.gui.widgets.ui_utils import IconActionButton
 from autoreport.utils.agent_labels import get_agent_badge, get_agent_title, get_agent_icon
 from autoreport.gui.widgets.messages_area import MessagesArea
 from autoreport.gui.widgets.status_indicator import StatusIndicator
@@ -47,6 +48,7 @@ class AgentPanel(QWidget):
 
     def __init__(self, panel_id: str, title: str, workspace: Path | None = None):
         super().__init__()
+        self.setMinimumWidth(48)
         self.panel_id = panel_id
         self._agent_type = "sub"
         self._is_working = False
@@ -55,6 +57,7 @@ class AgentPanel(QWidget):
         self._opened_file: str | None = None
         self._context_enabled: bool = True
         self._current_tool_group = None
+        self._pending_tool_groups: list = []
 
         self._file_search_manager = FileSearchManager(self._workspace)
         self._file_search_popup: FileSearchPopup | None = None
@@ -97,20 +100,22 @@ class AgentPanel(QWidget):
 
         hl.addStretch()
 
-        self._new_conv_btn = QPushButton("+")
-        self._new_conv_btn.setObjectName("headerAction")
-        self._new_conv_btn.setToolTip("New conversation")
-        self._new_conv_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._new_conv_btn.clicked.connect(self._on_new_conversation)
-        self._new_conv_btn.setFixedSize(28, 28)
+        self._new_conv_btn = IconActionButton(
+            text="+",
+            tooltip="New conversation",
+            object_name="headerAction",
+            button_size=(28, 28),
+            on_click=self._on_new_conversation,
+        )
         hl.addWidget(self._new_conv_btn)
 
-        self._history_btn = QPushButton("☰")
-        self._history_btn.setObjectName("headerAction")
-        self._history_btn.setToolTip("History")
-        self._history_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._history_btn.clicked.connect(self._on_history)
-        self._history_btn.setFixedSize(28, 28)
+        self._history_btn = IconActionButton(
+            text="☰",
+            tooltip="History",
+            object_name="headerAction",
+            button_size=(28, 28),
+            on_click=self._on_history,
+        )
         hl.addWidget(self._history_btn)
 
         self._debug_button = QPushButton("Debug")
@@ -176,14 +181,15 @@ class AgentPanel(QWidget):
         self._context_label.setWordWrap(True)
         cl.addWidget(self._context_label, 1)
 
-        self._context_eye = QPushButton("👁")
-        self._context_eye.setObjectName("contextEye")
+        self._context_eye = IconActionButton(
+            text="👁",
+            tooltip="Include context (toggle)",
+            object_name="contextEye",
+            button_size=(24, 24),
+            on_click=self._on_eye_toggled,
+        )
         self._context_eye.setCheckable(True)
         self._context_eye.setChecked(True)
-        self._context_eye.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._context_eye.setToolTip("Include context (toggle)")
-        self._context_eye.clicked.connect(self._on_eye_toggled)
-        self._context_eye.setFixedSize(24, 24)
         cl.addWidget(self._context_eye)
 
         layout.addWidget(self._context_bar)
@@ -204,11 +210,12 @@ class AgentPanel(QWidget):
         self._input_field.popup_navigate.connect(self._on_popup_navigate)
         icl.addWidget(self._input_field, 1)
 
-        self._send_btn = QPushButton("↑")
-        self._send_btn.setObjectName("sendBtn")
-        self._send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._send_btn.clicked.connect(self._on_send_btn_clicked)
-        self._send_btn.setFixedSize(26, 26)
+        self._send_btn = IconActionButton(
+            text="↑",
+            object_name="sendBtn",
+            button_size=(26, 26),
+            on_click=self._on_send_btn_clicked,
+        )
 
         icl.addWidget(self._send_btn)
 
@@ -225,18 +232,20 @@ class AgentPanel(QWidget):
         sl.setContentsMargins(10, 0, 6, 2)
         sl.setSpacing(2)
 
-        add_btn = QPushButton("+")
-        add_btn.setObjectName("secondaryBtn")
-        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        add_btn.setToolTip("添加上下文")
-        add_btn.setFixedSize(22, 18)
+        add_btn = IconActionButton(
+            text="+",
+            tooltip="添加上下文",
+            object_name="secondaryBtn",
+            button_size=(22, 18),
+        )
         sl.addWidget(add_btn)
 
-        at_btn = QPushButton("@")
-        at_btn.setObjectName("secondaryBtn")
-        at_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        at_btn.setToolTip("引用文件")
-        at_btn.setFixedSize(22, 18)
+        at_btn = IconActionButton(
+            text="@",
+            tooltip="引用文件",
+            object_name="secondaryBtn",
+            button_size=(22, 18),
+        )
         sl.addWidget(at_btn)
 
         sl.addStretch()
@@ -500,12 +509,9 @@ class AgentPanel(QWidget):
         detail: str | None = None,
         expandable: bool = True,
     ) -> None:
-        groups = self._messages_area.get_tool_groups()
-        if not groups:
-            group = self._messages_area.add_tool_group()
-            self._current_tool_group = group
-        else:
-            self._current_tool_group = groups[-1]
+        # One tool call -> one tool group row.
+        self._current_tool_group = self._messages_area.add_tool_group()
+        self._pending_tool_groups.append(self._current_tool_group)
         self._current_tool_group.add_tool_call(
             name=tool_name,
             arguments=arguments,
@@ -525,8 +531,14 @@ class AgentPanel(QWidget):
         detail: str | None = None,
         expandable: bool | None = None,
     ) -> None:
-        if hasattr(self, "_current_tool_group") and self._current_tool_group:
-            self._current_tool_group.complete_tool_call(
+        target_group = None
+        if self._pending_tool_groups:
+            target_group = self._pending_tool_groups.pop(0)
+        elif hasattr(self, "_current_tool_group") and self._current_tool_group:
+            target_group = self._current_tool_group
+
+        if target_group:
+            target_group.complete_tool_call(
                 name=tool_name,
                 result=result,
                 error=error,
@@ -789,4 +801,6 @@ class AgentPanel(QWidget):
     def clear_conversation(self) -> None:
         """Clear messages and notify backend."""
         self._messages_area.clear()
+        self._pending_tool_groups.clear()
+        self._current_tool_group = None
         self.conversation_cleared.emit()
