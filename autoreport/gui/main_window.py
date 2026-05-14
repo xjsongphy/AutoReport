@@ -33,6 +33,7 @@ from .theme import get_theme_colors
 from .widgets.agent_panel import AgentPanel
 from .widgets.file_tree import FileTreeWidget
 from .widgets.preview import PreviewWidget
+from .widgets.ui_utils import compact_tooltip_qss
 
 
 class MainWindow(QMainWindow):
@@ -134,14 +135,7 @@ class MainWindow(QMainWindow):
             QScrollBar::sub-line:horizontal {{
                 width: 0;
             }}
-            QToolTip {{
-                background-color: {c["surface"]};
-                color: {c["fg"]};
-                border: 1px solid {c["border"]};
-                padding: {px(3)} {px(7)};
-                font-size: {px(12)};
-                border-radius: {px(4)};
-            }}
+            {compact_tooltip_qss("QToolTip")}
 
             /* ---- Panel Header ---- */
             #panelHeader {{
@@ -280,7 +274,6 @@ class MainWindow(QMainWindow):
             #userMessageBubble {{
                 background-color: {c["bubble_bg"]};
                 border-radius: {px(12)};
-                max-width: 95%;
             }}
             #userMessageBubble:hover {{
                 background-color: {c["bubble_hover"]};
@@ -303,8 +296,8 @@ class MainWindow(QMainWindow):
                 color: {c["muted"]};
                 border: none;
                 border-radius: {px(4)};
-                padding: {px(1)} {px(5)};
-                font-size: {px(11)};
+                padding: 0;
+                font-size: {px(15)};
             }}
             #userEditBtn:hover, #userCopyBtn:hover {{
                 background-color: {c["hover"]};
@@ -367,8 +360,8 @@ class MainWindow(QMainWindow):
                 color: {c["muted"]};
                 border: 1px solid {c["border"]};
                 border-radius: {px(4)};
-                padding: {px(1)} {px(5)};
-                font-size: {px(11)};
+                padding: 0;
+                font-size: {px(15)};
             }}
             #copyBtn:hover {{
                 background-color: {c["hover"]};
@@ -396,8 +389,8 @@ class MainWindow(QMainWindow):
                 color: transparent;
                 border: none;
                 border-radius: {px(4)};
-                font-size: {px(12)};
-                padding: {px(1)} {px(4)};
+                font-size: {px(15)};
+                padding: 0;
             }}
             #codeBlockCard:hover #codeBlockCopyBtn {{
                 color: {c["muted"]};
@@ -454,6 +447,7 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
 
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        main_splitter.setChildrenCollapsible(False)
         main_layout.addWidget(main_splitter)
 
         # Left: File tree
@@ -470,12 +464,13 @@ class MainWindow(QMainWindow):
 
         # Right: Agent panels side-by-side (Sub Agent | Main Agent)
         self.sub_agent_panel = AgentPanel("sub", get_agent_title("sub"), self.workspace)
-        self.sub_agent_panel.setMinimumWidth(0)
         main_splitter.addWidget(self.sub_agent_panel)
 
         self.main_agent_panel = AgentPanel("main", get_agent_title("main"), self.workspace)
-        self.main_agent_panel.setMinimumWidth(0)
         main_splitter.addWidget(self.main_agent_panel)
+
+        for index in range(main_splitter.count()):
+            main_splitter.setCollapsible(index, False)
 
         # Set stretch factors for proportional sizing
         # file_tree: 20%, preview: 35%, sub_agent: 22.5%, main_agent: 22.5%

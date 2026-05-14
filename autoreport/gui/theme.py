@@ -88,8 +88,8 @@ def get_theme_colors() -> dict[str, str]:
         "stop_hover": "#d32f2f" if dark else "#b71c1c",
 
         # === Scrollbar ===
-        "scrollbar": "#ffffff1a" if dark else "#c1c1c1",  # Transparent track
-        "scrollbar_hover": "#ffffff33" if dark else "#a8a8a8",
+        "scrollbar": "#6b6b6b" if dark else "#c1c1c1",
+        "scrollbar_hover": "#8a8a8a" if dark else "#a8a8a8",
 
         # === Chat/Agent Panel ===
         "bubble_bg": "#2a2a2a" if dark else "#f0f0f0",

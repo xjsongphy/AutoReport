@@ -14,10 +14,10 @@ import shutil
 from pathlib import Path
 
 from loguru import logger
-from PyQt6.QtCore import QFileSystemWatcher, QMimeData, QRect, QRectF, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QFileSystemWatcher, QMimeData, QRect, QSize, Qt, QTimer, pyqtSignal
 
 from autoreport.utils.logging_config import ui_logger
-from PyQt6.QtGui import QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PyQt6.QtGui import QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QIcon, QPainter, QPen
 from PyQt6.QtWidgets import (
     QAbstractItemDelegate,
     QApplication,
@@ -39,74 +39,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..theme import get_theme_colors
-from .ui_utils import IconActionButton
-
-
-# ================================================================== #
-#  VSCode-style SVG icon rendering
-# ================================================================== #
-
-
-def _draw_codicon_icon(name: str, color: QColor, size: int = 16) -> QIcon:
-    """Draw a VSCode Codicon icon using SVG vector rendering.
-
-    Loads the SVG files from the codicons package and renders them as
-    vector graphics for smooth, scalable icons with high-DPI support.
-    """
-    from PyQt6.QtSvg import QSvgRenderer
-    from PyQt6.QtWidgets import QApplication
-    from pathlib import Path
-
-    # Map icon names to SVG files
-    svg_files = {
-        "new-file": "new-file.svg",
-        "new-folder": "new-folder.svg",
-        "refresh": "refresh.svg",
-        "collapse-all": None,  # Not used currently
-    }
-
-    svg_file = svg_files.get(name)
-    if not svg_file:
-        # Fallback: simple text icon
-        pixmap = QPixmap(size, size)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        p = QPainter(pixmap)
-        p.setPen(color)
-        p.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "?")
-        p.end()
-        return QIcon(pixmap)
-
-    # Get SVG file path (relative to this file)
-    svg_path = Path(__file__).parent / svg_file
-
-    # Load and render SVG
-    renderer = QSvgRenderer(str(svg_path))
-
-    # Get device pixel ratio for high-DPI displays
-    dpr = QApplication.primaryScreen().devicePixelRatio()
-
-    # Render at high resolution for sharpness
-    actual_size = int(size * dpr)
-    pixmap = QPixmap(actual_size, actual_size)
-    pixmap.fill(Qt.GlobalColor.transparent)
-
-    # Set device pixel ratio on pixmap
-    pixmap.setDevicePixelRatio(dpr)
-
-    p = QPainter(pixmap)
-    p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-
-    # Render SVG to fill the entire pixmap
-    renderer.render(p, QRectF(0.0, 0.0, float(size), float(size)))
-
-    # Tint the rendered icon with the desired color
-    p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-    p.fillRect(pixmap.rect(), color)
-
-    p.end()
-
-    return QIcon(pixmap)
+from .ui_utils import IconActionButton, compact_tooltip_qss, render_svg_icon
 
 # Fixed directory structure
 FIXED_DIRECTORIES = ["data", "references", "theory", "code", "tex"]
@@ -254,6 +187,51 @@ class _ChevronTreeWidget(QTreeWidget):
         finally:
             painter.end()
         super().paintEvent(event)
+        self._paint_chevrons()
+
+    def _paint_chevrons(self) -> None:
+        """Overlay stable VSCode-style chevrons after Qt paints the tree."""
+        c = get_theme_colors()
+        painter = QPainter(self.viewport())
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            pen = QPen(QColor(c["fg"]), 1.5)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+            for item in self._visible_items():
+                if not self._has_chevron(item):
+                    continue
+                rect = self.visualItemRect(item)
+                if not rect.isValid():
+                    continue
+                x = self._chevron_x(item)
+                y = rect.center().y()
+                if item.isExpanded():
+                    painter.drawLine(x, y - 2, x + 4, y + 2)
+                    painter.drawLine(x + 4, y + 2, x + 8, y - 2)
+                else:
+                    painter.drawLine(x + 2, y - 4, x + 6, y)
+                    painter.drawLine(x + 6, y, x + 2, y + 4)
+        finally:
+            painter.end()
+
+    def _has_chevron(self, item: QTreeWidgetItem) -> bool:
+        policy = item.childIndicatorPolicy()
+        if policy == QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator:
+            return True
+        return item.childCount() > 0
+
+    def _chevron_x(self, item: QTreeWidgetItem) -> int:
+        return self._item_depth(item) * self.indentation() + 4
+
+    def _item_depth(self, item: QTreeWidgetItem) -> int:
+        depth = 0
+        parent = item.parent()
+        while parent is not None:
+            depth += 1
+            parent = parent.parent()
+        return depth
 
     def _visible_items(self) -> list[QTreeWidgetItem]:
         root = self.invisibleRootItem()
@@ -513,6 +491,12 @@ class FileTreeWidget(QWidget):
                 background-color: transparent;
             }}
 
+            #fileTree::branch {{
+                image: none;
+                border-image: none;
+                background: transparent;
+            }}
+
             /* Scrollbar */
             QScrollBar:vertical {{
                 background-color: {c["surface"]};
@@ -535,15 +519,8 @@ class FileTreeWidget(QWidget):
                 height: 0px;
             }}
 
-            /* Tooltips - compact padding */
-            QToolTip {{
-                background-color: {c["bg"]};
-                color: {c["fg"]};
-                border: 1px solid {c["border"]};
-                padding: 2px 6px;
-                font-size: 12px;
-                border-radius: 3px;
-            }}
+            /* Tooltips */
+            {compact_tooltip_qss("QToolTip")}
 
             /* Context Menu */
             #explorerContextMenu {{
@@ -576,9 +553,9 @@ class FileTreeWidget(QWidget):
         theme = get_theme_colors()
         icon_color = QColor(theme["fg"])
 
-        self._new_file_btn.setIcon(_draw_codicon_icon("new-file", icon_color))
-        self._new_folder_btn.setIcon(_draw_codicon_icon("new-folder", icon_color))
-        self._refresh_btn.setIcon(_draw_codicon_icon("refresh", icon_color))
+        self._new_file_btn.setIcon(render_svg_icon("new-file", icon_color))
+        self._new_folder_btn.setIcon(render_svg_icon("new-folder", icon_color))
+        self._refresh_btn.setIcon(render_svg_icon("refresh", icon_color))
 
     def _update_width(self) -> None:
         """Update widget width to be adaptive.

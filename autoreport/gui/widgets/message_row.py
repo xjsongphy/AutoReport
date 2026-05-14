@@ -8,7 +8,7 @@
 import re
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QClipboard
+from PyQt6.QtGui import QClipboard, QColor, QIcon
 
 from ..scale import scaled_size
 from PyQt6.QtWidgets import (
@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
 
 from .markdown_renderer import render_markdown
 from ..theme import get_theme_colors
+from .ui_utils import install_compact_tooltip, render_svg_icon
 
 
 def _parse_code_blocks(content: str) -> list[tuple[str, str | None]]:
@@ -43,6 +44,10 @@ def _parse_code_blocks(content: str) -> list[tuple[str, str | None]]:
     if not parts:
         parts.append((content, None))
     return parts
+
+
+def _copy_icon() -> QIcon:
+    return render_svg_icon("copy", QColor(get_theme_colors()["muted"]), size=16)
 
 
 class _CodeBlockWidget(QWidget):
@@ -72,12 +77,13 @@ class _CodeBlockWidget(QWidget):
         hl.addWidget(lang_label)
         hl.addStretch()
 
-        w, h = scaled_size(28, 20)
-        self._copy_btn = QPushButton("⎘")
+        w, h = scaled_size(30, 24)
+        self._copy_btn = QPushButton()
         self._copy_btn.setObjectName("codeBlockCopyBtn")
+        self._copy_btn.setIcon(_copy_icon())
         self._copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._copy_btn.setFixedSize(w, h)
-        self._copy_btn.setToolTip("Copy code")
+        install_compact_tooltip(self._copy_btn, "Copy")
         self._copy_btn.clicked.connect(self._copy)
         hl.addWidget(self._copy_btn)
 
@@ -119,6 +125,10 @@ class MessageRow(QWidget):
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
         self._role = role
         self._content = content
         self._timestamp = timestamp
@@ -146,6 +156,10 @@ class MessageRow(QWidget):
 
         outer = QWidget()
         outer.setObjectName("msgOuterContainer")
+        outer.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
         self._outer_layout = QVBoxLayout(outer)
         self._outer_layout.setContentsMargins(16, 6, 16, 6)
         self._outer_layout.setSpacing(0)
@@ -155,9 +169,13 @@ class MessageRow(QWidget):
             coord.setObjectName("msgCoordination")
             self._outer_layout.addWidget(coord)
 
-        if self._role == "user":
+        if self._is_outbound_message():
             row = QWidget()
             row.setObjectName("userMessageRow")
+            row.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Preferred,
+            )
             rl = QHBoxLayout(row)
             rl.setContentsMargins(0, 0, 0, 0)
             rl.setSpacing(0)
@@ -165,12 +183,20 @@ class MessageRow(QWidget):
 
             self._user_bubble_container = QWidget()
             self._user_bubble_container.setObjectName("userMessageBubbleContainer")
+            self._user_bubble_container.setSizePolicy(
+                QSizePolicy.Policy.Fixed,
+                QSizePolicy.Policy.Preferred,
+            )
             bcl = QVBoxLayout(self._user_bubble_container)
             bcl.setContentsMargins(0, 0, 0, 0)
             bcl.setSpacing(0)
 
             bubble = QWidget()
             bubble.setObjectName("userMessageBubble")
+            bubble.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Preferred,
+            )
             bl = QVBoxLayout(bubble)
             bl.setContentsMargins(8, 8, 12, 8)
             bl.setSpacing(0)
@@ -184,7 +210,7 @@ class MessageRow(QWidget):
                 text = QLabel(self._content)
                 text.setObjectName("userMessageText")
                 text.setWordWrap(True)
-                text.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+                text.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
                 text.setTextFormat(Qt.TextFormat.PlainText)
                 text.setTextInteractionFlags(
                     Qt.TextInteractionFlag.TextSelectableByMouse
@@ -203,27 +229,29 @@ class MessageRow(QWidget):
             fl.setContentsMargins(8, 2, 12, 4)
             fl.setSpacing(4)
 
-            w, h = scaled_size(28, 20)
+            w, h = scaled_size(30, 24)
             self._edit_btn = QPushButton("✎")
             self._edit_btn.setObjectName("userEditBtn")
             self._edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            self._edit_btn.setToolTip("Edit & Resend")
+            install_compact_tooltip(self._edit_btn, "Edit & Resend")
             self._edit_btn.setFixedSize(w, h)
             self._edit_btn.clicked.connect(self._request_edit)
             fl.addWidget(self._edit_btn)
 
-            self._user_copy_btn = QPushButton("⎘")
+            self._user_copy_btn = QPushButton()
             self._user_copy_btn.setObjectName("userCopyBtn")
+            self._user_copy_btn.setIcon(_copy_icon())
             self._user_copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            self._user_copy_btn.setToolTip("Copy")
             self._user_copy_btn.setFixedSize(w, h)
+            install_compact_tooltip(self._user_copy_btn, "Copy")
             self._user_copy_btn.clicked.connect(self._copy_content)
             fl.addWidget(self._user_copy_btn)
 
             bcl.addWidget(self._user_footer)
-            self._user_footer.setVisible(False)
+            self._set_user_actions_visible(False)
 
-            rl.addWidget(self._user_bubble_container, 0)
+            rl.addWidget(self._user_bubble_container, 0, Qt.AlignmentFlag.AlignRight)
+            rl.setAlignment(self._user_bubble_container, Qt.AlignmentFlag.AlignRight)
             self._outer_layout.addWidget(row)
         else:
             # Agent header
@@ -259,16 +287,17 @@ class MessageRow(QWidget):
             fl.setContentsMargins(32, 4, 0, 0)
             fl.setSpacing(4)
 
-            w, h = scaled_size(28, 24)
-            self._copy_btn = QPushButton("⎘")
+            w, h = scaled_size(30, 24)
+            self._copy_btn = QPushButton()
             self._copy_btn.setObjectName("copyBtn")
+            self._copy_btn.setIcon(_copy_icon())
             self._copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            self._copy_btn.setToolTip("Copy")
+            install_compact_tooltip(self._copy_btn, "Copy")
             self._copy_btn.clicked.connect(self._copy_content)
             self._copy_btn.setFixedSize(w, h)
             fl.addWidget(self._copy_btn)
             fl.addStretch()
-            self._footer.setVisible(False)
+            self._set_agent_actions_visible(False)
             self._outer_layout.addWidget(self._footer)
 
         layout.addWidget(outer)
@@ -401,13 +430,14 @@ class MessageRow(QWidget):
         self._complete = True
         if hasattr(self, "_footer"):
             self._footer.setVisible(True)
+            self._set_agent_actions_visible(True)
         # User footer buttons are shown on hover (via eventFilter)
         # but we need to mark them as ready
         if self._user_footer:
             self._user_copy_btn.setVisible(True)
             self._edit_btn.setVisible(self._editable)
-            # Initially hide footer - will show on hover
-            self._user_footer.setVisible(False)
+            self._user_footer.setVisible(True)
+            self._set_user_actions_visible(False)
 
     def set_editable(self, editable: bool) -> None:
         """Set whether this user message can be edited.
@@ -419,6 +449,7 @@ class MessageRow(QWidget):
         self._editable = editable
         if self._complete and self._user_footer:
             self._edit_btn.setVisible(editable)
+            self._set_user_actions_visible(False)
 
     def _request_edit(self) -> None:
         """Emit edit_requested signal with current content."""
@@ -466,41 +497,63 @@ class MessageRow(QWidget):
 
     def _setup_hover_handler(self) -> None:
         """Setup hover detection for user message buttons."""
-        if self._role != "user" or self._user_footer is None:
+        if not self._is_outbound_message() or self._user_footer is None:
             return
         self._user_bubble_container.installEventFilter(self)
 
     def eventFilter(self, obj, event):
         """Handle hover events for user message bubble container."""
-        if self._role != "user":
+        if not self._is_outbound_message():
             return super().eventFilter(obj, event)
 
         if obj == self._user_bubble_container:
             if event.type() == event.Type.Enter:
                 if self._complete and self._user_footer:
-                    self._user_footer.setVisible(True)
+                    self._set_user_actions_visible(True)
             elif event.type() == event.Type.Leave:
                 if self._user_footer:
-                    self._user_footer.setVisible(False)
+                    self._set_user_actions_visible(False)
 
         return super().eventFilter(obj, event)
 
     def enterEvent(self, event) -> None:
         super().enterEvent(event)
-        if self._role == "user" and self._complete and self._user_footer:
-            self._user_footer.setVisible(True)
+        if self._is_outbound_message() and self._complete and self._user_footer:
+            self._set_user_actions_visible(True)
 
     def leaveEvent(self, event) -> None:
         super().leaveEvent(event)
-        if self._role == "user" and self._user_footer:
-            self._user_footer.setVisible(False)
+        if self._is_outbound_message() and self._user_footer:
+            self._set_user_actions_visible(False)
+
+    def _set_user_actions_visible(self, visible: bool) -> None:
+        if not self._user_footer:
+            return
+        self._user_footer.setVisible(True)
+        edit_visible = visible and self._editable
+        self._edit_btn.setText("✎" if edit_visible else "")
+        self._edit_btn.setEnabled(edit_visible)
+        self._user_copy_btn.setIcon(_copy_icon() if visible else QIcon())
+        self._user_copy_btn.setEnabled(visible)
+
+    def _set_agent_actions_visible(self, visible: bool) -> None:
+        if not hasattr(self, "_copy_btn"):
+            return
+        self._footer.setVisible(True)
+        self._copy_btn.setEnabled(visible)
+        self._copy_btn.setIcon(_copy_icon() if visible else QIcon())
 
     def resizeEvent(self, event) -> None:
         """Keep message content constrained to current panel width."""
         super().resizeEvent(event)
         self._apply_text_width_constraints()
-        if self._role == "user" and self._user_bubble_container is not None:
-            self._user_bubble_container.setMaximumWidth(max(80, int(self.width() * 0.35)))
+        if self._is_outbound_message() and self._user_bubble_container is not None:
+            width = max(80, int(self.width() * 0.45))
+            self._user_bubble_container.setFixedWidth(width)
+
+    def _is_outbound_message(self) -> bool:
+        """Right-side messages sent to an agent share the user bubble layout."""
+        return self._role == "user"
 
     def _apply_text_width_constraints(self) -> None:
         max_w = max(40, self._content_width_limit())
