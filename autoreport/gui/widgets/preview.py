@@ -198,6 +198,12 @@ def _create_spreadsheet_viewer(path: Path) -> tuple:
     table.setModel(_PandasModel(df))
     table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     table.setAlternatingRowColors(True)
+    # Enable horizontal scrollbar when content exceeds width
+    table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    # Make columns resizable to allow horizontal scrolling
+    table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+    table.horizontalHeader().setStretchLastSection(False)
     table.setStyleSheet(f"""
         QTableView#fileTableView {{
             background-color: {c["editor_bg"]};
@@ -727,8 +733,8 @@ class PreviewWidget(QWidget):
                 background_color=c["input_bg"],
                 foreground_color=c["fg"],
                 hover_border_color=c["accent"],
-                selection_bg=c["send_bg"],
-                selection_fg="#ffffff",
+                selection_bg=c["hover"],
+                selection_fg=c["fg"],
                 font_size=12,
                 padding="4px 24px 4px 8px",
             )}

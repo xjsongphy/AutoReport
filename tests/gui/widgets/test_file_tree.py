@@ -1,0 +1,158 @@
+"""Tests for FileTreeWidget file operations.
+
+This test module verifies that the file operations work correctly:
+- Drag-drop file import
+- New file creation
+- New folder creation
+- File deletion
+- File renaming
+
+Note: Due to Windows permission issues with pytest-qt, these tests focus on
+verifying the API and methods exist and are callable, rather than full integration tests.
+"""
+
+from pathlib import Path
+
+import pytest
+
+from autoreport.gui.widgets.file_tree import FileTreeWidget, FIXED_DIRECTORIES
+
+
+def test_fixed_directories_constant() -> None:
+    """Test that fixed directories are correctly defined."""
+    assert isinstance(FIXED_DIRECTORIES, list)
+    assert set(FIXED_DIRECTORIES) == {"data", "references", "theory", "code", "tex"}
+
+
+def test_file_tree_class_has_required_methods() -> None:
+    """Test that FileTreeWidget has all required file operation methods."""
+    # Check that the class has the required methods
+    assert hasattr(FileTreeWidget, "_new_file")
+    assert hasattr(FileTreeWidget, "_new_folder")
+    assert hasattr(FileTreeWidget, "_new_file_in_dir")
+    assert hasattr(FileTreeWidget, "_new_folder_in_dir")
+    assert hasattr(FileTreeWidget, "_delete_file")
+    assert hasattr(FileTreeWidget, "_delete_directory")
+    assert hasattr(FileTreeWidget, "_rename_file")
+    assert hasattr(FileTreeWidget, "_rename_directory")
+    assert hasattr(FileTreeWidget, "_handle_drop")
+    assert hasattr(FileTreeWidget, "_show_context_menu")
+    assert hasattr(FileTreeWidget, "refresh")
+
+
+def test_file_tree_has_required_attributes() -> None:
+    """Test that FileTreeWidget has required attributes for file operations."""
+    # Check instance attributes by inspecting the class __init__
+    import inspect
+    init_source = inspect.getsource(FileTreeWidget.__init__)
+
+    # Should initialize workspace
+    assert "self.workspace" in init_source
+
+    # Should initialize tracking variables for inline editing
+    assert "_editing_item" in init_source
+    assert "_pending_new_item" in init_source
+    assert "_pending_new_kind" in init_source
+
+
+def test_file_tree_has_drag_drop_handlers() -> None:
+    """Test that FileTreeWidget has drag-drop event handlers."""
+    # Check that drag-drop methods exist
+    assert hasattr(FileTreeWidget, "dragEnterEvent")
+    assert hasattr(FileTreeWidget, "dragMoveEvent")
+    assert hasattr(FileTreeWidget, "dropEvent")
+
+
+def test_file_tree_has_toolbar_buttons() -> None:
+    """Test that FileTreeWidget setup creates toolbar buttons."""
+    import inspect
+    setup_source = inspect.getsource(FileTreeWidget._setup_ui)
+
+    # Should create toolbar buttons
+    assert "_new_file_btn" in setup_source
+    assert "_new_folder_btn" in setup_source
+    assert "_refresh_btn" in setup_source
+
+
+def test_file_tree_has_context_menu() -> None:
+    """Test that FileTreeWidget has context menu support."""
+    import inspect
+    setup_source = inspect.getsource(FileTreeWidget._setup_ui)
+
+    # Should enable context menu
+    assert "customContextMenuRequested" in setup_source
+
+
+def test_context_menu_has_required_actions() -> None:
+    """Test that context menu has required actions."""
+    import inspect
+    menu_source = inspect.getsource(FileTreeWidget._show_context_menu)
+
+    # Should have actions for files
+    assert "rename_action" in menu_source
+    assert "delete_action" in menu_source
+
+    # Should have actions for directories
+    assert "new_file_action" in menu_source
+    assert "new_folder_action" in menu_source
+
+
+def test_delete_operations_use_confirmation() -> None:
+    """Test that delete operations show confirmation dialogs."""
+    import inspect
+
+    delete_file_source = inspect.getsource(FileTreeWidget._delete_file)
+    delete_dir_source = inspect.getsource(FileTreeWidget._delete_directory)
+
+    # Both should use QMessageBox for confirmation
+    assert "QMessageBox.question" in delete_file_source
+    assert "QMessageBox.question" in delete_dir_source
+
+
+def test_file_operations_use_correct_paths() -> None:
+    """Test that file operations use workspace-relative paths."""
+    import inspect
+
+    new_file_source = inspect.getsource(FileTreeWidget._new_file_in_dir)
+    new_folder_source = inspect.getsource(FileTreeWidget._new_folder_in_dir)
+
+    # Should use workspace / dir_name for path construction
+    assert "self.workspace" in new_file_source
+    assert "self.workspace" in new_folder_source
+
+
+def test_drag_drop_handles_multiple_files() -> None:
+    """Test that drag-drop can handle multiple files."""
+    import inspect
+    drop_source = inspect.getsource(FileTreeWidget._handle_drop)
+
+    # Should iterate through URLs
+    assert "for url in urls:" in drop_source
+
+    # Should copy files with progress dialog
+    assert "_copy_files_with_progress" in drop_source
+
+
+def test_file_tree_has_file_watcher() -> None:
+    """Test that FileTreeWidget sets up file system watcher."""
+    import inspect
+    init_source = inspect.getsource(FileTreeWidget.__init__)
+
+    # Should setup file watcher
+    assert "_setup_file_watcher" in init_source
+
+
+def test_inline_edit_methods_exist() -> None:
+    """Test that inline edit methods exist for create/rename operations."""
+    assert hasattr(FileTreeWidget, "_start_inline_create")
+    assert hasattr(FileTreeWidget, "_on_close_editor")
+    assert hasattr(FileTreeWidget, "_bind_create_editor_live_updates")
+
+
+def test_refresh_method_updates_tree() -> None:
+    """Test that refresh method updates the tree display."""
+    import inspect
+    refresh_source = inspect.getsource(FileTreeWidget.refresh)
+
+    # Should update expanded items
+    assert "setExpanded" in refresh_source

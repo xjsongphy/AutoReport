@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QVBoxLayout,
     QWidget,
+    QPlainTextEdit,
 )
 
 from .markdown_renderer import render_markdown
@@ -112,6 +113,12 @@ class MessageRow(QWidget):
     # Signal emitted when user clicks edit button on their message
     edit_requested = pyqtSignal(str)
 
+    # Signal emitted when user saves an edit (content, row_widget)
+    edit_saved = pyqtSignal(str, object)
+
+    # Signal emitted when user cancels an edit
+    edit_cancelled = pyqtSignal()
+
     def __init__(
         self,
         role: str,
@@ -146,6 +153,11 @@ class MessageRow(QWidget):
         self._wrapping_labels: list[QLabel] = []
         self._summary_btn: QPushButton | None = None
         self._detail_widget: QWidget | None = None
+        self._editing = False  # Track if in edit mode
+        self._original_text_widget: QWidget | None = None  # Store original widget when editing
+        self._edit_widget: QPlainTextEdit | None = None  # Edit mode widget
+        self._save_btn: QPushButton | None = None  # Save button in edit mode
+        self._cancel_btn: QPushButton | None = None  # Cancel button in edit mode
         self._setup_ui()
         self._setup_hover_handler()
 
@@ -222,12 +234,14 @@ class MessageRow(QWidget):
 
             bcl.addWidget(bubble)
 
-            # Footer with edit/copy buttons (hover visible)
+            # Footer with edit/copy buttons (hover visible, right-aligned)
             self._user_footer = QWidget()
             self._user_footer.setObjectName("userMsgFooter")
             fl = QHBoxLayout(self._user_footer)
-            fl.setContentsMargins(8, 2, 12, 4)
-            fl.setSpacing(4)
+            fl.setContentsMargins(0, 2, 0, 4)
+            fl.setSpacing(2)
+
+            fl.addStretch()
 
             w, h = scaled_size(30, 24)
             self._edit_btn = QPushButton("✎")
@@ -280,12 +294,14 @@ class MessageRow(QWidget):
             self._outer_layout.addLayout(self._agent_content_layout)
             self._rebuild_agent_content()
 
-            # Copy button at bottom, always visible after complete (VS Code: .chat-footer-toolbar)
+            # Copy button at bottom — shown on hover, right-aligned
             self._footer = QWidget()
             self._footer.setObjectName("msgFooter")
             fl = QHBoxLayout(self._footer)
-            fl.setContentsMargins(32, 4, 0, 0)
+            fl.setContentsMargins(32, 4, 4, 0)
             fl.setSpacing(4)
+
+            fl.addStretch()
 
             w, h = scaled_size(30, 24)
             self._copy_btn = QPushButton()
@@ -296,7 +312,6 @@ class MessageRow(QWidget):
             self._copy_btn.clicked.connect(self._copy_content)
             self._copy_btn.setFixedSize(w, h)
             fl.addWidget(self._copy_btn)
-            fl.addStretch()
             self._set_agent_actions_visible(False)
             self._outer_layout.addWidget(self._footer)
 
@@ -426,17 +441,12 @@ class MessageRow(QWidget):
             self._summary_btn.setText(f"{self._summary_arrow()} {self._summary or ''}")
 
     def mark_complete(self) -> None:
-        """Mark streaming complete — show copy button at bottom."""
+        """Mark streaming complete — enable hover-triggered actions."""
         self._complete = True
         if hasattr(self, "_footer"):
             self._footer.setVisible(True)
-            self._set_agent_actions_visible(True)
-        # User footer buttons are shown on hover (via eventFilter)
-        # but we need to mark them as ready
+            self._set_agent_actions_visible(False)
         if self._user_footer:
-            self._user_copy_btn.setVisible(True)
-            self._edit_btn.setVisible(self._editable)
-            self._user_footer.setVisible(True)
             self._set_user_actions_visible(False)
 
     def set_editable(self, editable: bool) -> None:
@@ -452,9 +462,165 @@ class MessageRow(QWidget):
             self._set_user_actions_visible(False)
 
     def _request_edit(self) -> None:
-        """Emit edit_requested signal with current content."""
-        if self._role == "user":
-            self.edit_requested.emit(self._content)
+        """Enter edit mode for this user message."""
+        if self._role == "user" and self._editable:
+            self.enter_edit_mode()
+
+    def enter_edit_mode(self) -> None:
+        """Replace text with editable widget in-place."""
+        if not self._is_outbound_message() or self._editing:
+            return
+
+        self._editing = True
+        self._set_user_actions_visible(False)  # Hide edit/copy buttons
+
+        # Find the text label in the bubble
+        if self._user_bubble_container is None:
+            self._editing = False
+            return
+
+        bubble = self._user_bubble_container.findChild(QWidget, "userMessageBubble")
+        if not bubble:
+            self._editing = False
+            return
+
+        c = get_theme_colors()
+        edit_style = f"color: {c['editor_fg']}; background-color: {c['editor_bg']}; border: 1px solid {c['border']}; border-radius: 4px; padding: 4px;"
+
+        # Find the original text widget
+        if self._summary is None:
+            # Simple text case - find the userMessageText label
+            text_widget = bubble.findChild(QLabel, "userMessageText")
+            if text_widget:
+                self._original_text_widget = text_widget
+                edit = QPlainTextEdit(self._content)
+                edit.setObjectName("userMessageEdit")
+                edit.setPlainText(self._content)
+                edit.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+                edit.setStyleSheet(edit_style)
+                self._edit_widget = edit
+        else:
+            # Summary/detail case - need to edit the detail widget
+            if self._detail_widget:
+                detail_label = self._detail_widget.findChild(QLabel, "userMessageText")
+                if detail_label:
+                    self._original_text_widget = detail_label
+                    edit = QPlainTextEdit(self._detail or "")
+                    edit.setObjectName("userMessageEdit")
+                    edit.setPlainText(self._detail or "")
+                    edit.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+                    edit.setStyleSheet(edit_style)
+                    self._edit_widget = edit
+
+        # Guard: if no edit widget was created, abort edit mode
+        if not self._edit_widget:
+            self._editing = False
+            self._set_user_actions_visible(True)
+            return
+
+        # Swap original widget with edit widget in layout
+        orig_layout = self._original_text_widget.parent().layout()
+        if orig_layout:
+            index = orig_layout.indexOf(self._original_text_widget)
+            orig_layout.removeWidget(self._original_text_widget)
+            self._original_text_widget.setParent(None)
+            orig_layout.insertWidget(index, self._edit_widget)
+            self._edit_widget.setFocus()
+            self._edit_widget.setMinimumWidth(0)
+
+        # Change footer to Save/Cancel buttons
+        if self._user_footer:
+            layout = self._user_footer.layout()
+            if layout:
+                while layout.count():
+                    item = layout.takeAt(0)
+                    if item.widget():
+                        item.widget().deleteLater()
+
+                w, h = scaled_size(40, 24)
+                self._save_btn = QPushButton("Save")
+                self._save_btn.setObjectName("userSaveBtn")
+                self._save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                self._save_btn.setFixedSize(w, h)
+                self._save_btn.clicked.connect(self._save_edit)
+                layout.addWidget(self._save_btn)
+
+                self._cancel_btn = QPushButton("Cancel")
+                self._cancel_btn.setObjectName("userCancelBtn")
+                self._cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                self._cancel_btn.setFixedSize(w, h)
+                self._cancel_btn.clicked.connect(self._cancel_edit)
+                layout.addWidget(self._cancel_btn)
+
+            self._user_footer.setVisible(True)
+
+    def _save_edit(self) -> None:
+        """Save the edited content and emit signal."""
+        if not self._editing or not self._edit_widget:
+            return
+
+        new_content = self._edit_widget.toPlainText()
+        self._content = new_content  # Update stored content
+        self.exit_edit_mode()
+        self.edit_saved.emit(new_content, self)
+
+    def _cancel_edit(self) -> None:
+        """Cancel editing and restore original content."""
+        if not self._editing:
+            return
+        self.exit_edit_mode()
+        self.edit_cancelled.emit()
+
+    def exit_edit_mode(self) -> None:
+        """Restore original text widget and footer buttons."""
+        if not self._editing:
+            return
+
+        self._editing = False
+
+        # Restore original widget
+        if self._original_text_widget and self._edit_widget:
+            edit_layout = self._edit_widget.parent().layout()
+            if edit_layout:
+                index = edit_layout.indexOf(self._edit_widget)
+                edit_layout.removeWidget(self._edit_widget)
+                self._edit_widget.setParent(None)
+                self._edit_widget.deleteLater()
+                self._edit_widget = None
+                edit_layout.insertWidget(index, self._original_text_widget)
+            self._original_text_widget = None
+
+        # Restore original footer buttons
+        if self._user_footer:
+            layout = self._user_footer.layout()
+            if layout:
+                while layout.count():
+                    item = layout.takeAt(0)
+                    if item.widget():
+                        item.widget().deleteLater()
+
+                w, h = scaled_size(30, 24)
+                layout.addStretch()
+
+                self._edit_btn = QPushButton("✎")
+                self._edit_btn.setObjectName("userEditBtn")
+                self._edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                install_compact_tooltip(self._edit_btn, "Edit & Resend")
+                self._edit_btn.setFixedSize(w, h)
+                self._edit_btn.clicked.connect(self._request_edit)
+                self._edit_btn.setEnabled(self._editable)
+                layout.addWidget(self._edit_btn)
+
+                self._user_copy_btn = QPushButton()
+                self._user_copy_btn.setObjectName("userCopyBtn")
+                self._user_copy_btn.setIcon(_copy_icon())
+                self._user_copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                self._user_copy_btn.setFixedSize(w, h)
+                install_compact_tooltip(self._user_copy_btn, "Copy")
+                self._user_copy_btn.clicked.connect(self._copy_content)
+                layout.addWidget(self._user_copy_btn)
+
+            self._set_user_actions_visible(False)
 
     def _copy_content(self) -> None:
         clipboard = QApplication.clipboard()
@@ -518,23 +684,31 @@ class MessageRow(QWidget):
 
     def enterEvent(self, event) -> None:
         super().enterEvent(event)
-        if self._is_outbound_message() and self._complete and self._user_footer:
-            self._set_user_actions_visible(True)
+        if self._is_outbound_message():
+            if self._complete and self._user_footer:
+                self._set_user_actions_visible(True)
+        else:
+            if self._complete:
+                self._set_agent_actions_visible(True)
 
     def leaveEvent(self, event) -> None:
         super().leaveEvent(event)
-        if self._is_outbound_message() and self._user_footer:
-            self._set_user_actions_visible(False)
+        if self._is_outbound_message():
+            if self._user_footer:
+                self._set_user_actions_visible(False)
+        else:
+            self._set_agent_actions_visible(False)
 
     def _set_user_actions_visible(self, visible: bool) -> None:
         if not self._user_footer:
             return
-        self._user_footer.setVisible(True)
-        edit_visible = visible and self._editable
-        self._edit_btn.setText("✎" if edit_visible else "")
-        self._edit_btn.setEnabled(edit_visible)
-        self._user_copy_btn.setIcon(_copy_icon() if visible else QIcon())
-        self._user_copy_btn.setEnabled(visible)
+        self._user_footer.setVisible(visible)
+        if visible:
+            edit_visible = self._editable
+            self._edit_btn.setText("✎" if edit_visible else "")
+            self._edit_btn.setEnabled(edit_visible)
+            self._user_copy_btn.setIcon(_copy_icon())
+            self._user_copy_btn.setEnabled(True)
 
     def _set_agent_actions_visible(self, visible: bool) -> None:
         if not hasattr(self, "_copy_btn"):

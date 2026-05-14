@@ -17,9 +17,12 @@ class MessagesArea(QScrollArea):
     - add_message_row() and add_tool_group() methods
     - Query methods for testing
     - Track latest user message for editing
+    - Support in-place editing with message retraction
     """
 
     edit_requested = pyqtSignal(str)
+    edit_saved = pyqtSignal(str, object)  # content, row_widget
+    edit_cancelled = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None):
         """Initialize messages area.
@@ -31,6 +34,7 @@ class MessagesArea(QScrollArea):
         self._auto_scroll_enabled = True
         self._user_scrolled = False
         self._latest_user_row: MessageRow | None = None
+        self._editing_row: MessageRow | None = None
 
         self._setup_ui()
         self._connect_scroll_signals()
@@ -167,9 +171,11 @@ class MessagesArea(QScrollArea):
             parent=None,
         )
 
-        # Connect edit signal for user messages
+        # Connect edit signals for user messages
         if role == "user":
             row.edit_requested.connect(self.edit_requested.emit)
+            row.edit_saved.connect(self._on_edit_saved)
+            row.edit_cancelled.connect(self._on_edit_cancelled)
 
         # Handle editable state — only latest user message is editable
         if role == "user":
@@ -248,6 +254,41 @@ class MessagesArea(QScrollArea):
                 item.widget().deleteLater()
         # Reset latest-user pointer to avoid accessing deleted row widgets.
         self._latest_user_row = None
+        self._editing_row = None
+
+    def _on_edit_saved(self, content: str, row: MessageRow) -> None:
+        """Handle edit saved signal from a message row."""
+        self._editing_row = row
+        self.edit_saved.emit(content, row)
+
+    def _on_edit_cancelled(self) -> None:
+        """Handle edit cancelled signal from a message row."""
+        self._editing_row = None
+        self.edit_cancelled.emit()
+
+    def remove_message_row(self, row: MessageRow) -> None:
+        """Remove a specific message row from the container.
+
+        Args:
+            row: The MessageRow widget to remove.
+        """
+        # Find and remove the row
+        for i in range(self._layout.count() - 1):  # Exclude stretch spacer
+            item = self._layout.itemAt(i)
+            if item and item.widget() == row:
+                self._layout.removeWidget(row)
+                row.deleteLater()
+                # If this was the latest user row, reset it
+                if row == self._latest_user_row:
+                    self._latest_user_row = None
+                # If this was the editing row, reset it
+                if row == self._editing_row:
+                    self._editing_row = None
+                break
+
+        # Auto-scroll if enabled
+        if self._auto_scroll_enabled:
+            self.scroll_to_bottom()
 
     # ---- Query methods for testing ----
 

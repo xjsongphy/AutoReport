@@ -62,24 +62,35 @@ class _FullRowDelegate(QStyledItemDelegate):
     def paint(self, painter, option, index):
         """Paint the item with full-width selection background and guide lines.
 
-        Args:
-            painter: QPainter instance.
-            option: Style option for the item.
-            index: Model index being painted.
+        We fully control selection/hover rendering here. Qt's default painting
+        is suppressed for these states to avoid double-painting.
         """
-        # Get theme colors
+        tree_widget = option.widget
         c = get_theme_colors()
 
-        # Draw VSCode-style guide lines for nested items
-        tree_widget = option.widget
+        # --- Draw guide lines BEFORE anything else ---
         if tree_widget:
             item = tree_widget.itemFromIndex(index)
             if item and item.parent():
-                # This is a nested item - draw guide line
                 self._draw_guide_lines(painter, option, item, tree_widget)
 
-        # Let Qt own hover/selected backgrounds via stylesheet for both item and branch
-        # so arrows and text stay visually in sync.
+        # --- Draw selection background ourselves ---
+        is_selected = (option.state & QStyle.StateFlag.State_Selected) == QStyle.StateFlag.State_Selected
+        has_focus = tree_widget and tree_widget.hasFocus() if tree_widget else False
+
+        if is_selected and has_focus:
+            # Focused + selected: paint a subtle selection background across full row
+            painter.fillRect(option.rect, QColor(c["tree_sel_bg"]))
+        elif is_selected:
+            # Selected but no focus: very subtle or no highlight
+            inactive = QColor(c["hover"])
+            inactive.setAlpha(80)
+            painter.fillRect(option.rect, inactive)
+
+        # Remove Qt's built-in selection/hover painting to avoid double effects
+        option.state &= ~QStyle.StateFlag.State_MouseOver
+        # Keep State_Selected so text color changes via CSS, but we already painted bg
+
         super().paint(painter, option, index)
 
     def _draw_guide_lines(self, painter, option, item, tree_widget):
@@ -91,28 +102,34 @@ class _FullRowDelegate(QStyledItemDelegate):
             item: Tree item being painted.
             tree_widget: The tree widget.
         """
-        # Get theme colors for guide line
-        c = get_theme_colors()
-        # Use a subtle border color for guide lines
-        guide_color = QColor(c["border"])
-        guide_color.setAlpha(56)  # VSCode-like subtle tree guide lines
+        is_selected = (option.state & QStyle.StateFlag.State_Selected) == QStyle.StateFlag.State_Selected
+        mouse_hover = tree_widget.underMouse()
 
-        # Get indentation level
+        # Use theme-aware colors that are visible in both light and dark modes
+        # Selected = dark gray (more visible), unselected = light gray (less visible)
+        if is_selected:
+            # Selected: deep gray, fully opaque
+            guide_color = QColor("#555555")
+        elif mouse_hover:
+            # Mouse in tree, unselected: light gray, semi-transparent
+            guide_color = QColor("#aaaaaa")
+            guide_color.setAlpha(160)
+        else:
+            # No mouse in tree: very subtle
+            guide_color = QColor("#cccccc")
+            guide_color.setAlpha(60)
+
         indentation = tree_widget.indentation()
         depth = self._get_item_depth(item)
 
-        # Draw guide line for each level of nesting
-        # VSCode shows guide lines on the left side of nested items
-        for level in range(depth):
-            x_pos = indentation * (level + 1) - (indentation // 2)
-
-            # Draw a consistent guide for each depth level.
-            line_x = x_pos
-            top_y = option.rect.top()
-            bottom_y = option.rect.bottom()
-
-            painter.setPen(QPen(guide_color, 1))
-            painter.drawLine(int(line_x), int(top_y), int(line_x), int(bottom_y))
+        if depth > 0:
+            pen = QPen(guide_color, 1)
+            painter.setPen(pen)
+            for level in range(depth):
+                x_pos = indentation * (level + 1) - (indentation // 2)
+                top_y = option.rect.top()
+                bottom_y = option.rect.bottom()
+                painter.drawLine(int(x_pos), int(top_y), int(x_pos), int(bottom_y))
 
     def _get_item_depth(self, item):
         """Get the depth level of an item (0 for root items)."""
@@ -251,13 +268,15 @@ class _ChevronTreeWidget(QTreeWidget):
         """Handle drag enter - accept file URLs."""
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
-            super().dragEnterEvent(event)
+        else:
+            event.ignore()
 
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:
         """Handle drag move - accept file URLs."""
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
-            super().dragMoveEvent(event)
+        else:
+            event.ignore()
 
     def dropEvent(self, event: QDropEvent) -> None:
         """Handle drop - process dropped files."""
@@ -265,7 +284,8 @@ class _ChevronTreeWidget(QTreeWidget):
             event.acceptProposedAction()
             if self._file_tree_widget:
                 self._file_tree_widget._handle_drop(event)
-        super().dropEvent(event)
+        else:
+            event.ignore()
 
 
 def _get_file_icon(ext: str, style: QStyle = None) -> QIcon:
@@ -450,13 +470,6 @@ class FileTreeWidget(QWidget):
             #explorerToolbarBtn:hover {{
                 background-color: {c["tree_hover"]};
             }}
-            /* Ensure icon is centered in button */
-            #explorerToolbarBtn QAbstractButton {{
-                background-color: transparent;
-                border: none;
-                padding: 0;
-                margin: 0;
-            }}
 
             /* File tree */
             #fileTree {{
@@ -465,7 +478,7 @@ class FileTreeWidget(QWidget):
                 outline: none;
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
                 font-size: 13px;
-                selection-background-color: {c["tree_sel_bg"]};
+                selection-background-color: transparent;
                 selection-color: {c["tree_sel_fg"]};
             }}
 
@@ -475,7 +488,7 @@ class FileTreeWidget(QWidget):
                 border: none;
                 padding: 0 12px 0 0;
                 border-radius: 0px;
-                show-decoration-selected: 1;
+                show-decoration-selected: 0;
             }}
 
             #fileTree::item:hover {{
@@ -485,16 +498,40 @@ class FileTreeWidget(QWidget):
             #fileTree::item:selected {{
                 background-color: transparent;
                 color: {c["tree_sel_fg"]};
+                border: none;
             }}
 
             #fileTree::item:selected:hover {{
                 background-color: transparent;
             }}
 
+            #fileTree::item:selected:!active {{
+                background-color: transparent;
+                color: {c["fg"]};
+                border: none;
+            }}
+
+            /* Branch area (arrow/indentation) — fully transparent, no borders */
             #fileTree::branch {{
                 image: none;
                 border-image: none;
-                background: transparent;
+                background-color: transparent;
+                border: none;
+                border-left: none;
+            }}
+            #fileTree::branch:hover,
+            #fileTree::branch:selected,
+            #fileTree::branch:has-children,
+            #fileTree::branch:has-children:hover,
+            #fileTree::branch:has-children:selected,
+            #fileTree::branch:open,
+            #fileTree::branch:open:hover,
+            #fileTree::branch:closed,
+            #fileTree::branch:closed:hover,
+            #fileTree::branch:selected:hover {{
+                background-color: transparent;
+                border: none;
+                border-left: none;
             }}
 
             /* Scrollbar */
@@ -925,32 +962,21 @@ class FileTreeWidget(QWidget):
         """Handle file drop event - import files into the project.
 
         VS Code-style behavior:
-        - Files dropped on directory -> copy to that directory
-        - Files dropped on root -> determine target based on file type
-        - Shows progress dialog for copy operation
+        - Files dropped on a fixed directory -> copy into that directory
+        - Files dropped on a sub-directory/file -> resolve up to the fixed directory
+        - Files dropped on empty area -> default to references
+        - Never creates, renames, or deletes the 5 fixed directories
         """
         mime = event.mimeData()
         urls = mime.urls()
         if not urls:
             return
 
-        # Get target directory
+        # Resolve target: must be inside one of the 5 fixed directories
         target_item = self.tree.itemAt(event.position())
-        target_dir_name = None
+        target_dir_name = self._resolve_target_dir(target_item)
 
-        if target_item:
-            dir_name = target_item.data(0, Qt.ItemDataRole.UserRole)
-            if dir_name:
-                target_dir_name = dir_name
-
-        # Determine target directory
-        if target_dir_name:
-            target_dir = self.workspace / target_dir_name
-        else:
-            # Auto-determine target based on file type
-            # For now, default to references
-            target_dir = self.workspace / "references"
-
+        target_dir = self.workspace / target_dir_name
         if not target_dir.exists():
             target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -970,6 +996,31 @@ class FileTreeWidget(QWidget):
 
         # Refresh the tree to show new files
         self.refresh()
+
+    def _resolve_target_dir(self, target_item) -> str:
+        """Resolve drop target to one of the 5 fixed directory names.
+
+        Walks up the tree hierarchy until it finds a top-level fixed directory.
+        Falls back to 'references' if no valid target is found.
+        """
+        if target_item is None:
+            return "references"
+
+        # Check if this item IS a top-level fixed directory
+        dir_name = target_item.data(0, Qt.ItemDataRole.UserRole)
+        if dir_name in FIXED_DIRECTORIES:
+            return dir_name
+
+        # Walk up to find parent fixed directory
+        parent = target_item.parent()
+        while parent is not None:
+            parent_dir = parent.data(0, Qt.ItemDataRole.UserRole)
+            if parent_dir in FIXED_DIRECTORIES:
+                return parent_dir
+            parent = parent.parent()
+
+        # Fallback
+        return "references"
 
     def _copy_files_with_progress(self, source_files: list[Path], target_dir: Path) -> None:
         """Copy files to target directory with progress dialog."""

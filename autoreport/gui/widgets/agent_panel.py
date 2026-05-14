@@ -148,6 +148,8 @@ class AgentPanel(QWidget):
         # ---- Messages area ----
         self._messages_area = MessagesArea()
         self._messages_area.edit_requested.connect(self._on_message_edit_requested)
+        self._messages_area.edit_saved.connect(self._on_message_edit_saved)
+        self._messages_area.edit_cancelled.connect(self._on_message_edit_cancelled)
         layout.addWidget(self._messages_area, 1)
 
         # ---- Debug panel (hidden) ----
@@ -337,9 +339,21 @@ class AgentPanel(QWidget):
         self._input_field.set_popup_active(False)
 
     def _on_message_edit_requested(self, content: str) -> None:
-        """Handle edit request from a user message."""
+        """Handle edit request from a user message (legacy, for compatibility)."""
         self._input_field.set_text(content)
         self._input_field.setFocus()
+
+    def _on_message_edit_saved(self, content: str, row) -> None:
+        """Handle edit saved from a user message - remove original and prepare to send."""
+        # Remove the original message row
+        self._messages_area.remove_message_row(row)
+        # Set the input text to the edited content
+        self._input_field.set_text(content)
+        self._input_field.setFocus()
+
+    def _on_message_edit_cancelled(self) -> None:
+        """Handle edit cancelled - just reset state."""
+        pass
 
     # ---- Command palette (/ commands) ----
 

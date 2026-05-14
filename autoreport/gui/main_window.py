@@ -262,6 +262,7 @@ class MainWindow(QMainWindow):
             }}
             #userMessageBubble {{
                 background-color: {c["bubble_bg"]};
+                border: 1px solid {c["border"]};
                 border-radius: {px(12)};
             }}
             #userMessageBubble:hover {{
@@ -278,7 +279,6 @@ class MainWindow(QMainWindow):
             #userMsgFooter {{
                 background-color: transparent;
                 padding-top: {px(2)};
-                padding-right: {px(8)};
             }}
             #userEditBtn, #userCopyBtn {{
                 background-color: transparent;
@@ -291,6 +291,34 @@ class MainWindow(QMainWindow):
             #userEditBtn:hover, #userCopyBtn:hover {{
                 background-color: {c["hover"]};
                 color: {c["fg"]};
+            }}
+            #userSaveBtn {{
+                background-color: {c["primary"]};
+                color: #ffffff;
+                border: none;
+                border-radius: {px(4)};
+                padding: {px(4)} {px(10)};
+                font-size: {px(12)};
+                font-weight: 600;
+            }}
+            #userSaveBtn:hover {{
+                background-color: {c["primary_hover"]};
+            }}
+            #userSaveBtn:disabled {{
+                background-color: {c["muted"]};
+                opacity: 0.5;
+            }}
+            #userCancelBtn {{
+                background-color: transparent;
+                color: {c["fg"]};
+                border: 1px solid {c["border"]};
+                border-radius: {px(4)};
+                padding: {px(4)} {px(10)};
+                font-size: {px(12)};
+            }}
+            #userCancelBtn:hover {{
+                background-color: {c["hover"]};
+                border-color: {c["muted"]};
             }}
             #queuePreview {{
                 background-color: {c["surface"]};
@@ -347,7 +375,7 @@ class MainWindow(QMainWindow):
             #copyBtn {{
                 background-color: transparent;
                 color: {c["muted"]};
-                border: 1px solid {c["border"]};
+                border: none;
                 border-radius: {px(4)};
                 padding: 0;
                 font-size: {px(15)};
@@ -462,11 +490,11 @@ class MainWindow(QMainWindow):
             main_splitter.setCollapsible(index, False)
 
         # Set stretch factors for proportional sizing
-        # file_tree: 20%, preview: 35%, sub_agent: 22.5%, main_agent: 22.5%
+        # file_tree: 20%, preview: 40%, sub_agent: 20%, main_agent: 20%
         main_splitter.setStretchFactor(0, 20)   # file_tree
-        main_splitter.setStretchFactor(1, 35)   # preview
-        main_splitter.setStretchFactor(2, 23)   # sub_agent_panel
-        main_splitter.setStretchFactor(3, 23)   # main_agent_panel
+        main_splitter.setStretchFactor(1, 40)   # preview
+        main_splitter.setStretchFactor(2, 20)   # sub_agent_panel
+        main_splitter.setStretchFactor(3, 20)   # main_agent_panel
 
         # Store main_splitter for resize handling
         self._main_splitter = main_splitter
@@ -1022,13 +1050,30 @@ class MainWindow(QMainWindow):
         if total_width <= 0:
             return
 
-        # Explorer keeps its minimal complete width by default.
-        file_target = self.file_tree.minimumWidth()
-        remaining = max(0, total_width - file_target)
-        sizes = [
-            file_target,
-            int(remaining * 0.4375),   # preview (35 / 80)
-            int(remaining * 0.28125),  # sub agent (22.5 / 80)
-            int(remaining * 0.28125),  # main agent (22.5 / 80)
-        ]
+        # Use the same proportions as stretch factors: 20%, 40%, 20%, 20%
+        # But respect minimum widths of each panel
+        total_factor = 20 + 40 + 20 + 20  # 100
+
+        # Calculate minimum widths
+        file_tree_min = self.file_tree.minimumWidth()
+        preview_min = self.preview.minimumWidth()
+        sub_agent_min = self.sub_agent_panel.minimumWidth()
+        main_agent_min = self.main_agent_panel.minimumWidth()
+
+        # Calculate sizes based on proportions
+        file_tree_size = max(file_tree_min, int(total_width * 20 / total_factor))
+        preview_size = max(preview_min, int(total_width * 40 / total_factor))
+        sub_agent_size = max(sub_agent_min, int(total_width * 20 / total_factor))
+        main_agent_size = max(main_agent_min, int(total_width * 20 / total_factor))
+
+        # If sum exceeds total, scale down proportionally
+        total_calculated = file_tree_size + preview_size + sub_agent_size + main_agent_size
+        if total_calculated > total_width:
+            scale = total_width / total_calculated
+            file_tree_size = int(file_tree_size * scale)
+            preview_size = int(preview_size * scale)
+            sub_agent_size = int(sub_agent_size * scale)
+            main_agent_size = int(main_agent_size * scale)
+
+        sizes = [file_tree_size, preview_size, sub_agent_size, main_agent_size]
         self._main_splitter.setSizes(sizes)

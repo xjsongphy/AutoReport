@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, QPoint, QRectF, QSize, Qt
+from PyQt6.QtCore import QObject, QPoint, QRectF, QSize, Qt, QTimer
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import QApplication, QComboBox, QLabel, QPushButton, QWidget
@@ -41,7 +41,7 @@ def render_svg_icon(name: str, color: QColor, size: int = 16) -> QIcon:
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-    QSvgRenderer(str(svg_path)).render(painter, QRectF(0.0, 0.0, float(actual_size), float(actual_size)))
+    QSvgRenderer(str(svg_path)).render(painter, QRectF(0.0, 0.0, float(size), float(size)))
     painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
     painter.fillRect(pixmap.rect(), color)
     painter.end()
@@ -49,12 +49,17 @@ def render_svg_icon(name: str, color: QColor, size: int = 16) -> QIcon:
 
 
 class CompactTooltipFilter(QObject):
-    """Small VS Code-like tooltip for icon buttons."""
+    """Small VS Code-like tooltip for icon buttons (3 s hover delay)."""
 
     def __init__(self, text: str, parent: QWidget):
         super().__init__(parent)
         self._text = text
         self._tip: QLabel | None = None
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(3000)
+        self._timer.timeout.connect(self._delayed_show)
+        self._anchor: QWidget | None = None
 
     def eventFilter(self, obj, event):
         if (
@@ -62,14 +67,20 @@ class CompactTooltipFilter(QObject):
             and isinstance(obj, QWidget)
             and obj.isEnabled()
         ):
-            self._show(obj)
+            self._anchor = obj
+            self._timer.start()
         elif event.type() in (
             event.Type.Leave,
             event.Type.MouseButtonPress,
             event.Type.Hide,
         ):
+            self._timer.stop()
             self._hide()
         return False
+
+    def _delayed_show(self) -> None:
+        if self._anchor:
+            self._show(self._anchor)
 
     def _show(self, anchor: QWidget) -> None:
         self._hide()
@@ -217,7 +228,7 @@ def combo_box_qss(
             border-radius: 4px;
             background-color: {background_color};
             color: {foreground_color};
-            selection-background-color: {selection_bg};
+            selection-background-color: transparent;
             selection-color: {selection_fg};
             padding: 4px;
             outline: none;
@@ -226,8 +237,13 @@ def combo_box_qss(
             min-height: 22px;
             padding: 2px 8px;
             border: none;
+            border-radius: 4px;
         }}
         QComboBox{selector} QAbstractItemView::item:selected {{
+            background-color: transparent;
+            color: {selection_fg};
+        }}
+        QComboBox{selector} QAbstractItemView::item:hover {{
             background-color: {selection_bg};
             color: {selection_fg};
         }}
