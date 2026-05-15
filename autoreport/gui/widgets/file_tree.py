@@ -421,8 +421,18 @@ class FileTreeWidget(QWidget):
             logger.debug("FileTree: directory clicked: {}, emitting: {}", dir_name, dir_name)
             self.directory_selected.emit(dir_name)
 
-        # Let Qt handle expansion natively via arrow clicks.
-        # Clicking the item text also expands via Qt's built-in behavior.
+        # Toggle expansion on single click, but only if click is on the
+        # text area (not the decoration/arrow where Qt already toggles).
+        from PyQt6.QtGui import QCursor
+        cursor_x = self.tree.viewport().mapFromGlobal(QCursor.pos()).x()
+        depth = 0
+        p = item.parent()
+        while p is not None:
+            depth += 1
+            p = p.parent()
+        text_start = (depth + 1) * self.tree.indentation()
+        if cursor_x >= text_start:
+            item.setExpanded(not item.isExpanded())
 
     def _on_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
         if self._editing_item is not None and self._editing_item != item:
