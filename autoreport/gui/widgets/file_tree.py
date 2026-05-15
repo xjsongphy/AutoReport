@@ -11,10 +11,10 @@ import shutil
 from pathlib import Path
 
 from loguru import logger
-from PyQt6.QtCore import QFileSystemWatcher, QMimeData, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QFileSystemWatcher, QMimeData, QPoint, QSize, Qt, QTimer, pyqtSignal
 
 from autoreport.utils.logging_config import ui_logger
-from PyQt6.QtGui import QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QIcon
+from PyQt6.QtGui import QColor, QDrag, QDragEnterEvent, QDragMoveEvent, QDropEvent, QIcon, QPalette, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemDelegate,
     QApplication,
@@ -65,6 +65,47 @@ class _DragDropTreeWidget(QTreeWidget):
     def __init__(self, file_tree_widget=None, parent=None):
         super().__init__(parent)
         self._file_tree_widget = file_tree_widget
+
+    def startDrag(self, supportedActions: Qt.DropAction) -> None:
+        """Override to create a compact drag preview that doesn't stretch.
+
+        Prevents the drag pixmap from expanding to full filename width.
+        """
+        current_item = self.currentItem()
+        if not current_item:
+            return
+
+        # Get the icon for the item
+        icon = current_item.icon(0)
+        if icon.isNull():
+            # Create a default icon if none exists
+            from PyQt6.QtWidgets import QApplication
+            from PyQt6.QtGui import QPainter
+            pixmap = QPixmap(16, 16)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pixmap)
+            painter.setPen(self.palette().color(QPalette.ColorRole.Text))
+            painter.drawRect(0, 0, 15, 15)
+            painter.end()
+            drag_icon = QIcon(pixmap)
+        else:
+            # Use the item's icon but limit size
+            drag_icon = icon
+
+        # Create a compact pixmap (just the icon, no text)
+        drag_pixmap = drag_icon.pixmap(16, 16)
+
+        # Create the drag object with our custom pixmap
+        drag = QDrag(self)
+        drag.setPixmap(drag_pixmap)
+        drag.setHotSpot(QPoint(8, 8))
+
+        # Set mime data
+        mime = self.mimeData(current_item)
+        drag.setMimeData(mime)
+
+        # Execute the drag
+        drag.exec(supportedActions)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if event.mimeData().hasUrls():
@@ -460,11 +501,16 @@ class FileTreeWidget(QWidget):
         # Check if this is a new item being created
         is_new_item = (self._pending_new_item == item and not dir_name and not file_path_str)
 
+        # For new items, only update icon during editing, don't create file yet
         if is_new_item:
             self._editing_item = item
-            # Only delete if user confirmed empty (editor closed without content)
-            # Don't delete while typing
-            return
+            # Update icon based on extension while typing
+            if self._pending_new_kind == "file" and new_name:
+                from PyQt6.QtWidgets import QApplication
+                style = QApplication.style()
+                ext = Path(new_name).suffix or ".txt"
+                item.setIcon(0, _get_file_icon(ext, style))
+            return  # Don't create file yet, wait for editor to close
 
         # Empty name for existing items - revert
         if not new_name and not is_new_item:

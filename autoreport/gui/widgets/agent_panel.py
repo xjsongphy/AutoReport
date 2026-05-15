@@ -270,21 +270,25 @@ class AgentPanel(QWidget):
         self._cmd_popup.hide()
 
     def _update_width(self) -> None:
-        """Update minimum width to fit header content."""
-        # Calculate minimum width for header:
+        """Update minimum width to fit header content.
+
+        Calculate minimum width needed for header content (title + buttons).
+        Let splitter control actual width through stretch factor.
+        """
+        fm = self.fontMetrics()
+        title_width = fm.horizontalAdvance(self._title_label.text())
+        # Calculate minimum width:
         # - Left margin: 16px
         # - Icon: 24px
-        # - Title: variable (calculate from font)
-        # - Status: ~40px ("idle"/"working")
         # - Spacing: 8px
+        # - Title: variable
+        # - Status: ~40px (average)
+        # - Spacing: 8px
+        # - Stretch: 1
         # - 2 buttons: 28px * 2
         # - Button spacing: 8px
         # - Right margin: 16px
-
-        fm = self.fontMetrics()
-        title_width = fm.horizontalAdvance(self._title_label.text())
-        status_width = fm.horizontalAdvance("working")
-        min_width = 16 + 24 + title_width + 8 + status_width + 8 + (28 * 2) + 8 + 16
+        min_width = 16 + 24 + 8 + title_width + 40 + 8 + 1 + (28 * 2) + 8 + 16
         self.setMinimumWidth(min_width)
 
     # ---- File reference handling ----
