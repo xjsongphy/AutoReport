@@ -421,7 +421,8 @@ class FileTreeWidget(QWidget):
             logger.debug("FileTree: directory clicked: {}, emitting: {}", dir_name, dir_name)
             self.directory_selected.emit(dir_name)
 
-        item.setExpanded(not item.isExpanded())
+        # Let Qt handle expansion natively via arrow clicks.
+        # Clicking the item text also expands via Qt's built-in behavior.
 
     def _on_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
         if self._editing_item is not None and self._editing_item != item:
