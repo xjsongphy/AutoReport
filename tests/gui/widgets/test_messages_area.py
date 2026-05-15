@@ -202,3 +202,46 @@ def test_new_messages_added_when_auto_scroll_enabled(qtbot):
     # Messages should still be added
     widget.add_message_row(role="agent", content="Msg 4", timestamp="12:03")
     assert widget.message_count() == 4
+
+
+def test_only_latest_user_message_is_editable(qtbot):
+    widget = MessagesArea()
+    qtbot.addWidget(widget)
+
+    first = widget.add_message_row(role="user", content="first", timestamp="12:00")
+    second = widget.add_message_row(role="user", content="second", timestamp="12:01")
+
+    assert first._editable is False
+    assert second._editable is True
+
+
+def test_agent_message_is_marked_complete_for_hover_actions(qtbot):
+    widget = MessagesArea()
+    qtbot.addWidget(widget)
+
+    row = widget.add_message_row(role="agent", content="Agent msg", timestamp="12:00")
+    assert row._complete is True
+
+
+def test_follow_streaming_respects_user_scroll_state(qtbot):
+    widget = MessagesArea()
+    qtbot.addWidget(widget)
+    widget.resize(320, 120)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    for i in range(30):
+        widget.add_message_row(role="agent", content=f"line {i}", timestamp="12:00")
+    qtbot.wait(20)
+
+    sb = widget.verticalScrollBar()
+    sb.setValue(sb.maximum())
+    widget.follow_streaming_if_enabled()
+    qtbot.wait(20)
+    assert sb.value() == sb.maximum()
+
+    # User scrolls up: auto-follow should stop.
+    sb.setValue(max(0, sb.maximum() - 50))
+    widget.follow_streaming_if_enabled()
+    qtbot.wait(20)
+    assert sb.value() < sb.maximum()

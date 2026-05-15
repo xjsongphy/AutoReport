@@ -14,6 +14,7 @@ verifying the API and methods exist and are callable, rather than full integrati
 from pathlib import Path
 
 import pytest
+from PyQt6.QtWidgets import QAbstractItemDelegate
 
 from autoreport.gui.widgets.file_tree import FileTreeWidget, FIXED_DIRECTORIES
 
@@ -211,3 +212,80 @@ def test_repeat_new_click_keeps_typed_pending_and_starts_another(qtbot, tmp_path
     assert (tmp_path / "references" / "first.txt").exists()
     assert second_pending is not None
     assert first_pending is not second_pending
+
+
+def test_repeat_new_click_uses_live_editor_text(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    widget._new_file_in_dir("references")
+    qtbot.wait(20)
+    assert widget._pending_editor is not None
+    widget._pending_editor.setText("typed.txt")
+
+    widget._new_file_in_dir("references")
+
+    assert (tmp_path / "references" / "typed.txt").exists()
+    assert widget._pending_new_item is not None
+
+
+def test_close_editor_uses_live_editor_text(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    widget._new_file_in_dir("references")
+    qtbot.wait(20)
+    assert widget._pending_editor is not None
+    editor = widget._pending_editor
+    editor.setText("closed.txt")
+
+    widget._on_close_editor(editor, QAbstractItemDelegate.EndEditHint.NoHint)
+
+    assert (tmp_path / "references" / "closed.txt").exists()
+    assert widget._pending_new_item is None
+
+
+def test_new_file_in_collapsed_nested_dir_keeps_pending_item(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    data_item = widget.tree.topLevelItem(0)
+    processed_item = data_item.child(0)
+    assert not processed_item.isExpanded()
+
+    widget._new_file_in_dir("data/processed")
+
+    pending = widget._pending_new_item
+    assert pending is not None
+    assert pending.parent() is processed_item
+    assert processed_item.isExpanded()
+
+
+def test_drop_target_resolves_nested_directories(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    data_item = widget.tree.topLevelItem(0)
+    processed_item = data_item.child(0)
+
+    assert widget._resolve_target_dir(processed_item) == "data/processed"
+
+
+def test_directories_do_not_show_folder_icons(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    for i in range(widget.tree.topLevelItemCount()):
+        item = widget.tree.topLevelItem(i)
+        assert item is not None
+        assert item.icon(0).isNull()
+
+
+def test_new_file_editor_is_bound_after_start_create(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    widget._new_file_in_dir("references")
+    qtbot.wait(20)
+    assert widget._pending_new_item is not None
+    assert widget._pending_editor is not None

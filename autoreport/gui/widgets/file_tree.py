@@ -172,6 +172,7 @@ class FileTreeWidget(QWidget):
         self._editing_item: QTreeWidgetItem | None = None
         self._pending_new_item: QTreeWidgetItem | None = None
         self._pending_new_kind: str | None = None  # "file" | "folder"
+        self._pending_editor: QLineEdit | None = None
         self._setup_ui()
         self._init_directories()
         self._setup_file_watcher()
@@ -236,7 +237,7 @@ class FileTreeWidget(QWidget):
         self.tree.setDragEnabled(True)
         self.tree.setAcceptDrops(True)
         self.tree.setDropIndicatorShown(True)
-        self.tree.setIndentation(20)
+        self.tree.setIndentation(14)
         self.tree.setRootIsDecorated(True)
         self.tree.setItemsExpandable(True)
         self.tree.setAnimated(False)
@@ -304,7 +305,7 @@ class FileTreeWidget(QWidget):
 
             #fileTree::item {{
                 height: 22px;
-                padding: 0 4px;
+                padding: 0 2px;
             }}
 
             #fileTree::item:hover {{
@@ -427,6 +428,10 @@ class FileTreeWidget(QWidget):
     def _on_directory_changed(self, path: str) -> None:
         path_obj = Path(path)
         rel_path = str(path_obj.relative_to(self.workspace))
+        if self._pending_new_item is not None:
+            pending_parent = self._pending_new_item.data(0, Qt.ItemDataRole.UserRole + 2)
+            if pending_parent == rel_path:
+                return
 
         root = self.tree.invisibleRootItem()
         for i in range(root.childCount()):
@@ -582,29 +587,55 @@ class FileTreeWidget(QWidget):
     def _on_close_editor(self, editor, hint: QAbstractItemDelegate.EndEditHint) -> None:
         if self._pending_new_item is None:
             return
+        # Ignore close events from unrelated editors.
+        if self._pending_editor is not None and editor is not self._pending_editor:
+            return
         text = self._pending_new_item.text(0).strip()
+        if isinstance(editor, QLineEdit):
+            text = editor.text().strip()
+            with QSignalBlocker(self.tree):
+                self._pending_new_item.setText(0, text)
         if not text:
             self._cancel_pending_new_item()
             return
         self._finalize_pending_new_item()
 
-    def _bind_create_editor_live_updates(self, item: QTreeWidgetItem) -> None:
-        if self._pending_new_kind != "file":
-            return
+    def _pending_create_text(self) -> str:
+        if self._pending_new_item is None:
+            return ""
+        editor = self._pending_editor
+        if not isinstance(editor, QLineEdit):
+            focus_widget = self.tree.focusWidget()
+            if isinstance(focus_widget, QLineEdit):
+                editor = focus_widget
+        if isinstance(editor, QLineEdit):
+            return editor.text().strip()
+        return self._pending_new_item.text(0).strip()
 
+    def _bind_create_editor_live_updates(self, item: QTreeWidgetItem) -> None:
         def _attach() -> None:
             editor = self.tree.focusWidget()
             if isinstance(editor, QLineEdit):
-                def _on_text_changed(text: str) -> None:
-                    if self._pending_new_item is not item:
-                        return
-                    ext = Path(text.strip()).suffix or ".txt"
-                    with QSignalBlocker(self.tree):
-                        item.setIcon(0, _get_file_icon(ext, QApplication.style()))
-
-                editor.textChanged.connect(_on_text_changed)
+                self._pending_editor = editor
+                editor.destroyed.connect(lambda *_: self._clear_pending_editor(editor))
 
         QTimer.singleShot(0, _attach)
+
+    def _focus_inline_editor(self) -> None:
+        def _apply_focus() -> None:
+            editor = self.tree.focusWidget()
+            if not isinstance(editor, QLineEdit):
+                editor = self.tree.findChild(QLineEdit)
+            if isinstance(editor, QLineEdit):
+                self._pending_editor = editor
+                editor.destroyed.connect(lambda *_: self._clear_pending_editor(editor))
+                editor.setFocus(Qt.FocusReason.OtherFocusReason)
+
+        QTimer.singleShot(0, _apply_focus)
+
+    def _clear_pending_editor(self, editor: QLineEdit) -> None:
+        if self._pending_editor is editor:
+            self._pending_editor = None
 
     def _revert_item_name(self, item: QTreeWidgetItem) -> None:
         file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
@@ -742,13 +773,16 @@ class FileTreeWidget(QWidget):
             return "references"
 
         dir_name = target_item.data(0, Qt.ItemDataRole.UserRole)
-        if dir_name in FIXED_DIRECTORIES:
+        file_path_str = target_item.data(0, Qt.ItemDataRole.UserRole + 1)
+        if dir_name and not file_path_str:
+            return dir_name
+        if dir_name:
             return dir_name
 
         parent = target_item.parent()
         while parent is not None:
             parent_dir = parent.data(0, Qt.ItemDataRole.UserRole)
-            if parent_dir in FIXED_DIRECTORIES:
+            if parent_dir:
                 return parent_dir
             parent = parent.parent()
 
@@ -894,14 +928,13 @@ class FileTreeWidget(QWidget):
     def _start_inline_create(self, dir_name: str, is_folder: bool, style: QStyle) -> None:
         # Handle repeated "new file/folder" clicks while an inline-create is pending.
         if self._pending_new_item is not None:
-            pending_text = self._pending_new_item.text(0).strip()
-            editor = self.tree.focusWidget()
-            if isinstance(editor, QLineEdit):
-                pending_text = editor.text().strip()
+            pending_text = self._pending_create_text()
 
             if not pending_text:
                 self._cancel_pending_new_item()
             else:
+                with QSignalBlocker(self.tree):
+                    self._pending_new_item.setText(0, pending_text)
                 self._finalize_pending_new_item()
 
         # Find the target directory item (could be nested like data/processed)
@@ -943,6 +976,12 @@ class FileTreeWidget(QWidget):
         if not target_item:
             return
 
+        # Expand and load existing children before inserting the temporary
+        # editor item. Expanding after insertion rebuilds children and can
+        # remove the inline editor for collapsed nested directories.
+        if not target_item.isExpanded():
+            target_item.setExpanded(True)
+
         new_item = QTreeWidgetItem()
         new_item.setText(0, "")
         new_item.setFlags(new_item.flags() | Qt.ItemFlag.ItemIsEditable)
@@ -953,12 +992,12 @@ class FileTreeWidget(QWidget):
         else:
             new_item.setIcon(0, _get_file_icon(".txt", style))
         target_item.addChild(new_item)
-        target_item.setExpanded(True)
         self.tree.setCurrentItem(new_item)
         self._pending_new_item = new_item
         self._pending_new_kind = "folder" if is_folder else "file"
         self.tree.editItem(new_item, 0)
         self._bind_create_editor_live_updates(new_item)
+        self._focus_inline_editor()
 
     def _cancel_pending_new_item(self) -> None:
         if self._pending_new_item is None:
@@ -969,6 +1008,7 @@ class FileTreeWidget(QWidget):
             parent.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
         self._pending_new_item = None
         self._pending_new_kind = None
+        self._pending_editor = None
 
     def _finalize_pending_new_item(self) -> None:
         if self._pending_new_item is None:
@@ -987,7 +1027,7 @@ class FileTreeWidget(QWidget):
         try:
             if is_folder:
                 new_folder = parent_path / new_name
-                new_folder.mkdir(exist_ok=True)
+                new_folder.mkdir(exist_ok=False)
                 new_dir_name = f"{parent_dir}/{new_name}" if parent_dir else new_name
                 with QSignalBlocker(self.tree):
                     item.setData(0, Qt.ItemDataRole.UserRole, new_dir_name)
@@ -1013,6 +1053,7 @@ class FileTreeWidget(QWidget):
         finally:
             self._pending_new_item = None
             self._pending_new_kind = None
+            self._pending_editor = None
 
     def _rename_file(self, file_path: Path, item: QTreeWidgetItem) -> None:
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)

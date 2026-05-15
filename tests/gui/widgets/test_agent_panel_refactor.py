@@ -212,6 +212,11 @@ def test_add_checkpoint_creates_message(agent_panel):
     assert "Before tool execution" in rows[0]._content
 
 
+def test_pre_checkpoint_is_hidden(agent_panel):
+    agent_panel.add_checkpoint("ckpt_pre", "pre:user")
+    assert agent_panel._messages_area.message_count() == 0
+
+
 def test_multiple_messages_and_tools(agent_panel):
     """Multiple messages and tool calls should be displayed correctly."""
     # Add user message
@@ -276,6 +281,21 @@ def test_new_conversation_requested_signal(qtbot, agent_panel):
     """Clicking new conversation button should emit new_conversation_requested."""
     with qtbot.waitSignal(agent_panel.new_conversation_requested, timeout=1000):
         agent_panel._on_new_conversation()
+
+
+def test_edit_saved_retracts_following_rows_and_sends_immediately(qtbot, agent_panel):
+    agent_panel.add_message(role="user", content="old user")
+    target_row = agent_panel._messages_area.get_message_rows()[-1]
+    agent_panel.add_message(role="agent", content="old reply")
+    agent_panel.add_tool_call("read_file", {"path": "a.txt"})
+
+    assert agent_panel._messages_area.message_count() == 3
+
+    with qtbot.waitSignal(agent_panel.message_sent, timeout=1000) as blocker:
+        agent_panel._on_message_edit_saved("new user", target_row)
+
+    assert blocker.args[0].startswith("new user")
+    assert agent_panel._messages_area.message_count() == 0
 
 
 def test_hide_conv_buttons(agent_panel):

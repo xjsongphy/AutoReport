@@ -1,6 +1,6 @@
 """Scrollable messages area container for chat display."""
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QTimer, Qt, pyqtSignal
 from PyQt6.QtWidgets import QScrollArea, QVBoxLayout, QWidget
 
 from ..theme import get_theme_colors
@@ -188,6 +188,10 @@ class MessagesArea(QScrollArea):
             # User messages are immediately complete (non-streaming),
             # so hover toolbar and context actions should be available.
             row.mark_complete()
+        else:
+            # Non-user rows are added as complete messages, so hover actions
+            # (e.g. agent copy button) should be available immediately.
+            row.mark_complete()
 
         # Find the stretch item and insert before it
         stretch_index = self._layout.count() - 1
@@ -245,6 +249,14 @@ class MessagesArea(QScrollArea):
         scrollbar = self.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
+    def follow_streaming_if_enabled(self) -> None:
+        """Keep following streaming output unless user has scrolled up."""
+        self._update_auto_scroll_state()
+        if not self._auto_scroll_enabled:
+            return
+        # Defer until layout/size updates from appended text are applied.
+        QTimer.singleShot(0, self.scroll_to_bottom)
+
     def clear(self) -> None:
         """Remove all messages from the container."""
         # Remove all widgets except the stretch spacer
@@ -287,6 +299,38 @@ class MessagesArea(QScrollArea):
                 break
 
         # Auto-scroll if enabled
+        if self._auto_scroll_enabled:
+            self.scroll_to_bottom()
+
+    def retract_from_row(self, row: MessageRow) -> None:
+        """Remove `row` and every following message/tool row."""
+        start_index = -1
+        for i in range(self._layout.count() - 1):  # Exclude stretch spacer
+            item = self._layout.itemAt(i)
+            if item and item.widget() == row:
+                start_index = i
+                break
+
+        if start_index < 0:
+            return
+
+        for i in range(self._layout.count() - 2, start_index - 1, -1):
+            item = self._layout.itemAt(i)
+            if not item or not item.widget():
+                continue
+            widget = item.widget()
+            self._layout.removeWidget(widget)
+            widget.deleteLater()
+
+        self._latest_user_row = None
+        self._editing_row = None
+        rows = self.get_message_rows()
+        for msg_row in reversed(rows):
+            if msg_row._role == "user":
+                self._latest_user_row = msg_row
+                msg_row.set_editable(True)
+                break
+
         if self._auto_scroll_enabled:
             self.scroll_to_bottom()
 

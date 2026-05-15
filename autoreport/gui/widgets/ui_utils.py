@@ -49,7 +49,7 @@ def render_svg_icon(name: str, color: QColor, size: int = 16) -> QIcon:
 
 
 class CompactTooltipFilter(QObject):
-    """Small VS Code-like tooltip for icon buttons (3 s hover delay)."""
+    """Small VS Code-like tooltip for icon buttons (2 s hover delay)."""
 
     def __init__(self, text: str, parent: QWidget):
         super().__init__(parent)
@@ -57,25 +57,30 @@ class CompactTooltipFilter(QObject):
         self._tip: QLabel | None = None
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
-        self._timer.setInterval(3000)
+        self._timer.setInterval(2000)
         self._timer.timeout.connect(self._delayed_show)
         self._anchor: QWidget | None = None
 
     def eventFilter(self, obj, event):
-        if (
-            event.type() == event.Type.Enter
-            and isinstance(obj, QWidget)
-            and obj.isEnabled()
-        ):
-            self._anchor = obj
-            self._timer.start()
-        elif event.type() in (
+        if event.type() in (
             event.Type.Leave,
             event.Type.MouseButtonPress,
             event.Type.Hide,
         ):
             self._timer.stop()
+            self._anchor = None
             self._hide()
+            return False
+
+        if isinstance(obj, QWidget) and obj.isEnabled():
+            if event.type() == event.Type.Enter:
+                self._anchor = obj
+                self._timer.start()
+            elif event.type() == event.Type.MouseMove and self._anchor is None:
+                # When a button becomes visible/enabled under an already-stationary cursor,
+                # Enter may not fire; a subsequent move should still start tooltip delay.
+                self._anchor = obj
+                self._timer.start()
         return False
 
     def _delayed_show(self) -> None:
@@ -112,7 +117,7 @@ def compact_tooltip_qss(selector: str = "QLabel") -> str:
             background-color: {c["surface"]};
             color: {c["fg"]};
             border: 1px solid {c["border"]};
-            border-radius: 2px;
+            border-radius: 6px;
             padding: 2px 6px;
             font-size: 11px;
         }}
@@ -122,6 +127,7 @@ def compact_tooltip_qss(selector: str = "QLabel") -> str:
 def install_compact_tooltip(button: QPushButton, text: str) -> None:
     """Attach the shared compact tooltip to a button."""
     button.setToolTip("")
+    button.setMouseTracking(True)
     tooltip_filter = CompactTooltipFilter(text, button)
     button.installEventFilter(tooltip_filter)
     button._compact_tooltip_filter = tooltip_filter  # keep QObject alive

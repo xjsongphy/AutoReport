@@ -375,12 +375,11 @@ class AgentPanel(QWidget):
         self._input_field.setFocus()
 
     def _on_message_edit_saved(self, content: str, row) -> None:
-        """Handle edit saved from a user message - remove original and prepare to send."""
-        # Remove the original message row
-        self._messages_area.remove_message_row(row)
-        # Set the input text to the edited content
-        self._input_field.set_text(content)
-        self._input_field.setFocus()
+        """Handle edit saved from a user message: retract and resend immediately."""
+        self._messages_area.retract_from_row(row)
+        self._pending_tool_groups.clear()
+        self._current_tool_group = None
+        self._send_content(content)
 
     def _on_message_edit_cancelled(self) -> None:
         """Handle edit cancelled - just reset state."""
@@ -523,6 +522,7 @@ class AgentPanel(QWidget):
             rows = self._messages_area.get_message_rows()
             if rows and rows[-1]._role == "agent":
                 rows[-1].append_content(content)
+                self._messages_area.follow_streaming_if_enabled()
                 return
 
         ts = datetime.now().strftime("%H:%M")
@@ -594,6 +594,9 @@ class AgentPanel(QWidget):
         )
 
     def add_checkpoint(self, checkpoint_id: str, description: str) -> None:
+        # Hide internal pre-message sentinel checkpoints from UI.
+        if (description or "").strip().lower().startswith("pre:"):
+            return
         ts = datetime.now().strftime("%H:%M")
         short_id = checkpoint_id[-12:] if len(checkpoint_id) > 12 else checkpoint_id
         self._messages_area.add_message_row(
@@ -747,6 +750,10 @@ class AgentPanel(QWidget):
             self._execute_slash_command(cmd, content)
             return
 
+        self._input_field.clear_text()
+        self._send_content(content)
+
+    def _send_content(self, content: str) -> None:
         final_message = content
         if self._context_enabled:
             if self._preview_context:
@@ -758,7 +765,6 @@ class AgentPanel(QWidget):
                 final_message = content + ctx
 
         ui_logger.debug("AgentPanel[{}]: sending message ({} chars)", self.panel_id, len(final_message))
-        self._input_field.clear_text()
         self._set_working(True)
         self.message_sent.emit(final_message)
 
