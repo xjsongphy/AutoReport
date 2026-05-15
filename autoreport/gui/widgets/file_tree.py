@@ -280,6 +280,19 @@ class FileTreeWidget(QWidget):
                 color: {c["fg"]};
             }}
 
+            /* Inline edit input - gray background with blue border on focus */
+            #fileTree QLineEdit {{
+                background-color: {c["bg"]};
+                color: {c["fg"]};
+                border: 1px solid {c["border"]};
+                border-radius: 3px;
+                padding: 2px 4px;
+                selection-background-color: {c["accent"]};
+            }}
+            #fileTree QLineEdit:focus {{
+                border: 1px solid {c["accent"]};
+            }}
+
             /* Scrollbar */
             QScrollBar:vertical {{
                 background-color: {c["surface"]};
@@ -439,7 +452,22 @@ class FileTreeWidget(QWidget):
             return
 
         new_name = item.text(0).strip()
-        if not new_name:
+
+        dir_name = item.data(0, Qt.ItemDataRole.UserRole)
+        file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
+        parent_dir = item.data(0, Qt.ItemDataRole.UserRole + 2)
+
+        # Check if this is a new item being created
+        is_new_item = (self._pending_new_item == item and not dir_name and not file_path_str)
+
+        if is_new_item:
+            self._editing_item = item
+            # Only delete if user confirmed empty (editor closed without content)
+            # Don't delete while typing
+            return
+
+        # Empty name for existing items - revert
+        if not new_name and not is_new_item:
             self._remove_item(item)
             self._editing_item = None
             if self._pending_new_item == item:
@@ -447,39 +475,34 @@ class FileTreeWidget(QWidget):
                 self._pending_new_kind = None
             return
 
-        dir_name = item.data(0, Qt.ItemDataRole.UserRole)
-        file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
-
-        if not dir_name and not file_path_str:
-            self._editing_item = item
-            parent = item.parent()
-            if parent:
-                parent_dir = parent.data(0, Qt.ItemDataRole.UserRole)
-                if parent_dir:
-                    parent_path = self.workspace / parent_dir
-                    if "." in new_name:
-                        new_file = parent_path / new_name
-                        try:
-                            new_file.touch()
-                            from PyQt6.QtWidgets import QApplication
-                            style = QApplication.style()
-                            item.setIcon(0, _get_file_icon(new_file.suffix, style))
-                            item.setData(0, Qt.ItemDataRole.UserRole, parent_dir)
-                            item.setData(0, Qt.ItemDataRole.UserRole + 1, str(new_file))
-                            logger.info("Created file: {}", new_file)
-                        except Exception as e:
-                            QMessageBox.warning(self, "创建失败", f"无法创建文件:\n{e}")
-                            self._remove_item(item)
-                    else:
-                        new_folder = parent_path / new_name
-                        try:
-                            new_folder.mkdir(exist_ok=True)
-                            new_dir_name = f"{parent_dir}/{new_name}"
-                            item.setData(0, Qt.ItemDataRole.UserRole, new_dir_name)
-                            logger.info("Created folder: {}", new_folder)
-                        except Exception as e:
-                            QMessageBox.warning(self, "创建失败", f"无法创建文件夹:\n{e}")
-                            self._remove_item(item)
+        # Handle new item creation when editor closes (has content)
+        if is_new_item and parent_dir and new_name:
+            parent_path = self.workspace / parent_dir
+            if "." in new_name:
+                new_file = parent_path / new_name
+                try:
+                    new_file.touch()
+                    from PyQt6.QtWidgets import QApplication
+                    style = QApplication.style()
+                    item.setIcon(0, _get_file_icon(new_file.suffix, style))
+                    item.setData(0, Qt.ItemDataRole.UserRole, parent_dir)
+                    item.setData(0, Qt.ItemDataRole.UserRole + 1, str(new_file))
+                    item.setData(0, Qt.ItemDataRole.UserRole + 2, "")  # Clear parent dir marker
+                    logger.info("Created file: {}", new_file)
+                except Exception as e:
+                    QMessageBox.warning(self, "创建失败", f"无法创建文件:\n{e}")
+                    self._remove_item(item)
+            else:
+                new_folder = parent_path / new_name
+                try:
+                    new_folder.mkdir(exist_ok=True)
+                    new_dir_name = f"{parent_dir}/{new_name}" if parent_dir else new_name
+                    item.setData(0, Qt.ItemDataRole.UserRole, new_dir_name)
+                    item.setData(0, Qt.ItemDataRole.UserRole + 2, "")  # Clear parent dir marker
+                    logger.info("Created folder: {}", new_folder)
+                except Exception as e:
+                    QMessageBox.warning(self, "创建失败", f"无法创建文件夹:\n{e}")
+                    self._remove_item(item)
             if self._pending_new_item == item:
                 self._pending_new_item = None
                 self._pending_new_kind = None
@@ -565,6 +588,11 @@ class FileTreeWidget(QWidget):
                 parent.setChildIndicatorPolicy(
                     QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
                 )
+        else:
+            # Trigger the itemChanged signal to handle the actual file/folder creation
+            # by calling _on_item_changed manually
+            self._on_item_changed(item, 0)
+
         self._pending_new_item = None
         self._pending_new_kind = None
 
@@ -862,28 +890,61 @@ class FileTreeWidget(QWidget):
         self._start_inline_create(dir_name=dir_name, is_folder=True, style=QApplication.style())
 
     def _start_inline_create(self, dir_name: str, is_folder: bool, style: QStyle) -> None:
-        root = self.tree.invisibleRootItem()
-        for i in range(root.childCount()):
-            parent_item = root.child(i)
-            item_dir = parent_item.data(0, Qt.ItemDataRole.UserRole)
-            if item_dir != dir_name:
-                continue
+        # Find the target directory item (could be nested like data/processed)
+        target_item = None
 
-            new_item = QTreeWidgetItem()
-            new_item.setText(0, "")
-            new_item.setFlags(new_item.flags() | Qt.ItemFlag.ItemIsEditable)
-            if is_folder:
-                new_item.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
+        if "/" in dir_name:
+            # Handle nested directories
+            parts = dir_name.split("/")
+            root = self.tree.invisibleRootItem()
+            current = None
+            for i in range(root.childCount()):
+                if root.child(i).data(0, Qt.ItemDataRole.UserRole) == parts[0]:
+                    current = root.child(i)
+                    break
+
+            if current and len(parts) > 1:
+                # Navigate to subdirectory
+                for j in range(current.childCount()):
+                    if current.child(j).data(0, Qt.ItemDataRole.UserRole) == dir_name:
+                        target_item = current.child(j)
+                        break
+                if not target_item:
+                    # Subdirectory item not found, create it
+                    target_item = QTreeWidgetItem(current)
+                    target_item.setText(0, DIR_LABELS.get(parts[1], parts[1]))
+                    target_item.setData(0, Qt.ItemDataRole.UserRole, dir_name)
+                    target_item.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
             else:
-                new_item.setIcon(0, _get_file_icon(".txt", style))
-            parent_item.addChild(new_item)
-            parent_item.setExpanded(True)
-            self.tree.setCurrentItem(new_item)
-            self._pending_new_item = new_item
-            self._pending_new_kind = "folder" if is_folder else "file"
-            self.tree.editItem(new_item, 0)
-            self._bind_create_editor_live_updates(new_item)
+                target_item = current
+        else:
+            # Top-level directory
+            root = self.tree.invisibleRootItem()
+            for i in range(root.childCount()):
+                item = root.child(i)
+                if item.data(0, Qt.ItemDataRole.UserRole) == dir_name:
+                    target_item = item
+                    break
+
+        if not target_item:
             return
+
+        new_item = QTreeWidgetItem()
+        new_item.setText(0, "")
+        new_item.setFlags(new_item.flags() | Qt.ItemFlag.ItemIsEditable)
+        # Store the parent directory path in UserRole+2 to use during file creation
+        new_item.setData(0, Qt.ItemDataRole.UserRole + 2, dir_name)
+        if is_folder:
+            new_item.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
+        else:
+            new_item.setIcon(0, _get_file_icon(".txt", style))
+        target_item.addChild(new_item)
+        target_item.setExpanded(True)
+        self.tree.setCurrentItem(new_item)
+        self._pending_new_item = new_item
+        self._pending_new_kind = "folder" if is_folder else "file"
+        self.tree.editItem(new_item, 0)
+        self._bind_create_editor_live_updates(new_item)
 
     def _rename_file(self, file_path: Path, item: QTreeWidgetItem) -> None:
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)

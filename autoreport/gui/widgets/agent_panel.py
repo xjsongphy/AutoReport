@@ -47,7 +47,6 @@ class AgentPanel(QWidget):
 
     def __init__(self, panel_id: str, title: str, workspace: Path | None = None):
         super().__init__()
-        self.setMinimumWidth(48)
         self.panel_id = panel_id
         self._agent_type = "sub"
         self._is_working = False
@@ -63,6 +62,7 @@ class AgentPanel(QWidget):
 
         self._setup_ui(title)
         self._setup_file_search()
+        self._update_width()
 
         self._debug_msg_signal.connect(self._handle_debug_msg)
 
@@ -268,6 +268,24 @@ class AgentPanel(QWidget):
         self._cmd_popup.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._cmd_popup.itemClicked.connect(self._on_command_selected)
         self._cmd_popup.hide()
+
+    def _update_width(self) -> None:
+        """Update minimum width to fit header content."""
+        # Calculate minimum width for header:
+        # - Left margin: 16px
+        # - Icon: 24px
+        # - Title: variable (calculate from font)
+        # - Status: ~40px ("idle"/"working")
+        # - Spacing: 8px
+        # - 2 buttons: 28px * 2
+        # - Button spacing: 8px
+        # - Right margin: 16px
+
+        fm = self.fontMetrics()
+        title_width = fm.horizontalAdvance(self._title_label.text())
+        status_width = fm.horizontalAdvance("working")
+        min_width = 16 + 24 + title_width + 8 + status_width + 8 + (28 * 2) + 8 + 16
+        self.setMinimumWidth(min_width)
 
     # ---- File reference handling ----
 
