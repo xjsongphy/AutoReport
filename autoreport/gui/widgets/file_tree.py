@@ -557,7 +557,14 @@ class FileTreeWidget(QWidget):
         item = self._pending_new_item
         text = item.text(0).strip()
         if not text:
+            parent = item.parent()
             self._remove_item(item)
+            # Re-apply ShowIndicator so native Qt keeps the arrow visible
+            # after the placeholder child was removed.
+            if parent and parent.childCount() == 0:
+                parent.setChildIndicatorPolicy(
+                    QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
+                )
         self._pending_new_item = None
         self._pending_new_kind = None
 
@@ -607,6 +614,12 @@ class FileTreeWidget(QWidget):
             child = item.child(0)
             item.removeChild(child)
 
+        # Re-apply ShowIndicator after clearing children so native Qt
+        # keeps the arrow visible even for empty directories.
+        item.setChildIndicatorPolicy(
+            QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
+        )
+
         try:
             entries = sorted(
                 dir_path.iterdir(),
@@ -650,6 +663,23 @@ class FileTreeWidget(QWidget):
         if file_path_str:
             return Path(file_path_str)
         return None
+
+    def _get_selected_dir(self) -> str:
+        """Get the directory of the currently selected item, falling back to 'references'."""
+        item = self.tree.currentItem()
+        if not item:
+            return "references"
+        dir_name = item.data(0, Qt.ItemDataRole.UserRole)
+        if dir_name in FIXED_DIRECTORIES:
+            return dir_name
+        # Walk up to find parent fixed directory
+        parent = item.parent()
+        while parent is not None:
+            parent_dir = parent.data(0, Qt.ItemDataRole.UserRole)
+            if parent_dir in FIXED_DIRECTORIES:
+                return parent_dir
+            parent = parent.parent()
+        return "references"
 
     def _handle_drop(self, event: QDropEvent) -> None:
         mime = event.mimeData()
@@ -793,10 +823,10 @@ class FileTreeWidget(QWidget):
     # ------------------------------------------------------------------ #
 
     def _new_file(self) -> None:
-        self._new_file_in_dir("references")
+        self._new_file_in_dir(self._get_selected_dir())
 
     def _new_folder(self) -> None:
-        self._new_folder_in_dir("references")
+        self._new_folder_in_dir(self._get_selected_dir())
 
     def _new_file_in_dir(self, dir_name: str) -> None:
         from PyQt6.QtWidgets import QApplication
