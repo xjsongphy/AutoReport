@@ -275,20 +275,29 @@ class AgentPanel(QWidget):
         Calculate minimum width needed for header content (title + buttons).
         Let splitter control actual width through stretch factor.
         """
-        fm = self.fontMetrics()
-        title_width = fm.horizontalAdvance(self._title_label.text())
+        # Force a layout update to get correct sizes
+        self._title_label.updateGeometry()
+        self._status_label.updateGeometry()
+
+        # Use actual widget sizes instead of font metrics
+        title_width = self._title_label.sizeHint().width()
+        status_width = self._status_label.sizeHint().width()
+
         # Calculate minimum width:
-        # - Left margin: 16px
+        # - Left margin (hl.setContentsMargins(16, 0, 16, 0)): 16px
         # - Icon: 24px
-        # - Spacing: 8px
+        # - Spacing after icon: 8px (hl.setSpacing(8))
         # - Title: variable
-        # - Status: ~40px (average)
-        # - Spacing: 8px
-        # - Stretch: 1
+        # - Spacing after title: 8px
+        # - Status: variable
+        # - Stretch: takes remaining space
+        # - Spacing before buttons: 8px
         # - 2 buttons: 28px * 2
-        # - Button spacing: 8px
+        # - Spacing between buttons: 8px
         # - Right margin: 16px
-        min_width = 16 + 24 + 8 + title_width + 40 + 8 + 1 + (28 * 2) + 8 + 16
+        min_width = 16 + 24 + 8 + title_width + 8 + status_width + 8 + (28 * 2) + 8 + 16
+        # Add extra padding for safety
+        min_width += 10
         self.setMinimumWidth(min_width)
 
     # ---- File reference handling ----
