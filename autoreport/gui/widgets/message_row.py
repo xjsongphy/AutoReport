@@ -153,6 +153,7 @@ class MessageRow(QWidget):
         self._wrapping_labels: list[QLabel] = []
         self._summary_btn: QPushButton | None = None
         self._detail_widget: QWidget | None = None
+        self._user_actions_visible = False
         self._editing = False  # Track if in edit mode
         self._original_text_widget: QWidget | None = None  # Store original widget when editing
         self._edit_widget: QPlainTextEdit | None = None  # Edit mode widget
@@ -447,6 +448,7 @@ class MessageRow(QWidget):
             self._footer.setVisible(True)
             self._set_agent_actions_visible(False)
         if self._user_footer:
+            self._user_footer.setVisible(True)
             self._set_user_actions_visible(False)
 
     def set_editable(self, editable: bool) -> None:
@@ -458,7 +460,6 @@ class MessageRow(QWidget):
             return
         self._editable = editable
         if self._complete and self._user_footer:
-            self._edit_btn.setVisible(editable)
             self._set_user_actions_visible(False)
 
     def _request_edit(self) -> None:
@@ -702,13 +703,27 @@ class MessageRow(QWidget):
     def _set_user_actions_visible(self, visible: bool) -> None:
         if not self._user_footer:
             return
-        self._user_footer.setVisible(visible)
+        self._user_actions_visible = visible
+
+        edit_enabled = self._editable and visible
+        self._edit_btn.setText("✎")
+        self._edit_btn.setEnabled(edit_enabled)
+        self._edit_btn.setVisible(True)
+
+        self._user_copy_btn.setEnabled(visible)
+        self._user_copy_btn.setVisible(True)
+
+        # Keep layout width stable: buttons always occupy space, only visual state changes.
+        self._edit_btn.setFlat(not visible)
+        self._user_copy_btn.setFlat(not visible)
         if visible:
-            edit_visible = self._editable
-            self._edit_btn.setText("✎" if edit_visible else "")
-            self._edit_btn.setEnabled(edit_visible)
             self._user_copy_btn.setIcon(_copy_icon())
-            self._user_copy_btn.setEnabled(True)
+            self._edit_btn.setStyleSheet("")
+            self._user_copy_btn.setStyleSheet("")
+        else:
+            self._user_copy_btn.setIcon(QIcon())
+            self._edit_btn.setStyleSheet("color: transparent;")
+            self._user_copy_btn.setStyleSheet("color: transparent;")
 
     def _set_agent_actions_visible(self, visible: bool) -> None:
         if not hasattr(self, "_copy_btn"):

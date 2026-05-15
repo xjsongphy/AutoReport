@@ -156,3 +156,58 @@ def test_refresh_method_updates_tree() -> None:
 
     # Should update expanded items
     assert "setExpanded" in refresh_source
+
+
+def test_selected_nested_dir_is_used_for_new_file(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    data_item = widget.tree.topLevelItem(0)
+    data_item.setExpanded(True)
+    processed_item = data_item.child(0)
+    widget.tree.setCurrentItem(processed_item)
+
+    widget._new_file()
+    pending = widget._pending_new_item
+    assert pending is not None
+    widget.tree.blockSignals(True)
+    pending.setText(0, "a.txt")
+    widget.tree.blockSignals(False)
+    widget._finalize_pending_new_item()
+
+    assert (tmp_path / "data" / "processed" / "a.txt").exists()
+    assert not (tmp_path / "data" / "a.txt").exists()
+
+
+def test_repeat_new_click_cancels_empty_pending_and_restarts(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    widget._new_file_in_dir("references")
+    first_pending = widget._pending_new_item
+    assert first_pending is not None
+
+    widget._new_file_in_dir("references")
+    second_pending = widget._pending_new_item
+
+    assert second_pending is not None
+    assert first_pending is not second_pending
+
+
+def test_repeat_new_click_keeps_typed_pending_and_starts_another(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    widget._new_file_in_dir("references")
+    first_pending = widget._pending_new_item
+    assert first_pending is not None
+    widget.tree.blockSignals(True)
+    first_pending.setText(0, "first.txt")
+    widget.tree.blockSignals(False)
+
+    widget._new_file_in_dir("references")
+    second_pending = widget._pending_new_item
+
+    assert (tmp_path / "references" / "first.txt").exists()
+    assert second_pending is not None
+    assert first_pending is not second_pending

@@ -102,3 +102,22 @@ def test_agent_message_can_render_collapsed_summary(qtbot):
     assert not widget.is_expanded()
     widget._summary_btn.click()
     assert widget.is_expanded()
+
+
+def test_user_bubble_width_stable_when_actions_toggle(qtbot):
+    widget = MessageRow(role="user", content="Width stability check")
+    qtbot.addWidget(widget)
+    widget.resize(900, 200)
+    widget.mark_complete()
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    before = widget._user_bubble_container.sizeHint().width()
+    widget._set_user_actions_visible(True)
+    qtbot.wait(10)
+    after_show = widget._user_bubble_container.sizeHint().width()
+    widget._set_user_actions_visible(False)
+    qtbot.wait(10)
+    after_hide = widget._user_bubble_container.sizeHint().width()
+
+    assert before == after_show == after_hide
