@@ -66,10 +66,14 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("AutoReport")
         self.resize(1400, 900)
 
-        # Set frameless window flag for custom title bar
-        # On macOS, we need to be more careful with this
-        if sys.platform != "darwin":
-            self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
+        # Set frameless window flag for custom title bar on all platforms
+        # macOS needs special handling for frameless windows
+        flags = self.windowFlags() | Qt.WindowType.FramelessWindowHint
+        if sys.platform == "darwin":
+            # On macOS, also set Qt.WindowType.Tool to avoid showing in dock
+            # and remove the window title button
+            flags |= Qt.WindowType.CustomizeWindowHint
+        self.setWindowFlags(flags)
 
         self._conv_store = ConversationStore(workspace)
 

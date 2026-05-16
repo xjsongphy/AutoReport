@@ -763,6 +763,11 @@ class FileTreeWidget(QWidget):
                         rel = self._workspace_rel(entry)
                         child.setData(0, Qt.ItemDataRole.UserRole, rel)
                         child.setText(0, entry.name)
+                        # Add transparent icon for alignment with files
+                        from PyQt6.QtGui import QPixmap
+                        pixmap = QPixmap(16, 16)
+                        pixmap.fill(Qt.GlobalColor.transparent)
+                        child.setIcon(0, QIcon(pixmap))
                         self._show_directory_indicator(child)
                     else:
                         child.setIcon(0, _get_file_icon(entry.suffix, style))

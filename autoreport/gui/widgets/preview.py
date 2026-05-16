@@ -793,6 +793,9 @@ class PreviewWidget(QWidget):
         else:
             self._mode_stack.setCurrentIndex(0)
             self._compile_btn.setVisible(False)
+            # Clear all tabs in panels when switching directories
+            for panel in self._panels:
+                panel.close_all_tabs()
 
         logger.debug("Preview directory: {}", directory)
 
