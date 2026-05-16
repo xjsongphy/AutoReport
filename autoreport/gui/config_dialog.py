@@ -409,7 +409,7 @@ class ConfigDialog(QDialog):
 
         header_layout.addLayout(title_row)
 
-        subtitle = QLabel("管理 API 配置。选择活跃配置后所有 Agent 将使用该服务商。\n预设模板数据来自 cc-switch 仓库，点击「同步预设」获取最新。")
+        subtitle = QLabel("管理 API 配置。选择启用配置后所有 Agent 将使用该服务商。\n预设模板数据来自 cc-switch 仓库，点击「同步预设」获取最新。")
         subtitle.setObjectName("dialogSubtitle")
         subtitle.setWordWrap(True)
         header_layout.addWidget(subtitle)
@@ -422,20 +422,20 @@ class ConfigDialog(QDialog):
         warning.setWordWrap(True)
         header_layout.addWidget(warning)
 
-        # Active config switcher
-        active_row = QHBoxLayout()
-        active_row.setSpacing(8)
-        active_label = QLabel("活跃配置:")
-        active_label.setObjectName("activeLabel")
-        active_row.addWidget(active_label)
+        # Enabled config selector
+        enabled_row = QHBoxLayout()
+        enabled_row.setSpacing(8)
+        enabled_label = QLabel("启用配置:")
+        enabled_label.setObjectName("activeLabel")
+        enabled_row.addWidget(enabled_label)
 
-        self.active_combo = NoWheelComboBox()
-        self.active_combo.setMinimumWidth(200)
-        self._refresh_active_combo()
-        active_row.addWidget(self.active_combo, 1)
-        active_row.addStretch()
+        self.enabled_combo = NoWheelComboBox()
+        self.enabled_combo.setMinimumWidth(200)
+        self._refresh_enabled_combo()
+        enabled_row.addWidget(self.enabled_combo, 1)
+        enabled_row.addStretch()
 
-        header_layout.addLayout(active_row)
+        header_layout.addLayout(enabled_row)
         root.addWidget(header)
 
         # Scrollable config cards
@@ -500,22 +500,40 @@ class ConfigDialog(QDialog):
 
         root.addWidget(footer)
 
-    def _refresh_active_combo(self) -> None:
-        self.active_combo.clear()
+    def _refresh_enabled_combo(self) -> None:
+        """Refresh the enabled config dropdown with auto-detection.
+
+        Auto-detection logic:
+        1. Try to match the saved active_id
+        2. If no match, auto-select the first enabled config
+        3. If no enabled configs, select the first config
+        """
+        self.enabled_combo.clear()
         configs = [c.get_config() for c in self._cards] if self._cards else []
         active_id = self._config_manager.config.providers.active
 
         matched = False
-        for cfg in configs:
-            label = f"{cfg.name} ({PROVIDER_LABELS.get(cfg.provider, cfg.provider)})"
-            self.active_combo.addItem(label, cfg.id)
-            if cfg.id == active_id:
-                self.active_combo.setCurrentIndex(self.active_combo.count() - 1)
-                matched = True
+        first_enabled_idx = -1
 
+        for i, cfg in enumerate(configs):
+            label = f"{cfg.name} ({PROVIDER_LABELS.get(cfg.provider, cfg.provider)})"
+            self.enabled_combo.addItem(label, cfg.id)
+            if cfg.id == active_id:
+                self.enabled_combo.setCurrentIndex(self.enabled_combo.count() - 1)
+                matched = True
+            # Track first enabled config
+            if first_enabled_idx < 0 and cfg.enabled and cfg.api_key:
+                first_enabled_idx = self.enabled_combo.count() - 1
+
+        # Auto-detect: if no match, select first enabled config
         if not matched and configs:
-            self._config_manager.config.providers.active = configs[0].id
-            self.active_combo.setCurrentIndex(0)
+            if first_enabled_idx >= 0:
+                self.enabled_combo.setCurrentIndex(first_enabled_idx)
+                self._config_manager.config.providers.active = configs[first_enabled_idx].id
+            else:
+                # No enabled configs, select first one
+                self._config_manager.config.providers.active = configs[0].id
+                self.enabled_combo.setCurrentIndex(0)
         elif not configs:
             self._config_manager.config.providers.active = ""
 
@@ -561,7 +579,7 @@ class ConfigDialog(QDialog):
             self._config_manager.config.providers.active = self._cards[0].get_config().id
         elif was_active:
             self._config_manager.config.providers.active = ""
-        self._refresh_active_combo()
+        self._refresh_enabled_combo()
         self._update_empty_hint_visibility()
 
     def _add_card(self, cfg: ApiConfig) -> None:
@@ -569,7 +587,7 @@ class ConfigDialog(QDialog):
         card.delete_btn.clicked.connect(lambda checked, c=card: self._remove_card(c))
         self.scroll_layout.insertWidget(self.scroll_layout.count() - 2, card)
         self._cards.append(card)
-        self._refresh_active_combo()
+        self._refresh_enabled_combo()
         self._update_empty_hint_visibility()
 
     def _add_config(self) -> None:
@@ -638,8 +656,8 @@ class ConfigDialog(QDialog):
         new_configs = [card.get_config() for card in self._cards]
         cfg.providers.configurations = new_configs
 
-        if self.active_combo.currentData():
-            cfg.providers.active = self.active_combo.currentData()
+        if self.enabled_combo.currentData():
+            cfg.providers.active = self.enabled_combo.currentData()
         elif new_configs:
             cfg.providers.active = new_configs[0].id
 
@@ -667,7 +685,7 @@ class ConfigDialog(QDialog):
             if item and item.widget():
                 item.widget().deleteLater()
         self._rebuild_cards()
-        self._refresh_active_combo()
+        self._refresh_enabled_combo()
 
         logger.info("Configuration reset to defaults")
         QMessageBox.information(self, "重置完成", "配置已恢复为默认值。请重新配置 API Key。")
