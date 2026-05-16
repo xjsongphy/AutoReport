@@ -831,8 +831,9 @@ class PreviewWidget(QWidget):
 
     def _sync_tabs_from_panels(self) -> None:
         """Sync unified tab bar with tabs from all panels."""
-        # Clear current tabs
-        self._unified_tab_bar.clear()
+        # Clear current tabs (QTabBar has no clear(), remove one by one)
+        while self._unified_tab_bar.count() > 0:
+            self._unified_tab_bar.removeTab(0)
 
         # Collect all open files from panels
         for panel in self._panels:
