@@ -42,7 +42,7 @@ class MessagesArea(QScrollArea):
     def _setup_ui(self) -> None:
         """Setup the UI layout."""
         # Container widget for all messages
-        self._container = QWidget()
+        self._container = QWidget(self)
         self._container.setObjectName("messagesContainer")
 
         self._layout = QVBoxLayout(self._container)

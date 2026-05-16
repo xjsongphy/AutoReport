@@ -72,7 +72,7 @@ class AgentPanel(QWidget):
         layout.setSpacing(0)
 
         # ---- Header (minimal, Codex-style) ----
-        header = QWidget()
+        header = QWidget(self)
         header.setObjectName("panelHeader")
         header.setFixedHeight(36)
         hl = QHBoxLayout(header)
@@ -126,7 +126,7 @@ class AgentPanel(QWidget):
         self._history_dropdown.rename_session_requested.connect(self._on_history_rename)
 
         # ---- Queued follow-up messages ----
-        self._queue_preview = QWidget()
+        self._queue_preview = QWidget(self)
         self._queue_preview.setObjectName("queuePreview")
         self._queue_preview.setVisible(False)
         ql = QVBoxLayout(self._queue_preview)
@@ -162,7 +162,7 @@ class AgentPanel(QWidget):
         layout.addWidget(self._status_indicator)
 
         # ---- Context chip bar ----
-        self._context_bar = QWidget()
+        self._context_bar = QWidget(self)
         self._context_bar.setObjectName("contextBar")
         self._context_bar.setVisible(False)
         cl = QHBoxLayout(self._context_bar)
@@ -190,7 +190,7 @@ class AgentPanel(QWidget):
 
         # ---- Input bar (VS Code Copilot-style composer) ----
         # Single container with input + send button, wrapped by working border
-        self._input_container = QWidget()
+        self._input_container = QWidget(self)
         self._input_container.setObjectName("inputContainer")
         icl = QHBoxLayout(self._input_container)
         icl.setContentsMargins(4, 2, 4, 2)
@@ -220,7 +220,7 @@ class AgentPanel(QWidget):
         layout.addWidget(self._input_container)
 
         # ---- Secondary toolbar (VS Code: .chat-secondary-toolbar) ----
-        secondary_bar = QWidget()
+        secondary_bar = QWidget(self)
         secondary_bar.setObjectName("secondaryToolbar")
         sl = QHBoxLayout(secondary_bar)
         sl.setContentsMargins(10, 0, 6, 2)

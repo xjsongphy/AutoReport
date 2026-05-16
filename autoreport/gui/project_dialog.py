@@ -94,7 +94,7 @@ class ProjectDialog(QDialog):
         root.setSpacing(0)
 
         # ---- Header ----
-        header = QWidget()
+        header = QWidget(self)
         header.setObjectName("header")
         header_layout = QVBoxLayout(header)
         header_layout.setContentsMargins(40, 36, 40, 28)
@@ -115,7 +115,7 @@ class ProjectDialog(QDialog):
         root.addWidget(header)
 
         # ---- Action buttons ----
-        actions = QWidget()
+        actions = QWidget(self)
         actions.setObjectName("actionBar")
         actions_layout = QHBoxLayout(actions)
         actions_layout.setContentsMargins(40, 12, 40, 16)
@@ -144,7 +144,7 @@ class ProjectDialog(QDialog):
         root.addWidget(actions)
 
         # ---- Recent projects ----
-        recent_header = QWidget()
+        recent_header = QWidget(self)
         recent_header.setObjectName("sectionHeader")
         recent_header_layout = QHBoxLayout(recent_header)
         recent_header_layout.setContentsMargins(40, 24, 40, 10)
@@ -160,7 +160,7 @@ class ProjectDialog(QDialog):
         scroll.setFrameStyle(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        self._list_container = QWidget()
+        self._list_container = QWidget(self)
         self._list_container.setObjectName("listContainer")
         self._list_layout = QVBoxLayout(self._list_container)
         self._list_layout.setContentsMargins(40, 0, 40, 0)
@@ -171,7 +171,7 @@ class ProjectDialog(QDialog):
         root.addWidget(scroll, 1)
 
         # ---- Footer ----
-        footer = QWidget()
+        footer = QWidget(self)
         footer.setObjectName("footer")
         footer_layout = QHBoxLayout(footer)
         footer_layout.setContentsMargins(40, 12, 40, 16)

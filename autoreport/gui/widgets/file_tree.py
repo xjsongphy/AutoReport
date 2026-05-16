@@ -100,8 +100,8 @@ class _DragDropTreeWidget(QTreeWidget):
         drag.setPixmap(drag_pixmap)
         drag.setHotSpot(QPoint(8, 8))
 
-        # Set mime data
-        mime = self.mimeData(current_item)
+        # Set mime data (mimeData expects iterable, not single item)
+        mime = self.mimeData([current_item])
         drag.setMimeData(mime)
 
         # Execute the drag
@@ -183,7 +183,7 @@ class FileTreeWidget(QWidget):
         layout.setSpacing(0)
 
         # Explorer header with toolbar
-        header = QWidget()
+        header = QWidget(self)
         header.setObjectName("explorerHeader")
         header.setFixedHeight(36)
         hlayout = QHBoxLayout(header)

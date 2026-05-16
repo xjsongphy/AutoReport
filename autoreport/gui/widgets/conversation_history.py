@@ -45,7 +45,7 @@ class SessionListItem(QWidget):
         layout.addLayout(left_layout, 1)
 
         # Right: time label and delete button (stacked, delete on hover)
-        right_widget = QWidget()
+        right_widget = QWidget(self)
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(2)

@@ -72,7 +72,7 @@ class DebugPanel(QWidget):
         layout.addWidget(header)
 
         # Content area
-        self._content_widget = QWidget()
+        self._content_widget = QWidget(self)
         content_layout = QVBoxLayout(self._content_widget)
         content_layout.setContentsMargins(8, 8, 8, 8)
 
@@ -82,7 +82,7 @@ class DebugPanel(QWidget):
         self._scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
         self._scroll_area.setMaximumHeight(300)
 
-        self._entries_widget = QWidget()
+        self._entries_widget = QWidget(self)
         self._entries_layout = QVBoxLayout(self._entries_widget)
         self._entries_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self._entries_layout.setContentsMargins(0, 0, 0, 0)

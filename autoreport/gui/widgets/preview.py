@@ -339,9 +339,8 @@ class EditorPanel(QWidget):
         self._tab_bar.setVisible(True)
 
         if preview:
-            font = self._tab_bar.tabFont(tab_idx)
-            font.setItalic(True)
-            self._tab_bar.setTabFont(tab_idx, font)
+            # PyQt6 doesn't have tabFont(), use stylesheet for italic preview tabs
+            self._tab_bar.setTabData(tab_idx, "preview")
 
         self._active_key = key
 
@@ -352,9 +351,7 @@ class EditorPanel(QWidget):
             if not state.pinned:
                 state.pinned = True
                 idx = self._tab_order.index(self._active_key)
-                font = self._tab_bar.tabFont(idx)
-                font.setItalic(False)
-                self._tab_bar.setTabFont(idx, font)
+                self._tab_bar.setTabData(idx, "pinned")
 
     def has_tab(self, path: Path) -> bool:
         return str(path.resolve()) in self._tabs
@@ -393,9 +390,7 @@ class EditorPanel(QWidget):
         other._tab_bar.setTabToolTip(tab_idx, str(path))
         other._tab_bar.setVisible(True)
         if not state.pinned:
-            font = other._tab_bar.tabFont(tab_idx)
-            font.setItalic(True)
-            other._tab_bar.setTabFont(tab_idx, font)
+            other._tab_bar.setTabData(tab_idx, "preview")
         other._active_key = key
 
         # Check if we're empty
@@ -463,9 +458,7 @@ class EditorPanel(QWidget):
             state = self._tabs[key]
             if not state.pinned:
                 state.pinned = True
-                font = self._tab_bar.tabFont(index)
-                font.setItalic(False)
-                self._tab_bar.setTabFont(index, font)
+                self._tab_bar.setTabData(index, "pinned")
 
     def _on_context_menu(self, pos) -> None:
         index = self._tab_bar.tabAt(pos)
@@ -566,7 +559,7 @@ class PreviewWidget(QWidget):
         layout.setSpacing(0)
 
         # Header
-        header = QWidget()
+        header = QWidget(self)
         header.setObjectName("previewHeader")
         header.setFixedHeight(36)
         hl = QHBoxLayout(header)
@@ -641,13 +634,13 @@ class PreviewWidget(QWidget):
         from PyQt6.QtGui import QColor, QFont
 
         c = get_theme_colors()
-        self._tex_widget = QWidget()
+        self._tex_widget = QWidget(self)
         tex_layout = QVBoxLayout(self._tex_widget)
         tex_layout.setContentsMargins(0, 0, 0, 0)
         tex_layout.setSpacing(0)
 
         # TeX section (single editor pane by default)
-        tex_section = QWidget()
+        tex_section = QWidget(self)
         tsl = QVBoxLayout(tex_section)
         tsl.setContentsMargins(0, 0, 0, 0)
         tsl.setSpacing(0)

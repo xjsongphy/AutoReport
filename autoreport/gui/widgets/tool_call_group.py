@@ -62,7 +62,7 @@ class ToolCallGroup(QWidget):
         self._header_btn.clicked.connect(self._on_toggle)
         layout.addWidget(self._header_btn)
 
-        self._details = QWidget()
+        self._details = QWidget(self)
         self._details.setObjectName("toolCallDetails")
         self._details_layout = QVBoxLayout(self._details)
         self._details_layout.setContentsMargins(0, 2, 0, 0)

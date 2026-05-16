@@ -462,7 +462,7 @@ class MainWindow(QMainWindow):
         """)
 
     def _setup_ui(self) -> None:
-        central_widget = QWidget()
+        central_widget = QWidget(self)
         self.setCentralWidget(central_widget)
 
         main_layout = QHBoxLayout(central_widget)

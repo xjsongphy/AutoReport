@@ -313,7 +313,7 @@ class PresetSelectorDialog(QDialog):
         scroll.setWidgetResizable(True)
         scroll.setFrameStyle(QFrame.Shape.NoFrame)
 
-        scroll_content = QWidget()
+        scroll_content = QWidget(self)
         scroll_layout = QVBoxLayout(scroll_content)
         scroll_layout.setSpacing(12)
 
@@ -390,7 +390,7 @@ class ConfigDialog(QDialog):
         root.setSpacing(0)
 
         # Header
-        header = QWidget()
+        header = QWidget(self)
         header.setObjectName("dialogHeader")
         header_layout = QVBoxLayout(header)
         header_layout.setContentsMargins(24, 20, 24, 16)
@@ -443,7 +443,7 @@ class ConfigDialog(QDialog):
         scroll.setFrameStyle(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        self.scroll_content = QWidget()
+        self.scroll_content = QWidget(self)
         self.scroll_layout = QVBoxLayout(self.scroll_content)
         self.scroll_layout.setContentsMargins(20, 8, 20, 8)
         self.scroll_layout.setSpacing(12)
@@ -474,7 +474,7 @@ class ConfigDialog(QDialog):
         root.addLayout(add_row)
 
         # Footer
-        footer = QWidget()
+        footer = QWidget(self)
         footer.setObjectName("dialogFooter")
         footer_layout = QHBoxLayout(footer)
         footer_layout.setContentsMargins(24, 12, 24, 16)
