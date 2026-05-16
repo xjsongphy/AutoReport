@@ -278,7 +278,7 @@ class FileTreeWidget(QWidget):
         # Enable both internal move and external drag-drop
         self.tree.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.tree.setDefaultDropAction(Qt.DropAction.MoveAction)
-        self.tree.setIndentation(14)
+        self.tree.setIndentation(7)
         self.tree.setRootIsDecorated(True)
         self.tree.setItemsExpandable(True)
         self.tree.setAnimated(False)
@@ -763,11 +763,6 @@ class FileTreeWidget(QWidget):
                         rel = self._workspace_rel(entry)
                         child.setData(0, Qt.ItemDataRole.UserRole, rel)
                         child.setText(0, entry.name)
-                        # Add transparent icon for alignment with files
-                        from PyQt6.QtGui import QPixmap
-                        pixmap = QPixmap(16, 16)
-                        pixmap.fill(Qt.GlobalColor.transparent)
-                        child.setIcon(0, QIcon(pixmap))
                         self._show_directory_indicator(child)
                     else:
                         child.setIcon(0, _get_file_icon(entry.suffix, style))
