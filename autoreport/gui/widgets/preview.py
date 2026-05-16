@@ -214,7 +214,7 @@ def _create_spreadsheet_viewer(path: Path) -> tuple:
             color: {c["fg"]};
             border: 1px solid {c["border"]};
             padding: 4px 8px;
-            font-weight: 600;
+            font-weight: {c["fw_semibold"]};
         }}
     """)
 
@@ -701,8 +701,9 @@ class PreviewWidget(QWidget):
             }}
             #previewTitle {{
                 font-size: 13px;
-                font-weight: 600;
+                font-weight: {c["fw_semibold"]};
                 color: {c["fg"]};
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             #previewFileCardsScroll {{
                 background-color: transparent;

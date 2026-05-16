@@ -76,9 +76,17 @@ class _DragDropTreeWidget(QTreeWidget):
         if not current_item:
             return
 
-        # Check if this is a fixed directory (cannot be moved)
+        # Only block dragging top-level fixed directories.
+        # File nodes store parent dir in UserRole, so we must not use UserRole
+        # alone to decide draggable status.
         dir_name = current_item.data(0, Qt.ItemDataRole.UserRole)
-        if dir_name in FileTreeWidget.FIXED_DIRECTORIES:
+        file_path_str = current_item.data(0, Qt.ItemDataRole.UserRole + 1)
+        is_top_level_fixed_dir = (
+            current_item.parent() is None
+            and not file_path_str
+            and dir_name in FIXED_DIRECTORIES
+        )
+        if is_top_level_fixed_dir:
             return  # Don't allow dragging fixed directories
 
         # Get the icon for the item
@@ -266,6 +274,7 @@ class FileTreeWidget(QWidget):
         self.tree.setDragEnabled(True)
         self.tree.setAcceptDrops(True)
         self.tree.setDropIndicatorShown(True)
+        self.tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         # Enable both internal move and external drag-drop
         self.tree.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.tree.setDefaultDropAction(Qt.DropAction.MoveAction)
@@ -306,7 +315,7 @@ class FileTreeWidget(QWidget):
 
             #explorerTitle {{
                 font-size: 11px;
-                font-weight: 600;
+                font-weight: {c["fw_semibold"]};
                 color: {c["fg"]};
                 text-transform: uppercase;
                 letter-spacing: 1px;

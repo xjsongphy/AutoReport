@@ -93,7 +93,7 @@ class MainWindow(QMainWindow):
             }}
             QWidget {{
                 color: {c["fg"]};
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica Neue", sans-serif;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
                 font-size: {px(13)};
             }}
             QSplitter::handle {{
@@ -157,8 +157,9 @@ class MainWindow(QMainWindow):
             }}
             #panelTitle {{
                 font-size: {px(13)};
-                font-weight: 600;
+                font-weight: {c["fw_semibold"]};
                 color: {c["fg"]};
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             #panelStatus {{
                 font-size: {px(11)};
@@ -211,7 +212,7 @@ class MainWindow(QMainWindow):
                 border: none;
                 border-radius: {px(13)};
                 font-size: {px(14)};
-                font-weight: 700;
+                font-weight: {c["fw_bold"]};
                 padding: 0;
                 min-width: {px(26)};
                 min-height: {px(26)};
@@ -227,7 +228,7 @@ class MainWindow(QMainWindow):
                 border: none;
                 border-radius: {px(13)};
                 font-size: {px(14)};
-                font-weight: 700;
+                font-weight: {c["fw_bold"]};
                 padding: 0;
                 min-width: {px(26)};
                 min-height: {px(26)};
@@ -279,6 +280,7 @@ class MainWindow(QMainWindow):
                 color: {c["editor_fg"]};
                 font-size: {px(13)};
                 line-height: 1.5;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             #userMessageBubbleContainer {{
                 background-color: transparent;
@@ -306,7 +308,8 @@ class MainWindow(QMainWindow):
                 border-radius: {px(4)};
                 padding: {px(4)} {px(10)};
                 font-size: {px(12)};
-                font-weight: 600;
+                font-weight: {c["fw_semibold"]};
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             #userSaveBtn:hover {{
                 background-color: {c["primary_hover"]};
@@ -322,6 +325,7 @@ class MainWindow(QMainWindow):
                 border-radius: {px(4)};
                 padding: {px(4)} {px(10)};
                 font-size: {px(12)};
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             #userCancelBtn:hover {{
                 background-color: {c["hover"]};
@@ -334,7 +338,7 @@ class MainWindow(QMainWindow):
             #queueTitle {{
                 font-size: {px(11)};
                 color: {c["muted"]};
-                font-weight: 600;
+                font-weight: {c["fw_semibold"]};
             }}
             #queueItems {{
                 font-size: {px(12)};
@@ -354,8 +358,9 @@ class MainWindow(QMainWindow):
             }}
             #agentUsername {{
                 font-size: {px(13)};
-                font-weight: 600;
+                font-weight: {c["fw_semibold"]};
                 color: {c["fg"]};
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             #agentMessageRow {{
                 background-color: transparent;
@@ -365,6 +370,7 @@ class MainWindow(QMainWindow):
                 font-size: {px(13)};
                 line-height: 1.5;
                 background-color: transparent;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             #msgCoordination {{
                 font-size: {px(11)};
@@ -434,9 +440,9 @@ class MainWindow(QMainWindow):
                 background-color: transparent;
                 border: none;
                 color: {c["tool_fg"]};
-                font-family: "Segoe UI", "SF Pro", -apple-system, sans-serif;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
                 font-size: {px(12)};
-                font-weight: 500;
+                font-weight: {c["fw_medium"]};
                 text-align: left;
                 padding: {px(2)} 0;
                 border-radius: {px(4)};
@@ -472,6 +478,8 @@ class MainWindow(QMainWindow):
         file_menu = menubar.addMenu("文件")
         file_menu.setObjectName("fileMenu")
 
+        logger.info("Menu bar created - File menu added")
+
         # Add menu items
         new_file_act = file_menu.addAction("新建文件")
         new_file_act.triggered.connect(self._on_new_file)
@@ -496,31 +504,34 @@ class MainWindow(QMainWindow):
         c = get_theme_colors()
         menubar.setStyleSheet(f"""
             QMenuBar {{
-                background-color: #3c3c3c;
-                border-bottom: 1px solid #252525;
+                background-color: {c["surface"]};
+                border-bottom: 1px solid {c["border"]};
                 padding: 2px;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             QMenuBar::item {{
                 background-color: transparent;
-                color: #cccccc;
+                color: {c["fg"]};
                 padding: 4px 8px;
                 border-radius: 4px;
             }}
             QMenuBar::item:selected {{
-                background-color: #094771;
+                background-color: {c["selection"]};
             }}
             QMenu {{
-                background-color: #252526;
-                border: 1px solid #454545;
+                background-color: {c["context_bg"]};
+                border: 1px solid {c["context_border"]};
                 border-radius: 4px;
                 padding: 4px;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             QMenu::item {{
                 padding: 6px 24px;
                 border-radius: 4px;
+                color: {c["fg"]};
             }}
             QMenu::item:selected {{
-                background-color: #094771;
+                background-color: {c["selection"]};
             }}
         """)
 

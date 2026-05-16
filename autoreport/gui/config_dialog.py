@@ -771,7 +771,7 @@ class ConfigDialog(QDialog):
             }}
             #dialogTitle {{
                 font-size: 20px;
-                font-weight: 600;
+                font-weight: {c["fw_semibold"]};
                 color: {c["titleFg"]};
             }}
             #dialogSubtitle {{
@@ -795,7 +795,7 @@ class ConfigDialog(QDialog):
             }}
             #activeLabel {{
                 font-size: 13px;
-                font-weight: 600;
+                font-weight: {c["fw_semibold"]};
                 color: {c["activeFg"]};
             }}
             #dialogFooter {{
@@ -809,7 +809,7 @@ class ConfigDialog(QDialog):
             }}
             #categoryLabel {{
                 font-size: 12px;
-                font-weight: 600;
+                font-weight: {c["fw_semibold"]};
                 color: {c["categoryFg"]};
                 text-transform: uppercase;
                 margin-top: 4px;
@@ -820,7 +820,7 @@ class ConfigDialog(QDialog):
                 border: none;
                 border-radius: 6px;
                 padding: 8px 24px;
-                font-weight: 600;
+                font-weight: {c["fw_semibold"]};
                 font-size: 13px;
             }}
             #saveBtn:hover {{ background-color: {c["primaryBtnHover"]}; }}
@@ -864,7 +864,7 @@ class ConfigDialog(QDialog):
                 border: 1px solid transparent;
                 border-radius: 4px;
                 font-size: 16px;
-                font-weight: bold;
+                font-weight: {c["fw_bold"]};
             }}
             #deleteBtn:hover {{
                 color: {c["deleteHoverFg"]};

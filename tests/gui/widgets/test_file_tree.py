@@ -64,6 +64,22 @@ def test_file_tree_has_drag_drop_handlers() -> None:
     assert hasattr(FileTreeWidget, "dropEvent")
 
 
+def test_file_tree_enables_extended_selection() -> None:
+    import inspect
+
+    setup_source = inspect.getsource(FileTreeWidget._setup_ui)
+    assert "SelectionMode.ExtendedSelection" in setup_source
+
+
+def test_drag_guard_does_not_reference_class_constant() -> None:
+    import inspect
+    import autoreport.gui.widgets.file_tree as file_tree_module
+
+    # Ensure drag guard uses module-level FIXED_DIRECTORIES, not class attr.
+    file_source = inspect.getsource(file_tree_module)
+    assert "FileTreeWidget.FIXED_DIRECTORIES" not in file_source
+
+
 def test_file_tree_has_toolbar_buttons() -> None:
     """Test that FileTreeWidget setup creates toolbar buttons."""
     import inspect

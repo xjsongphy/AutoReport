@@ -59,6 +59,12 @@ def get_theme_colors() -> dict[str, str]:
         "fg": fg,
         "muted": muted,
 
+        # === Font Weights ===
+        "fw_normal": "400",
+        "fw_medium": "500",
+        "fw_semibold": "600",
+        "fw_bold": "700",
+
         # === Aliases for specific components ===
         "bg_header": surface,  # Header background
         "bg_header_alt": bg,  # Alternative header background (menus)

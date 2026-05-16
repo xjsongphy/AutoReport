@@ -268,13 +268,14 @@ def filled_button_qss(
     disabled_fg: str,
 ) -> str:
     """Build a reusable filled button QSS fragment."""
+    c = get_theme_colors()
     return f"""
         QPushButton{selector} {{
             background-color: {bg};
             color: {fg};
             border: none;
             border-radius: 4px;
-            font-weight: 600;
+            font-weight: {c["fw_semibold"]};
             font-size: 12px;
             padding: 2px 12px;
         }}
