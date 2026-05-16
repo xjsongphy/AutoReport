@@ -48,12 +48,11 @@ FIXED_DIRECTORIES = ["data", "references", "theory", "code", "tex"]
 
 
 class _FileTreeDelegate(QStyledItemDelegate):
-    """Delegate that draws file icons into the decoration area.
+    """Delegate that draws file icons aligned with folder arrows.
 
-    Files have icons, folders only have branch arrows. To align text,
-    we suppress Qt's default icon rendering and manually draw the icon
-    into the branch/arrow area. This way file text starts at the same
-    horizontal position as folder text.
+    Problem: files have icons that push text right; folders don't.
+    Fix: suppress Qt's icon, draw text as if no icon, then paint icon
+    at the arrow position (center of the indentation column).
     """
 
     def paint(self, painter, option, index):
@@ -69,27 +68,23 @@ class _FileTreeDelegate(QStyledItemDelegate):
             super().paint(painter, option, index)
             return
 
-        # --- File with icon: paint text without icon, then draw icon manually ---
-
-        # Grab icon before we suppress it
+        # Save icon reference
         icon = item.icon(0)
-        icon_size = tree_widget.iconSize()
+        icon_sz = tree_widget.iconSize()  # QSize(16, 16)
 
-        # Temporarily remove icon so base class doesn't draw it
-        # (don't call item.setIcon because it triggers itemChanged)
+        # Temporarily remove decoration data so super().paint draws no icon
         from PyQt6.QtCore import Qt
-        saved_data = item.data(0, Qt.ItemDataRole.DecorationRole)
+        saved = item.data(0, Qt.ItemDataRole.DecorationRole)
         item.setData(0, Qt.ItemDataRole.DecorationRole, None)
 
-        # Draw background + text without icon
+        # Draw selection bg + text (without icon → text starts at folder text position)
         super().paint(painter, option, index)
 
-        # Restore icon data
-        item.setData(0, Qt.ItemDataRole.DecorationRole, saved_data)
+        # Restore decoration
+        item.setData(0, Qt.ItemDataRole.DecorationRole, saved)
 
-        # Now draw the icon manually into the decoration area (left of text rect)
-        # option.decorationRect is where Qt *would* have drawn the icon.
-        # We shift it left into the branch indicator zone.
+        # Draw icon at the same X as the branch arrow for this depth.
+        # Qt draws the arrow centred in the column at  depth * indentation.
         indent = tree_widget.indentation()
         depth = 0
         p = item.parent()
@@ -97,11 +92,14 @@ class _FileTreeDelegate(QStyledItemDelegate):
             depth += 1
             p = p.parent()
 
-        # Place icon at the indentation position (same column as the arrow)
-        icon_x = depth * indent - icon_size.width() // 2
-        icon_y = option.rect.y() + (option.rect.height() - icon_size.height()) // 2
+        # Arrow X for this depth:  depth * indent  (left edge of the column)
+        # Centre the icon in that column
+        icon_x = depth * indent + (indent - icon_sz.width()) // 2
+        icon_y = option.rect.y() + (option.rect.height() - icon_sz.height()) // 2
 
-        icon.paint(painter, icon_x, icon_y, icon_size.width(), icon_size.height())
+        painter.save()
+        icon.paint(painter, icon_x, icon_y, icon_sz.width(), icon_sz.height())
+        painter.restore()
 
 # Directory display labels (VSCode style: concise, title case)
 DIR_LABELS = {
@@ -411,7 +409,7 @@ class FileTreeWidget(QWidget):
 
             #fileTree::item {{
                 height: 22px;
-                padding: 0 2px;
+                padding: 0 6px 0 0;
             }}
 
             #fileTree::item:hover {{

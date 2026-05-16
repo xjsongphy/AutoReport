@@ -41,7 +41,7 @@ def apply_scintilla_style(
         if margin_width is None:
             line_count = sci.lines()
             # Calculate width needed for max line number
-            char_width = sci.textWidth(QsciScintilla.TextWidthStyle.STYLE_DEFAULT, "8")
+            char_width = sci.SendScintilla(sci.SCI_TEXTWIDTH, sci.STYLE_DEFAULT, b"8")
             digits = len(str(line_count))
             # Add padding
             margin_width = max(30, char_width * digits + 12)
@@ -77,7 +77,7 @@ def update_margin_width(sci: QsciScintilla) -> None:
         sci: The QScintilla widget to update
     """
     line_count = sci.lines()
-    char_width = sci.textWidth(QsciScintilla.TextWidthStyle.STYLE_DEFAULT, "8")
+    char_width = sci.SendScintilla(sci.SCI_TEXTWIDTH, sci.STYLE_DEFAULT, b"8")
     digits = len(str(line_count))
     margin_width = max(30, char_width * digits + 12)
     sci.setMarginWidth(1, margin_width)
