@@ -1,6 +1,7 @@
 """Main application window."""
 
 import asyncio
+import sys
 from pathlib import Path
 
 from loguru import logger
@@ -11,6 +12,7 @@ from PyQt6.QtWidgets import (
     QMenu,
     QMenuBar,
     QSplitter,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -32,6 +34,7 @@ from ..utils.agent_labels import get_agent_badge, get_agent_title
 from ..utils.logging_config import ui_logger
 from .scale import dpi_scale
 from .theme import get_theme_colors
+from .title_bar import TitleBar
 from .widgets.agent_panel import AgentPanel
 from .widgets.file_tree import FileTreeWidget
 from .widgets.preview import PreviewWidget
@@ -58,9 +61,15 @@ class MainWindow(QMainWindow):
         self.workspace = Path(workspace).resolve()
         self._async_loop: asyncio.AbstractEventLoop | None = None
         self._debug_agents = {str(a) for a in (debug_agents or [])}
+        self._title_bar: TitleBar | None = None
 
         self.setWindowTitle("AutoReport")
         self.resize(1400, 900)
+
+        # Set frameless window flag for custom title bar
+        # On macOS, we need to be more careful with this
+        if sys.platform != "darwin":
+            self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
 
         self._conv_store = ConversationStore(workspace)
 
@@ -469,9 +478,8 @@ class MainWindow(QMainWindow):
             }}
         """)
 
-    def _setup_menu_bar(self) -> None:
+    def _setup_menu_bar(self, menubar: QMenuBar) -> None:
         """Setup the application menu bar."""
-        menubar = self.menuBar()
         menubar.setObjectName("mainMenuBar")
 
         # File menu
@@ -499,41 +507,6 @@ class MainWindow(QMainWindow):
 
         new_window_act = file_menu.addAction("新建窗口")
         new_window_act.triggered.connect(self._on_new_window)
-
-        # Apply theme to menu bar
-        c = get_theme_colors()
-        menubar.setStyleSheet(f"""
-            QMenuBar {{
-                background-color: {c["surface"]};
-                border-bottom: 1px solid {c["border"]};
-                padding: 2px;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
-            }}
-            QMenuBar::item {{
-                background-color: transparent;
-                color: {c["fg"]};
-                padding: 4px 8px;
-                border-radius: 4px;
-            }}
-            QMenuBar::item:selected {{
-                background-color: {c["selection"]};
-            }}
-            QMenu {{
-                background-color: {c["context_bg"]};
-                border: 1px solid {c["context_border"]};
-                border-radius: 4px;
-                padding: 4px;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
-            }}
-            QMenu::item {{
-                padding: 6px 24px;
-                border-radius: 4px;
-                color: {c["fg"]};
-            }}
-            QMenu::item:selected {{
-                background-color: {c["selection"]};
-            }}
-        """)
 
         # Set window title bar color (Windows only)
         if hasattr(self, "setWindowProperty"):
@@ -590,18 +563,30 @@ class MainWindow(QMainWindow):
         logger.info("New window requested")
 
     def _setup_ui(self) -> None:
-        # Setup menu bar
-        self._setup_menu_bar()
-
+        # Create custom title bar and container
         central_widget = QWidget(self)
         self.setCentralWidget(central_widget)
 
-        main_layout = QHBoxLayout(central_widget)
+        main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Custom title bar
+        self._title_bar = TitleBar(self)
+        main_layout.addWidget(self._title_bar)
+
+        # Setup menu bar in custom title bar
+        self._setup_menu_bar(self._title_bar.get_menu_bar())
+
+        # Main content area
+        content_widget = QWidget(self)
+        content_layout = QHBoxLayout(content_widget)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(content_widget)
 
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
         main_splitter.setChildrenCollapsible(False)
-        main_layout.addWidget(main_splitter)
+        content_layout.addWidget(main_splitter)
 
         # Left: File tree
         self.file_tree = FileTreeWidget(self.workspace)
@@ -1179,6 +1164,17 @@ class MainWindow(QMainWindow):
         """Handle window resize to maintain proportional layout."""
         super().resizeEvent(event)
         self._apply_splitter_sizes()
+
+    def changeEvent(self, event) -> None:
+        """Handle window state changes (maximize/restore/fullscreen)."""
+        super().changeEvent(event)
+        if event.type() == event.Type.WindowStateChange:
+            if self._title_bar:
+                is_maximized = self.windowState() & Qt.WindowState.WindowMaximized
+                is_fullscreen = self.windowState() & Qt.WindowState.WindowFullScreen
+                self._title_bar.update_maximize_button(
+                    bool(is_maximized or is_fullscreen)
+                )
 
     def _apply_splitter_sizes(self) -> None:
         if not hasattr(self, "_main_splitter"):
