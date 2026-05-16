@@ -209,6 +209,11 @@ class ProjectDialog(QDialog):
             "deleteHoverBg": "#3a1a1a" if dark else "#fef2f2",
             "cancelFg": "#858585" if dark else "#888888",
             "cancelHoverFg": "#ccc" if dark else "#333333",
+            # Font weights
+            "fw_normal": "400",
+            "fw_medium": "500",
+            "fw_semibold": "600",
+            "fw_bold": "700",
         }
 
         self.setStyleSheet(f"""
@@ -220,7 +225,7 @@ class ProjectDialog(QDialog):
             }}
             #title {{
                 font-size: 28px;
-                font-weight: 700;
+                font-weight: {c["fw_bold"]};
                 color: {c["titleFg"]};
             }}
             #subtitle {{
@@ -238,7 +243,7 @@ class ProjectDialog(QDialog):
                 border-radius: 4px;
                 padding: 8px 20px;
                 font-size: 13px;
-                font-weight: 600;
+                font-weight: {c["fw_semibold"]};
             }}
             #primaryBtn:hover {{ background-color: {c["primaryHover"]}; }}
             #secondaryBtn {{
@@ -268,7 +273,7 @@ class ProjectDialog(QDialog):
             }}
             #sectionLabel {{
                 font-size: 12px;
-                font-weight: 600;
+                font-weight: {c["fw_semibold"]};
                 color: {c["sectionFg"]};
                 text-transform: uppercase;
                 letter-spacing: 0.5px;
