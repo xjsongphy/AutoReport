@@ -234,7 +234,7 @@ def combo_box_qss(
             border-radius: 4px;
             background-color: {background_color};
             color: {foreground_color};
-            selection-background-color: transparent;
+            selection-background-color: {selection_bg};
             selection-color: {selection_fg};
             padding: 4px;
             outline: none;
@@ -244,9 +244,10 @@ def combo_box_qss(
             padding: 2px 8px;
             border: none;
             border-radius: 4px;
+            color: {foreground_color};
         }}
         QComboBox{selector} QAbstractItemView::item:selected {{
-            background-color: transparent;
+            background-color: {selection_bg};
             color: {selection_fg};
         }}
         QComboBox{selector} QAbstractItemView::item:hover {{

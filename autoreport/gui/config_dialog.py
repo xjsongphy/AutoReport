@@ -431,7 +431,6 @@ class ConfigDialog(QDialog):
 
         self.enabled_combo = NoWheelComboBox()
         self.enabled_combo.setMinimumWidth(200)
-        self._refresh_enabled_combo()
         enabled_row.addWidget(self.enabled_combo, 1)
         enabled_row.addStretch()
 
@@ -456,6 +455,7 @@ class ConfigDialog(QDialog):
         self._empty_hint.setWordWrap(True)
 
         self._rebuild_cards()
+        self._refresh_enabled_combo()
         self.scroll_layout.addStretch()
         scroll.setWidget(self.scroll_content)
         root.addWidget(scroll, 1)
