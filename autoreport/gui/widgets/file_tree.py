@@ -88,7 +88,8 @@ class _FileTreeDelegate(QStyledItemDelegate):
         indent = tree_widget.indentation()
         depth = 0
         p = item.parent()
-        while p is not None:
+        root = tree_widget.invisibleRootItem()
+        while p is not None and p is not root:
             depth += 1
             p = p.parent()
 
@@ -354,6 +355,9 @@ class FileTreeWidget(QWidget):
         self.tree.itemDelegate().closeEditor.connect(self._on_close_editor)
         layout.addWidget(self.tree)
 
+        # Give root items breathing room from the left edge
+        self.tree.setContentsMargins(4, 0, 0, 0)
+
         self.tree.header().hide()
 
         self._apply_style()
@@ -409,7 +413,7 @@ class FileTreeWidget(QWidget):
 
             #fileTree::item {{
                 height: 22px;
-                padding: 0 6px 0 0;
+                padding: 0 6px;
             }}
 
             #fileTree::item:hover {{
