@@ -247,8 +247,8 @@ def combo_box_qss(
             color: {foreground_color};
         }}
         QComboBox{selector} QAbstractItemView::item:selected {{
-            background-color: {selection_bg};
-            color: {selection_fg};
+            background-color: transparent;
+            color: {foreground_color};
         }}
         QComboBox{selector} QAbstractItemView::item:hover {{
             background-color: {selection_bg};
