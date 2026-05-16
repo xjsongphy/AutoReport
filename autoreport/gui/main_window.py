@@ -595,30 +595,44 @@ class MainWindow(QMainWindow):
         logger.info("New window requested")
 
     def _setup_ui(self) -> None:
-        # Create custom title bar and container
+        # Create container
         central_widget = QWidget(self)
         self.setCentralWidget(central_widget)
 
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
+        if sys.platform == "darwin":
+            # macOS: Use native title bar with system menu bar
+            main_layout = QHBoxLayout(central_widget)
+            main_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Custom title bar
-        self._title_bar = TitleBar(self)
-        main_layout.addWidget(self._title_bar)
+            # Use system menu bar
+            self._setup_menu_bar(self.menuBar())
+            self._title_bar = None
 
-        # Setup menu bar in custom title bar
-        self._setup_menu_bar(self._title_bar.get_menu_bar())
+            main_splitter = QSplitter(Qt.Orientation.Horizontal)
+            main_splitter.setChildrenCollapsible(False)
+            main_layout.addWidget(main_splitter)
+        else:
+            # Windows/Linux: Use custom title bar
+            main_layout = QVBoxLayout(central_widget)
+            main_layout.setContentsMargins(0, 0, 0, 0)
+            main_layout.setSpacing(0)
 
-        # Main content area
-        content_widget = QWidget(self)
-        content_layout = QHBoxLayout(content_widget)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.addWidget(content_widget)
+            # Custom title bar
+            self._title_bar = TitleBar(self)
+            main_layout.addWidget(self._title_bar)
 
-        main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        main_splitter.setChildrenCollapsible(False)
-        content_layout.addWidget(main_splitter)
+            # Setup menu bar in custom title bar
+            self._setup_menu_bar(self._title_bar.get_menu_bar())
+
+            # Main content area
+            content_area = QWidget(self)
+            content_layout = QHBoxLayout(content_area)
+            content_layout.setContentsMargins(0, 0, 0, 0)
+            main_layout.addWidget(content_area)
+
+            main_splitter = QSplitter(Qt.Orientation.Horizontal)
+            main_splitter.setChildrenCollapsible(False)
+            content_layout.addWidget(main_splitter)
 
         # Left: File tree
         self.file_tree = FileTreeWidget(self.workspace)
