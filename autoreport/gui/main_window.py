@@ -268,6 +268,11 @@ class MainWindow(QMainWindow):
             #userMessageBubble:hover {{
                 background-color: {c["bubble_hover"]};
             }}
+            #userEditBubble {{
+                background-color: {c["edit_bubble_bg"]};
+                border: 1px solid {c["edit_bubble_border"]};
+                border-radius: {px(12)};
+            }}
             #userMessageText {{
                 color: {c["editor_fg"]};
                 font-size: {px(13)};

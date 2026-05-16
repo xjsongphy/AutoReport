@@ -4,8 +4,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import override
 
-from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QKeyEvent, QTextDocument, QIcon
+from PyQt6.QtWidgets import QGraphicsOpacityEffect
 from PyQt6.QtWidgets import (
     QLabel,
     QListWidget,
@@ -130,6 +131,36 @@ class FileSearchPopup(QWidget):
             | Qt.WindowType.NoDropShadowWindowHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+
+        # Setup fade animation
+        self._fade_effect = QGraphicsOpacityEffect(self)
+        self._fade_effect.setOpacity(1.0)
+        self.setGraphicsEffect(self._fade_effect)
+
+        self._fade_animation = QPropertyAnimation(self._fade_effect, b"opacity")
+        self._fade_animation.setDuration(150)
+        self._fade_animation.setStartValue(1.0)
+        self._fade_animation.setEndValue(0.0)
+        self._fade_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        self._fade_animation.finished.connect(self._on_fade_out_finished)
+
+    def _on_fade_out_finished(self) -> None:
+        """Called when fade-out animation completes."""
+        self.hide()
+        self._fade_effect.setOpacity(1.0)
+
+    def hide(self) -> None:
+        """Hide with fade-out animation."""
+        if self.isVisible() and not self._fade_animation.state() == QPropertyAnimation.State.Running:
+            self._fade_animation.start()
+        else:
+            super().hide()
+
+    def hideEvent(self, event) -> None:
+        """Handle hide event (e.g., when clicked outside) - use fade animation."""
+        if self._fade_animation.state() != QPropertyAnimation.State.Running:
+            self._fade_animation.start()
+        event.accept()
 
     def set_current_agent(self, agent_type: str) -> None:
         self._current_agent = agent_type

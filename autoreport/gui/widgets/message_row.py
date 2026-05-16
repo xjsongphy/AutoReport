@@ -67,7 +67,7 @@ class _CodeBlockWidget(QWidget):
         layout.setSpacing(0)
 
         # Header bar with language label (left) and copy icon (right)
-        header = QWidget()
+        header = QWidget(self)
         header.setObjectName("codeBlockHeader")
         hl = QHBoxLayout(header)
         hl.setContentsMargins(12, 4, 4, 4)
@@ -171,7 +171,7 @@ class MessageRow(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        outer = QWidget()
+        outer = QWidget(self)
         outer.setObjectName("msgOuterContainer")
         outer.setSizePolicy(
             QSizePolicy.Policy.Expanding,
@@ -187,7 +187,7 @@ class MessageRow(QWidget):
             self._outer_layout.addWidget(coord)
 
         if self._is_outbound_message():
-            row = QWidget()
+            row = QWidget(outer)
             row.setObjectName("userMessageRow")
             row.setSizePolicy(
                 QSizePolicy.Policy.Expanding,
@@ -198,7 +198,7 @@ class MessageRow(QWidget):
             rl.setSpacing(0)
             rl.addStretch(1)
 
-            self._user_bubble_container = QWidget()
+            self._user_bubble_container = QWidget(row)
             self._user_bubble_container.setObjectName("userMessageBubbleContainer")
             self._user_bubble_container.setSizePolicy(
                 QSizePolicy.Policy.Fixed,
@@ -208,7 +208,7 @@ class MessageRow(QWidget):
             bcl.setContentsMargins(0, 0, 0, 0)
             bcl.setSpacing(0)
 
-            bubble = QWidget()
+            bubble = QWidget(self._user_bubble_container)
             bubble.setObjectName("userMessageBubble")
             bubble.setSizePolicy(
                 QSizePolicy.Policy.Expanding,
@@ -242,7 +242,7 @@ class MessageRow(QWidget):
             bcl.addWidget(bubble)
 
             # Footer with edit/copy buttons (hover visible, right-aligned)
-            self._user_footer = QWidget()
+            self._user_footer = QWidget(self._user_bubble_container)
             self._user_footer.setObjectName("userMsgFooter")
             fl = QHBoxLayout(self._user_footer)
             fl.setContentsMargins(0, 2, 0, 4)
@@ -276,7 +276,7 @@ class MessageRow(QWidget):
             self._outer_layout.addWidget(row)
         else:
             # Agent header
-            header = QWidget()
+            header = QWidget(outer)
             header.setObjectName("agentHeader")
             hl = QHBoxLayout(header)
             hl.setContentsMargins(0, 0, 0, 8)
@@ -302,7 +302,7 @@ class MessageRow(QWidget):
             self._rebuild_agent_content()
 
             # Copy button at bottom — shown on hover, right-aligned
-            self._footer = QWidget()
+            self._footer = QWidget(outer)
             self._footer.setObjectName("msgFooter")
             fl = QHBoxLayout(self._footer)
             fl.setContentsMargins(32, 4, 4, 0)
@@ -353,7 +353,7 @@ class MessageRow(QWidget):
         segments = _parse_code_blocks(self._content)
         for seg_text, seg_lang in segments:
             if seg_lang is not None:
-                code_widget = _CodeBlockWidget(seg_text, seg_lang)
+                code_widget = _CodeBlockWidget(seg_text, seg_lang, self)
                 self._agent_content_layout.addWidget(code_widget)
             else:
                 # Render markdown text
@@ -388,7 +388,7 @@ class MessageRow(QWidget):
         return "v" if self._expanded else ">"
 
     def _build_summary_widget(self, summary_type: str) -> QWidget:
-        widget = QWidget()
+        widget = QWidget(self)
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
@@ -403,7 +403,7 @@ class MessageRow(QWidget):
         return widget
 
     def _build_detail_widget(self, detail_type: str) -> QWidget:
-        widget = QWidget()
+        widget = QWidget(self)
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(20, 2, 0, 0)
         layout.setSpacing(0)
@@ -487,16 +487,16 @@ class MessageRow(QWidget):
         edit_style = (
             f"QPlainTextEdit#userMessageEdit {{"
             f"color: {c['editor_fg']};"
-            f"background-color: {c['editor_bg']};"
-            f"border: 1px solid {c['border']};"
+            f"background-color: {c['edit_bubble_bg']};"
+            f"border: 1px solid {c['edit_bubble_border']};"
             f"border-radius: 4px; padding: 4px;"
             f"}}"
         )
 
         edit_content = self._detail if self._summary is not None else self._content
 
-        edit_bubble = QWidget()
-        edit_bubble.setObjectName("userMessageBubble")
+        edit_bubble = QWidget(self._user_bubble_container)
+        edit_bubble.setObjectName("userEditBubble")
         edit_bubble.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         ebl = QVBoxLayout(edit_bubble)
         ebl.setContentsMargins(8, 8, 12, 8)
@@ -510,15 +510,15 @@ class MessageRow(QWidget):
         edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         edit.document().setDocumentMargin(4.0)
-        edit.viewport().setStyleSheet(f"background-color: {c['editor_bg']};")
+        edit.viewport().setStyleSheet(f"background-color: {c['edit_bubble_bg']};")
         pal = edit.palette()
-        pal.setColor(QPalette.ColorRole.Base, QColor(c["editor_bg"]))
+        pal.setColor(QPalette.ColorRole.Base, QColor(c["edit_bubble_bg"]))
         pal.setColor(QPalette.ColorRole.Text, QColor(c["editor_fg"]))
         edit.setPalette(pal)
         self._edit_widget = edit
         ebl.addWidget(edit)
 
-        actions = QWidget()
+        actions = QWidget(edit_bubble)
         actions.setObjectName("userEditActions")
         al = QHBoxLayout(actions)
         al.setContentsMargins(0, 6, 0, 0)

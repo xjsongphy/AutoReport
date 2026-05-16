@@ -2,8 +2,8 @@
 
 from datetime import datetime
 
-from PyQt6.QtCore import QPoint, Qt, pyqtSignal
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QWidget
+from PyQt6.QtCore import QPoint, Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QWidget, QGraphicsOpacityEffect
 
 
 class SessionListItem(QWidget):
@@ -120,6 +120,18 @@ class ConversationHistoryDropdown(QListWidget):
 
         self._apply_style()
 
+        # Setup fade animation
+        self._fade_effect = QGraphicsOpacityEffect(self)
+        self._fade_effect.setOpacity(1.0)
+        self.setGraphicsEffect(self._fade_effect)
+
+        self._fade_animation = QPropertyAnimation(self._fade_effect, b"opacity")
+        self._fade_animation.setDuration(150)
+        self._fade_animation.setStartValue(1.0)
+        self._fade_animation.setEndValue(0.0)
+        self._fade_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        self._fade_animation.finished.connect(self._on_fade_out_finished)
+
     def _apply_style(self) -> None:
         from PyQt6.QtWidgets import QApplication
         hints = QApplication.styleHints()
@@ -162,6 +174,18 @@ class ConversationHistoryDropdown(QListWidget):
                 background-color: #d32f2f;
             }}
         """)
+
+    def _on_fade_out_finished(self) -> None:
+        """Called when fade-out animation completes."""
+        self.hide()
+        self._fade_effect.setOpacity(1.0)
+
+    def hide(self) -> None:
+        """Hide with fade-out animation."""
+        if self.isVisible() and not self._fade_animation.state() == QPropertyAnimation.State.Running:
+            self._fade_animation.start()
+        else:
+            super().hide()
 
     def show_dropdown(self, parent_widget: QWidget) -> None:
         """Position and show the dropdown below parent widget."""
@@ -273,5 +297,7 @@ class ConversationHistoryDropdown(QListWidget):
             self.delete_session_requested.emit(session_id)
 
     def hideEvent(self, event) -> None:
-        """Hide when clicked outside."""
-        super().hideEvent(event)
+        """Hide when clicked outside - use fade animation."""
+        if self._fade_animation.state() != QPropertyAnimation.State.Running:
+            self._fade_animation.start()
+        event.accept()

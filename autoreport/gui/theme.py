@@ -94,6 +94,8 @@ def get_theme_colors() -> dict[str, str]:
         # === Chat/Agent Panel ===
         "bubble_bg": "#2a2a2a" if dark else "#f0f0f0",
         "bubble_hover": "#333333" if dark else "#e8e8e8",
+        "edit_bubble_bg": "#3c3c3c" if dark else "#ffffff",
+        "edit_bubble_border": "transparent" if dark else "#616161",
         "avatar_bg": "#3c3c3c" if dark else "#e0e0e0",
         "avatar_fg": "#cccccc" if dark else "#616161",
 

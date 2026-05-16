@@ -168,7 +168,7 @@ class MessagesArea(QScrollArea):
             summary=summary,
             detail=detail,
             expandable=expandable,
-            parent=None,
+            parent=self._container,
         )
 
         # Connect edit signals for user messages
@@ -234,7 +234,7 @@ class MessagesArea(QScrollArea):
             content=text,
             timestamp="",
             is_coordination=True,
-            parent=None,
+            parent=self._container,
         )
 
         # Find the stretch item and insert before it
