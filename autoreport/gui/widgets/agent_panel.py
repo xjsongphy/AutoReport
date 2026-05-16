@@ -21,13 +21,14 @@ from autoreport.gui.widgets.chat_input import ChatInput
 from autoreport.gui.widgets.conversation_history import ConversationHistoryDropdown
 from autoreport.gui.widgets.debug_panel import DebugPanel
 from autoreport.gui.widgets.file_search_popup import FileSearchPopup
-from autoreport.gui.widgets.ui_utils import IconActionButton
+from autoreport.gui.widgets.ui_utils import IconActionButton, NoWheelComboBox
 from autoreport.utils.agent_labels import get_agent_badge, get_agent_title, get_agent_icon
 from autoreport.gui.widgets.messages_area import MessagesArea
 from autoreport.gui.widgets.status_indicator import StatusIndicator
 from autoreport.gui.widgets.working_border import WorkingBorder
 from autoreport.interfaces.types import ApiDebugMessage
 from autoreport.utils.logging_config import ui_logger
+from ..theme import get_theme_colors
 
 
 class AgentPanel(QWidget):
@@ -44,6 +45,7 @@ class AgentPanel(QWidget):
     conversation_cleared = pyqtSignal()
     compact_requested = pyqtSignal()
     init_requested = pyqtSignal()
+    agent_type_changed = pyqtSignal(str)
 
     def __init__(self, panel_id: str, title: str, workspace: Path | None = None):
         super().__init__()
@@ -56,6 +58,7 @@ class AgentPanel(QWidget):
         self._context_enabled: bool = True
         self._current_tool_group = None
         self._pending_tool_groups: list = []
+        self._agent_selector: NoWheelComboBox | None = None
 
         self._file_search_manager = FileSearchManager(self._workspace)
         self._file_search_popup: FileSearchPopup | None = None
@@ -78,6 +81,8 @@ class AgentPanel(QWidget):
         hl = QHBoxLayout(header)
         hl.setContentsMargins(16, 0, 16, 0)
         hl.setSpacing(8)
+        self._header = header
+        self._header_layout = hl
 
         # Icon label
         self._icon_label = QLabel()
@@ -93,7 +98,20 @@ class AgentPanel(QWidget):
         self._title_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         hl.addWidget(self._title_label)
 
-        self._status_label = QLabel("idle")
+        if self.panel_id == "sub":
+            self._title_label.setVisible(False)
+            self._agent_selector = NoWheelComboBox()
+            self._agent_selector.setObjectName("subAgentSelector")
+            self._agent_selector.addItem("Data Analysis", "data_analysis")
+            self._agent_selector.addItem("Plotting", "plotting")
+            self._agent_selector.addItem("Theory", "theory")
+            self._agent_selector.addItem("Report", "report")
+            self._agent_selector.setMinimumContentsLength(12)
+            self._agent_selector.setSizeAdjustPolicy(NoWheelComboBox.SizeAdjustPolicy.AdjustToContents)
+            self._agent_selector.currentIndexChanged.connect(self._on_agent_selector_changed)
+            hl.addWidget(self._agent_selector)
+
+        self._status_label = QLabel("Idle")
         self._status_label.setObjectName("panelStatus")
         hl.addWidget(self._status_label)
 
@@ -275,29 +293,20 @@ class AgentPanel(QWidget):
         Calculate minimum width needed for header content (title + buttons).
         Let splitter control actual width through stretch factor.
         """
-        # Force a layout update to get correct sizes
-        self._title_label.updateGeometry()
-        self._status_label.updateGeometry()
+        # Measure visible header widgets directly to avoid clipping by stale metrics.
+        widgets = [self._icon_label]
+        if self._agent_selector is not None and self._agent_selector.isVisible():
+            widgets.append(self._agent_selector)
+        elif self._title_label.isVisible():
+            widgets.append(self._title_label)
+        widgets.extend([self._status_label, self._new_conv_btn, self._history_btn])
 
-        # Use actual widget sizes instead of font metrics
-        title_width = self._title_label.sizeHint().width()
-        status_width = self._status_label.sizeHint().width()
-
-        # Calculate minimum width:
-        # - Left margin (hl.setContentsMargins(16, 0, 16, 0)): 16px
-        # - Icon: 24px
-        # - Spacing after icon: 8px (hl.setSpacing(8))
-        # - Title: variable
-        # - Spacing after title: 8px
-        # - Status: variable
-        # - Stretch: takes remaining space
-        # - Spacing before buttons: 8px
-        # - 2 buttons: 28px * 2
-        # - Spacing between buttons: 8px
-        # - Right margin: 16px
-        min_width = 16 + 24 + 8 + title_width + 8 + status_width + 8 + (28 * 2) + 8 + 16
-        # Add extra padding for safety
-        min_width += 10
+        spacing = self._header_layout.spacing() if hasattr(self, "_header_layout") else 8
+        margins = self._header_layout.contentsMargins() if hasattr(self, "_header_layout") else None
+        margin_total = (margins.left() + margins.right()) if margins else 32
+        content_width = sum(w.sizeHint().width() for w in widgets)
+        gap_count = max(0, len(widgets) - 1)
+        min_width = margin_total + content_width + (gap_count * spacing) + 24
         self.setMinimumWidth(min_width)
 
     # ---- File reference handling ----
@@ -497,10 +506,24 @@ class AgentPanel(QWidget):
         self._title_label.setText(get_agent_title(agent_type))
         if self._file_search_popup:
             self._file_search_popup.set_current_agent(agent_type)
+        if self._agent_selector is not None:
+            idx = self._agent_selector.findData(agent_type)
+            if idx >= 0 and idx != self._agent_selector.currentIndex():
+                self._agent_selector.blockSignals(True)
+                self._agent_selector.setCurrentIndex(idx)
+                self._agent_selector.blockSignals(False)
 
     @property
     def agent_type(self) -> str:
         return self._agent_type
+
+    def _on_agent_selector_changed(self, index: int) -> None:
+        if self._agent_selector is None or index < 0:
+            return
+        agent_type = str(self._agent_selector.currentData() or "")
+        if not agent_type or agent_type == self._agent_type:
+            return
+        self.agent_type_changed.emit(agent_type)
 
     # ---- Messages ----
 
@@ -518,12 +541,16 @@ class AgentPanel(QWidget):
         if streaming and role == "agent" and not content:
             return
 
-        if streaming and role == "agent":
+        if role == "agent":
             rows = self._messages_area.get_message_rows()
             if rows and rows[-1]._role == "agent":
-                rows[-1].append_content(content)
-                self._messages_area.follow_streaming_if_enabled()
-                return
+                # If we inserted an empty anchor row for pre-text tool calls,
+                # reuse it when the first agent text arrives.
+                if rows[-1]._content == "" or streaming:
+                    rows[-1].append_content(content)
+                    if streaming:
+                        self._messages_area.follow_streaming_if_enabled()
+                    return
 
         ts = datetime.now().strftime("%H:%M")
         agent_name = self._title_label.text() or "Agent"
@@ -538,6 +565,19 @@ class AgentPanel(QWidget):
             expandable=expandable,
         )
 
+    def _ensure_agent_anchor_for_tools(self) -> None:
+        rows = self._messages_area.get_message_rows()
+        if rows and rows[-1]._role == "agent":
+            return
+        ts = datetime.now().strftime("%H:%M")
+        agent_name = self._title_label.text() or "Agent"
+        self._messages_area.add_message_row(
+            role="agent",
+            content="",
+            timestamp=ts,
+            agent_name=agent_name,
+        )
+
     def add_tool_call(
         self,
         tool_name: str,
@@ -546,6 +586,8 @@ class AgentPanel(QWidget):
         detail: str | None = None,
         expandable: bool = True,
     ) -> None:
+        # Ensure tool calls are visually grouped under an agent turn header.
+        self._ensure_agent_anchor_for_tools()
         # One tool call -> one tool group row.
         self._current_tool_group = self._messages_area.add_tool_group()
         self._pending_tool_groups.append(self._current_tool_group)
@@ -705,14 +747,19 @@ class AgentPanel(QWidget):
 
     def set_status(self, status: str, extra: dict | None = None) -> None:
         status_map = {
-            "idle": ("idle", False),
-            "thinking": ("thinking", True),
-            "running_tool": ("tool", True),
-            "error": ("error", False),
-            "debug_mode": ("debug", False),
+            "idle": ("Idle", False, "status_idle"),
+            "thinking": ("Thinking", True, "status_think"),
+            "running_tool": ("Tool", True, "status_tool"),
+            "error": ("Error", False, "status_error"),
+            "debug_mode": ("Debug", False, "status_debug"),
         }
-        label, active = status_map.get(status, (status, False))
+        label, active, color_key = status_map.get(
+            status,
+            (status.replace("_", " ").title(), False, "status_idle"),
+        )
         self._status_label.setText(label)
+        colors = get_theme_colors()
+        self._status_label.setStyleSheet(f"color: {colors.get(color_key, colors['status_idle'])};")
 
         if active:
             header = "Thinking" if status == "thinking" else "Running tool"

@@ -23,7 +23,7 @@ from ..config.manager import ConfigManager
 from ..config.presets import ProviderPreset, get_presets_by_category, load_presets
 from ..config.schema import ApiConfig
 from ..core.preset_sync import is_cached, sync_presets
-from .widgets.ui_utils import NoWheelComboBox, combo_box_qss
+from .widgets.ui_utils import NoWheelComboBox, combo_box_qss, line_edit_qss
 
 CATEGORY_LABELS = {
     "official": "官方",
@@ -759,6 +759,8 @@ class ConfigDialog(QDialog):
             "syncBtnFg": "#30d158" if dark else "#059669",
             "syncBtnBorder": "#30d158" if dark else "#059669",
             "syncBtnHoverBg": "#1a3a1a" if dark else "#ecfdf5",
+            "fw_semibold": "600",
+            "fw_bold": "700",
         }
 
         self.setStyleSheet(f"""
@@ -911,19 +913,18 @@ class ConfigDialog(QDialog):
                 color: {c["primaryBtnBg"]};
                 border-color: {c["primaryBtnBg"]};
             }}
-            QLineEdit {{
-                border: 1px solid {c["inputBorder"]};
-                border-radius: 4px;
-                padding: 6px 10px;
-                font-size: 13px;
-                background-color: {c["inputBg"]};
-                color: {c["inputFg"]};
-            }}
-            QLineEdit:focus {{ border-color: {c["inputFocusBorder"]}; }}
-            QLineEdit:disabled {{
-                background-color: {c["inputDisabledBg"]};
-                color: {c["inputDisabledFg"]};
-            }}
+            {line_edit_qss(
+                "",
+                border_color=c["inputBorder"],
+                focus_border_color=c["inputFocusBorder"],
+                background_color=c["inputBg"],
+                foreground_color=c["inputFg"],
+                disabled_bg=c["inputDisabledBg"],
+                disabled_fg=c["inputDisabledFg"],
+                radius="4px",
+                font_size=13,
+                padding="6px 10px",
+            )}
             QCheckBox {{ font-size: 13px; color: {c["checkFg"]}; }}
             {combo_box_qss(
                 "",
@@ -935,6 +936,9 @@ class ConfigDialog(QDialog):
                 selection_fg=c["primaryBtnFg"],
                 font_size=13,
                 padding="6px 30px 6px 10px",
+                radius="6px",
+                popup_radius="6px",
+                item_radius="4px",
             )}
             QScrollArea {{
                 background-color: {c["bodyBg"]};

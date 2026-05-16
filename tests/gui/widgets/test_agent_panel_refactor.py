@@ -103,6 +103,9 @@ def test_add_tool_call_creates_group(agent_panel):
 
     groups = agent_panel._messages_area.get_tool_groups()
     assert len(groups) == 1
+    rows = agent_panel._messages_area.get_message_rows()
+    assert len(rows) == 1
+    assert rows[0]._role == "agent"
 
 
 def test_add_tool_result_adds_to_group(agent_panel):
@@ -141,6 +144,16 @@ def test_add_tool_result_updates_pending_group_item(agent_panel):
     groups = agent_panel._messages_area.get_tool_groups()
     assert len(groups) == 1
     assert "Theory replied: first line" in groups[0].get_summary_text()
+
+
+def test_tool_call_before_agent_text_reuses_agent_anchor(agent_panel):
+    agent_panel.add_tool_call("list_dir", {"path": "."})
+    agent_panel.add_message(role="agent", content="Hello", streaming=True)
+
+    rows = agent_panel._messages_area.get_message_rows()
+    assert len(rows) == 1
+    assert rows[0]._role == "agent"
+    assert rows[0]._content == "Hello"
 
 
 def test_set_debug_mode_shows_hides_panel(agent_panel):
@@ -225,11 +238,11 @@ def test_multiple_messages_and_tools(agent_panel):
 
     # Add tool call
     agent_panel.add_tool_call("read_file", {"path": "test.py"})
-    assert agent_panel._messages_area.message_count() == 2
+    assert agent_panel._messages_area.message_count() == 3
 
     # Add tool result
     agent_panel.add_tool_result("read_file", "content", None)
-    assert agent_panel._messages_area.message_count() == 2  # Still 2 (tool group is 1 item)
+    assert agent_panel._messages_area.message_count() == 3  # Still 3 (anchor + tool group + user)
 
     # Add agent response
     agent_panel.add_message(role="agent", content="I've read the file")
@@ -238,7 +251,7 @@ def test_multiple_messages_and_tools(agent_panel):
     rows = agent_panel._messages_area.get_message_rows()
     groups = agent_panel._messages_area.get_tool_groups()
 
-    assert len(rows) == 2  # user + agent messages
+    assert len(rows) == 2  # user + anchored agent message
     assert len(groups) == 1  # 1 tool group
 
 
@@ -247,7 +260,7 @@ def test_clear_messages(agent_panel):
     agent_panel.add_message(role="user", content="Test")
     agent_panel.add_tool_call("test_tool", {})
 
-    assert agent_panel._messages_area.message_count() == 2
+    assert agent_panel._messages_area.message_count() == 3
 
     agent_panel._messages_area.clear()
 

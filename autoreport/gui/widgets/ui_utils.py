@@ -5,7 +5,7 @@ from pathlib import Path
 from PyQt6.QtCore import QObject, QPoint, QRectF, QSize, Qt, QTimer
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
-from PyQt6.QtWidgets import QApplication, QComboBox, QLabel, QPushButton, QWidget
+from PyQt6.QtWidgets import QApplication, QComboBox, QFrame, QLabel, QListView, QPushButton, QStyleFactory, QWidget
 
 from ..theme import get_theme_colors
 
@@ -118,8 +118,8 @@ def compact_tooltip_qss(selector: str = "QLabel") -> str:
             background-color: {c["surface"]};
             color: {c["fg"]};
             border: 1px solid {c["border"]};
-            border-radius: 6px;
-            padding: 2px 6px;
+            border-radius: 10px;
+            padding: 4px 8px;
             font-size: 11px;
         }}
     """
@@ -136,6 +136,26 @@ def install_compact_tooltip(button: QPushButton, text: str) -> None:
 
 class NoWheelComboBox(QComboBox):
     """QComboBox that ignores wheel events and draws a clean chevron."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFrame(False)
+        # Force a cross-platform style path (avoid macOS native popup look).
+        fusion = QStyleFactory.create("Fusion")
+        if fusion is not None:
+            self.setStyle(fusion)
+
+        # Use a non-native popup view so QSS hover/font are applied consistently.
+        popup_view = QListView(self)
+        popup_view.setObjectName("comboPopupView")
+        popup_view.setFrameShape(QFrame.Shape.NoFrame)
+        popup_view.setUniformItemSizes(True)
+        popup_view.setMouseTracking(True)
+        popup_view.setEditTriggers(QListView.EditTrigger.NoEditTriggers)
+        popup_view.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
+        popup_view.viewport().setMouseTracking(True)
+        popup_view.viewport().installEventFilter(self)
+        self.setView(popup_view)
 
     def wheelEvent(self, event) -> None:  # noqa: N802
         event.ignore()
@@ -163,7 +183,71 @@ class NoWheelComboBox(QComboBox):
         if self.count() == 0:
             self.addItem("（无可用项）")
             self.model().item(0).setEnabled(False)
+        self._apply_popup_style()
         super().showPopup()
+        # Keep popup position consistent across platforms: directly below combo.
+        view = self.view()
+        if view and view.window():
+            view.setFont(self.font())
+            popup = view.window()
+            popup.setWindowFlags(
+                Qt.WindowType.Popup
+                | Qt.WindowType.FramelessWindowHint
+                | Qt.WindowType.NoDropShadowWindowHint
+            )
+            popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            popup.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+            popup.setContentsMargins(0, 0, 0, 0)
+            popup.setStyleSheet("background: transparent; border: none;")
+            popup.move(self.mapToGlobal(QPoint(0, self.height())))
+            popup.show()
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        view = self.view()
+        if view and obj is view.viewport():
+            et = event.type()
+            if et in (event.Type.Leave, event.Type.Hide):
+                sel = view.selectionModel()
+                if sel:
+                    sel.clearSelection()
+                view.setCurrentIndex(view.model().index(-1, -1))
+        return super().eventFilter(obj, event)
+
+    def _apply_popup_style(self) -> None:
+        c = get_theme_colors()
+        radius = c.get("radius_md", "6px")
+        item_radius = c.get("radius_sm", "4px")
+        view = self.view()
+        if view is None:
+            return
+        view.setStyleSheet(
+            f"""
+            QListView#comboPopupView {{
+                border: 1px solid {c["border"]};
+                border-radius: {radius};
+                background-color: {c["surface"]};
+                color: {c["fg"]};
+                outline: none;
+                padding: 0;
+            }}
+            QListView#comboPopupView::item {{
+                border: none;
+                background: transparent;
+                color: {c["fg"]};
+                padding: 0 8px;
+                min-height: 22px;
+                border-radius: {item_radius};
+            }}
+            QListView#comboPopupView::item:selected {{
+                background: transparent;
+                color: {c["fg"]};
+            }}
+            QListView#comboPopupView::item:hover {{
+                background-color: {c["selection"]};
+                color: {c["fg"]};
+            }}
+            """
+        )
 
 
 class IconActionButton(QPushButton):
@@ -203,12 +287,16 @@ def combo_box_qss(
     selection_fg: str,
     font_size: int = 12,
     padding: str = "4px 24px 4px 8px",
+    radius: str = "4px",
+    popup_radius: str | None = None,
+    item_radius: str = "0px",
 ) -> str:
     """Build a reusable combo-box + popup list QSS fragment."""
+    effective_popup_radius = popup_radius if popup_radius is not None else radius
     return f"""
         QComboBox{selector} {{
             border: 1px solid {border_color};
-            border-radius: 4px;
+            border-radius: {radius};
             padding: {padding};
             font-size: {font_size}px;
             background-color: {background_color};
@@ -232,20 +320,27 @@ def combo_box_qss(
         }}
         QComboBox{selector} QAbstractItemView {{
             border: 1px solid {border_color};
-            border-radius: 4px;
-            background-color: {background_color};
+            border-radius: {effective_popup_radius};
+            background: transparent;
             color: {foreground_color};
             selection-background-color: {selection_bg};
             selection-color: {selection_fg};
-            padding: 4px;
+            padding: 0;
             outline: none;
+        }}
+        QComboBox{selector} QAbstractItemView::viewport {{
+            border: none;
+            border-radius: {effective_popup_radius};
+            background-color: {background_color};
+            padding: 0;
         }}
         QComboBox{selector} QAbstractItemView::item {{
             min-height: 22px;
-            padding: 2px 8px;
+            padding: 0 8px;
             border: none;
-            border-radius: 4px;
+            border-radius: {item_radius};
             color: {foreground_color};
+            background: transparent;
         }}
         QComboBox{selector} QAbstractItemView::item:selected {{
             background-color: transparent;
@@ -254,6 +349,39 @@ def combo_box_qss(
         QComboBox{selector} QAbstractItemView::item:hover {{
             background-color: {selection_bg};
             color: {selection_fg};
+        }}
+    """
+
+
+def line_edit_qss(
+    selector: str,
+    *,
+    border_color: str,
+    focus_border_color: str,
+    background_color: str,
+    foreground_color: str,
+    disabled_bg: str,
+    disabled_fg: str,
+    radius: str = "4px",
+    font_size: int = 13,
+    padding: str = "6px 10px",
+) -> str:
+    """Build a reusable QLineEdit style fragment."""
+    return f"""
+        QLineEdit{selector} {{
+            border: 1px solid {border_color};
+            border-radius: {radius};
+            padding: {padding};
+            font-size: {font_size}px;
+            background-color: {background_color};
+            color: {foreground_color};
+        }}
+        QLineEdit{selector}:focus {{
+            border-color: {focus_border_color};
+        }}
+        QLineEdit{selector}:disabled {{
+            background-color: {disabled_bg};
+            color: {disabled_fg};
         }}
     """
 

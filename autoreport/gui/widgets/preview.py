@@ -1,17 +1,11 @@
-"""Preview widget with VS Code-style split editor and multi-format file viewing.
+"""Preview widget with a unified editor for all file types."""
 
-General mode: horizontal splitter with up to 2 EditorPanels (tab bars + stacked content).
-Tex mode: vertical splitter with QScintilla (top) + QPdfView (bottom) + compile button.
-"""
-
-import shutil
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import pandas as pd
 from loguru import logger
-from PyQt6.QtCore import QPointF, Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtPdf import QPdfDocument
 from PyQt6.QtWidgets import (
@@ -19,8 +13,6 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMenu,
-    QMessageBox,
-    QPushButton,
     QScrollArea,
     QSplitter,
     QStackedWidget,
@@ -30,11 +22,10 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ..icons import get_run_icon
 from ..scale import scaled, scaled_size
 from ..scintilla_utils import apply_scintilla_style, configure_lexer_colors
 from ..theme import get_theme_colors
-from .ui_utils import IconActionButton, NoWheelComboBox, combo_box_qss, filled_button_qss
+from .ui_utils import IconActionButton
 
 # ================================================================== #
 #  File-type routing
@@ -332,7 +323,7 @@ class EditorPanel(QWidget):
         tab_idx = self._tab_bar.addTab(path.name)
         self._tab_bar.setCurrentIndex(tab_idx)
         self._tab_bar.setTabToolTip(tab_idx, str(path))
-        self._tab_bar.setVisible(True)
+        self._tab_bar.setVisible(False)
 
         if preview:
             # PyQt6 doesn't have tabFont(), use stylesheet for italic preview tabs
@@ -385,7 +376,7 @@ class EditorPanel(QWidget):
         tab_idx = other._tab_bar.addTab(path.name)
         other._tab_bar.setCurrentIndex(tab_idx)
         other._tab_bar.setTabToolTip(tab_idx, str(path))
-        other._tab_bar.setVisible(True)
+        other._tab_bar.setVisible(False)
         if not state.pinned:
             other._tab_bar.setTabData(tab_idx, "preview")
         other._active_key = key
@@ -477,8 +468,6 @@ class EditorPanel(QWidget):
         close_act = menu.addAction("关闭")
         close_others_act = menu.addAction("关闭其他")
         close_all_act = menu.addAction("关闭所有")
-        menu.addSeparator()
-        split_act = menu.addAction("向右拆分")
 
         action = menu.exec(self._tab_bar.mapToGlobal(pos))
         if action == close_act:
@@ -487,8 +476,7 @@ class EditorPanel(QWidget):
             self.close_other_tabs(path)
         elif action == close_all_act:
             self.close_all_tabs()
-        elif action == split_act:
-            self.split_requested.emit(key)
+        # Single editor mode: no split action.
 
     def apply_style(self) -> None:
         c = get_theme_colors()
@@ -532,7 +520,7 @@ class EditorPanel(QWidget):
 
 
 class PreviewWidget(QWidget):
-    """Preview widget with VS Code-style split editor."""
+    """Unified editor pane with tabs, regardless of file type."""
 
     selection_changed = pyqtSignal(str, str, int, int)
     file_changed = pyqtSignal(Path)  # Emitted when current file changes
@@ -540,21 +528,12 @@ class PreviewWidget(QWidget):
     def __init__(self, workspace: Path):
         super().__init__()
         self.workspace = Path(workspace).resolve()
-        self._current_directory = "data"
+        self._current_directory = ""
         self._current_file: Path | None = None
-        self._current_pdf: Path | None = None
-        self._synctex_available: bool | None = None
 
-        # General mode panels
+        # Single editor panel
         self._panels: list[EditorPanel] = []
         self._general_splitter: QSplitter | None = None
-
-        # Tex mode components (lazy)
-        self._tex_widget: QWidget | None = None
-        self._tex_scintilla = None
-        self._tex_pdf_view = None
-        self._tex_pdf_document = None
-        self._tex_process = None
 
         self._setup_ui()
 
@@ -568,14 +547,8 @@ class PreviewWidget(QWidget):
         header.setObjectName("previewHeader")
         header.setFixedHeight(36)
         hl = QHBoxLayout(header)
-        hl.setContentsMargins(12, 0, 12, 0)
+        hl.setContentsMargins(0, 0, 0, 0)
         hl.setSpacing(0)
-
-        # Title label - "预览"
-        self._title_label = QLabel("预览")
-        self._title_label.setObjectName("previewTitle")
-        self._title_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        hl.addWidget(self._title_label)
 
         # Unified tab bar for all open files
         self._unified_tab_bar = QTabBar()
@@ -590,29 +563,22 @@ class PreviewWidget(QWidget):
         self._unified_tab_bar.tabCloseRequested.connect(self._on_unified_tab_close)
         self._unified_tab_bar.customContextMenuRequested.connect(self._on_unified_tab_context_menu)
         hl.addWidget(self._unified_tab_bar, 1)
-
-        # TeX mode controls (hidden by default)
-        self._compile_btn = QPushButton()
-        self._compile_btn.setObjectName("compileBtn")
-        self._compile_btn.setFixedSize(scaled(32), scaled(28))
-        self._compile_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._compile_btn.setIcon(get_run_icon())
-        self._compile_btn.setToolTip("编译")
-        self._compile_btn.clicked.connect(self._compile_tex)
-        self._compile_btn.setVisible(False)
-        hl.addWidget(self._compile_btn)
+        self._unified_tab_bar.setVisible(False)
 
         layout.addWidget(header)
-
-        # Mode stack
-        self._mode_stack = QStackedWidget()
-        layout.addWidget(self._mode_stack, 1)
-
-        # Page 0: General mode (splitter with EditorPanels)
-        self._setup_general_mode()
-        # Page 1: Tex mode (lazy, created on first access)
+        layout.addWidget(self._build_general_container(), 1)
 
         self._apply_style()
+
+    def _build_general_container(self) -> QWidget:
+        container = QWidget(self)
+        cl = QVBoxLayout(container)
+        cl.setContentsMargins(0, 0, 0, 0)
+        cl.setSpacing(0)
+
+        self._setup_general_mode()
+        cl.addWidget(self._general_splitter, 1)
+        return container
 
     def _setup_general_mode(self) -> None:
         self._general_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -620,69 +586,11 @@ class PreviewWidget(QWidget):
 
         # Left panel (always present)
         left = EditorPanel()
-        left.split_requested.connect(self._on_split_requested)
         left.panel_emptied.connect(self._on_panel_emptied)
         left.tab_changed.connect(self._sync_tabs_from_panels)
         self._panels.append(left)
         self._general_splitter.addWidget(left)
 
-        self._mode_stack.addWidget(self._general_splitter)  # page 0
-
-    # ------------------------------------------------------------------ #
-    #  Tex mode (lazy init)
-    # ------------------------------------------------------------------ #
-
-    def _ensure_tex_mode(self) -> None:
-        if self._tex_widget is not None:
-            return
-
-        from PyQt6.Qsci import QsciLexerTeX, QsciScintilla
-        from PyQt6.QtPdfWidgets import QPdfView
-        from PyQt6.QtGui import QColor, QFont
-
-        c = get_theme_colors()
-        self._tex_widget = QWidget(self)
-        tex_layout = QVBoxLayout(self._tex_widget)
-        tex_layout.setContentsMargins(0, 0, 0, 0)
-        tex_layout.setSpacing(0)
-
-        # TeX section (single editor pane by default)
-        tex_section = QWidget(self)
-        tsl = QVBoxLayout(tex_section)
-        tsl.setContentsMargins(0, 0, 0, 0)
-        tsl.setSpacing(0)
-
-        self._tex_scintilla = QsciScintilla()
-        apply_scintilla_style(self._tex_scintilla, object_name="texEditor", line_numbers=True, read_only=False)
-
-        # Configure lexer with theme colors
-        lexer = QsciLexerTeX(self._tex_scintilla)
-        self._tex_scintilla.setLexer(lexer)
-        self._tex_scintilla.marginClicked.connect(self._on_tex_margin_clicked)
-        configure_lexer_colors(lexer)
-
-        # Update margin width when content changes
-        from ..scintilla_utils import update_margin_width
-        self._tex_scintilla.textChanged.connect(lambda: update_margin_width(self._tex_scintilla))
-
-        tsl.addWidget(self._tex_scintilla, 1)
-
-        # PDF viewer kept for compile preview refresh, but not shown side-by-side by default.
-        self._tex_pdf_document = QPdfDocument(None)
-        self._tex_pdf_view = QPdfView(None)
-        self._tex_pdf_view.setObjectName("texPdfView")
-        self._tex_pdf_view.setDocument(self._tex_pdf_document)
-        self._tex_pdf_view.setPageMode(QPdfView.PageMode.MultiPage)
-        self._tex_pdf_view.setStyleSheet(f"""
-            QPdfView#texPdfView {{
-                background-color: {c["editor_bg"]};
-                border: none;
-            }}
-        """)
-
-        tex_layout.addWidget(tex_section, 1)
-
-        self._mode_stack.addWidget(self._tex_widget)  # page 1
 
     # ------------------------------------------------------------------ #
     #  Style
@@ -697,13 +605,7 @@ class PreviewWidget(QWidget):
             #previewHeader {{
                 background-color: {c["surface"]};
                 border-bottom: 1px solid {c["border"]};
-                padding-right: 1px;
-            }}
-            #previewTitle {{
-                font-size: 13px;
-                font-weight: {c["fw_semibold"]};
-                color: {c["fg"]};
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
+                padding: 0;
             }}
             #previewFileCardsScroll {{
                 background-color: transparent;
@@ -721,25 +623,6 @@ class PreviewWidget(QWidget):
             #previewSettingsBtn:hover {{
                 background-color: {c["hover"]};
             }}
-            {combo_box_qss(
-                "#engineCombo",
-                border_color=c["input_border"],
-                background_color=c["input_bg"],
-                foreground_color=c["fg"],
-                hover_border_color=c["accent"],
-                selection_bg=c["hover"],
-                selection_fg=c["fg"],
-                font_size=12,
-                padding="4px 24px 4px 8px",
-            )}
-            {filled_button_qss(
-                "#compileBtn",
-                bg=c["send_bg"],
-                fg="#ffffff",
-                hover_bg=c["send_hover"],
-                disabled_bg=c["muted"],
-                disabled_fg=c["editor_bg"],
-            )}
             QSplitter#editorSplitter::handle {{
                 background-color: {c["border"]};
                 width: 2px;
@@ -749,21 +632,30 @@ class PreviewWidget(QWidget):
                 border: none;
             }}
             QTabBar#previewTabBar::tab {{
-                background-color: {c["tab_inactive_bg"]};
+                background-color: {c["bg"]};
                 color: {c["tab_inactive_fg"]};
                 border: none;
                 border-right: 1px solid {c["border"]};
-                padding: 6px 12px;
-                margin-right: 2px;
-                border-radius: 4px;
+                padding: 0 12px 0 10px;
+                min-height: 35px;
+                margin: 0;
+                border-radius: 0px;
             }}
             QTabBar#previewTabBar::tab:selected {{
-                background-color: {c["tab_active_bg"]};
+                background-color: {c["tab_inactive_bg"]};
                 color: {c["tab_active_fg"]};
                 border-top: 2px solid {c["accent"]};
             }}
-            QTabBar#previewTabBar::tab:hover {{
+            QTabBar#previewTabBar::tab:!selected:hover {{
                 background-color: {c["hover"]};
+            }}
+            QTabBar#previewTabBar::tab:selected:hover {{
+                background-color: {c["tab_inactive_bg"]};
+            }}
+            QTabBar#previewTabBar::close-button {{
+                image: none;
+                subcontrol-position: right;
+                margin-right: 2px;
             }}
         """)
 
@@ -776,42 +668,13 @@ class PreviewWidget(QWidget):
 
     def set_directory(self, directory: str) -> None:
         self._current_directory = directory
-        self._current_file = None
-        self._current_pdf = None
-
-        # Always show "预览" as title
-        self._title_label.setText("预览")
-
-        # Clear unified tab bar (QTabBar has no clear() method, remove tabs one by one)
-        while self._unified_tab_bar.count() > 0:
-            self._unified_tab_bar.removeTab(0)
-
-        if directory == "tex":
-            self._ensure_tex_mode()
-            self._mode_stack.setCurrentIndex(1)
-            self._compile_btn.setVisible(True)
-        else:
-            self._mode_stack.setCurrentIndex(0)
-            self._compile_btn.setVisible(False)
-            # Clear all tabs in panels when switching directories
-            for panel in self._panels:
-                panel.close_all_tabs()
-
-        logger.debug("Preview directory: {}", directory)
+        logger.debug("Editor directory context updated: {}", directory)
 
     def load_file(self, file_path: Path) -> None:
         file_path = Path(file_path).resolve()
         self._current_file = file_path
-
-        if self._current_directory == "tex":
-            self._load_tex_file(file_path)
-            # Add tab for tex file
-            self._add_unified_tab(file_path)
-        else:
-            # Open in panel
-            self._panels[-1].open_file(file_path, preview=True)
-            # Sync tabs from panel to unified tab bar
-            self._sync_tabs_from_panels()
+        self._panels[-1].open_file(file_path, preview=False)
+        self._sync_tabs_from_panels()
 
         # Emit file changed signal
         self.file_changed.emit(file_path)
@@ -842,6 +705,7 @@ class PreviewWidget(QWidget):
                 self._unified_tab_bar.setTabToolTip(tab_idx, str(state.path))
                 if key == panel._active_key:
                     self._unified_tab_bar.setCurrentIndex(tab_idx)
+        self._unified_tab_bar.setVisible(self._unified_tab_bar.count() > 0)
 
     def _on_unified_tab_changed(self, index: int) -> None:
         """Handle unified tab bar change."""
@@ -859,17 +723,13 @@ class PreviewWidget(QWidget):
         file_path = Path(file_path_str)
         self._current_file = file_path
 
-        if self._current_directory == "tex":
-            # Switch tex file
-            self._load_tex_file(file_path)
-        else:
-            # Find the panel that has this file and switch to it
-            for panel in self._panels:
-                key = str(file_path.resolve())
-                if key in panel._tabs:
-                    idx = panel._tab_order.index(key)
-                    panel._tab_bar.setCurrentIndex(idx)
-                    break
+        # Find the panel that has this file and switch to it
+        for panel in self._panels:
+            key = str(file_path.resolve())
+            if key in panel._tabs:
+                idx = panel._tab_order.index(key)
+                panel._tab_bar.setCurrentIndex(idx)
+                break
 
         # Emit file changed signal
         self.file_changed.emit(file_path)
@@ -882,19 +742,14 @@ class PreviewWidget(QWidget):
 
         file_path = Path(file_path_str)
 
-        if self._current_directory == "tex":
-            # Clear tex file
-            self._unified_tab_bar.removeTab(index)
-            self._current_file = None
-        else:
-            # Close tab in panel
-            for panel in self._panels:
-                key = str(file_path.resolve())
-                if key in panel._tabs:
-                    panel._close_tab(key)
-                    break
-            # Sync tabs
-            self._sync_tabs_from_panels()
+        # Close tab in panel
+        for panel in self._panels:
+            key = str(file_path.resolve())
+            if key in panel._tabs:
+                panel._close_tab(key)
+                break
+        # Sync tabs
+        self._sync_tabs_from_panels()
 
         # Emit file changed signal with None or current active file
         active_file = self.current_file
@@ -933,236 +788,12 @@ class PreviewWidget(QWidget):
             for i in range(self._unified_tab_bar.count() - 1, -1, -1):
                 self._on_unified_tab_close(i)
 
-    def _load_tex_file(self, path: Path) -> None:
-        self._ensure_tex_mode()
-        suffix = path.suffix.lower()
-
-        if suffix == ".pdf":
-            self._current_pdf = path
-            self._tex_pdf_document.close()
-            status = self._tex_pdf_document.load(path)
-            if status != QPdfDocument.Status.Ready:
-                logger.warning("PDF load status: {} for {}", status, path)
-        elif suffix == ".tex":
-            try:
-                content = path.read_text(encoding="utf-8", errors="replace")
-                self._tex_scintilla.setText(content)
-                self._find_matching_pdf(path)
-            except Exception as e:
-                self._tex_scintilla.setText(f"无法读取文件: {e}")
-                logger.error("Failed to load tex: {}", e)
-        else:
-            try:
-                content = path.read_text(encoding="utf-8", errors="replace")
-                self._tex_scintilla.setText(content)
-            except Exception as e:
-                self._tex_scintilla.setText(f"无法读取文件: {e}")
-
-    def _find_matching_pdf(self, tex_path: Path) -> None:
-        pdf_path = tex_path.with_suffix(".pdf")
-        if pdf_path.exists():
-            self._current_pdf = pdf_path
-            self._tex_pdf_document.close()
-            self._tex_pdf_document.load(pdf_path)
-            return
-
-        tex_dir = tex_path.parent
-        pdfs = list(tex_dir.glob("*.pdf"))
-        if len(pdfs) == 1:
-            self._current_pdf = pdfs[0]
-            self._tex_pdf_document.close()
-            self._tex_pdf_document.load(pdfs[0])
-
-    # ------------------------------------------------------------------ #
-    #  Tex compile
-    # ------------------------------------------------------------------ #
-
-    def _compile_tex(self) -> None:
-        if not self._current_file or self._current_file.suffix.lower() != ".tex":
-            QMessageBox.information(self, "编译", "请先打开一个 .tex 文件")
-            return
-
-        if (
-            self._tex_process is not None
-            and self._tex_process.state() != self._tex_process.state().NotRunning
-        ):
-            return  # Already compiling
-
-        engine = "xelatex"  # Default to xelatex
-        tex_path = self._current_file
-        work_dir = str(tex_path.parent)
-
-        from PyQt6.QtCore import QProcess
-
-        self._tex_process = QProcess(self)
-        self._tex_process.setWorkingDirectory(work_dir)
-        self._tex_process.finished.connect(self._on_compile_finished)
-        self._compile_btn.setEnabled(False)
-
-        args = [
-            "-synctex=1",
-            "-interaction=nonstopmode",
-            tex_path.name,
-        ]
-        self._tex_process.start(engine, args)
-        logger.info("Compiling: {} {}", engine, " ".join(args))
-
-    def _on_compile_finished(self, exit_code, exit_status) -> None:
-        self._compile_btn.setEnabled(True)
-
-        if exit_code == 0:
-            logger.info("TeX compilation succeeded")
-            self.refresh_pdf()
-        else:
-            stderr = ""
-            if self._tex_process:
-                stderr = bytes(self._tex_process.readAllStandardError()).decode(
-                    "utf-8", errors="replace"
-                )
-            logger.warning("TeX compilation failed (exit {}): {}", exit_code, stderr[:500])
-            QMessageBox.warning(
-                self,
-                "编译失败",
-                f"编译退出码: {exit_code}\n\n{stderr[:1000]}",
-            )
-
-    # ------------------------------------------------------------------ #
-    #  Split logic
-    # ------------------------------------------------------------------ #
-
-    def _on_split_requested(self, file_key: str) -> None:
-        """Handle split-right request from an EditorPanel."""
-        if len(self._panels) >= 2:
-            # Already split — move tab to right panel
-            path = Path(file_key)
-            left = self._panels[0]
-            right = self._panels[1]
-            left.move_tab_to(path, right)
-            self._sync_tabs_from_panels()
-            return
-
-        # Create right panel
-        path = Path(file_key)
-        left = self._panels[0]
-        right = EditorPanel()
-        right.split_requested.connect(self._on_split_requested)
-        right.panel_emptied.connect(self._on_right_panel_emptied)
-        right.tab_changed.connect(self._sync_tabs_from_panels)
-        right.apply_style()
-        self._panels.append(right)
-        self._general_splitter.addWidget(right)
-        self._general_splitter.setSizes([self.width() // 2, self.width() // 2])
-
-        left.move_tab_to(path, right)
-
     def _on_panel_emptied(self) -> None:
-        """Left panel emptied — nothing to do (keep it for new files)."""
         pass
 
-    def _on_right_panel_emptied(self) -> None:
-        """Right panel emptied — remove it."""
-        if len(self._panels) < 2:
-            return
-        right = self._panels.pop()
-        self._general_splitter.removeWidget(right)
-        right.deleteLater()
-
-    # ------------------------------------------------------------------ #
-    #  SyncTeX
-    # ------------------------------------------------------------------ #
-
-    def _check_synctex(self) -> bool:
-        if self._synctex_available is None:
-            self._synctex_available = shutil.which("synctex") is not None
-            if not self._synctex_available:
-                logger.info("synctex not found — SyncTeX disabled")
-        return self._synctex_available
-
-    def _on_tex_margin_clicked(self, margin, line, state) -> None:
-        if not self._current_file or not self._current_pdf:
-            return
-        mods = self._tex_scintilla.modifiers
-        if mods & Qt.KeyboardModifier.ControlModifier:
-            self._synctex_forward_search(line + 1)
-
-    def _synctex_forward_search(self, line: int) -> None:
-        if not self._check_synctex() or not self._current_file or not self._current_pdf:
-            return
-        try:
-            result = subprocess.run(
-                [
-                    "synctex",
-                    "view",
-                    "-i",
-                    f"{line}:0:{self._current_file}",
-                    "-o",
-                    str(self._current_pdf),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                cwd=str(self._current_file.parent),
-            )
-            if result.returncode != 0:
-                return
-            page = self._parse_synctex_view_output(result.stdout)
-            if page is not None and self._tex_pdf_view:
-                self._tex_pdf_view.pageNavigator().jump(page - 1, QPointF(0, 0), 0)
-                logger.debug("SyncTeX forward: line {} → page {}", line, page)
-        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-            logger.warning("SyncTeX forward failed: {}", e)
-
-    def _parse_synctex_view_output(self, output: str) -> int | None:
-        for line in output.strip().splitlines():
-            if line.startswith("Page:"):
-                try:
-                    return int(line.split(":")[1].strip())
-                except (ValueError, IndexError):
-                    pass
-        return None
-
-    def synctex_inverse_search(self, page: int, x: float, y: float) -> None:
-        if not self._check_synctex() or not self._current_pdf:
-            return
-        try:
-            result = subprocess.run(
-                [
-                    "synctex",
-                    "edit",
-                    "-p",
-                    str(page),
-                    "-x",
-                    f"0:{x}:{y}",
-                    "-o",
-                    str(self._current_pdf),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                cwd=str(self._current_pdf.parent),
-            )
-            if result.returncode != 0:
-                return
-            line, _ = self._parse_synctex_edit_output(result.stdout)
-            if line is not None and self._tex_scintilla:
-                self._tex_scintilla.ensureLineVisible(line - 1)
-                self._tex_scintilla.setCursorPosition(line - 1, 0)
-                self._tex_scintilla.setSelection(line - 1, 0, line, 0)
-        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-            logger.warning("SyncTeX inverse failed: {}", e)
-
-    def _parse_synctex_edit_output(self, output: str) -> tuple[int | None, str | None]:
-        line_num = None
-        file_path = None
-        for ln in output.strip().splitlines():
-            if ln.startswith("Line:"):
-                try:
-                    line_num = int(ln.split(":")[1].strip())
-                except (ValueError, IndexError):
-                    pass
-            elif ln.startswith("Input:"):
-                file_path = ln.split(":", 1)[1].strip()
-        return line_num, file_path
+    def _on_split_requested(self, _file_path: str) -> None:
+        # Split mode was removed; keep a no-op handler for signal compatibility.
+        return
 
     # ------------------------------------------------------------------ #
     #  Selection tracking (for general mode editors)
@@ -1172,7 +803,7 @@ class PreviewWidget(QWidget):
         if not self._current_file:
             return
 
-        panel = self._panels[-1] if self._current_directory != "tex" else None
+        panel = self._panels[-1] if self._panels else None
         if not panel:
             return
 
@@ -1200,8 +831,7 @@ class PreviewWidget(QWidget):
         if not self._current_file:
             return None
 
-        # General mode
-        if self._current_directory != "tex" and self._panels:
+        if self._panels:
             viewer = self._panels[-1].get_active_viewer()
             from PyQt6.Qsci import QsciScintilla
 
@@ -1214,9 +844,7 @@ class PreviewWidget(QWidget):
         return None
 
     def clear_selection(self) -> None:
-        if self._current_directory == "tex" and self._tex_scintilla:
-            self._tex_scintilla.setSelection(-1, -1, -1, -1)
-        elif self._panels:
+        if self._panels:
             viewer = self._panels[-1].get_active_viewer()
             from PyQt6.Qsci import QsciScintilla
 
@@ -1224,9 +852,8 @@ class PreviewWidget(QWidget):
                 viewer.setSelection(-1, -1, -1, -1)
 
     def refresh_pdf(self) -> None:
-        if self._current_directory == "tex" and self._current_pdf and self._current_pdf.exists():
-            self._tex_pdf_document.close()
-            self._tex_pdf_document.load(self._current_pdf)
+        # Kept for API compatibility; unified editor has no dedicated PDF refresh path.
+        return
 
     @property
     def current_directory(self) -> str:
@@ -1234,6 +861,6 @@ class PreviewWidget(QWidget):
 
     @property
     def current_file(self) -> Path | None:
-        if self._current_directory != "tex" and self._panels:
+        if self._panels:
             return self._panels[-1].active_path()
-        return self._current_file
+        return None

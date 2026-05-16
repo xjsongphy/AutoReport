@@ -38,7 +38,7 @@ from .title_bar import TitleBar
 from .widgets.agent_panel import AgentPanel
 from .widgets.file_tree import FileTreeWidget
 from .widgets.preview import PreviewWidget
-from .widgets.ui_utils import compact_tooltip_qss
+from .widgets.ui_utils import combo_box_qss, compact_tooltip_qss
 
 
 class MainWindow(QMainWindow):
@@ -134,7 +134,7 @@ class MainWindow(QMainWindow):
             }}
             QWidget {{
                 color: {c["fg"]};
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
+                font-family: "SF Pro Text", "PingFang SC", "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
                 font-size: {px(13)};
             }}
             QSplitter::handle {{
@@ -200,12 +200,26 @@ class MainWindow(QMainWindow):
                 font-size: {px(13)};
                 font-weight: {c["fw_semibold"]};
                 color: {c["fg"]};
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
+                font-family: "SF Pro Text", "PingFang SC", "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             #panelStatus {{
                 font-size: {px(11)};
                 color: {c["status_idle"]};
             }}
+            {combo_box_qss(
+                "#subAgentSelector",
+                border_color=c["border"],
+                background_color=c["surface"],
+                foreground_color=c["fg"],
+                hover_border_color=c["focus"],
+                selection_bg=c["selection"],
+                selection_fg=c["fg"],
+                font_size=12,
+                padding="2px 24px 2px 8px",
+                radius=c["radius_md"],
+                popup_radius=c["radius_md"],
+                item_radius=c["radius_sm"],
+            )}
             #headerAction {{
                 background-color: transparent;
                 color: {c["header_action"]};
@@ -684,9 +698,11 @@ class MainWindow(QMainWindow):
         self.sub_agent_panel.rename_session_requested.connect(self._on_rename_session)
         self.main_agent_panel.interrupt_requested.connect(lambda: self._on_interrupt("main"))
         self.sub_agent_panel.interrupt_requested.connect(lambda: self._on_interrupt(self.sub_agent_panel.agent_type))
+        self.sub_agent_panel.agent_type_changed.connect(self._on_sub_agent_type_changed)
 
         self.preview.selection_changed.connect(self._on_preview_selection_changed)
         self.main_agent_panel.set_agent_type("main")
+        self.sub_agent_panel.set_agent_type("data_analysis")
         self.main_agent_panel.set_debug_mode("main" in self._debug_agents)
         self.sub_agent_panel.set_debug_mode(self.sub_agent_panel.agent_type in self._debug_agents)
 
@@ -697,33 +713,12 @@ class MainWindow(QMainWindow):
 
     def _on_directory_selected(self, directory: str) -> None:
         ui_logger.debug("MainWindow: directory selected {}", directory)
-        self.preview.set_directory(directory)
-        agent_map = {
-            "data": "data_analysis",
-            "refs": "main",
-            "theory": "theory",
-            "code": "plotting",
-            "tex": "report",
-        }
-        agent_type = agent_map.get(directory, "sub")
-
-        # Clear file context when user switches directories by clicking a folder.
-        # Skip if this was triggered by clicking a file (file_selected fires first).
+        # Directory navigation is decoupled from sub-agent switching.
+        # Keep current contexts when the event is triggered by file click.
         if not getattr(self, "_file_just_selected", False):
             self.main_agent_panel.clear_file_context()
             self.sub_agent_panel.clear_file_context()
         self._file_just_selected = False
-
-        if agent_type != self.sub_agent_panel.agent_type:
-            sizes = self._main_splitter.sizes() if hasattr(self, "_main_splitter") else None
-            ui_logger.debug("MainWindow: switching sub-agent panel to {}", agent_type)
-            self.sub_agent_panel._messages_area.clear()
-            self.sub_agent_panel.set_agent_type(agent_type)
-            self.sub_agent_panel.set_debug_mode(agent_type in self._debug_agents)
-            if agent_type != "sub":
-                self._load_conversations_for_agent(agent_type, self.sub_agent_panel)
-            if sizes:
-                self._main_splitter.setSizes(sizes)
 
     def _on_preview_selection_changed(self, file_path: str, selected_text: str, start_line: int, end_line: int) -> None:
         self.main_agent_panel.set_preview_context(file_path, selected_text, start_line, end_line)
@@ -849,11 +844,13 @@ class MainWindow(QMainWindow):
 
     def _on_sub_agent_message(self, content: str) -> None:
         agent_type = self.sub_agent_panel.agent_type
-        if agent_type == "sub":
-            self.main_agent_panel.add_message("agent", "请先在左侧文件树选择目录以激活对应的子 Agent。")
-            return
         self._conv_store.append_message(agent_type, "user", content)
         self._submit_coroutine(self.backend.send_user_message(content, agent_type))
+
+    def _on_sub_agent_type_changed(self, agent_type: str) -> None:
+        self.sub_agent_panel.set_agent_type(agent_type)
+        self.sub_agent_panel.set_debug_mode(agent_type in self._debug_agents)
+        self._load_conversations_for_agent(agent_type, self.sub_agent_panel)
 
     def _on_interrupt(self, agent_type: str) -> None:
         """Handle interrupt request from GUI."""

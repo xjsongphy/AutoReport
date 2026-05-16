@@ -72,16 +72,13 @@ class _FileTreeDelegate(QStyledItemDelegate):
         icon = item.icon(0)
         icon_sz = tree_widget.iconSize()  # QSize(16, 16)
 
-        # Temporarily remove decoration data so super().paint draws no icon
-        from PyQt6.QtCore import Qt
-        saved = item.data(0, Qt.ItemDataRole.DecorationRole)
-        item.setData(0, Qt.ItemDataRole.DecorationRole, None)
-
-        # Draw selection bg + text (without icon → text starts at folder text position)
-        super().paint(painter, option, index)
-
-        # Restore decoration
-        item.setData(0, Qt.ItemDataRole.DecorationRole, saved)
+        # Draw selection bg + text without decoration, but do not mutate model
+        # data in paint path (that can cause unstable click/edit behavior).
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        opt.icon = QIcon()
+        style = opt.widget.style() if opt.widget else QApplication.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
 
         # Draw icon at the same X as the branch arrow for this depth.
         # Qt draws the arrow centred in the column at  depth * indentation.
@@ -93,14 +90,29 @@ class _FileTreeDelegate(QStyledItemDelegate):
             depth += 1
             p = p.parent()
 
-        # Arrow X for this depth:  depth * indent  (left edge of the column)
-        # Centre the icon in that column
+        # Align file icons to the branch column at this depth.
+        # Keep icon near filename while staying centered in the branch column.
         icon_x = depth * indent + (indent - icon_sz.width()) // 2
         icon_y = option.rect.y() + (option.rect.height() - icon_sz.height()) // 2
 
         painter.save()
         icon.paint(painter, icon_x, icon_y, icon_sz.width(), icon_sz.height())
         painter.restore()
+
+    def updateEditorGeometry(self, editor, option, index):  # noqa: N802
+        super().updateEditorGeometry(editor, option, index)
+        tree_widget = option.widget
+        if not tree_widget:
+            return
+        item = tree_widget.itemFromIndex(index)
+        if item is None:
+            return
+        # Leave clear branch/arrow area so expanded arrows are never covered
+        # by the inline filename editor.
+        if not item.icon(0).isNull():
+            rect = editor.geometry()
+            shift = tree_widget.indentation() + 2
+            editor.setGeometry(rect.adjusted(shift, 0, 0, 0))
 
 # Directory display labels (VSCode style: concise, title case)
 DIR_LABELS = {
@@ -342,7 +354,7 @@ class FileTreeWidget(QWidget):
         # Enable both internal move and external drag-drop
         self.tree.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.tree.setDefaultDropAction(Qt.DropAction.MoveAction)
-        self.tree.setIndentation(7)
+        self.tree.setIndentation(14)
         self.tree.setRootIsDecorated(True)
         self.tree.setItemsExpandable(True)
         self.tree.setAnimated(False)
@@ -355,8 +367,8 @@ class FileTreeWidget(QWidget):
         self.tree.itemDelegate().closeEditor.connect(self._on_close_editor)
         layout.addWidget(self.tree)
 
-        # Give root items breathing room from the left edge
-        self.tree.setContentsMargins(4, 0, 0, 0)
+        # Use native margins to keep top-level branch spacing consistent.
+        self.tree.setContentsMargins(0, 0, 0, 0)
 
         self.tree.header().hide()
 
@@ -413,7 +425,7 @@ class FileTreeWidget(QWidget):
 
             #fileTree::item {{
                 height: 22px;
-                padding: 0 6px;
+                padding: 0 4px;
             }}
 
             #fileTree::item:hover {{

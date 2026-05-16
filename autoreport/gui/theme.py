@@ -58,6 +58,9 @@ def get_theme_colors() -> dict[str, str]:
         "border": border,
         "fg": fg,
         "muted": muted,
+        "radius_sm": "4px",
+        "radius_md": "6px",
+        "radius_lg": "10px",
 
         # === Font Weights ===
         "fw_normal": "400",
