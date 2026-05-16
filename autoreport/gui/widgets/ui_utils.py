@@ -225,7 +225,7 @@ class NoWheelComboBox(QComboBox):
             QListView#comboPopupView {{
                 border: 1px solid {c["border"]};
                 border-radius: {radius};
-                background-color: {c["surface"]};
+                background-color: {c["card"]};
                 color: {c["fg"]};
                 outline: none;
                 padding: 0;
@@ -235,7 +235,8 @@ class NoWheelComboBox(QComboBox):
                 background: transparent;
                 color: {c["fg"]};
                 padding: 0 8px;
-                min-height: 22px;
+                margin: 0;
+                min-height: 24px;
                 border-radius: {item_radius};
             }}
             QListView#comboPopupView::item:selected {{
@@ -243,7 +244,7 @@ class NoWheelComboBox(QComboBox):
                 color: {c["fg"]};
             }}
             QListView#comboPopupView::item:hover {{
-                background-color: {c["selection"]};
+                background-color: {c["focus"]};
                 color: {c["fg"]};
             }}
             """
