@@ -165,7 +165,7 @@ class ToolCallGroup(QWidget):
     def _duration_text(self, duration_ms: int) -> str:
         if duration_ms <= 0:
             return ""
-        return f"{duration_ms / 1000:.1f}s"
+        return str(round(duration_ms / 1000))
 
     def _status_text_for_call(self, call: ToolCall) -> str:
         if call.success is None:
@@ -231,7 +231,7 @@ class ToolCallGroup(QWidget):
             parts = [arrow, ", ".join(names)]
             total_ms = sum(call.duration_ms for call in self._calls)
             if total_ms > 0:
-                parts.append(f"{total_ms / 1000:.1f}s")
+                parts.append(str(round(total_ms / 1000)))
             status = self._status_counts_text()
             if status:
                 parts.append(status)

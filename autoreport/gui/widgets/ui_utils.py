@@ -15,6 +15,7 @@ _SVG_ICONS = {
     "new-folder": "new-folder.svg",
     "refresh": "refresh.svg",
     "copy": "copy.svg",
+    "settings": "settings.svg",
 }
 
 

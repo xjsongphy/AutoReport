@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QStackedWidget,
     QTabBar,
@@ -29,9 +30,11 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from ..icons import get_run_icon
 from ..scale import scaled, scaled_size
+from ..scintilla_utils import apply_scintilla_style, configure_lexer_colors
 from ..theme import get_theme_colors
-from .ui_utils import NoWheelComboBox, combo_box_qss, filled_button_qss
+from .ui_utils import IconActionButton, NoWheelComboBox, combo_box_qss, filled_button_qss
 
 # ================================================================== #
 #  File-type routing
@@ -62,33 +65,25 @@ def _create_scintilla(path: Path, lexer_name: str) -> tuple:
     """Create a QScintilla editor for the given file."""
     from PyQt6.Qsci import QsciScintilla
 
-    c = get_theme_colors()
     sci = QsciScintilla()
-    sci.setObjectName("fileEditor")
-    sci.setUtf8(True)
-    sci.setMarginLineNumbers(1, True)
-    sci.setMarginWidth(1, "0000")
-    sci.setReadOnly(False)
+    apply_scintilla_style(sci, object_name="fileEditor", line_numbers=True, read_only=False)
 
     if lexer_name:
         mod = __import__("PyQt6.Qsci", fromlist=[lexer_name])
         lexer_cls = getattr(mod, lexer_name, None)
         if lexer_cls:
-            sci.setLexer(lexer_cls(sci))
-
-    sci.setStyleSheet(f"""
-        QsciScintilla#fileEditor {{
-            background-color: {c["editor_bg"]};
-            color: {c["fg"]};
-            border: none;
-            font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
-            font-size: 13px;
-        }}
-    """)
+            lexer = lexer_cls(sci)
+            sci.setLexer(lexer)
+            configure_lexer_colors(lexer)
 
     try:
         content = path.read_text(encoding="utf-8", errors="replace")
         sci.setText(content)
+        # Update margin width after loading content
+        from ..scintilla_utils import update_margin_width
+        update_margin_width(sci)
+        # Auto-update margin width when content changes
+        sci.textChanged.connect(lambda: update_margin_width(sci))
     except Exception as e:
         sci.setText(f"无法读取文件: {e}")
 
@@ -270,6 +265,7 @@ class EditorPanel(QWidget):
 
     split_requested = pyqtSignal(str)  # file path string
     panel_emptied = pyqtSignal()  # emitted when last tab is closed
+    tab_changed = pyqtSignal()  # emitted when tabs are opened/closed/switched
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -343,6 +339,7 @@ class EditorPanel(QWidget):
             self._tab_bar.setTabData(tab_idx, "preview")
 
         self._active_key = key
+        self.tab_changed.emit()
 
     def pin_active_tab(self) -> None:
         """Pin the current preview tab."""
@@ -393,6 +390,10 @@ class EditorPanel(QWidget):
             other._tab_bar.setTabData(tab_idx, "preview")
         other._active_key = key
 
+        # Emit signals for both panels
+        self.tab_changed.emit()
+        other.tab_changed.emit()
+
         # Check if we're empty
         if not self._tabs:
             self._active_key = None
@@ -439,6 +440,8 @@ class EditorPanel(QWidget):
                 self._stack.setCurrentIndex(0)
                 self.panel_emptied.emit()
 
+        self.tab_changed.emit()
+
     def _on_tab_changed(self, index: int) -> None:
         if index < 0 or index >= len(self._tab_order):
             self._stack.setCurrentIndex(0)
@@ -447,6 +450,7 @@ class EditorPanel(QWidget):
         self._active_key = key
         state = self._tabs[key]
         self._stack.setCurrentWidget(state.viewer)
+        self.tab_changed.emit()
 
     def _on_close_requested(self, index: int) -> None:
         if 0 <= index < len(self._tab_order):
@@ -531,6 +535,7 @@ class PreviewWidget(QWidget):
     """Preview widget with VS Code-style split editor."""
 
     selection_changed = pyqtSignal(str, str, int, int)
+    file_changed = pyqtSignal(Path)  # Emitted when current file changes
 
     def __init__(self, workspace: Path):
         super().__init__()
@@ -558,40 +563,41 @@ class PreviewWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Header
+        # Unified header bar with title and tabs
         header = QWidget(self)
         header.setObjectName("previewHeader")
         header.setFixedHeight(36)
         hl = QHBoxLayout(header)
         hl.setContentsMargins(12, 0, 12, 0)
-        hl.setSpacing(4)
+        hl.setSpacing(0)
 
+        # Title label - "预览"
         self._title_label = QLabel("预览")
         self._title_label.setObjectName("previewTitle")
         self._title_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         hl.addWidget(self._title_label)
 
-        self._file_label = QLabel()
-        self._file_label.setObjectName("previewFile")
-        self._file_label.setVisible(False)
-        hl.addWidget(self._file_label)
+        # Unified tab bar for all open files
+        self._unified_tab_bar = QTabBar()
+        self._unified_tab_bar.setObjectName("previewTabBar")
+        self._unified_tab_bar.setDrawBase(False)
+        self._unified_tab_bar.setExpanding(False)
+        self._unified_tab_bar.setMovable(True)
+        self._unified_tab_bar.setTabsClosable(True)
+        self._unified_tab_bar.setDocumentMode(True)
+        self._unified_tab_bar.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._unified_tab_bar.currentChanged.connect(self._on_unified_tab_changed)
+        self._unified_tab_bar.tabCloseRequested.connect(self._on_unified_tab_close)
+        self._unified_tab_bar.customContextMenuRequested.connect(self._on_unified_tab_context_menu)
+        hl.addWidget(self._unified_tab_bar, 1)
 
-        hl.addStretch()
-
-        self._engine_combo = NoWheelComboBox()
-        self._engine_combo.setObjectName("engineCombo")
-        self._engine_combo.addItems(["xelatex", "lualatex"])
-        self._engine_combo.setFixedWidth(scaled(100))
-        self._engine_combo.setFixedHeight(scaled(24))
-        self._engine_combo.setVisible(False)
-        hl.addWidget(self._engine_combo)
-
-        w, h = scaled_size(80, 26)
-        self._compile_btn = QPushButton("编译")
+        # TeX mode controls (hidden by default)
+        self._compile_btn = QPushButton()
         self._compile_btn.setObjectName("compileBtn")
-        self._compile_btn.setFixedHeight(scaled(24))
-        self._compile_btn.setMinimumWidth(scaled(68))
+        self._compile_btn.setFixedSize(scaled(32), scaled(28))
         self._compile_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._compile_btn.setIcon(get_run_icon())
+        self._compile_btn.setToolTip("编译")
         self._compile_btn.clicked.connect(self._compile_tex)
         self._compile_btn.setVisible(False)
         hl.addWidget(self._compile_btn)
@@ -616,6 +622,7 @@ class PreviewWidget(QWidget):
         left = EditorPanel()
         left.split_requested.connect(self._on_split_requested)
         left.panel_emptied.connect(self._on_panel_emptied)
+        left.tab_changed.connect(self._sync_tabs_from_panels)
         self._panels.append(left)
         self._general_splitter.addWidget(left)
 
@@ -646,36 +653,18 @@ class PreviewWidget(QWidget):
         tsl.setSpacing(0)
 
         self._tex_scintilla = QsciScintilla()
-        self._tex_scintilla.setObjectName("texEditor")
-        self._tex_scintilla.setUtf8(True)
-        self._tex_scintilla.setMarginLineNumbers(1, True)
-        self._tex_scintilla.setMarginWidth(1, "000")
-        self._tex_scintilla.setReadOnly(False)
+        apply_scintilla_style(self._tex_scintilla, object_name="texEditor", line_numbers=True, read_only=False)
 
         # Configure lexer with theme colors
         lexer = QsciLexerTeX(self._tex_scintilla)
         self._tex_scintilla.setLexer(lexer)
         self._tex_scintilla.marginClicked.connect(self._on_tex_margin_clicked)
+        configure_lexer_colors(lexer)
 
-        # Set basic colors for lexer
-        lexer.setColor(QColor(c["fg"]))
-        lexer.setPaper(QColor(c["editor_bg"]))
-        self._tex_scintilla.setMarginsBackgroundColor(QColor(c["surface"]))
-        self._tex_scintilla.setMarginsForegroundColor(QColor(c["muted"]))
+        # Update margin width when content changes
+        from ..scintilla_utils import update_margin_width
+        self._tex_scintilla.textChanged.connect(lambda: update_margin_width(self._tex_scintilla))
 
-        self._tex_scintilla.setStyleSheet(f"""
-            QsciScintilla#texEditor {{
-                background-color: {c["editor_bg"]};
-                color: {c["fg"]};
-                border: none;
-                font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
-                font-size: 13px;
-            }}
-            QsciScintilla#texEditor::margin {{
-                background-color: {c["surface"]};
-                color: {c["muted"]};
-            }}
-        """)
         tsl.addWidget(self._tex_scintilla, 1)
 
         # PDF viewer kept for compile preview refresh, but not shown side-by-side by default.
@@ -715,10 +704,21 @@ class PreviewWidget(QWidget):
                 font-weight: 600;
                 color: {c["fg"]};
             }}
-            #previewFile {{
-                font-size: 11px;
-                color: {c["muted"]};
-                font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
+            #previewFileCardsScroll {{
+                background-color: transparent;
+                border: none;
+            }}
+            #previewFileCardsWidget {{
+                background-color: transparent;
+            }}
+            #previewSettingsBtn {{
+                background-color: transparent;
+                border: none;
+                border-radius: 4px;
+                padding: 4px;
+            }}
+            #previewSettingsBtn:hover {{
+                background-color: {c["hover"]};
             }}
             {combo_box_qss(
                 "#engineCombo",
@@ -743,7 +743,29 @@ class PreviewWidget(QWidget):
                 background-color: {c["border"]};
                 width: 2px;
             }}
+            QTabBar#previewTabBar {{
+                background-color: transparent;
+                border: none;
+            }}
+            QTabBar#previewTabBar::tab {{
+                background-color: {c["tab_inactive_bg"]};
+                color: {c["tab_inactive_fg"]};
+                border: none;
+                border-right: 1px solid {c["border"]};
+                padding: 6px 12px;
+                margin-right: 2px;
+                border-radius: 4px;
+            }}
+            QTabBar#previewTabBar::tab:selected {{
+                background-color: {c["tab_active_bg"]};
+                color: {c["tab_active_fg"]};
+                border-top: 2px solid {c["accent"]};
+            }}
+            QTabBar#previewTabBar::tab:hover {{
+                background-color: {c["hover"]};
+            }}
         """)
+
         for panel in self._panels:
             panel.apply_style()
 
@@ -755,21 +777,21 @@ class PreviewWidget(QWidget):
         self._current_directory = directory
         self._current_file = None
         self._current_pdf = None
-        self._file_label.setVisible(False)
+
+        # Always show "预览" as title
+        self._title_label.setText("预览")
+
+        # Clear unified tab bar (QTabBar has no clear() method, remove tabs one by one)
+        while self._unified_tab_bar.count() > 0:
+            self._unified_tab_bar.removeTab(0)
 
         if directory == "tex":
             self._ensure_tex_mode()
             self._mode_stack.setCurrentIndex(1)
-            self._title_label.setText("LaTeX 编辑器")
-            self._engine_combo.setVisible(True)
             self._compile_btn.setVisible(True)
         else:
             self._mode_stack.setCurrentIndex(0)
-            self._title_label.setText("预览")
-            self._engine_combo.setVisible(False)
             self._compile_btn.setVisible(False)
-            if not self._panels[0].tab_count():
-                pass  # Placeholder already visible
 
         logger.debug("Preview directory: {}", directory)
 
@@ -777,14 +799,134 @@ class PreviewWidget(QWidget):
         file_path = Path(file_path).resolve()
         self._current_file = file_path
 
-        rel = file_path.relative_to(self.workspace)
-        self._file_label.setText(f"文件: {rel}")
-        self._file_label.setVisible(True)
-
         if self._current_directory == "tex":
             self._load_tex_file(file_path)
+            # Add tab for tex file
+            self._add_unified_tab(file_path)
         else:
+            # Open in panel
             self._panels[-1].open_file(file_path, preview=True)
+            # Sync tabs from panel to unified tab bar
+            self._sync_tabs_from_panels()
+
+        # Emit file changed signal
+        self.file_changed.emit(file_path)
+
+    def _add_unified_tab(self, file_path: Path) -> None:
+        """Add a tab to the unified tab bar."""
+        # Check if already exists
+        for i in range(self._unified_tab_bar.count()):
+            if self._unified_tab_bar.tabToolTip(i) == str(file_path):
+                self._unified_tab_bar.setCurrentIndex(i)
+                return
+
+        # Add new tab
+        tab_idx = self._unified_tab_bar.addTab(file_path.name)
+        self._unified_tab_bar.setTabToolTip(tab_idx, str(file_path))
+        self._unified_tab_bar.setCurrentIndex(tab_idx)
+
+    def _sync_tabs_from_panels(self) -> None:
+        """Sync unified tab bar with tabs from all panels."""
+        # Clear current tabs
+        self._unified_tab_bar.clear()
+
+        # Collect all open files from panels
+        for panel in self._panels:
+            for key, state in panel._tabs.items():
+                tab_idx = self._unified_tab_bar.addTab(state.path.name)
+                self._unified_tab_bar.setTabToolTip(tab_idx, str(state.path))
+                if key == panel._active_key:
+                    self._unified_tab_bar.setCurrentIndex(tab_idx)
+
+    def _on_unified_tab_changed(self, index: int) -> None:
+        """Handle unified tab bar change."""
+        if index < 0:
+            self._current_file = None
+            self.file_changed.emit(Path())  # Emit with empty path
+            return
+
+        file_path_str = self._unified_tab_bar.tabToolTip(index)
+        if not file_path_str:
+            self._current_file = None
+            self.file_changed.emit(Path())  # Emit with empty path
+            return
+
+        file_path = Path(file_path_str)
+        self._current_file = file_path
+
+        if self._current_directory == "tex":
+            # Switch tex file
+            self._load_tex_file(file_path)
+        else:
+            # Find the panel that has this file and switch to it
+            for panel in self._panels:
+                key = str(file_path.resolve())
+                if key in panel._tabs:
+                    idx = panel._tab_order.index(key)
+                    panel._tab_bar.setCurrentIndex(idx)
+                    break
+
+        # Emit file changed signal
+        self.file_changed.emit(file_path)
+
+    def _on_unified_tab_close(self, index: int) -> None:
+        """Handle unified tab close."""
+        file_path_str = self._unified_tab_bar.tabToolTip(index)
+        if not file_path_str:
+            return
+
+        file_path = Path(file_path_str)
+
+        if self._current_directory == "tex":
+            # Clear tex file
+            self._unified_tab_bar.removeTab(index)
+            self._current_file = None
+        else:
+            # Close tab in panel
+            for panel in self._panels:
+                key = str(file_path.resolve())
+                if key in panel._tabs:
+                    panel._close_tab(key)
+                    break
+            # Sync tabs
+            self._sync_tabs_from_panels()
+
+        # Emit file changed signal with None or current active file
+        active_file = self.current_file
+        self.file_changed.emit(active_file if active_file else Path())
+
+    def _on_unified_tab_context_menu(self, pos) -> None:
+        """Show context menu for unified tab bar."""
+        index = self._unified_tab_bar.tabAt(pos)
+        if index < 0:
+            return
+
+        file_path_str = self._unified_tab_bar.tabToolTip(index)
+        if not file_path_str:
+            return
+
+        file_path = Path(file_path_str)
+
+        menu = QMenu(self)
+        menu.setObjectName("tabContextMenu")
+
+        close_act = menu.addAction("关闭")
+        close_others_act = menu.addAction("关闭其他")
+        close_all_act = menu.addAction("关闭所有")
+
+        action = menu.exec(self._unified_tab_bar.mapToGlobal(pos))
+
+        if action == close_act:
+            self._on_unified_tab_close(index)
+        elif action == close_others_act:
+            # Close all except this one
+            for i in range(self._unified_tab_bar.count() - 1, -1, -1):
+                if i != index:
+                    self._on_unified_tab_close(i)
+        elif action == close_all_act:
+            # Close all tabs
+            for i in range(self._unified_tab_bar.count() - 1, -1, -1):
+                self._on_unified_tab_close(i)
 
     def _load_tex_file(self, path: Path) -> None:
         self._ensure_tex_mode()
@@ -841,7 +983,7 @@ class PreviewWidget(QWidget):
         ):
             return  # Already compiling
 
-        engine = self._engine_combo.currentText()
+        engine = "xelatex"  # Default to xelatex
         tex_path = self._current_file
         work_dir = str(tex_path.parent)
 
@@ -851,7 +993,6 @@ class PreviewWidget(QWidget):
         self._tex_process.setWorkingDirectory(work_dir)
         self._tex_process.finished.connect(self._on_compile_finished)
         self._compile_btn.setEnabled(False)
-        self._compile_btn.setText("编译中...")
 
         args = [
             "-synctex=1",
@@ -863,7 +1004,6 @@ class PreviewWidget(QWidget):
 
     def _on_compile_finished(self, exit_code, exit_status) -> None:
         self._compile_btn.setEnabled(True)
-        self._compile_btn.setText("编译")
 
         if exit_code == 0:
             logger.info("TeX compilation succeeded")
@@ -893,6 +1033,7 @@ class PreviewWidget(QWidget):
             left = self._panels[0]
             right = self._panels[1]
             left.move_tab_to(path, right)
+            self._sync_tabs_from_panels()
             return
 
         # Create right panel
@@ -901,6 +1042,7 @@ class PreviewWidget(QWidget):
         right = EditorPanel()
         right.split_requested.connect(self._on_split_requested)
         right.panel_emptied.connect(self._on_right_panel_emptied)
+        right.tab_changed.connect(self._sync_tabs_from_panels)
         right.apply_style()
         self._panels.append(right)
         self._general_splitter.addWidget(right)

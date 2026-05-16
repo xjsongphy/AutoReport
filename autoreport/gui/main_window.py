@@ -8,6 +8,8 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QMainWindow,
+    QMenu,
+    QMenuBar,
     QSplitter,
     QWidget,
 )
@@ -91,7 +93,7 @@ class MainWindow(QMainWindow):
             }}
             QWidget {{
                 color: {c["fg"]};
-                font-family: "Segoe UI", "SF Pro", -apple-system, sans-serif;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica Neue", sans-serif;
                 font-size: {px(13)};
             }}
             QSplitter::handle {{
@@ -244,7 +246,7 @@ class MainWindow(QMainWindow):
             #contextLabel {{
                 font-size: {px(11)};
                 color: {c["muted"]};
-                font-family: "SF Mono", "Consolas", monospace;
+                font-family: "Cascadia Code", "Consolas", "Courier New", monospace;
             }}
             #contextEye {{
                 background-color: transparent;
@@ -461,7 +463,125 @@ class MainWindow(QMainWindow):
             }}
         """)
 
+    def _setup_menu_bar(self) -> None:
+        """Setup the application menu bar."""
+        menubar = self.menuBar()
+        menubar.setObjectName("mainMenuBar")
+
+        # File menu
+        file_menu = menubar.addMenu("文件")
+        file_menu.setObjectName("fileMenu")
+
+        # Add menu items
+        new_file_act = file_menu.addAction("新建文件")
+        new_file_act.triggered.connect(self._on_new_file)
+
+        new_folder_act = file_menu.addAction("新建文件夹")
+        new_folder_act.triggered.connect(self._on_new_folder)
+
+        file_menu.addSeparator()
+
+        open_file_act = file_menu.addAction("打开文件...")
+        open_file_act.triggered.connect(self._on_open_file)
+
+        open_folder_act = file_menu.addAction("打开文件夹...")
+        open_folder_act.triggered.connect(self._on_open_folder)
+
+        file_menu.addSeparator()
+
+        new_window_act = file_menu.addAction("新建窗口")
+        new_window_act.triggered.connect(self._on_new_window)
+
+        # Apply theme to menu bar
+        c = get_theme_colors()
+        menubar.setStyleSheet(f"""
+            QMenuBar {{
+                background-color: #3c3c3c;
+                border-bottom: 1px solid #252525;
+                padding: 2px;
+            }}
+            QMenuBar::item {{
+                background-color: transparent;
+                color: #cccccc;
+                padding: 4px 8px;
+                border-radius: 4px;
+            }}
+            QMenuBar::item:selected {{
+                background-color: #094771;
+            }}
+            QMenu {{
+                background-color: #252526;
+                border: 1px solid #454545;
+                border-radius: 4px;
+                padding: 4px;
+            }}
+            QMenu::item {{
+                padding: 6px 24px;
+                border-radius: 4px;
+            }}
+            QMenu::item:selected {{
+                background-color: #094771;
+            }}
+        """)
+
+        # Set window title bar color (Windows only)
+        if hasattr(self, "setWindowProperty"):
+            self.setWindowProperty("Appearance", "DWMWindowAccentPolicy", 0)  # Disable accent
+
+    def _update_window_title(self) -> None:
+        """Update window title to show current file."""
+        base_title = "AutoReport"
+
+        # Check if preview exists (may not during initialization)
+        if not hasattr(self, 'preview'):
+            self.setWindowTitle(base_title)
+            return
+
+        current_file = self.preview.current_file
+
+        if current_file:
+            rel_path = current_file.relative_to(self.workspace)
+            self.setWindowTitle(f"{rel_path} - {base_title}")
+        else:
+            self.setWindowTitle(base_title)
+
+    def _on_new_file(self) -> None:
+        """Handle new file action."""
+        # Delegate to file tree
+        self.file_tree._new_file()
+
+    def _on_new_folder(self) -> None:
+        """Handle new folder action."""
+        # Delegate to file tree
+        self.file_tree._new_folder()
+
+    def _on_open_file(self) -> None:
+        """Handle open file action."""
+        from PyQt6.QtWidgets import QFileDialog
+
+        file_path, _ = QFileDialog.getOpenFileName(self, "打开文件")
+        if file_path:
+            # TODO: Import/open the file
+            logger.info("Open file requested: {}", file_path)
+
+    def _on_open_folder(self) -> None:
+        """Handle open folder action."""
+        from PyQt6.QtWidgets import QFileDialog
+
+        folder_path = QFileDialog.getExistingDirectory(self, "打开文件夹")
+        if folder_path:
+            # TODO: Switch workspace
+            logger.info("Open folder requested: {}", folder_path)
+
+    def _on_new_window(self) -> None:
+        """Handle new window action."""
+        # TODO: Launch new window
+        logger.info("New window requested")
+
     def _setup_ui(self) -> None:
+        # Setup menu bar
+        self._setup_menu_bar()
+
         central_widget = QWidget(self)
         self.setCentralWidget(central_widget)
 
@@ -482,6 +602,7 @@ class MainWindow(QMainWindow):
         # Center: Preview
         self.preview = PreviewWidget(self.workspace)
         self.preview.setMinimumWidth(300)
+        self.preview.file_changed.connect(self._update_window_title)
         main_splitter.addWidget(self.preview)
 
         # Right: Agent panels side-by-side (Sub Agent | Main Agent)

@@ -14,7 +14,7 @@ verifying the API and methods exist and are callable, rather than full integrati
 from pathlib import Path
 
 import pytest
-from PyQt6.QtWidgets import QAbstractItemDelegate
+from PyQt6.QtWidgets import QAbstractItemDelegate, QTreeWidgetItem
 
 from autoreport.gui.widgets.file_tree import FileTreeWidget, FIXED_DIRECTORIES
 
@@ -279,6 +279,69 @@ def test_directories_do_not_show_folder_icons(qtbot, tmp_path: Path) -> None:
         item = widget.tree.topLevelItem(i)
         assert item is not None
         assert item.icon(0).isNull()
+
+
+def test_empty_directory_keeps_expand_indicator_after_reload(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    references_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("references"))
+    assert references_item is not None
+
+    references_item.setExpanded(True)
+    widget._on_item_expanded(references_item)
+
+    assert references_item.childCount() == 0
+    assert (
+        references_item.childIndicatorPolicy()
+        == QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
+    )
+    assert widget.tree.updatesEnabled()
+
+
+def test_refresh_recovers_directory_indicator_policy(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    references_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("references"))
+    assert references_item is not None
+
+    references_item.setChildIndicatorPolicy(
+        QTreeWidgetItem.ChildIndicatorPolicy.DontShowIndicatorWhenChildless
+    )
+    widget.refresh()
+
+    assert (
+        references_item.childIndicatorPolicy()
+        == QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
+    )
+
+
+def test_expand_top_level_collapses_other_top_level(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    data_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("data"))
+    refs_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("references"))
+    assert data_item is not None
+    assert refs_item is not None
+
+    data_item.setExpanded(True)
+    assert data_item.isExpanded()
+
+    widget._collapse_other_top_level_dirs("references")
+    refs_item.setExpanded(True)
+
+    assert not data_item.isExpanded()
+    assert refs_item.isExpanded()
+    assert (
+        data_item.childIndicatorPolicy()
+        == QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
+    )
+    assert (
+        refs_item.childIndicatorPolicy()
+        == QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
+    )
 
 
 def test_new_file_editor_is_bound_after_start_create(qtbot, tmp_path: Path) -> None:

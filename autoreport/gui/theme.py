@@ -118,7 +118,7 @@ def get_theme_colors() -> dict[str, str]:
         # === Editor/Preview ===
         "editor_bg": "#1f1f1f" if dark else "#ffffff",
         "editor_fg": "#d4d4d4" if dark else "#333333",
-        "editor_margin": "#252526" if dark else "#f3f3f3",
+        "editor_margin": "#2d2d2d" if dark else "#f0f0f0",  # Darker for contrast in dark mode, lighter gray in light mode
         "accent": "#0078d4" if dark else "#0090ff",
         "compile_bg": "#0e639c" if dark else "#0078d4",
         "compile_fg": "#ffffff",

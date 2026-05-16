@@ -12,6 +12,8 @@ _SVG_ICONS: dict[str, str] = {
     "line-chart": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M4 16l4-4 4 4 4-6 4 4"/></svg>',
     "pencil": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4"/><path d="M13.5 6.5l4 4"/></svg>',
     "file-text": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z"/><line x1="9" y1="9" x2="10" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>',
+    # VSCode Codicons (CC0 1.0 Universal)
+    "run": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M4.25 3l1.166-.624 8 5.333v1.248l-8 5.334-1.166-.624V3zm1.5 1.401v7.864l5.898-3.932L5.75 4.401z"/></svg>',
 }
 
 _AGENT_ICON_MAP: dict[str, str] = {
@@ -69,6 +71,22 @@ def get_agent_icon(agent_type: str, color: str | None = None, size: int = 24) ->
 
     if cache_key not in _ICON_CACHE:
         svg_data = _SVG_ICONS[icon_name]
+        _ICON_CACHE[cache_key] = _svg_to_icon(svg_data, color, size)
+
+    return _ICON_CACHE[cache_key]
+
+
+def get_run_icon(color: str = "#4ec9b0", size: int = 18) -> QIcon:
+    """Get QIcon for the run/play button (VSCode Codicon).
+
+    Args:
+        color: Icon color (default VSCode green: #4ec9b0).
+        size: Icon size in pixels (default 18).
+    """
+    cache_key = f"run_{color}_{size}"
+
+    if cache_key not in _ICON_CACHE:
+        svg_data = _SVG_ICONS["run"]
         _ICON_CACHE[cache_key] = _svg_to_icon(svg_data, color, size)
 
     return _ICON_CACHE[cache_key]
