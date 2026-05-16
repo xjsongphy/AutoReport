@@ -2,8 +2,10 @@
 
 from datetime import datetime
 
-from PyQt6.QtCore import QPoint, Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QWidget, QGraphicsOpacityEffect
+from PyQt6.QtCore import QPoint, Qt, pyqtSignal
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QWidget
+
+from .base_popup_dropdown import BasePopupDropdown
 
 
 class SessionListItem(QWidget):
@@ -88,10 +90,10 @@ class SessionListItem(QWidget):
         super().leaveEvent(event)
 
 
-class ConversationHistoryDropdown(QListWidget):
+class ConversationHistoryDropdown(BasePopupDropdown):
     """Floating dropdown list showing conversation sessions.
 
-    Popup window that appears below header, not embedded in layout.
+    Inherits unified styling and animations from BasePopupDropdown.
     """
 
     session_selected = pyqtSignal(str)
@@ -99,69 +101,23 @@ class ConversationHistoryDropdown(QListWidget):
     rename_session_requested = pyqtSignal(str, str)
 
     def __init__(self, parent: QWidget | None = None):
+        """Initialize the conversation history dropdown."""
         super().__init__(parent)
         self.setObjectName("historyDropdown")
-        self.setWindowFlags(
-            Qt.WindowType.Popup
-            | Qt.WindowType.FramelessWindowHint
-        )
-        self.setVisible(False)
-        self._setup_ui()
 
-    def _setup_ui(self) -> None:
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.itemClicked.connect(self._on_item_clicked)
+        # Setup context menu for delete/rename
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
 
-        # Set fixed size
-        self.setFixedWidth(320)
-        self.setMaximumHeight(300)
+        # Override base styling with delete button style
+        self._apply_extended_style()
 
-        self._apply_style()
-
-        # Setup fade animation
-        self._fade_effect = QGraphicsOpacityEffect(self)
-        self._fade_effect.setOpacity(1.0)
-        self.setGraphicsEffect(self._fade_effect)
-
-        self._fade_animation = QPropertyAnimation(self._fade_effect, b"opacity")
-        self._fade_animation.setDuration(150)
-        self._fade_animation.setStartValue(1.0)
-        self._fade_animation.setEndValue(0.0)
-        self._fade_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
-        self._fade_animation.finished.connect(self._on_fade_out_finished)
-
-    def _apply_style(self) -> None:
+    def _apply_extended_style(self) -> None:
+        """Add delete button styling to base theme."""
         from PyQt6.QtWidgets import QApplication
-        hints = QApplication.styleHints()
-        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
 
-        bg = "#1f1f1f" if dark else "#ffffff"
-        border = "#2b2b2b" if dark else "#e0e0e0"
-        fg = "#cccccc" if dark else "#333333"
-        hover = "#2a2d2e" if dark else "#f5f5f5"
-        selected_bg = "#094771" if dark else "#e8f0fe"
-
-        self.setStyleSheet(f"""
-            QListWidget#historyDropdown {{
-                background-color: {bg};
-                border: 1px solid {border};
-                border-radius: 6px;
-                outline: none;
-            }}
-            QListWidget#historyDropdown::item {{
-                border-radius: 4px;
-                margin: 1px 4px;
-                padding: 0;
-            }}
-            QListWidget#historyDropdown::item:hover {{
-                background-color: {hover};
-            }}
-            QListWidget#historyDropdown::item:selected {{
-                background-color: {selected_bg};
-            }}
-            QPushButton#sessionDeleteBtn {{
+        delete_btn_style = """
+            QPushButton#sessionDeleteBtn {
                 background-color: #f44747;
                 border: none;
                 color: #ffffff;
@@ -169,23 +125,14 @@ class ConversationHistoryDropdown(QListWidget):
                 font-weight: 500;
                 border-radius: 3px;
                 padding: 0 6px;
-            }}
-            QPushButton#sessionDeleteBtn:hover {{
+            }
+            QPushButton#sessionDeleteBtn:hover {
                 background-color: #d32f2f;
-            }}
-        """)
-
-    def _on_fade_out_finished(self) -> None:
-        """Called when fade-out animation completes."""
-        self.hide()
-        self._fade_effect.setOpacity(1.0)
-
-    def hide(self) -> None:
-        """Hide with fade-out animation."""
-        if self.isVisible() and not self._fade_animation.state() == QPropertyAnimation.State.Running:
-            self._fade_animation.start()
-        else:
-            super().hide()
+            }
+        """
+        # Append to existing stylesheet
+        current_style = self.styleSheet() or ""
+        self.setStyleSheet(current_style + delete_btn_style)
 
     def show_dropdown(self, parent_widget: QWidget) -> None:
         """Position and show the dropdown below parent widget."""
@@ -198,11 +145,14 @@ class ConversationHistoryDropdown(QListWidget):
         if self.count() == 0:
             return
 
-        # Position below parent widget
-        global_pos = parent_widget.mapToGlobal(QPoint(0, parent_widget.height()))
-        self.move(global_pos)
-        self.setVisible(True)
-        self.setFocus()
+        # Use base class show_dropdown for positioning and fade-in
+        super().show_dropdown(parent_widget)
+
+    def _on_item_clicked(self, item) -> None:
+        """Handle item click - emit session_selected signal."""
+        session_id = item.data(Qt.ItemDataRole.UserRole)
+        if session_id:
+            self.session_selected.emit(session_id)
 
     def populate_from_store(self) -> None:
         """Populate from conversation store via signal callback."""
@@ -296,8 +246,3 @@ class ConversationHistoryDropdown(QListWidget):
         elif action == delete_action:
             self.delete_session_requested.emit(session_id)
 
-    def hideEvent(self, event) -> None:
-        """Hide when clicked outside - use fade animation."""
-        if self._fade_animation.state() != QPropertyAnimation.State.Running:
-            self._fade_animation.start()
-        event.accept()

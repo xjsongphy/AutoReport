@@ -6,7 +6,7 @@ from typing import override
 
 from PyQt6.QtCore import QSize, Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QKeyEvent, QTextDocument, QIcon
-from PyQt6.QtWidgets import QGraphicsOpacityEffect
+from PyQt6.QtWidgets import QGraphicsOpacityEffect, QApplication
 from PyQt6.QtWidgets import (
     QLabel,
     QListWidget,
@@ -91,12 +91,14 @@ class FileSearchPopup(QWidget):
         hints = QApplication.styleHints()
         dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
 
+        # Use same colors as BasePopupDropdown for consistency
         bg = "#1f1f1f" if dark else "#ffffff"
         border = "#2b2b2b" if dark else "#e0e0e0"
         fg = "#cccccc" if dark else "#333333"
         muted = "#737373" if dark else "#999999"
-        sel_bg = "#094771" if dark else "#cce4f7"
-        hover = "#2a2d2e" if dark else "#e8e8e8"
+        hover = "#2a2d2e" if dark else "#f5f5f5"
+        selected_bg = "#094771" if dark else "#e8f0fe"
+        selected_fg = "#ffffff" if dark else "#202020"
 
         self.setStyleSheet(f"""
             FileSearchPopup {{
@@ -119,8 +121,8 @@ class FileSearchPopup(QWidget):
                 background-color: {hover};
             }}
             QListWidget::item:selected {{
-                background-color: {sel_bg};
-                color: #ffffff;
+                background-color: {selected_bg};
+                color: {selected_fg};
             }}
         """)
 
