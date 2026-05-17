@@ -215,6 +215,13 @@ def test_directory_items_do_not_use_native_tooltip(qtbot, tmp_path: Path) -> Non
     assert top.toolTip(0) == ""
 
 
+def test_file_tree_hover_uses_two_second_delay(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    assert widget._hover_timer.interval() == 2000
+
+
 def test_repeat_new_click_cancels_empty_pending_and_restarts(qtbot, tmp_path: Path) -> None:
     widget = FileTreeWidget(tmp_path)
     qtbot.addWidget(widget)

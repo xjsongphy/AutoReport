@@ -40,6 +40,8 @@ from .ui_utils import IconActionButton, compact_tooltip_qss, render_svg_icon
 
 # Fixed directory structure
 FIXED_DIRECTORIES = ["data", "references", "theory", "code", "tex"]
+_FILE_TEXT_ICON_GAP_ADJUST = 14
+_FILE_EDITOR_ICON_GAP_ADJUST = 0
 
 
 # ================================================================== #
@@ -79,7 +81,7 @@ class _FileTreeDelegate(QStyledItemDelegate):
         opt.icon = QIcon()
         style = opt.widget.style() if opt.widget else QApplication.style()
         # Keep icon fixed; pull text closer so file rows visually match folder rows.
-        opt.rect = opt.rect.adjusted(-10, 0, 0, 0)
+        opt.rect = opt.rect.adjusted(-_FILE_TEXT_ICON_GAP_ADJUST, 0, 0, 0)
         style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
 
         # Draw icon at the same X as the branch arrow for this depth.
@@ -112,7 +114,7 @@ class _FileTreeDelegate(QStyledItemDelegate):
         # by the inline filename editor.
         if not item.icon(0).isNull():
             rect = editor.geometry()
-            shift = tree_widget.indentation() + 2
+            shift = tree_widget.indentation() + _FILE_EDITOR_ICON_GAP_ADJUST
             editor.setGeometry(rect.adjusted(shift, 0, 0, 0))
 
 # Directory display labels (VSCode style: concise, title case)
@@ -287,6 +289,12 @@ class FileTreeWidget(QWidget):
         self._pending_new_kind: str | None = None  # "file" | "folder"
         self._pending_editor: QLineEdit | None = None
         self._hover_tip: QLabel | None = None
+        self._hover_timer = QTimer(self)
+        self._hover_timer.setSingleShot(True)
+        self._hover_timer.setInterval(2000)
+        self._hover_timer.timeout.connect(self._show_pending_hover_tip)
+        self._pending_hover_text = ""
+        self._pending_hover_pos = QPoint()
         self._setup_ui()
         self._init_directories()
         self._setup_file_watcher()
@@ -675,13 +683,24 @@ class FileTreeWidget(QWidget):
             self._hide_hover_tip()
             return
 
-        self._show_hover_tip(tip, QCursor.pos() + QPoint(10, 2))
+        self._pending_hover_text = tip
+        self._pending_hover_pos = QCursor.pos() + QPoint(10, 2)
+        self._hover_timer.start()
+
+    def _show_pending_hover_tip(self) -> None:
+        if self._pending_hover_text:
+            self._show_hover_tip(self._pending_hover_text, self._pending_hover_pos)
 
     def _show_hover_tip(self, text: str, global_pos: QPoint) -> None:
         if self._hover_tip is None:
             self._hover_tip = QLabel(self)
-            self._hover_tip.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
+            self._hover_tip.setWindowFlags(
+                Qt.WindowType.ToolTip
+                | Qt.WindowType.FramelessWindowHint
+                | Qt.WindowType.NoDropShadowWindowHint
+            )
             self._hover_tip.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+            self._hover_tip.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
             self._hover_tip.setStyleSheet(compact_tooltip_qss("QLabel"))
         self._hover_tip.setText(text)
         self._hover_tip.adjustSize()
@@ -689,6 +708,8 @@ class FileTreeWidget(QWidget):
         self._hover_tip.show()
 
     def _hide_hover_tip(self) -> None:
+        self._hover_timer.stop()
+        self._pending_hover_text = ""
         if self._hover_tip is None:
             return
         self._hover_tip.hide()
@@ -697,6 +718,7 @@ class FileTreeWidget(QWidget):
         if obj is self.tree.viewport():
             if event.type() in (
                 event.Type.Leave,
+                event.Type.MouseMove,
                 event.Type.MouseButtonPress,
                 event.Type.Wheel,
                 event.Type.Hide,

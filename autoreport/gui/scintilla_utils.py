@@ -92,15 +92,16 @@ def update_margin_width(sci: QsciScintilla) -> None:
     sci.setMarginWidth(1, margin_width)
 
 
-def configure_lexer_colors(lexer: QsciLexer) -> None:
+def configure_lexer_colors(lexer: QsciLexer, paper_color: str | None = None) -> None:
     """Configure a QScintilla lexer with theme colors.
 
     Args:
         lexer: The QLexer instance to configure
+        paper_color: Optional background color override for lexer styles
     """
     c = get_theme_colors()
     lexer.setColor(QColor(c["editor_fg"]))
-    lexer.setPaper(QColor(c["editor_bg"]))
+    lexer.setPaper(QColor(paper_color or c["editor_bg"]))
 
 
 def create_scintilla(
@@ -108,6 +109,7 @@ def create_scintilla(
     object_name: str = "scintillaEditor",
     line_numbers: bool = True,
     read_only: bool = False,
+    content_bg: str | None = None,
 ) -> QsciScintilla:
     """Create a QScintilla editor with consistent styling.
 
@@ -116,15 +118,22 @@ def create_scintilla(
         object_name: Object name for CSS styling
         line_numbers: Whether to show line numbers
         read_only: Whether the editor should be read-only
+        content_bg: Optional editor content background override
 
     Returns:
         Configured QsciScintilla widget
     """
     sci = QsciScintilla()
-    apply_scintilla_style(sci, object_name, line_numbers, read_only=read_only)
+    apply_scintilla_style(
+        sci,
+        object_name,
+        line_numbers,
+        read_only=read_only,
+        content_bg=content_bg,
+    )
 
     if lexer:
         sci.setLexer(lexer)
-        configure_lexer_colors(lexer)
+        configure_lexer_colors(lexer, paper_color=content_bg)
 
     return sci

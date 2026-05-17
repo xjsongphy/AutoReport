@@ -72,7 +72,7 @@ def _create_scintilla(path: Path, lexer_name: str) -> tuple:
         if lexer_cls:
             lexer = lexer_cls(sci)
             sci.setLexer(lexer)
-            configure_lexer_colors(lexer)
+            configure_lexer_colors(lexer, paper_color=c["editor_margin"])
 
     try:
         content = path.read_text(encoding="utf-8", errors="replace")
@@ -510,17 +510,18 @@ class EditorPanel(QWidget):
             QTabBar#editorTabBar {{
                 background-color: {c["surface"]};
                 border-bottom: 1px solid {c["border"]};
-                min-height: 36px;
+                min-height: 35px;
             }}
             QTabBar#editorTabBar::tab {{
-                background-color: {c["surface"]};
+                background-color: {c["tab_inactive_bg"]};
                 color: {c["tab_inactive_fg"]};
                 border: none;
                 border-right: 1px solid {c["border"]};
                 padding: 6px 16px;
                 min-width: 80px;
                 max-width: 200px;
-                margin-top: 1px;
+                min-height: 32px;
+                margin: 1px 0 0 0;
             }}
             QTabBar#editorTabBar::tab:selected {{
                 background-color: {c["tab_active_bg"]};
@@ -529,7 +530,7 @@ class EditorPanel(QWidget):
                 border-left: 1px solid {c["border"]};
                 border-right: 1px solid {c["border"]};
                 border-bottom: 1px solid {c["tab_active_bg"]};
-                margin-top: 1px;
+                margin: 1px 0 0 0;
             }}
             QTabBar#editorTabBar::tab:!selected:hover {{
                 background-color: {c["hover"]};
@@ -579,7 +580,7 @@ class PreviewWidget(QWidget):
         header.setObjectName("previewHeader")
         header.setFixedHeight(36)
         hl = QHBoxLayout(header)
-        hl.setContentsMargins(0, 0, 0, 0)
+        hl.setContentsMargins(0, 0, 1, 1)
         hl.setSpacing(0)
 
         # Unified tab bar for all open files
@@ -639,6 +640,7 @@ class PreviewWidget(QWidget):
                 background-color: {c["surface"]};
                 border-bottom: 1px solid {c["border"]};
                 padding: 0;
+                padding-right: 1px;
             }}
             #previewFileCardsScroll {{
                 background-color: transparent;
@@ -663,16 +665,15 @@ class PreviewWidget(QWidget):
             QTabBar#previewTabBar {{
                 background-color: {c["surface"]};
                 border: none;
-                min-height: 36px;
+                min-height: 35px;
             }}
             QTabBar#previewTabBar::tab {{
-                background-color: {c["surface"]};
+                background-color: {c["tab_inactive_bg"]};
                 color: {c["tab_inactive_fg"]};
                 border: none;
                 border-right: 1px solid {c["border"]};
-                border-bottom: 1px solid {c["border"]};
                 padding: 0 12px 0 10px;
-                min-height: 33px;
+                min-height: 32px;
                 margin: 1px 0 0 0;
                 border-radius: 0px;
             }}
@@ -683,7 +684,7 @@ class PreviewWidget(QWidget):
                 border-left: 1px solid {c["border"]};
                 border-right: 1px solid {c["border"]};
                 border-bottom: 1px solid {c["tab_active_bg"]};
-                margin-top: 1px;
+                margin: 1px 0 0 0;
             }}
             QTabBar#previewTabBar::tab:!selected:hover {{
                 background-color: {c["hover"]};

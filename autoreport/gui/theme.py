@@ -45,6 +45,7 @@ def get_theme_colors() -> dict[str, str]:
     border = "#2b2b2b" if dark else "#e0e0e0"
     fg = "#cccccc" if dark else "#616161"
     muted = "#737373" if dark else "#9e9e9e"
+    file_editor_bg = "#242424" if dark else "#ffffff"
 
     # Pre-define values before using in aliases
     focus = "#0078d4" if dark else "#0090ff"
@@ -126,17 +127,17 @@ def get_theme_colors() -> dict[str, str]:
         "tree_sel_fg": "#ffffff" if dark else "#202020",
 
         # === Editor/Preview ===
-        "editor_bg": "#1f1f1f" if dark else "#ffffff",
+        "editor_bg": file_editor_bg,
         "editor_fg": "#d4d4d4" if dark else "#333333",
-        "editor_margin": "#2d2d2d" if dark else "#f0f0f0",
+        "editor_margin": file_editor_bg if dark else "#f0f0f0",
         "editor_caret_fg": "#ffffff" if dark else "#000000",
         "accent": "#0078d4" if dark else "#0090ff",
         "compile_bg": "#0e639c" if dark else "#0078d4",
         "compile_fg": "#ffffff",
 
         # === Tabs ===
-        "tab_active_bg": "#2d2d2d" if dark else "#f3f3f3",
-        "tab_inactive_bg": "#1f1f1f" if dark else "#ececec",
+        "tab_active_bg": file_editor_bg if dark else "#f3f3f3",
+        "tab_inactive_bg": file_editor_bg if dark else "#ececec",
         "tab_active_fg": "#ffffff" if dark else "#1a1a1a",
         "tab_inactive_fg": "#969696" if dark else "#888888",
 

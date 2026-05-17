@@ -115,9 +115,9 @@ def compact_tooltip_qss(selector: str = "QLabel") -> str:
     c = get_theme_colors()
     return f"""
         {selector} {{
-            background-color: {c["surface"]};
-            color: {c["fg"]};
-            border: 1px solid {c["input_border"]};
+            background-color: {c["bg"]};
+            color: {c["popup_fg"]};
+            border: 1px solid {c["border"]};
             border-radius: {c["radius_md"]};
             padding: 2px 6px;
             font-size: 11px;

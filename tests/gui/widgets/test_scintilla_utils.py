@@ -1,6 +1,6 @@
 from PyQt6.QtGui import QColor
 
-from autoreport.gui.scintilla_utils import apply_scintilla_style
+from autoreport.gui.scintilla_utils import apply_scintilla_style, configure_lexer_colors
 from autoreport.gui.theme import get_theme_colors
 
 
@@ -34,3 +34,12 @@ def test_scintilla_accepts_content_background_override(qtbot):
     assert widget.SendScintilla(widget.SCI_STYLEGETBACK, widget.STYLE_DEFAULT) == (
         _scintilla_color_value(QColor("#2d2d2d"))
     )
+
+
+def test_lexer_uses_override_background():
+    from PyQt6.Qsci import QsciLexerPython
+
+    lexer = QsciLexerPython()
+    configure_lexer_colors(lexer, paper_color="#2d2d2d")
+
+    assert lexer.paper(0) == QColor("#2d2d2d")
