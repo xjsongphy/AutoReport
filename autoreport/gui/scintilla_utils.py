@@ -47,8 +47,8 @@ def apply_scintilla_style(
             margin_width = max(30, char_width * digits + 12)
         sci.setMarginWidth(1, margin_width)
 
-    # Set margin colors - use a darker background for contrast
-    sci.setMarginsBackgroundColor(QColor(c["editor_margin"]))
+    # Keep gutter and editor on a unified gray base.
+    sci.setMarginsBackgroundColor(QColor(c["editor_bg"]))
     sci.setMarginsForegroundColor(QColor(c["muted"]))
 
     # Set read-only
@@ -64,7 +64,7 @@ def apply_scintilla_style(
             font-size: 13px;
         }}
         QsciScintilla#{object_name}::margin {{
-            background-color: {c["editor_margin"]};
+            background-color: {c["editor_bg"]};
             color: {c["muted"]};
         }}
     """)

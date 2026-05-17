@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 from loguru import logger
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QSignalBlocker, Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtPdf import QPdfDocument
 from PyQt6.QtWidgets import (
@@ -244,6 +244,11 @@ class TabState:
     pinned: bool = False
     viewer: QWidget = field(default=None)  # type: ignore[assignment]
     viewer_type: str = ""
+    modified: bool = False
+
+
+def _tab_key(path: Path) -> str:
+    return str(path.resolve())
 
 
 # ================================================================== #
@@ -297,9 +302,13 @@ class EditorPanel(QWidget):
         self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._stack.addWidget(self._placeholder)
 
+    @staticmethod
+    def _tab_label_for_state(state: TabState) -> str:
+        return f"{state.path.name}  ●" if state.modified else state.path.name
+
     def open_file(self, path: Path, preview: bool = True) -> None:
         """Open a file. If preview=True, opens as preview tab (replaces existing preview)."""
-        key = str(path.resolve())
+        key = _tab_key(path)
 
         # Already open? Just switch to it.
         if key in self._tabs:
@@ -320,16 +329,29 @@ class EditorPanel(QWidget):
         self._tab_order.append(key)
 
         # Add tab
-        tab_idx = self._tab_bar.addTab(path.name)
+        tab_idx = self._tab_bar.addTab(self._tab_label_for_state(state))
         self._tab_bar.setCurrentIndex(tab_idx)
-        self._tab_bar.setTabToolTip(tab_idx, str(path))
+        self._tab_bar.setTabData(tab_idx, key)
+        self._tab_bar.setTabToolTip(tab_idx, path.name)
         self._tab_bar.setVisible(False)
 
-        if preview:
-            # PyQt6 doesn't have tabFont(), use stylesheet for italic preview tabs
-            self._tab_bar.setTabData(tab_idx, "preview")
+        # Track dirty state for editable text editors.
+        if hasattr(viewer, "textChanged"):
+            viewer.textChanged.connect(lambda _k=key: self._mark_tab_modified(_k))
 
         self._active_key = key
+        self.tab_changed.emit()
+
+    def _mark_tab_modified(self, key: str) -> None:
+        state = self._tabs.get(key)
+        if not state or state.modified:
+            return
+        state.modified = True
+        try:
+            idx = self._tab_order.index(key)
+        except ValueError:
+            return
+        self._tab_bar.setTabText(idx, self._tab_label_for_state(state))
         self.tab_changed.emit()
 
     def pin_active_tab(self) -> None:
@@ -338,11 +360,9 @@ class EditorPanel(QWidget):
             state = self._tabs[self._active_key]
             if not state.pinned:
                 state.pinned = True
-                idx = self._tab_order.index(self._active_key)
-                self._tab_bar.setTabData(idx, "pinned")
 
     def has_tab(self, path: Path) -> bool:
-        return str(path.resolve()) in self._tabs
+        return _tab_key(path) in self._tabs
 
     def tab_count(self) -> int:
         return len(self._tabs)
@@ -359,26 +379,26 @@ class EditorPanel(QWidget):
 
     def move_tab_to(self, path: Path, other: "EditorPanel") -> None:
         """Move a tab from this panel to another panel."""
-        key = str(path.resolve())
+        key = _tab_key(path)
         if key not in self._tabs:
             return
         state = self._tabs.pop(key)
+        old_index = self._tab_order.index(key)
         self._tab_order.remove(key)
 
         # Remove from our stack and tab bar
-        self._tab_bar.removeTab(self._tab_order.index(key) if key in self._tab_order else 0)
+        self._tab_bar.removeTab(old_index)
         self._stack.removeWidget(state.viewer)
 
         # Add to other panel
         other._tabs[key] = state
         other._tab_order.append(key)
         other._stack.addWidget(state.viewer)
-        tab_idx = other._tab_bar.addTab(path.name)
+        tab_idx = other._tab_bar.addTab(other._tab_label_for_state(state))
         other._tab_bar.setCurrentIndex(tab_idx)
-        other._tab_bar.setTabToolTip(tab_idx, str(path))
+        other._tab_bar.setTabData(tab_idx, key)
+        other._tab_bar.setTabToolTip(tab_idx, path.name)
         other._tab_bar.setVisible(False)
-        if not state.pinned:
-            other._tab_bar.setTabData(tab_idx, "preview")
         other._active_key = key
 
         # Emit signals for both panels
@@ -399,7 +419,7 @@ class EditorPanel(QWidget):
 
     def close_other_tabs(self, keep_path: Path) -> None:
         """Close all tabs except the one matching keep_path."""
-        keep_key = str(keep_path.resolve())
+        keep_key = _tab_key(keep_path)
         for key in list(self._tabs.keys()):
             if key != keep_key:
                 self._close_tab(key)
@@ -410,9 +430,9 @@ class EditorPanel(QWidget):
         state = self._tabs.pop(key)
         self._tab_order.remove(key)
 
-        # Remove tab bar entry
+        # Remove tab bar entry by stored key for deterministic behavior.
         for i in range(self._tab_bar.count()):
-            if self._tab_bar.tabToolTip(i) == key or self._tab_bar.tabText(i) == state.path.name:
+            if self._tab_bar.tabData(i) == key:
                 self._tab_bar.removeTab(i)
                 break
 
@@ -453,7 +473,6 @@ class EditorPanel(QWidget):
             state = self._tabs[key]
             if not state.pinned:
                 state.pinned = True
-                self._tab_bar.setTabData(index, "pinned")
 
     def _on_context_menu(self, pos) -> None:
         index = self._tab_bar.tabAt(pos)
@@ -496,12 +515,14 @@ class EditorPanel(QWidget):
                 max-width: 200px;
             }}
             QTabBar#editorTabBar::tab:selected {{
-                background-color: {c["tab_active_bg"]};
+                background-color: {c["surface"]};
                 color: {c["tab_active_fg"]};
                 border-top: 2px solid {c["accent"]};
             }}
+            QTabBar#editorTabBar::tab:!selected:hover {{
+                background-color: {c["hover"]};
+            }}
             QTabBar#editorTabBar::close-button {{
-                image: none;
                 subcontrol-position: right;
             }}
         """)
@@ -528,7 +549,6 @@ class PreviewWidget(QWidget):
     def __init__(self, workspace: Path):
         super().__init__()
         self.workspace = Path(workspace).resolve()
-        self._current_directory = ""
         self._current_file: Path | None = None
 
         # Single editor panel
@@ -561,6 +581,7 @@ class PreviewWidget(QWidget):
         self._unified_tab_bar.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._unified_tab_bar.currentChanged.connect(self._on_unified_tab_changed)
         self._unified_tab_bar.tabCloseRequested.connect(self._on_unified_tab_close)
+        self._unified_tab_bar.tabBarDoubleClicked.connect(self._on_unified_tab_double_click)
         self._unified_tab_bar.customContextMenuRequested.connect(self._on_unified_tab_context_menu)
         hl.addWidget(self._unified_tab_bar, 1)
         self._unified_tab_bar.setVisible(False)
@@ -632,17 +653,18 @@ class PreviewWidget(QWidget):
                 border: none;
             }}
             QTabBar#previewTabBar::tab {{
-                background-color: {c["bg"]};
+                background-color: {c["tab_inactive_bg"]};
                 color: {c["tab_inactive_fg"]};
                 border: none;
                 border-right: 1px solid {c["border"]};
+                border-bottom: 1px solid {c["border"]};
                 padding: 0 12px 0 10px;
                 min-height: 35px;
                 margin: 0;
                 border-radius: 0px;
             }}
             QTabBar#previewTabBar::tab:selected {{
-                background-color: {c["tab_inactive_bg"]};
+                background-color: {c["surface"]};
                 color: {c["tab_active_fg"]};
                 border-top: 2px solid {c["accent"]};
             }}
@@ -650,10 +672,9 @@ class PreviewWidget(QWidget):
                 background-color: {c["hover"]};
             }}
             QTabBar#previewTabBar::tab:selected:hover {{
-                background-color: {c["tab_inactive_bg"]};
+                background-color: {c["surface"]};
             }}
             QTabBar#previewTabBar::close-button {{
-                image: none;
                 subcontrol-position: right;
                 margin-right: 2px;
             }}
@@ -663,12 +684,8 @@ class PreviewWidget(QWidget):
             panel.apply_style()
 
     # ------------------------------------------------------------------ #
-    #  Directory / file switching
+    #  File switching
     # ------------------------------------------------------------------ #
-
-    def set_directory(self, directory: str) -> None:
-        self._current_directory = directory
-        logger.debug("Editor directory context updated: {}", directory)
 
     def load_file(self, file_path: Path) -> None:
         file_path = Path(file_path).resolve()
@@ -683,29 +700,49 @@ class PreviewWidget(QWidget):
         """Add a tab to the unified tab bar."""
         # Check if already exists
         for i in range(self._unified_tab_bar.count()):
-            if self._unified_tab_bar.tabToolTip(i) == str(file_path):
+            if self._unified_tab_bar.tabData(i) == str(file_path):
                 self._unified_tab_bar.setCurrentIndex(i)
                 return
 
         # Add new tab
         tab_idx = self._unified_tab_bar.addTab(file_path.name)
-        self._unified_tab_bar.setTabToolTip(tab_idx, str(file_path))
+        self._unified_tab_bar.setTabData(tab_idx, str(file_path))
+        self._unified_tab_bar.setTabToolTip(tab_idx, file_path.name)
         self._unified_tab_bar.setCurrentIndex(tab_idx)
 
     def _sync_tabs_from_panels(self) -> None:
         """Sync unified tab bar with tabs from all panels."""
-        # Clear current tabs (QTabBar has no clear(), remove one by one)
-        while self._unified_tab_bar.count() > 0:
-            self._unified_tab_bar.removeTab(0)
+        active_key = _tab_key(self._current_file) if self._current_file else None
+        if not active_key:
+            for panel in self._panels:
+                if panel._active_key:
+                    active_key = panel._active_key
+                    break
 
-        # Collect all open files from panels
-        for panel in self._panels:
-            for key, state in panel._tabs.items():
-                tab_idx = self._unified_tab_bar.addTab(state.path.name)
-                self._unified_tab_bar.setTabToolTip(tab_idx, str(state.path))
-                if key == panel._active_key:
-                    self._unified_tab_bar.setCurrentIndex(tab_idx)
+        with QSignalBlocker(self._unified_tab_bar):
+            while self._unified_tab_bar.count() > 0:
+                self._unified_tab_bar.removeTab(0)
+
+            current_index = -1
+            for panel in self._panels:
+                for key in panel._tab_order:
+                    state = panel._tabs[key]
+                    label = f"{state.path.name}  ●" if state.modified else state.path.name
+                    tab_idx = self._unified_tab_bar.addTab(label)
+                    self._unified_tab_bar.setTabData(tab_idx, key)
+                    self._unified_tab_bar.setTabToolTip(tab_idx, state.path.name)
+                    if key == active_key or (current_index < 0 and key == panel._active_key):
+                        current_index = tab_idx
+
+            if current_index >= 0:
+                self._unified_tab_bar.setCurrentIndex(current_index)
         self._unified_tab_bar.setVisible(self._unified_tab_bar.count() > 0)
+
+        if self._unified_tab_bar.currentIndex() >= 0:
+            current_key = self._unified_tab_bar.tabData(self._unified_tab_bar.currentIndex())
+            self._current_file = Path(current_key) if current_key else None
+        elif self._unified_tab_bar.count() == 0:
+            self._current_file = None
 
     def _on_unified_tab_changed(self, index: int) -> None:
         """Handle unified tab bar change."""
@@ -714,7 +751,7 @@ class PreviewWidget(QWidget):
             self.file_changed.emit(Path())  # Emit with empty path
             return
 
-        file_path_str = self._unified_tab_bar.tabToolTip(index)
+        file_path_str = self._unified_tab_bar.tabData(index)
         if not file_path_str:
             self._current_file = None
             self.file_changed.emit(Path())  # Emit with empty path
@@ -725,7 +762,7 @@ class PreviewWidget(QWidget):
 
         # Find the panel that has this file and switch to it
         for panel in self._panels:
-            key = str(file_path.resolve())
+            key = _tab_key(file_path)
             if key in panel._tabs:
                 idx = panel._tab_order.index(key)
                 panel._tab_bar.setCurrentIndex(idx)
@@ -734,9 +771,25 @@ class PreviewWidget(QWidget):
         # Emit file changed signal
         self.file_changed.emit(file_path)
 
+    def _on_unified_tab_double_click(self, index: int) -> None:
+        """Pin a preview tab and switch to it on double-click."""
+        if index < 0:
+            return
+
+        file_path_str = self._unified_tab_bar.tabData(index)
+        if not file_path_str:
+            return
+
+        self._on_unified_tab_changed(index)
+        key = _tab_key(Path(file_path_str))
+        for panel in self._panels:
+            if key in panel._tabs:
+                panel._tabs[key].pinned = True
+                break
+
     def _on_unified_tab_close(self, index: int) -> None:
         """Handle unified tab close."""
-        file_path_str = self._unified_tab_bar.tabToolTip(index)
+        file_path_str = self._unified_tab_bar.tabData(index)
         if not file_path_str:
             return
 
@@ -744,7 +797,7 @@ class PreviewWidget(QWidget):
 
         # Close tab in panel
         for panel in self._panels:
-            key = str(file_path.resolve())
+            key = _tab_key(file_path)
             if key in panel._tabs:
                 panel._close_tab(key)
                 break
@@ -761,7 +814,7 @@ class PreviewWidget(QWidget):
         if index < 0:
             return
 
-        file_path_str = self._unified_tab_bar.tabToolTip(index)
+        file_path_str = self._unified_tab_bar.tabData(index)
         if not file_path_str:
             return
 
@@ -854,10 +907,6 @@ class PreviewWidget(QWidget):
     def refresh_pdf(self) -> None:
         # Kept for API compatibility; unified editor has no dedicated PDF refresh path.
         return
-
-    @property
-    def current_directory(self) -> str:
-        return self._current_directory
 
     @property
     def current_file(self) -> Path | None:

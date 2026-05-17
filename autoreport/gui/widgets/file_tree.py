@@ -14,7 +14,7 @@ from loguru import logger
 from PyQt6.QtCore import QFileSystemWatcher, QMimeData, QPoint, QSize, QSignalBlocker, Qt, QTimer, pyqtSignal
 
 from autoreport.utils.logging_config import ui_logger
-from PyQt6.QtGui import QColor, QDrag, QDragEnterEvent, QDragMoveEvent, QDropEvent, QIcon, QPalette, QPainter, QPixmap
+from PyQt6.QtGui import QColor, QCursor, QDrag, QDragEnterEvent, QDragMoveEvent, QDropEvent, QIcon, QPalette, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemDelegate,
     QAbstractItemView,
@@ -78,6 +78,8 @@ class _FileTreeDelegate(QStyledItemDelegate):
         self.initStyleOption(opt, index)
         opt.icon = QIcon()
         style = opt.widget.style() if opt.widget else QApplication.style()
+        # Keep icon fixed; pull text closer so file rows visually match folder rows.
+        opt.rect = opt.rect.adjusted(-10, 0, 0, 0)
         style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
 
         # Draw icon at the same X as the branch arrow for this depth.
@@ -90,8 +92,7 @@ class _FileTreeDelegate(QStyledItemDelegate):
             depth += 1
             p = p.parent()
 
-        # Align file icons to the branch column at this depth.
-        # Keep icon near filename while staying centered in the branch column.
+        # Keep icon strictly anchored to the branch column center.
         icon_x = depth * indent + (indent - icon_sz.width()) // 2
         icon_y = option.rect.y() + (option.rect.height() - icon_sz.height()) // 2
 
@@ -285,6 +286,7 @@ class FileTreeWidget(QWidget):
         self._pending_new_item: QTreeWidgetItem | None = None
         self._pending_new_kind: str | None = None  # "file" | "folder"
         self._pending_editor: QLineEdit | None = None
+        self._hover_tip: QLabel | None = None
         self._setup_ui()
         self._init_directories()
         self._setup_file_watcher()
@@ -358,7 +360,10 @@ class FileTreeWidget(QWidget):
         self.tree.setRootIsDecorated(True)
         self.tree.setItemsExpandable(True)
         self.tree.setAnimated(False)
+        self.tree.setMouseTracking(True)
         self.tree.itemClicked.connect(self._on_item_clicked)
+        self.tree.itemEntered.connect(self._on_item_entered)
+        self.tree.viewport().installEventFilter(self)
         self.tree.itemExpanded.connect(self._on_item_expanded)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
@@ -403,7 +408,7 @@ class FileTreeWidget(QWidget):
             #explorerToolbarBtn {{
                 background-color: transparent;
                 border: none;
-                border-radius: 3px;
+                border-radius: {c["radius_sm"]};
                 font-family: "codicon", "Segoe UI Symbol", "Apple Symbols", sans-serif;
                 font-size: 18px;
                 padding: 0;
@@ -447,7 +452,7 @@ class FileTreeWidget(QWidget):
                 background-color: {c["bg"]};
                 color: {c["fg"]};
                 border: 1px solid {c["border"]};
-                border-radius: 3px;
+                border-radius: {c["radius_sm"]};
                 padding: 2px 4px;
                 selection-background-color: {c["accent"]};
             }}
@@ -465,7 +470,7 @@ class FileTreeWidget(QWidget):
             QScrollBar::handle:vertical {{
                 background-color: {c["scrollbar"]};
                 min-height: 30px;
-                border-radius: 5px;
+                border-radius: {c["radius_md"]};
             }}
 
             QScrollBar::handle:vertical:hover {{
@@ -484,12 +489,12 @@ class FileTreeWidget(QWidget):
             #explorerContextMenu {{
                 background-color: {c["bg"]};
                 border: 1px solid {c["border"]};
-                border-radius: 6px;
+                border-radius: {c["radius_md"]};
                 padding: 4px;
             }}
             #explorerContextMenu::item {{
                 padding: 6px 24px;
-                border-radius: 3px;
+                border-radius: {c["radius_sm"]};
             }}
             #explorerContextMenu::item:selected {{
                 background-color: {c["tree_sel_bg"]};
@@ -629,7 +634,6 @@ class FileTreeWidget(QWidget):
 
         # Toggle expansion on single click, but only if click is on the
         # text area (not the decoration/arrow where Qt already toggles).
-        from PyQt6.QtGui import QCursor
         cursor_x = self.tree.viewport().mapFromGlobal(QCursor.pos()).x()
         depth = 0
         p = item.parent()
@@ -643,6 +647,51 @@ class FileTreeWidget(QWidget):
             item.setExpanded(not item.isExpanded())
         self._ensure_directory_indicators()
         self.tree.viewport().update()
+
+    def _on_item_entered(self, item: QTreeWidgetItem, column: int) -> None:
+        """Show compact tooltip close to cursor with full path context."""
+        file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
+        if file_path_str:
+            file_path = Path(file_path_str)
+            try:
+                tip = file_path.relative_to(self.workspace).as_posix()
+            except ValueError:
+                tip = file_path.as_posix()
+        else:
+            tip = item.toolTip(column) or item.text(column)
+
+        if not tip:
+            self._hide_hover_tip()
+            return
+
+        self._show_hover_tip(tip, QCursor.pos() + QPoint(10, 2))
+
+    def _show_hover_tip(self, text: str, global_pos: QPoint) -> None:
+        if self._hover_tip is None:
+            self._hover_tip = QLabel(self)
+            self._hover_tip.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
+            self._hover_tip.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+            self._hover_tip.setStyleSheet(compact_tooltip_qss("QLabel"))
+        self._hover_tip.setText(text)
+        self._hover_tip.adjustSize()
+        self._hover_tip.move(global_pos)
+        self._hover_tip.show()
+
+    def _hide_hover_tip(self) -> None:
+        if self._hover_tip is None:
+            return
+        self._hover_tip.hide()
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        if obj is self.tree.viewport():
+            if event.type() in (
+                event.Type.Leave,
+                event.Type.MouseButtonPress,
+                event.Type.Wheel,
+                event.Type.Hide,
+            ):
+                self._hide_hover_tip()
+        return super().eventFilter(obj, event)
 
     def _on_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
         if self._editing_item is not None and self._editing_item != item:
@@ -836,7 +885,7 @@ class FileTreeWidget(QWidget):
 
                     child = QTreeWidgetItem(item)
                     child.setText(0, entry.name)
-                    child.setToolTip(0, entry.name)
+                    child.setToolTip(0, self._workspace_rel(entry))
 
                     if entry.is_dir():
                         rel = self._workspace_rel(entry)

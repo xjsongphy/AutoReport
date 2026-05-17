@@ -26,6 +26,48 @@ app = typer.Typer(
 )
 
 
+class _FilteredStderr:
+    """Filter known noisy platform stderr lines while preserving real errors."""
+
+    _BLOCK_PATTERNS = (
+        "IMKCFRunLoopWakeUpReliable",
+    )
+
+    def __init__(self, wrapped):
+        self._wrapped = wrapped
+        self._buf = ""
+
+    def write(self, data):
+        if not isinstance(data, str):
+            data = str(data)
+        self._buf += data
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            if any(pat in line for pat in self._BLOCK_PATTERNS):
+                continue
+            self._wrapped.write(line + "\n")
+        return len(data)
+
+    def flush(self):
+        if self._buf:
+            line = self._buf
+            self._buf = ""
+            if not any(pat in line for pat in self._BLOCK_PATTERNS):
+                self._wrapped.write(line)
+        self._wrapped.flush()
+
+    def isatty(self):
+        return self._wrapped.isatty() if hasattr(self._wrapped, "isatty") else False
+
+
+def _install_stderr_filter() -> None:
+    if sys.platform != "darwin":
+        return
+    if isinstance(sys.stderr, _FilteredStderr):
+        return
+    sys.stderr = _FilteredStderr(sys.stderr)
+
+
 class AutoReportApp:
     """Main AutoReport application."""
 
@@ -419,6 +461,8 @@ def main(
     ] = False,
 ) -> None:
     """AutoReport - 基于 Agent 的自动化物理实验报告撰写系统"""
+    _install_stderr_filter()
+
     # Handle --sync-presets (CLI mode, no GUI needed)
     if sync_presets:
         setup_logging(log_level="INFO", log_to_file=True)

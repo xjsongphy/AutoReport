@@ -5,8 +5,10 @@ import sys
 from pathlib import Path
 
 from loguru import logger
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QTimer, Qt, pyqtSignal
+from PyQt6.QtGui import QAction, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QMainWindow,
     QMenu,
@@ -86,7 +88,11 @@ class MainWindow(QMainWindow):
 
         self._apply_theme()
         self._setup_ui()
-        # No longer auto-load history — each session starts fresh
+        # Load persisted histories for main and currently selected sub-agent.
+        # Do an immediate load plus a deferred reload after the first event-loop
+        # tick to avoid startup ordering glitches in the sub-agent selector.
+        self._load_conversations()
+        QTimer.singleShot(0, self._load_conversations)
 
         self._message_signal.connect(self._dispatch_backend_message)
         self.backend.subscribe_to_messages(self._on_bus_message)
@@ -554,6 +560,13 @@ class MainWindow(QMainWindow):
         new_window_act = file_menu.addAction("新建窗口")
         new_window_act.triggered.connect(self._on_new_window)
 
+        file_menu.addSeparator()
+        quit_act = QAction("退出 AutoReport", self)
+        quit_act.setShortcut(QKeySequence.StandardKey.Quit)
+        quit_act.setMenuRole(QAction.MenuRole.QuitRole)
+        quit_act.triggered.connect(QApplication.closeAllWindows)
+        file_menu.addAction(quit_act)
+
         # Set window title bar color (Windows only)
         if hasattr(self, "setWindowProperty"):
             self.setWindowProperty("Appearance", "DWMWindowAccentPolicy", 0)  # Disable accent
@@ -682,6 +695,12 @@ class MainWindow(QMainWindow):
         self._main_splitter = main_splitter
         self._apply_splitter_sizes()
 
+        # macOS reliability: make Cmd+Q work even when menu role shortcut
+        # isn't dispatched by the native menu chain.
+        self._quit_shortcut = QShortcut(QKeySequence.StandardKey.Quit, self)
+        self._quit_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._quit_shortcut.activated.connect(self.close)
+
         # Connect signals
         self.main_agent_panel.message_sent.connect(self._on_main_agent_message)
         self.sub_agent_panel.message_sent.connect(self._on_sub_agent_message)
@@ -740,52 +759,12 @@ class MainWindow(QMainWindow):
             return file_path.as_posix()
 
     def _load_conversations(self) -> None:
-        # Only restore main agent history. Sub-agents start fresh each session.
-        agent_type = "main"
-        records = self._conv_store.load_messages(agent_type)
-        if records:
-            panel = self._get_panel_for_agent(agent_type)
-            for rec in records:
-                role = rec.get("role", "")
-                content = rec.get("content", "")
-                if role == "user":
-                    panel.add_message(
-                        "user",
-                        content,
-                        summary=rec.get("summary"),
-                        detail=rec.get("detail"),
-                        expandable=rec.get("expandable", True),
-                    )
-                elif role == "agent":
-                    panel.add_message(
-                        "agent",
-                        content,
-                        summary=rec.get("summary"),
-                        detail=rec.get("detail"),
-                        expandable=rec.get("expandable", True),
-                    )
-                elif role == "tool_call":
-                    panel.add_tool_call(
-                        content,
-                        rec.get("arguments", {}),
-                        summary=rec.get("summary"),
-                        detail=rec.get("detail"),
-                        expandable=rec.get("expandable", True),
-                    )
-                elif role == "tool_result":
-                    panel.add_tool_result(
-                        content,
-                        rec.get("result"),
-                        rec.get("error"),
-                        summary=rec.get("summary"),
-                        detail=rec.get("detail"),
-                        expandable=rec.get("expandable"),
-                    )
-                elif role == "error":
-                    panel.add_error(rec.get("source", ""), content)
-            logger.info("Loaded {} messages for agent {}", len(records), agent_type)
+        # Restore main + currently selected sub-agent history on startup.
+        self._load_conversations_for_agent("main", self.main_agent_panel)
+        self._load_conversations_for_agent(self.sub_agent_panel.agent_type, self.sub_agent_panel)
 
     def _load_conversations_for_agent(self, agent_type: str, panel: AgentPanel) -> None:
+        panel._messages_area.clear()
         records = self._conv_store.load_messages(agent_type)
         if not records:
             return
@@ -895,6 +874,10 @@ class MainWindow(QMainWindow):
 
     def _handle_agent_response(self, message: AgentResponse) -> None:
         agent_str = str(message.agent_type)
+        if agent_str != "main" and agent_str != self.sub_agent_panel.agent_type:
+            if not message.streaming and message.content:
+                self._conv_store.append_message(agent_str, "agent", message.content)
+            return
         panel = self._get_panel_for_agent(agent_str)
         # Empty non-streaming message = completion signal for streaming
         if not message.streaming and not message.content:
@@ -922,6 +905,14 @@ class MainWindow(QMainWindow):
 
     def _handle_user_message(self, message: UserMessage) -> None:
         agent_str = str(message.agent_type)
+        if agent_str != "main" and agent_str != self.sub_agent_panel.agent_type:
+            self._conv_store.append_message(
+                agent_str,
+                "user",
+                message.content,
+                extra={"source": message.source},
+            )
+            return
         source_key = str(message.source or "user")
         is_agent_message = source_key not in {"user", "system"}
         is_coordination = source_key == "main_agent"
@@ -963,6 +954,9 @@ class MainWindow(QMainWindow):
 
     def _handle_tool_call(self, message: ToolCall) -> None:
         agent_str = str(message.agent_type)
+        if agent_str != "main" and agent_str != self.sub_agent_panel.agent_type:
+            self._conv_store.append_tool_call(agent_str, message.tool_name, message.arguments)
+            return
         panel = self._get_panel_for_agent(agent_str)
         summary = None
         detail = None
@@ -992,6 +986,15 @@ class MainWindow(QMainWindow):
 
     def _handle_tool_result(self, message: ToolResult) -> None:
         agent_str = str(message.agent_type)
+        if agent_str != "main" and agent_str != self.sub_agent_panel.agent_type:
+            result_str = str(message.result) if message.result else None
+            self._conv_store.append_tool_result(
+                agent_str,
+                message.tool_name,
+                result_str,
+                message.error,
+            )
+            return
         panel = self._get_panel_for_agent(agent_str)
         result_str = str(message.result) if message.result else None
         summary = None
@@ -1086,7 +1089,10 @@ class MainWindow(QMainWindow):
         return (summary, detail, bool(detail))
 
     def _handle_status_change(self, message: StatusChange) -> None:
-        panel = self._get_panel_for_agent(message.agent_type)
+        agent_str = str(message.agent_type)
+        if agent_str != "main" and agent_str != self.sub_agent_panel.agent_type:
+            return
+        panel = self._get_panel_for_agent(agent_str)
         panel.set_status(message.status, message.extra)
 
     def _handle_error(self, message: Error) -> None:
@@ -1125,11 +1131,15 @@ class MainWindow(QMainWindow):
 
     def _handle_queue_update(self, message: QueueUpdateMessage) -> None:
         agent_str = str(message.agent_type)
+        if agent_str != "main" and agent_str != self.sub_agent_panel.agent_type:
+            return
         panel = self._get_panel_for_agent(agent_str)
         panel.set_queue_preview(message.queued_messages)
 
     def _handle_checkpoint(self, message: Checkpoint) -> None:
         agent_str = str(message.agent_type) if hasattr(message, "agent_type") else "main"
+        if agent_str != "main" and agent_str != self.sub_agent_panel.agent_type:
+            return
         panel = self._get_panel_for_agent(agent_str)
         panel.add_checkpoint(message.checkpoint_id, message.description)
 

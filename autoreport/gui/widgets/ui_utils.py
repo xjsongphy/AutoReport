@@ -117,9 +117,9 @@ def compact_tooltip_qss(selector: str = "QLabel") -> str:
         {selector} {{
             background-color: {c["surface"]};
             color: {c["fg"]};
-            border: 1px solid {c["border"]};
-            border-radius: 10px;
-            padding: 4px 8px;
+            border: 1px solid {c["input_border"]};
+            border-radius: {c["radius_md"]};
+            padding: 2px 6px;
             font-size: 11px;
         }}
     """
@@ -150,6 +150,7 @@ class NoWheelComboBox(QComboBox):
         popup_view.setObjectName("comboPopupView")
         popup_view.setFrameShape(QFrame.Shape.NoFrame)
         popup_view.setUniformItemSizes(True)
+        popup_view.setSpacing(0)
         popup_view.setMouseTracking(True)
         popup_view.setEditTriggers(QListView.EditTrigger.NoEditTriggers)
         popup_view.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
@@ -199,7 +200,8 @@ class NoWheelComboBox(QComboBox):
             popup.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
             popup.setContentsMargins(0, 0, 0, 0)
             popup.setStyleSheet("background: transparent; border: none;")
-            popup.move(self.mapToGlobal(QPoint(0, self.height())))
+            # Stronger overlap to eliminate visual seam between combo and popup.
+            popup.move(self.mapToGlobal(QPoint(0, self.height() - 2)))
             popup.show()
 
     def eventFilter(self, obj, event):  # noqa: N802
@@ -210,22 +212,24 @@ class NoWheelComboBox(QComboBox):
                 sel = view.selectionModel()
                 if sel:
                     sel.clearSelection()
-                view.setCurrentIndex(view.model().index(-1, -1))
         return super().eventFilter(obj, event)
 
     def _apply_popup_style(self) -> None:
         c = get_theme_colors()
         radius = c.get("radius_md", "6px")
         item_radius = c.get("radius_sm", "4px")
+        border_color = c.get("input_border", c["border"])
+        border_width = c.get("input_border_width", "1px")
+        row_height = 30
         view = self.view()
         if view is None:
             return
         view.setStyleSheet(
             f"""
             QListView#comboPopupView {{
-                border: 1px solid {c["border"]};
+                border: {border_width} solid {border_color};
                 border-radius: {radius};
-                background-color: {c["card"]};
+                background-color: {c["bg"]};
                 color: {c["fg"]};
                 outline: none;
                 padding: 0;
@@ -236,7 +240,8 @@ class NoWheelComboBox(QComboBox):
                 color: {c["fg"]};
                 padding: 0 8px;
                 margin: 0;
-                min-height: 24px;
+                min-height: {row_height}px;
+                max-height: {row_height}px;
                 border-radius: {item_radius};
             }}
             QListView#comboPopupView::item:selected {{

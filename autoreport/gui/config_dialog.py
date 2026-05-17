@@ -787,7 +787,7 @@ class ConfigDialog(QDialog):
                 padding: 6px 10px;
                 background-color: {c["warningBg"]};
                 border: 1px solid {c["warningBorder"]};
-                border-radius: 6px;
+                border-radius: {c["radius_md"]};
                 margin-top: 8px;
             }}
             #emptyHint {{
@@ -807,7 +807,7 @@ class ConfigDialog(QDialog):
             #providerCard {{
                 background-color: {c["cardBg"]};
                 border: 1px solid {c["cardBorder"]};
-                border-radius: 8px;
+                border-radius: {c["radius_lg"]};
             }}
             #categoryLabel {{
                 font-size: 12px;
@@ -820,7 +820,7 @@ class ConfigDialog(QDialog):
                 background-color: {c["primaryBtnBg"]};
                 color: {c["primaryBtnFg"]};
                 border: none;
-                border-radius: 6px;
+                border-radius: {c["radius_md"]};
                 padding: 8px 24px;
                 font-weight: {c["fw_semibold"]};
                 font-size: 13px;
@@ -831,7 +831,7 @@ class ConfigDialog(QDialog):
                 background-color: {c["secondaryBtnBg"]};
                 color: {c["secondaryBtnFg"]};
                 border: 1px solid {c["secondaryBtnBorder"]};
-                border-radius: 6px;
+                border-radius: {c["radius_md"]};
                 padding: 8px 20px;
                 font-size: 13px;
             }}
@@ -851,7 +851,7 @@ class ConfigDialog(QDialog):
                 background-color: transparent;
                 color: {c["testFg"]};
                 border: 1px solid {c["testBorder"]};
-                border-radius: 4px;
+                border-radius: {c["radius_sm"]};
                 padding: 4px 12px;
                 font-size: 12px;
             }}
@@ -864,7 +864,7 @@ class ConfigDialog(QDialog):
                 background-color: transparent;
                 color: {c["deleteFg"]};
                 border: 1px solid transparent;
-                border-radius: 4px;
+                border-radius: {c["radius_sm"]};
                 font-size: 16px;
                 font-weight: {c["fw_bold"]};
             }}
@@ -877,7 +877,7 @@ class ConfigDialog(QDialog):
                 background-color: transparent;
                 color: {c["addBtnFg"]};
                 border: 1px dashed {c["addBtnBorder"]};
-                border-radius: 6px;
+                border-radius: {c["radius_md"]};
                 padding: 8px 16px;
                 font-size: 13px;
             }}
@@ -886,7 +886,7 @@ class ConfigDialog(QDialog):
                 background-color: transparent;
                 color: {c["syncBtnFg"]};
                 border: 1px solid {c["syncBtnBorder"]};
-                border-radius: 4px;
+                border-radius: {c["radius_sm"]};
                 padding: 4px 12px;
                 font-size: 12px;
             }}
@@ -895,7 +895,7 @@ class ConfigDialog(QDialog):
                 background-color: {c["presetBtnBg"]};
                 color: {c["presetBtnFg"]};
                 border: 1px solid {c["presetBtnBorder"]};
-                border-radius: 6px;
+                border-radius: {c["radius_md"]};
                 padding: 10px 14px;
                 font-size: 13px;
                 text-align: left;
@@ -905,7 +905,7 @@ class ConfigDialog(QDialog):
                 background-color: transparent;
                 color: {c["subtitleFg"]};
                 border: 1px dashed {c["inputBorder"]};
-                border-radius: 4px;
+                border-radius: {c["radius_sm"]};
                 padding: 6px 14px;
                 font-size: 12px;
             }}
@@ -921,7 +921,7 @@ class ConfigDialog(QDialog):
                 foreground_color=c["inputFg"],
                 disabled_bg=c["inputDisabledBg"],
                 disabled_fg=c["inputDisabledFg"],
-                radius="4px",
+                radius=c["radius_sm"],
                 font_size=13,
                 padding="6px 10px",
             )}
@@ -936,8 +936,8 @@ class ConfigDialog(QDialog):
                 selection_fg=c["primaryBtnFg"],
                 font_size=13,
                 padding="6px 30px 6px 10px",
-                radius="6px",
-                popup_radius="6px",
+                radius=c["radius_md"],
+                popup_radius=c["radius_md"],
                 item_radius="4px",
             )}
             QScrollArea {{

@@ -209,7 +209,7 @@ class ProjectDialog(QDialog):
                 background-color: {colors["primary"]};
                 color: {colors["primaryFg"]};
                 border: none;
-                border-radius: 4px;
+                border-radius: {colors["radius_sm"]};
                 padding: 8px 20px;
                 font-size: 13px;
                 font-weight: {colors["fw_semibold"]};
@@ -219,7 +219,7 @@ class ProjectDialog(QDialog):
                 background-color: transparent;
                 color: {colors["secondaryFg"]};
                 border: 1px solid {colors["secondaryBorder"]};
-                border-radius: 4px;
+                border-radius: {colors["radius_sm"]};
                 padding: 8px 20px;
                 font-size: 13px;
             }}
@@ -230,7 +230,7 @@ class ProjectDialog(QDialog):
                 background-color: transparent;
                 color: {colors["secondaryFg"]};
                 border: 1px solid {colors["secondaryBorder"]};
-                border-radius: 4px;
+                border-radius: {colors["radius_sm"]};
                 padding: 8px 20px;
                 font-size: 13px;
             }}
@@ -284,7 +284,7 @@ class ProjectDialog(QDialog):
                 background-color: transparent;
                 color: transparent;
                 border: none;
-                border-radius: 3px;
+                border-radius: {colors["radius_sm"]};
                 font-size: 11px;
                 padding: 0;
             }}

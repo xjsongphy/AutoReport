@@ -83,6 +83,7 @@ def get_theme_colors() -> dict[str, str]:
         # === Input ===
         "input_bg": "#313131" if dark else "#ffffff",
         "input_border": "#3c3c3c" if dark else "#e0e0e0",
+        "input_border_width": "1px",
 
         # === Buttons ===
         "primary": "#0078d4" if dark else "#0090ff",

@@ -664,7 +664,7 @@ class MessageRow(QWidget):
             QMenu::item {{
                 background-color: transparent;
                 padding: 6px 10px;
-                border-radius: 4px;
+                border-radius: {c["radius_sm"]};
             }}
             QMenu::item:selected {{
                 background-color: {c["hover"]};
