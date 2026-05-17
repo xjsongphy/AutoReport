@@ -3,6 +3,8 @@
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QWidget, QPushButton
 
+from ..theme import get_theme_colors
+
 
 _SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
@@ -55,17 +57,13 @@ class StatusIndicator(QPushButton):
         self.setVisible(False)
 
     def _update_style(self) -> None:
-        from PyQt6.QtWidgets import QApplication
-        hints = QApplication.styleHints()
-        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
-
-        # Status colors
+        c = get_theme_colors()
         colors = {
-            "idle": ("#3c3c3c", "#737373"),      # bg, fg
-            "thinking": ("#1a3a5a", "#0078d4"),
-            "tool": ("#5a4a1a", "#cca700"),
-            "error": ("#5a1a1a", "#f44747"),
-            "debug": ("#3a1a5a", "#b180d7"),
+            "idle": (c["secondaryBtnBg"], c["status_idle"]),
+            "thinking": (c["surface"], c["status_think"]),
+            "tool": (c["surface"], c["status_tool"]),
+            "error": (c["warningBg"], c["status_error"]),
+            "debug": (c["surface"], c["status_debug"]),
         }
 
         bg, fg = colors.get(self._status, colors["idle"])

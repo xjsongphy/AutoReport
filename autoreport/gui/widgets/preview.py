@@ -56,8 +56,15 @@ def _create_scintilla(path: Path, lexer_name: str) -> tuple:
     """Create a QScintilla editor for the given file."""
     from PyQt6.Qsci import QsciScintilla
 
+    c = get_theme_colors()
     sci = QsciScintilla()
-    apply_scintilla_style(sci, object_name="fileEditor", line_numbers=True, read_only=False)
+    apply_scintilla_style(
+        sci,
+        object_name="fileEditor",
+        line_numbers=True,
+        read_only=False,
+        content_bg=c["editor_margin"],
+    )
 
     if lexer_name:
         mod = __import__("PyQt6.Qsci", fromlist=[lexer_name])
@@ -503,21 +510,26 @@ class EditorPanel(QWidget):
             QTabBar#editorTabBar {{
                 background-color: {c["surface"]};
                 border-bottom: 1px solid {c["border"]};
-                height: 35px;
+                min-height: 36px;
             }}
             QTabBar#editorTabBar::tab {{
-                background-color: {c["tab_inactive_bg"]};
+                background-color: {c["surface"]};
                 color: {c["tab_inactive_fg"]};
                 border: none;
                 border-right: 1px solid {c["border"]};
                 padding: 6px 16px;
                 min-width: 80px;
                 max-width: 200px;
+                margin-top: 1px;
             }}
             QTabBar#editorTabBar::tab:selected {{
-                background-color: {c["surface"]};
+                background-color: {c["tab_active_bg"]};
                 color: {c["tab_active_fg"]};
                 border-top: 2px solid {c["accent"]};
+                border-left: 1px solid {c["border"]};
+                border-right: 1px solid {c["border"]};
+                border-bottom: 1px solid {c["tab_active_bg"]};
+                margin-top: 1px;
             }}
             QTabBar#editorTabBar::tab:!selected:hover {{
                 background-color: {c["hover"]};
@@ -638,7 +650,7 @@ class PreviewWidget(QWidget):
             #previewSettingsBtn {{
                 background-color: transparent;
                 border: none;
-                border-radius: 4px;
+                border-radius: {c["radius_sm"]};
                 padding: 4px;
             }}
             #previewSettingsBtn:hover {{
@@ -649,30 +661,35 @@ class PreviewWidget(QWidget):
                 width: 2px;
             }}
             QTabBar#previewTabBar {{
-                background-color: transparent;
+                background-color: {c["surface"]};
                 border: none;
+                min-height: 36px;
             }}
             QTabBar#previewTabBar::tab {{
-                background-color: {c["tab_inactive_bg"]};
+                background-color: {c["surface"]};
                 color: {c["tab_inactive_fg"]};
                 border: none;
                 border-right: 1px solid {c["border"]};
                 border-bottom: 1px solid {c["border"]};
                 padding: 0 12px 0 10px;
-                min-height: 35px;
-                margin: 0;
+                min-height: 33px;
+                margin: 1px 0 0 0;
                 border-radius: 0px;
             }}
             QTabBar#previewTabBar::tab:selected {{
-                background-color: {c["surface"]};
+                background-color: {c["tab_active_bg"]};
                 color: {c["tab_active_fg"]};
                 border-top: 2px solid {c["accent"]};
+                border-left: 1px solid {c["border"]};
+                border-right: 1px solid {c["border"]};
+                border-bottom: 1px solid {c["tab_active_bg"]};
+                margin-top: 1px;
             }}
             QTabBar#previewTabBar::tab:!selected:hover {{
                 background-color: {c["hover"]};
             }}
             QTabBar#previewTabBar::tab:selected:hover {{
-                background-color: {c["surface"]};
+                background-color: {c["tab_active_bg"]};
             }}
             QTabBar#previewTabBar::close-button {{
                 subcontrol-position: right;

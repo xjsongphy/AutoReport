@@ -23,6 +23,7 @@ from ..config.manager import ConfigManager
 from ..config.presets import ProviderPreset, get_presets_by_category, load_presets
 from ..config.schema import ApiConfig
 from ..core.preset_sync import is_cached, sync_presets
+from .theme import get_theme_colors
 from .widgets.ui_utils import NoWheelComboBox, combo_box_qss, line_edit_qss
 
 CATEGORY_LABELS = {
@@ -181,6 +182,7 @@ class ConfigCard(QFrame):
 
         Matches the lucide Eye / EyeOff style used in cc-switch.
         """
+        c = get_theme_colors()
         size = 64  # Render at 64px for crisp scaling
         half = size // 2
 
@@ -189,7 +191,8 @@ class ConfigCard(QFrame):
         eye_pixmap.fill(Qt.GlobalColor.transparent)
         p = QPainter(eye_pixmap)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#888"), 3.5)
+        pen_color = QColor(c["muted"])
+        pen = QPen(pen_color, 3.5)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
         p.setPen(pen)
@@ -200,7 +203,7 @@ class ConfigCard(QFrame):
         path.cubicTo(size - 16, size - 12, 16, size - 12, 6, half)
         p.drawPath(path)
         # Pupil circle
-        p.setBrush(QColor("#888"))
+        p.setBrush(pen_color)
         p.drawEllipse(QPointF(half, half), 8, 8)
         p.end()
 
@@ -700,65 +703,64 @@ class ConfigDialog(QDialog):
         return False
 
     def _apply_style(self) -> None:
-        dark = self._is_dark_mode()
-
         from PyQt6.QtGui import QPalette
+        c0 = get_theme_colors()
         palette = self.palette()
-        palette.setColor(QPalette.ColorRole.Window, QColor("#1f1f1f" if dark else "#ffffff"))
+        palette.setColor(QPalette.ColorRole.Window, QColor(c0["bg"]))
         self.setPalette(palette)
         self.setAutoFillBackground(True)
 
         c = {
-            "headerBg": "#181818" if dark else "#f8fafc",
-            "headerBorder": "#2b2b2b" if dark else "#e2e8f0",
-            "titleFg": "#e5e5e7" if dark else "#0f172a",
-            "subtitleFg": "#858585" if dark else "#64748b",
-            "activeFg": "#e5e5e7" if dark else "#1e293b",
-            "footerBg": "#181818" if dark else "#f8fafc",
-            "footerBorder": "#2b2b2b" if dark else "#e2e8f0",
-            "cardBg": "#1f1f1f" if dark else "#ffffff",
-            "cardBorder": "#2b2b2b" if dark else "#e2e8f0",
-            "primaryBtnBg": "#0078d4" if dark else "#2563eb",
-            "primaryBtnFg": "#ffffff",
-            "primaryBtnHover": "#026ec1" if dark else "#1d4ed8",
-            "primaryBtnPressed": "#005a9e" if dark else "#1e40af",
-            "secondaryBtnBg": "#181818" if dark else "#ffffff",
-            "secondaryBtnFg": "#cccccc" if dark else "#374151",
-            "secondaryBtnBorder": "#2b2b2b" if dark else "#d1d5db",
-            "secondaryBtnHoverBg": "#2a2d2e" if dark else "#f9fafb",
-            "secondaryBtnHoverBorder": "#3c3c3c" if dark else "#9ca3af",
-            "resetFg": "#858585" if dark else "#6b7280",
-            "resetHoverFg": "#f44747" if dark else "#dc2626",
-            "testFg": "#0078d4" if dark else "#2563eb",
-            "testBorder": "#0078d4" if dark else "#2563eb",
-            "testHoverBg": "#1a3a5c" if dark else "#eff6ff",
-            "testDisabledFg": "#48484a" if dark else "#cbd5d1",
-            "testDisabledBorder": "#2b2b2b" if dark else "#e2e8f0",
-            "deleteFg": "#858585" if dark else "#94a3b8",
-            "deleteHoverFg": "#f44747" if dark else "#ef4444",
-            "deleteHoverBg": "#3a1a1a" if dark else "#fef2f2",
-            "inputBorder": "#3c3c3c" if dark else "#d1d5db",
-            "inputFocusBorder": "#0078d4" if dark else "#2563eb",
-            "inputBg": "#1f1f1f" if dark else "#ffffff",
-            "inputFg": "#cccccc" if dark else "#1e293b",
-            "inputDisabledBg": "#181818" if dark else "#f1f5f9",
-            "inputDisabledFg": "#5a5a5a" if dark else "#94a3b8",
-            "checkFg": "#cccccc" if dark else "#374151",
-            "warningFg": "#f44747" if dark else "#dc2626",
-            "warningBg": "#3a1a1a" if dark else "#fef2f2",
-            "warningBorder": "#5a1a1a" if dark else "#fecaca",
-            "bodyBg": "#1f1f1f" if dark else "#ffffff",
-            "categoryFg": "#858585" if dark else "#64748b",
-            "presetBtnBg": "#1f1f1f" if dark else "#f8fafc",
-            "presetBtnFg": "#cccccc" if dark else "#334155",
-            "presetBtnBorder": "#2b2b2b" if dark else "#e2e8f0",
-            "presetBtnHoverBg": "#2a2d2e" if dark else "#f1f5f9",
-            "addBtnFg": "#0078d4" if dark else "#2563eb",
-            "addBtnBorder": "#0078d4" if dark else "#2563eb",
-            "addBtnHoverBg": "#1a3a5c" if dark else "#eff6ff",
-            "syncBtnFg": "#30d158" if dark else "#059669",
-            "syncBtnBorder": "#30d158" if dark else "#059669",
-            "syncBtnHoverBg": "#1a3a1a" if dark else "#ecfdf5",
+            "headerBg": c0["surface"],
+            "headerBorder": c0["border"],
+            "titleFg": c0["fg"],
+            "subtitleFg": c0["muted"],
+            "activeFg": c0["activeFg"],
+            "footerBg": c0["surface"],
+            "footerBorder": c0["border"],
+            "cardBg": c0["cardBg"],
+            "cardBorder": c0["cardBorder"],
+            "primaryBtnBg": c0["primaryBtnBg"],
+            "primaryBtnFg": c0["primaryBtnFg"],
+            "primaryBtnHover": c0["primaryBtnHover"],
+            "primaryBtnPressed": c0["primaryBtnPressed"],
+            "secondaryBtnBg": c0["secondaryBtnBg"],
+            "secondaryBtnFg": c0["secondaryBtnFg"],
+            "secondaryBtnBorder": c0["secondaryBtnBorder"],
+            "secondaryBtnHoverBg": c0["secondaryBtnHoverBg"],
+            "secondaryBtnHoverBorder": c0["secondaryBtnHoverBorder"],
+            "resetFg": c0["subtitleFg"],
+            "resetHoverFg": c0["deleteFg"],
+            "testFg": c0["primaryBtnBg"],
+            "testBorder": c0["primaryBtnBg"],
+            "testHoverBg": c0["hover"],
+            "testDisabledFg": c0["inputDisabledFg"],
+            "testDisabledBorder": c0["border"],
+            "deleteFg": c0["subtitleFg"],
+            "deleteHoverFg": c0["deleteFg"],
+            "deleteHoverBg": c0["warningBg"],
+            "inputBorder": c0["inputBorder"],
+            "inputFocusBorder": c0["inputFocusBorder"],
+            "inputBg": c0["inputBg"],
+            "inputFg": c0["inputFg"],
+            "inputDisabledBg": c0["inputDisabledBg"],
+            "inputDisabledFg": c0["inputDisabledFg"],
+            "checkFg": c0["checkFg"],
+            "warningFg": c0["warningFg"],
+            "warningBg": c0["warningBg"],
+            "warningBorder": c0["warningBorder"],
+            "bodyBg": c0["bodyBg"],
+            "categoryFg": c0["subtitleFg"],
+            "presetBtnBg": c0["presetBtnBg"],
+            "presetBtnFg": c0["presetBtnFg"],
+            "presetBtnBorder": c0["presetBtnBorder"],
+            "presetBtnHoverBg": c0["presetBtnHoverBg"],
+            "addBtnFg": c0["primaryBtnBg"],
+            "addBtnBorder": c0["primaryBtnBg"],
+            "addBtnHoverBg": c0["hover"],
+            "syncBtnFg": c0["checkFg"],
+            "syncBtnBorder": c0["checkFg"],
+            "syncBtnHoverBg": c0["hover"],
             "fw_semibold": "600",
             "fw_bold": "700",
         }

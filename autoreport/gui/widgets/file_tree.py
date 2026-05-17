@@ -529,7 +529,6 @@ class FileTreeWidget(QWidget):
             item = QTreeWidgetItem(self.tree)
             item.setText(0, DIR_LABELS.get(dir_name, dir_name))
             item.setData(0, Qt.ItemDataRole.UserRole, dir_name)
-            item.setToolTip(0, DIR_DESCRIPTIONS.get(dir_name, dir_name))
             self._show_directory_indicator(item)
 
             if dir_name == "data":
@@ -539,7 +538,6 @@ class FileTreeWidget(QWidget):
                 processed_item = QTreeWidgetItem(item)
                 processed_item.setText(0, DIR_LABELS.get("processed", "processed"))
                 processed_item.setData(0, Qt.ItemDataRole.UserRole, "data/processed")
-                processed_item.setToolTip(0, DIR_DESCRIPTIONS.get("processed", ""))
                 self._show_directory_indicator(processed_item)
 
     def _show_directory_indicator(self, item: QTreeWidgetItem) -> None:
@@ -557,6 +555,27 @@ class FileTreeWidget(QWidget):
 
     def _workspace_rel(self, path: Path) -> str:
         return path.relative_to(self.workspace).as_posix()
+
+    @staticmethod
+    def _tilde_path(path: Path) -> str:
+        resolved = path.resolve()
+        home = Path.home().resolve()
+        try:
+            rel = resolved.relative_to(home)
+            return "~" if not rel.parts else f"~/{rel.as_posix()}"
+        except ValueError:
+            return resolved.as_posix()
+
+    def _hover_text_for_item(self, item: QTreeWidgetItem) -> str:
+        file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
+        if file_path_str:
+            return self._tilde_path(Path(file_path_str))
+
+        dir_name = item.data(0, Qt.ItemDataRole.UserRole)
+        if dir_name:
+            return self._tilde_path(self.workspace / dir_name)
+
+        return item.text(0)
 
     def _collapse_other_top_level_dirs(self, keep_dir: str) -> None:
         root = self.tree.invisibleRootItem()
@@ -650,15 +669,7 @@ class FileTreeWidget(QWidget):
 
     def _on_item_entered(self, item: QTreeWidgetItem, column: int) -> None:
         """Show compact tooltip close to cursor with full path context."""
-        file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
-        if file_path_str:
-            file_path = Path(file_path_str)
-            try:
-                tip = file_path.relative_to(self.workspace).as_posix()
-            except ValueError:
-                tip = file_path.as_posix()
-        else:
-            tip = item.toolTip(column) or item.text(column)
+        tip = self._hover_text_for_item(item)
 
         if not tip:
             self._hide_hover_tip()
@@ -885,7 +896,6 @@ class FileTreeWidget(QWidget):
 
                     child = QTreeWidgetItem(item)
                     child.setText(0, entry.name)
-                    child.setToolTip(0, self._workspace_rel(entry))
 
                     if entry.is_dir():
                         rel = self._workspace_rel(entry)

@@ -9,6 +9,8 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor, QConicalGradient, QPainter, QPen
 from PyQt6.QtWidgets import QWidget
 
+from ..theme import get_theme_colors
+
 
 class WorkingBorder(QWidget):
     """Animated shimmer border that wraps around a target widget.
@@ -72,7 +74,7 @@ class WorkingBorder(QWidget):
 
         r = max(w, h) * 0.8
 
-        beam_color = QColor("#0078d4")
+        beam_color = QColor(get_theme_colors()["accent"])
         transparent = QColor(0, 0, 0, 0)
 
         grad = QConicalGradient(cx, cy, self._angle)

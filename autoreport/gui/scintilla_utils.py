@@ -19,6 +19,7 @@ def apply_scintilla_style(
     line_numbers: bool = True,
     margin_width: int | None = None,
     read_only: bool = False,
+    content_bg: str | None = None,
 ) -> None:
     """Apply consistent styling to a QScintilla editor.
 
@@ -28,8 +29,10 @@ def apply_scintilla_style(
         line_numbers: Whether to show line numbers in margin 1
         margin_width: Width in pixels for line number margin (None for auto)
         read_only: Whether the editor should be read-only
+        content_bg: Optional editor content background override
     """
     c = get_theme_colors()
+    paper_color = content_bg or c["editor_bg"]
 
     sci.setObjectName(object_name)
     sci.setUtf8(True)
@@ -43,13 +46,18 @@ def apply_scintilla_style(
             # Calculate width needed for max line number
             char_width = sci.SendScintilla(sci.SCI_TEXTWIDTH, sci.STYLE_DEFAULT, b"8")
             digits = len(str(line_count))
-            # Add padding
-            margin_width = max(30, char_width * digits + 12)
+            # Keep equal left/right padding for the widest line number while
+            # increasing the visual gap between gutter and code content.
+            side_padding = 14
+            margin_width = max(44, char_width * digits + side_padding * 2)
         sci.setMarginWidth(1, margin_width)
 
-    # Keep gutter and editor on a unified gray base.
-    sci.setMarginsBackgroundColor(QColor(c["editor_bg"]))
+    # Keep gutter distinct and give the caret a deterministic theme color.
+    sci.setMarginsBackgroundColor(QColor(c["editor_margin"]))
     sci.setMarginsForegroundColor(QColor(c["muted"]))
+    sci.setCaretForegroundColor(QColor(c["editor_caret_fg"]))
+    sci.setColor(QColor(c["editor_fg"]))
+    sci.setPaper(QColor(paper_color))
 
     # Set read-only
     sci.setReadOnly(read_only)
@@ -57,14 +65,14 @@ def apply_scintilla_style(
     # Apply stylesheet
     sci.setStyleSheet(f"""
         QsciScintilla#{object_name} {{
-            background-color: {c["editor_bg"]};
-            color: {c["fg"]};
+            background-color: {paper_color};
+            color: {c["editor_fg"]};
             border: none;
             font-family: "Cascadia Code", "Consolas", "Courier New", monospace;
             font-size: 13px;
         }}
         QsciScintilla#{object_name}::margin {{
-            background-color: {c["editor_bg"]};
+            background-color: {c["editor_margin"]};
             color: {c["muted"]};
         }}
     """)
@@ -79,7 +87,8 @@ def update_margin_width(sci: QsciScintilla) -> None:
     line_count = sci.lines()
     char_width = sci.SendScintilla(sci.SCI_TEXTWIDTH, sci.STYLE_DEFAULT, b"8")
     digits = len(str(line_count))
-    margin_width = max(30, char_width * digits + 12)
+    side_padding = 14
+    margin_width = max(44, char_width * digits + side_padding * 2)
     sci.setMarginWidth(1, margin_width)
 
 
@@ -90,7 +99,7 @@ def configure_lexer_colors(lexer: QsciLexer) -> None:
         lexer: The QLexer instance to configure
     """
     c = get_theme_colors()
-    lexer.setColor(QColor(c["fg"]))
+    lexer.setColor(QColor(c["editor_fg"]))
     lexer.setPaper(QColor(c["editor_bg"]))
 
 

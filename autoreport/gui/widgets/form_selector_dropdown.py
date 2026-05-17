@@ -14,6 +14,7 @@ Usage:
 from PyQt6.QtCore import QPoint, Qt, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
+from ..theme import get_theme_colors
 from .base_popup_dropdown import BasePopupDropdown
 
 
@@ -38,10 +39,8 @@ class _SelectorButton(QPushButton):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         # Get theme color
-        from PyQt6.QtWidgets import QApplication
-        hints = QApplication.styleHints()
-        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
-        color = QColor("#999") if dark else QColor("#666")
+        c = get_theme_colors()
+        color = QColor(c["muted"])
 
         pen = QPen(color, 1.5)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
@@ -101,32 +100,23 @@ class FormSelectorDropdown(QWidget):
 
     def _apply_theme(self) -> None:
         """Apply theme styling."""
-        from PyQt6.QtWidgets import QApplication
-
-        hints = QApplication.styleHints()
-        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
-
-        # Button styling
-        bg = "#3c3c3c" if dark else "#ffffff"
-        border = "#3c3c3c" if dark else "#e0e0e0"
-        fg = "#cccccc" if dark else "#333333"
-        hover_border = "#0078d4" if dark else "#0090ff"
+        c = get_theme_colors()
 
         self._button.setStyleSheet(f"""
             QPushButton#selectorButton {{
-                background-color: {bg};
-                border: 1px solid {border};
-                border-radius: 4px;
+                background-color: {c["input_bg"]};
+                border: 1px solid {c["input_border"]};
+                border-radius: {c["radius_sm"]};
                 padding: 4px 24px 4px 8px;
                 text-align: left;
-                color: {fg};
+                color: {c["inputFg"]};
                 font-size: 12px;
             }}
             QPushButton#selectorButton:hover {{
-                border: 1px solid {hover_border};
+                border: 1px solid {c["focus"]};
             }}
             QPushButton#selectorButton:pressed {{
-                background-color: {bg};
+                background-color: {c["input_bg"]};
             }}
         """)
 

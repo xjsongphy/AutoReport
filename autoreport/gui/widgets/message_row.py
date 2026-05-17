@@ -757,7 +757,7 @@ class MessageRow(QWidget):
     def _set_agent_actions_visible(self, visible: bool) -> None:
         if not hasattr(self, "_copy_btn"):
             return
-        self._footer.setVisible(True)
+        self._footer.setVisible(self._complete or visible)
         self._copy_btn.setEnabled(visible)
         self._copy_btn.setIcon(_copy_icon() if visible else QIcon())
 

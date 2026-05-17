@@ -171,10 +171,10 @@ class TitleBar(QWidget):
                 padding: 0px;
             }}
             #titleBarCloseBtn:hover {{
-                background-color: #e81123;
+                background-color: {c["danger"]};
             }}
             #titleBarCloseBtn:pressed {{
-                background-color: #c90014;
+                background-color: {c["danger_hover"]};
             }}
             /* macOS-specific styling */
             #titleBarMinimizeBtn,

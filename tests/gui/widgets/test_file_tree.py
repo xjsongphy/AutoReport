@@ -196,6 +196,25 @@ def test_selected_nested_dir_is_used_for_new_file(qtbot, tmp_path: Path) -> None
     assert not (tmp_path / "data" / "a.txt").exists()
 
 
+def test_hover_text_uses_tilde_prefixed_system_path(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    item = QTreeWidgetItem()
+    file_path = tmp_path / "code" / "plot.py"
+    item.setData(0, 257, str(file_path))
+
+    assert widget._hover_text_for_item(item) == FileTreeWidget._tilde_path(file_path)
+
+
+def test_directory_items_do_not_use_native_tooltip(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    top = widget.tree.topLevelItem(0)
+    assert top.toolTip(0) == ""
+
+
 def test_repeat_new_click_cancels_empty_pending_and_restarts(qtbot, tmp_path: Path) -> None:
     widget = FileTreeWidget(tmp_path)
     qtbot.addWidget(widget)

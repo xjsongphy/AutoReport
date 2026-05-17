@@ -269,7 +269,7 @@ class MainWindow(QMainWindow):
             /* VS Code send button */
             #sendBtn {{
                 background-color: {c["send_bg"]};
-                color: #ffffff;
+                color: {c["primaryBtnFg"]};
                 border: none;
                 border-radius: {px(13)};
                 font-size: {px(14)};
@@ -285,7 +285,7 @@ class MainWindow(QMainWindow):
             }}
             #stopBtn {{
                 background-color: {c["stop_bg"]};
-                color: #ffffff;
+                color: {c["primaryBtnFg"]};
                 border: none;
                 border-radius: {px(13)};
                 font-size: {px(14)};
@@ -364,7 +364,7 @@ class MainWindow(QMainWindow):
             }}
             #userSaveBtn {{
                 background-color: {c["primary"]};
-                color: #ffffff;
+                color: {c["primaryBtnFg"]};
                 border: none;
                 border-radius: {px(4)};
                 padding: {px(4)} {px(10)};

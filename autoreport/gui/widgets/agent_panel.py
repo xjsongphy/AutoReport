@@ -406,15 +406,7 @@ class AgentPanel(QWidget):
 
     def _on_command_palette_requested(self, query: str, position: QPoint) -> None:
         """Show a popup with available slash commands above the input field."""
-        from PyQt6.QtWidgets import QApplication
-        hints = QApplication.styleHints()
-        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
-
-        bg = "#1f1f1f" if dark else "#ffffff"
-        border = "#2b2b2b" if dark else "#e0e0e0"
-        fg = "#cccccc" if dark else "#333333"
-        hover = "#2a2d2e" if dark else "#e8e8e8"
-        sel_bg = "#094771" if dark else "#cce4f7"
+        c = get_theme_colors()
 
         # Filter commands matching query
         q = query.lower()
@@ -435,6 +427,27 @@ class AgentPanel(QWidget):
         h = min(self._cmd_popup.sizeHintForRow(0) * self._cmd_popup.count() + 12, 200)
         self._cmd_popup.setFixedHeight(h)
         self._cmd_popup.move(input_top.x(), input_top.y() - h)
+        self._cmd_popup.setStyleSheet(f"""
+            QListWidget {{
+                background-color: {c["bg"]};
+                border: 1px solid {c["border"]};
+                border-radius: {c["radius_md"]};
+                outline: none;
+                padding: 2px;
+                color: {c["popup_fg"]};
+            }}
+            QListWidget::item {{
+                padding: 6px 8px;
+                border-radius: {c["radius_sm"]};
+            }}
+            QListWidget::item:hover {{
+                background-color: {c["popup_hover"]};
+            }}
+            QListWidget::item:selected {{
+                background-color: {c["tree_sel_bg"]};
+                color: {c["tree_sel_fg"]};
+            }}
+        """)
         self._cmd_popup.show()
         self._cmd_popup.raise_()
 

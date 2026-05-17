@@ -49,3 +49,12 @@ def test_unselected_unified_tabs_use_inactive_background(qtbot, tmp_path: Path) 
     colors = get_theme_colors()
 
     assert f'background-color: {colors["tab_inactive_bg"]};' in widget.styleSheet()
+
+
+def test_selected_unified_tabs_use_active_background(qtbot, tmp_path: Path) -> None:
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    colors = get_theme_colors()
+
+    assert f'background-color: {colors["tab_active_bg"]};' in widget.styleSheet()

@@ -168,9 +168,8 @@ class NoWheelComboBox(QComboBox):
 
         x = self.width() - 16
         y = self.height() // 2 - 2
-        hints = QApplication.styleHints()
-        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
-        color = QColor("#999") if dark else QColor("#666")
+        c = get_theme_colors()
+        color = QColor(c["muted"])
 
         pen = QPen(color, 1.5)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)

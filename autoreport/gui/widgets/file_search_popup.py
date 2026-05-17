@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 
 from autoreport.utils.agent_labels import get_agent_title, get_agent_badge_with_icon
 from autoreport.gui.icons import get_agent_icon as get_agent_qicon
+from ..theme import get_theme_colors
 
 
 @dataclass
@@ -68,8 +69,6 @@ class FileSearchPopup(QWidget):
         self._setup_window_flags()
 
     def _setup_ui(self) -> None:
-        from PyQt6.QtWidgets import QApplication
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(2)
@@ -88,41 +87,31 @@ class FileSearchPopup(QWidget):
 
         self.setFixedWidth(400)
 
-        hints = QApplication.styleHints()
-        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
-
-        # Use same colors as BasePopupDropdown for consistency
-        bg = "#1f1f1f" if dark else "#ffffff"
-        border = "#2b2b2b" if dark else "#e0e0e0"
-        fg = "#cccccc" if dark else "#333333"
-        muted = "#737373" if dark else "#999999"
-        hover = "#2a2d2e" if dark else "#f5f5f5"
-        selected_bg = "#094771" if dark else "#e8f0fe"
-        selected_fg = "#ffffff" if dark else "#202020"
+        c = get_theme_colors()
 
         self.setStyleSheet(f"""
             FileSearchPopup {{
-                background-color: {bg};
-                border: 1px solid {border};
-                border-radius: 6px;
+                background-color: {c["bg"]};
+                border: 1px solid {c["border"]};
+                border-radius: {c["radius_md"]};
             }}
             QListWidget {{
-                background-color: {bg};
+                background-color: {c["bg"]};
                 border: none;
                 outline: none;
                 padding: 2px;
             }}
             QListWidget::item {{
                 padding: 5px 8px;
-                border-radius: 3px;
-                color: {fg};
+                border-radius: {c["radius_sm"]};
+                color: {c["popup_fg"]};
             }}
             QListWidget::item:hover {{
-                background-color: {hover};
+                background-color: {c["popup_hover"]};
             }}
             QListWidget::item:selected {{
-                background-color: {selected_bg};
-                color: {selected_fg};
+                background-color: {c["tree_sel_bg"]};
+                color: {c["tree_sel_fg"]};
             }}
         """)
 

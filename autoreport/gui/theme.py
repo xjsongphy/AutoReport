@@ -128,20 +128,23 @@ def get_theme_colors() -> dict[str, str]:
         # === Editor/Preview ===
         "editor_bg": "#1f1f1f" if dark else "#ffffff",
         "editor_fg": "#d4d4d4" if dark else "#333333",
-        "editor_margin": "#2d2d2d" if dark else "#f0f0f0",  # Darker for contrast in dark mode, lighter gray in light mode
+        "editor_margin": "#2d2d2d" if dark else "#f0f0f0",
+        "editor_caret_fg": "#ffffff" if dark else "#000000",
         "accent": "#0078d4" if dark else "#0090ff",
         "compile_bg": "#0e639c" if dark else "#0078d4",
         "compile_fg": "#ffffff",
 
         # === Tabs ===
-        "tab_active_bg": "#1f1f1f" if dark else "#f3f3f3",
-        "tab_inactive_bg": "#2d2d2d" if dark else "#ececec",
+        "tab_active_bg": "#2d2d2d" if dark else "#f3f3f3",
+        "tab_inactive_bg": "#1f1f1f" if dark else "#ececec",
         "tab_active_fg": "#ffffff" if dark else "#1a1a1a",
         "tab_inactive_fg": "#969696" if dark else "#888888",
 
         # === Context Menu ===
         "context_bg": "#1f1f1f" if dark else "#f3f3f3",
         "context_border": "#2b2b2b" if dark else "#e0e0e0",
+        "popup_fg": "#cccccc" if dark else "#333333",
+        "popup_hover": "#2a2d2e" if dark else "#f5f5f5",
 
         # === Spinner ===
         "spinner_fg": "#0078d4" if dark else "#0090ff",
@@ -232,6 +235,7 @@ def get_theme_colors() -> dict[str, str]:
         "warningBg": "#4c3c26" if dark else "#fff4e5",
         "warningBorder": "#cca700" if dark else "#bf8900",
         "warningFg": "#ffd866" if dark else "#7b5000",
+        "successFg": "#4ec9b0" if dark else "#008000",
     }
 
 

@@ -7,6 +7,8 @@ from PyQt6.QtCore import QPoint, Qt, pyqtSignal
 from PyQt6.QtGui import QKeyEvent, QTextCursor
 from PyQt6.QtWidgets import QPlainTextEdit
 
+from ..theme import get_theme_colors
+
 
 class ChatInput(QPlainTextEdit):
     """Enhanced input widget with @ file reference and / command support.
@@ -37,27 +39,20 @@ class ChatInput(QPlainTextEdit):
         )
         self.document().setDocumentMargin(0)
 
-        from PyQt6.QtWidgets import QApplication
-        hints = QApplication.styleHints()
-        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
-
-        input_bg = "#1f1f1f" if dark else "#ffffff"
-        input_fg = "#cccccc" if dark else "#616161"
-        input_border = "#3c3c3c" if dark else "#e0e0e0"
-        focus_border = "#0078d4" if dark else "#0090ff"
+        c = get_theme_colors()
 
         self.setStyleSheet(f"""
             QPlainTextEdit {{
-                border: 1px solid {input_border};
+                border: 1px solid {c["input_border"]};
                 border-radius: 8px;
                 padding: 4px 6px;
-                background-color: {input_bg};
-                color: {input_fg};
+                background-color: {c["input_bg"]};
+                color: {c["fg"]};
                 font-size: 13px;
                 font-family: "Segoe UI", "SF Pro", sans-serif;
             }}
             QPlainTextEdit:focus {{
-                border: 1px solid {focus_border};
+                border: 1px solid {c["focus"]};
             }}
         """)
 

@@ -16,7 +16,9 @@ Features:
 """
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import QApplication, QListWidget, QWidget
+from PyQt6.QtWidgets import QListWidget, QWidget
+
+from ..theme import get_theme_colors
 
 
 class BasePopupDropdown(QListWidget):
@@ -72,35 +74,28 @@ class BasePopupDropdown(QListWidget):
 
     def _apply_theme(self) -> None:
         """Apply unified theme styling."""
-        hints = QApplication.styleHints()
-        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
-
-        # Theme colors
-        bg = "#1f1f1f" if dark else "#ffffff"
-        border = "#2b2b2b" if dark else "#e0e0e0"
-        fg = "#cccccc" if dark else "#333333"
-        hover = "#2a2d2e" if dark else "#f5f5f5"
+        c = get_theme_colors()
 
         self.setStyleSheet(f"""
             QListWidget#{self.objectName()} {{
-                background-color: {bg};
-                border: 1px solid {border};
-                border-radius: 6px;
+                background-color: {c["bg"]};
+                border: 1px solid {c["border"]};
+                border-radius: {c["radius_md"]};
                 outline: none;
                 padding: 2px;
             }}
             QListWidget#{self.objectName()}::item {{
-                border-radius: 4px;
+                border-radius: {c["radius_sm"]};
                 margin: 1px 4px;
                 padding: 6px 8px;
-                color: {fg};
+                color: {c["popup_fg"]};
             }}
             QListWidget#{self.objectName()}::item:hover {{
-                background-color: {hover};
+                background-color: {c["popup_hover"]};
             }}
             QListWidget#{self.objectName()}::item:selected {{
                 background-color: transparent;
-                color: {fg};
+                color: {c["popup_fg"]};
             }}
         """)
 
