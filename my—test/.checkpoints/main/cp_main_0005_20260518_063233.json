@@ -1,0 +1,10 @@
+{
+  "id": "cp_main_0005_20260518_063233",
+  "agent_type": "main",
+  "timestamp": "2026-05-18T06:32:33.895034+00:00",
+  "epoch": 5,
+  "description": "pre:user",
+  "source": "pre_message",
+  "file_states": {},
+  "conversation_history": []
+}

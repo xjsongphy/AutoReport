@@ -10,7 +10,7 @@ from typing import Any
 from loguru import logger
 from openai import AsyncOpenAI
 
-from .base import LLMProvider, LLMResponse, Message, ToolCall
+from .base import LLMProvider, LLMResponse, LLMStreamChunk, Message, ToolCall
 
 _DEFAULT_API_BASES: dict[str, str] = {
     "deepseek": "https://api.deepseek.com",
@@ -149,6 +149,107 @@ class OpenAICompatProvider(LLMProvider):
             }
             for tool in tools
         ]
+
+    # ------------------------------------------------------------------
+    # Streaming chat
+    # ------------------------------------------------------------------
+
+    async def chat_stream(
+        self,
+        messages: list[Message],
+        tools: list[dict] | None = None,
+        temperature: float = 0.1,
+        max_tokens: int = 8192,
+    ):
+        """Send streaming chat completion request.
+
+        Yields LLMStreamChunk objects as text arrives.
+        """
+        openai_messages = self._convert_messages(messages)
+
+        params: dict[str, Any] = {
+            "model": self.model,
+            "messages": openai_messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+
+        if tools:
+            params["tools"] = self._convert_tools(tools)
+            params["tool_choice"] = "auto"
+
+        logger.debug(
+            "Sending {} streaming request: model={}, messages={}",
+            self.provider_type, self.model, len(messages),
+        )
+
+        # For tool calls, accumulate the arguments string fragments across chunks
+        # and only parse JSON at the end.
+        accumulated_tool_calls: dict[int, dict[str, Any]] = {}  # index -> {id, name, args_buffer}
+
+        try:
+            response = await self.client.chat.completions.create(**params)
+
+            async for chunk in response:
+                delta = chunk.choices[0].delta if chunk.choices else None
+
+                # Text delta
+                if delta and delta.content:
+                    yield LLMStreamChunk(delta=delta.content)
+
+                # Tool call deltas (OpenAI streams tool calls incrementally)
+                if delta and delta.tool_calls:
+                    for tc_delta in delta.tool_calls:
+                        idx = tc_delta.index
+                        if idx not in accumulated_tool_calls:
+                            accumulated_tool_calls[idx] = {
+                                "id": "",
+                                "name": "",
+                                "args_buffer": "",
+                            }
+                        entry = accumulated_tool_calls[idx]
+                        if tc_delta.id:
+                            entry["id"] += tc_delta.id
+                        if tc_delta.function:
+                            if tc_delta.function.name:
+                                entry["name"] += tc_delta.function.name
+                            if tc_delta.function.arguments:
+                                entry["args_buffer"] += tc_delta.function.arguments
+
+                # Check if stream is done
+                if chunk.choices and chunk.choices[0].finish_reason is not None:
+                    # Build final tool calls from accumulated data
+                    final_tool_calls = None
+                    if accumulated_tool_calls:
+                        final_tool_calls = []
+                        for idx in sorted(accumulated_tool_calls.keys()):
+                            entry = accumulated_tool_calls[idx]
+                            if entry["id"]:
+                                args = {}
+                                if entry["args_buffer"]:
+                                    try:
+                                        args = json.loads(entry["args_buffer"])
+                                    except json.JSONDecodeError:
+                                        logger.warning(
+                                            "Failed to parse streamed tool args: {}",
+                                            entry["args_buffer"][:200],
+                                        )
+                                final_tool_calls.append(ToolCall(
+                                    id=entry["id"],
+                                    name=entry["name"],
+                                    arguments=args,
+                                ))
+                    yield LLMStreamChunk(
+                        delta=None,
+                        done=True,
+                        tool_calls=final_tool_calls,
+                    )
+                    return
+
+        except Exception as e:
+            logger.error("{} streaming error: {}", self.provider_type, e)
+            raise
 
     def _parse_arguments(self, arguments: str) -> dict:
         """Parse JSON arguments string."""
