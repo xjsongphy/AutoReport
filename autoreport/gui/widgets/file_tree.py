@@ -702,7 +702,6 @@ class FileTreeWidget(QWidget):
                 | Qt.WindowType.NoDropShadowWindowHint
             )
             self._hover_tip.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-            self._hover_tip.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
             self._hover_tip.setStyleSheet(compact_tooltip_qss("QLabel"))
         self._hover_tip.setText(text)
         self._hover_tip.adjustSize()

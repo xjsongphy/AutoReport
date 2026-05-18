@@ -97,7 +97,6 @@ class CompactTooltipFilter(QObject):
             | Qt.WindowType.NoDropShadowWindowHint
         )
         tip.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        tip.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         tip.setStyleSheet(compact_tooltip_qss())
         tip.adjustSize()
         x = (anchor.width() - tip.width()) // 2

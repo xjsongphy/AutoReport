@@ -513,7 +513,7 @@ class EditorPanel(QWidget):
                 min-height: 35px;
             }}
             QTabBar#editorTabBar::tab {{
-                background-color: {c["tab_inactive_bg"]};
+                background-color: {c["surface"]};
                 color: {c["tab_inactive_fg"]};
                 border: none;
                 border-right: 1px solid {c["border"]};
@@ -668,7 +668,7 @@ class PreviewWidget(QWidget):
                 min-height: 35px;
             }}
             QTabBar#previewTabBar::tab {{
-                background-color: {c["tab_inactive_bg"]};
+                background-color: {c["surface"]};
                 color: {c["tab_inactive_fg"]};
                 border: none;
                 border-right: 1px solid {c["border"]};
