@@ -41,7 +41,7 @@ from .ui_utils import IconActionButton, compact_tooltip_qss, render_svg_icon
 # Fixed directory structure
 FIXED_DIRECTORIES = ["data", "references", "theory", "code", "tex"]
 _FILE_TEXT_ICON_GAP_ADJUST = 28
-_FILE_EDITOR_ICON_GAP_ADJUST = -6
+_FILE_EDITOR_LEFT_ADJUST = -26
 
 
 # ================================================================== #
@@ -114,8 +114,7 @@ class _FileTreeDelegate(QStyledItemDelegate):
         # by the inline filename editor.
         if not item.icon(0).isNull():
             rect = editor.geometry()
-            shift = tree_widget.indentation() + _FILE_EDITOR_ICON_GAP_ADJUST
-            editor.setGeometry(rect.adjusted(shift, 0, 0, 0))
+            editor.setGeometry(rect.adjusted(_FILE_EDITOR_LEFT_ADJUST, 0, 0, 0))
 
 # Directory display labels (VSCode style: concise, title case)
 DIR_LABELS = {
@@ -462,7 +461,7 @@ class FileTreeWidget(QWidget):
                 color: {c["fg"]};
                 border: 1px solid {c["border"]};
                 border-radius: {c["radius_sm"]};
-                padding: 2px 4px;
+                padding: 2px 2px;
                 selection-background-color: {c["accent"]};
             }}
             #fileTree QLineEdit:focus {{
