@@ -194,13 +194,13 @@ class MainWindow(QMainWindow):
 
             /* ---- Panel Header ---- */
             #panelHeader {{
-                background-color: {c["surface"]};
+                background-color: {c["panel_bg"]};
                 border-bottom: 1px solid {c["border"]};
                 padding-right: 1px;
             }}
             /* Agent Panel background */
             AgentPanel {{
-                background-color: {c["surface"]};
+                background-color: {c["panel_bg"]};
             }}
             #panelTitle {{
                 font-size: {px(13)};
@@ -557,6 +557,12 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
+        save_act = file_menu.addAction("保存")
+        save_act.setShortcut(QKeySequence.StandardKey.Save)
+        save_act.triggered.connect(self._on_save_file)
+
+        file_menu.addSeparator()
+
         new_window_act = file_menu.addAction("新建窗口")
         new_window_act.triggered.connect(self._on_new_window)
 
@@ -615,6 +621,11 @@ class MainWindow(QMainWindow):
         if folder_path:
             # TODO: Switch workspace
             logger.info("Open folder requested: {}", folder_path)
+
+    def _on_save_file(self) -> None:
+        """Save the active file in the preview panel."""
+        if not self.preview.save_current_file():
+            logger.debug("Save skipped: no editable active file")
 
     def _on_new_window(self) -> None:
         """Handle new window action."""
@@ -700,6 +711,7 @@ class MainWindow(QMainWindow):
         self._quit_shortcut = QShortcut(QKeySequence.StandardKey.Quit, self)
         self._quit_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self._quit_shortcut.activated.connect(self.close)
+        self._setup_app_shortcuts()
 
         # Connect signals
         self.main_agent_panel.message_sent.connect(self._on_main_agent_message)
@@ -757,6 +769,47 @@ class MainWindow(QMainWindow):
             return file_path.relative_to(self.workspace).as_posix()
         except ValueError:
             return file_path.as_posix()
+
+    def _setup_app_shortcuts(self) -> None:
+        """Install platform-native application shortcuts for editing actions."""
+        self._save_shortcut = QShortcut(QKeySequence.StandardKey.Save, self)
+        self._save_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._save_shortcut.activated.connect(self._on_save_file)
+
+        self._copy_shortcut = QShortcut(QKeySequence.StandardKey.Copy, self)
+        self._copy_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._copy_shortcut.activated.connect(lambda: self._dispatch_standard_edit("copy"))
+
+        self._paste_shortcut = QShortcut(QKeySequence.StandardKey.Paste, self)
+        self._paste_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._paste_shortcut.activated.connect(lambda: self._dispatch_standard_edit("paste"))
+
+        self._cut_shortcut = QShortcut(QKeySequence.StandardKey.Cut, self)
+        self._cut_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._cut_shortcut.activated.connect(lambda: self._dispatch_standard_edit("cut"))
+
+        self._undo_shortcut = QShortcut(QKeySequence.StandardKey.Undo, self)
+        self._undo_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._undo_shortcut.activated.connect(lambda: self._dispatch_standard_edit("undo"))
+
+        self._redo_shortcut = QShortcut(QKeySequence.StandardKey.Redo, self)
+        self._redo_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._redo_shortcut.activated.connect(lambda: self._dispatch_standard_edit("redo"))
+
+        self._select_all_shortcut = QShortcut(QKeySequence.StandardKey.SelectAll, self)
+        self._select_all_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._select_all_shortcut.activated.connect(
+            lambda: self._dispatch_standard_edit("selectAll")
+        )
+
+    def _dispatch_standard_edit(self, method_name: str) -> None:
+        """Dispatch standard edit command to focused widget when available."""
+        widget = QApplication.focusWidget()
+        if widget is None:
+            return
+        method = getattr(widget, method_name, None)
+        if callable(method):
+            method()
 
     def _load_conversations(self) -> None:
         # Restore main + currently selected sub-agent history on startup.

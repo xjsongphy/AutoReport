@@ -11,7 +11,7 @@ import shutil
 from pathlib import Path
 
 from loguru import logger
-from PyQt6.QtCore import QFileSystemWatcher, QMimeData, QPoint, QSize, QSignalBlocker, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QFileInfo, QFileSystemWatcher, QMimeData, QPoint, QSize, QSignalBlocker, Qt, QTimer, pyqtSignal
 
 from autoreport.utils.logging_config import ui_logger
 from PyQt6.QtGui import QColor, QCursor, QDrag, QDragEnterEvent, QDragMoveEvent, QDropEvent, QIcon, QPalette, QPainter, QPixmap
@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
     QMenu,
     QMessageBox,
     QProgressDialog,
+    QFileIconProvider,
     QStyle,
     QStyleOptionViewItem,
     QStyledItemDelegate,
@@ -242,36 +243,22 @@ class _DragDropTreeWidget(QTreeWidget):
 
 
 
-def _get_file_icon(ext: str, style: QStyle = None) -> QIcon:
-    """Get file icon by extension using QStyle standard icons."""
+def _get_file_icon(ext: str, style: QStyle = None, file_path: Path | None = None) -> QIcon:
+    """Get file icon by extension, preferring system file-type icons."""
     if style is None:
         from PyQt6.QtWidgets import QApplication
         style = QApplication.style()
+    provider = QFileIconProvider()
+    if file_path is not None:
+        icon = provider.icon(QFileInfo(str(file_path)))
+        if not icon.isNull():
+            return icon
 
-    ext = ext.lower()
-    icon_map = {
-        ".py": QStyle.StandardPixmap.SP_FileIcon,
-        ".txt": QStyle.StandardPixmap.SP_FileIcon,
-        ".md": QStyle.StandardPixmap.SP_FileIcon,
-        ".csv": QStyle.StandardPixmap.SP_FileIcon,
-        ".json": QStyle.StandardPixmap.SP_FileIcon,
-        ".yaml": QStyle.StandardPixmap.SP_FileIcon,
-        ".yml": QStyle.StandardPixmap.SP_FileIcon,
-        ".tex": QStyle.StandardPixmap.SP_FileIcon,
-        ".pdf": QStyle.StandardPixmap.SP_FileIcon,
-        ".png": QStyle.StandardPixmap.SP_FileIcon,
-        ".jpg": QStyle.StandardPixmap.SP_FileIcon,
-        ".jpeg": QStyle.StandardPixmap.SP_FileIcon,
-        ".gif": QStyle.StandardPixmap.SP_FileIcon,
-        ".svg": QStyle.StandardPixmap.SP_FileIcon,
-        ".bmp": QStyle.StandardPixmap.SP_FileIcon,
-        ".html": QStyle.StandardPixmap.SP_FileIcon,
-        ".css": QStyle.StandardPixmap.SP_FileIcon,
-        ".js": QStyle.StandardPixmap.SP_FileIcon,
-        ".ts": QStyle.StandardPixmap.SP_FileIcon,
-    }
-    standard_icon = icon_map.get(ext, QStyle.StandardPixmap.SP_FileIcon)
-    return style.standardIcon(standard_icon)
+    ext = ext.lower() or ".txt"
+    icon = provider.icon(QFileInfo(f"placeholder{ext}"))
+    if not icon.isNull():
+        return icon
+    return style.standardIcon(QStyle.StandardPixmap.SP_FileIcon)
 
 
 class FileTreeWidget(QWidget):
@@ -604,6 +591,13 @@ class FileTreeWidget(QWidget):
     def _on_directory_changed(self, path: str) -> None:
         path_obj = Path(path)
         rel_path = self._workspace_rel(path_obj)
+        selected_file = None
+        selected_dir = None
+        current_item = self.tree.currentItem()
+        if current_item is not None:
+            selected_file = current_item.data(0, Qt.ItemDataRole.UserRole + 1)
+            if not selected_file:
+                selected_dir = current_item.data(0, Qt.ItemDataRole.UserRole)
         if self._pending_new_item is not None:
             pending_parent = self._pending_new_item.data(0, Qt.ItemDataRole.UserRole + 2)
             if pending_parent == rel_path:
@@ -614,18 +608,55 @@ class FileTreeWidget(QWidget):
             item = root.child(i)
             item_dir = item.data(0, Qt.ItemDataRole.UserRole)
             if item_dir == rel_path and item.isExpanded():
-                item.setExpanded(False)
-                item.setExpanded(True)
+                self._refresh_expanded_item_preserve_state(item)
                 break
             for j in range(item.childCount()):
                 child = item.child(j)
                 child_dir = child.data(0, Qt.ItemDataRole.UserRole)
                 if child_dir == rel_path and child.isExpanded():
-                    child.setExpanded(False)
-                    child.setExpanded(True)
+                    self._refresh_expanded_item_preserve_state(child)
                     break
+        self._restore_selection(selected_file, selected_dir)
         self._ensure_directory_indicators()
         self.tree.viewport().update()
+
+    def _restore_selection(self, selected_file: str | None, selected_dir: str | None) -> None:
+        if not selected_file and not selected_dir:
+            return
+
+        root = self.tree.invisibleRootItem()
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            for i in range(node.childCount()):
+                child = node.child(i)
+                file_path_str = child.data(0, Qt.ItemDataRole.UserRole + 1)
+                dir_name = child.data(0, Qt.ItemDataRole.UserRole)
+                if selected_file and file_path_str == selected_file:
+                    self.tree.setCurrentItem(child)
+                    return
+                if not selected_file and selected_dir and dir_name == selected_dir:
+                    self.tree.setCurrentItem(child)
+                    return
+                stack.append(child)
+
+    def _refresh_expanded_item_preserve_state(self, item: QTreeWidgetItem) -> None:
+        """Refresh an expanded directory item while preserving direct child expansions."""
+        expanded_child_dirs: set[str] = set()
+        for i in range(item.childCount()):
+            child = item.child(i)
+            dir_name = child.data(0, Qt.ItemDataRole.UserRole)
+            file_path_str = child.data(0, Qt.ItemDataRole.UserRole + 1)
+            if dir_name and not file_path_str and child.isExpanded():
+                expanded_child_dirs.add(dir_name)
+
+        self._on_item_expanded(item)
+        for i in range(item.childCount()):
+            child = item.child(i)
+            dir_name = child.data(0, Qt.ItemDataRole.UserRole)
+            file_path_str = child.data(0, Qt.ItemDataRole.UserRole + 1)
+            if dir_name in expanded_child_dirs and not file_path_str:
+                child.setExpanded(True)
 
     def _on_item_clicked(self, item: QTreeWidgetItem, column: int) -> None:
         self._ensure_directory_indicators()
@@ -669,8 +700,6 @@ class FileTreeWidget(QWidget):
             p = p.parent()
         text_start = (depth + 1) * self.tree.indentation()
         if cursor_x >= text_start:
-            if item.parent() is None and dir_name in FIXED_DIRECTORIES:
-                self._collapse_other_top_level_dirs(dir_name)
             item.setExpanded(not item.isExpanded())
         self._ensure_directory_indicators()
         self.tree.viewport().update()
@@ -932,7 +961,7 @@ class FileTreeWidget(QWidget):
                         child.setText(0, entry.name)
                         self._show_directory_indicator(child)
                     else:
-                        child.setIcon(0, _get_file_icon(entry.suffix, style))
+                        child.setIcon(0, _get_file_icon(entry.suffix, style, entry))
                         rel = self._workspace_rel(entry.parent)
                         child.setData(0, Qt.ItemDataRole.UserRole, rel)
                         child.setData(0, Qt.ItemDataRole.UserRole + 1, str(entry))
@@ -1354,7 +1383,7 @@ class FileTreeWidget(QWidget):
                 new_file = parent_path / new_name
                 new_file.touch(exist_ok=False)
                 with QSignalBlocker(self.tree):
-                    item.setIcon(0, _get_file_icon(new_file.suffix or ".txt"))
+                    item.setIcon(0, _get_file_icon(new_file.suffix or ".txt", file_path=new_file))
                     item.setData(0, Qt.ItemDataRole.UserRole, parent_dir)
                     item.setData(0, Qt.ItemDataRole.UserRole + 1, str(new_file))
                     item.setData(0, Qt.ItemDataRole.UserRole + 2, "")

@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import shutil
+import subprocess
 
 import pandas as pd
 from loguru import logger
@@ -20,11 +22,15 @@ from PyQt6.QtWidgets import (
     QTableView,
     QVBoxLayout,
     QWidget,
+    QPushButton,
+    QMessageBox,
+    QHBoxLayout,
 )
 
 from ..scale import scaled, scaled_size
 from ..scintilla_utils import apply_scintilla_style, configure_lexer_colors
 from ..theme import get_theme_colors
+from ..icons import get_preview_icon, get_run_icon
 from .ui_utils import IconActionButton
 
 # ================================================================== #
@@ -301,6 +307,7 @@ class EditorPanel(QWidget):
         # Stacked content
         self._stack = QStackedWidget()
         self._stack.setObjectName("editorStack")
+        self._stack.setContentsMargins(0, 6, 0, 0)
         layout.addWidget(self._stack, 1)
 
         # Placeholder
@@ -311,7 +318,7 @@ class EditorPanel(QWidget):
 
     @staticmethod
     def _tab_label_for_state(state: TabState) -> str:
-        return f"{state.path.name}  ●" if state.modified else state.path.name
+        return state.path.name
 
     def open_file(self, path: Path, preview: bool = True) -> None:
         """Open a file. If preview=True, opens as preview tab (replaces existing preview)."""
@@ -517,8 +524,8 @@ class EditorPanel(QWidget):
                 color: {c["tab_inactive_fg"]};
                 border: none;
                 border-right: 1px solid {c["border"]};
-                padding: 6px 16px;
-                min-width: 80px;
+                padding: 6px 8px;
+                min-width: 52px;
                 max-width: 200px;
                 min-height: 32px;
                 margin: 1px 0 0 0;
@@ -527,13 +534,12 @@ class EditorPanel(QWidget):
                 background-color: {c["tab_active_bg"]};
                 color: {c["tab_active_fg"]};
                 border-top: 2px solid {c["accent"]};
-                border-left: 1px solid {c["border"]};
                 border-right: 1px solid {c["border"]};
                 border-bottom: 1px solid {c["tab_active_bg"]};
                 margin: 1px 0 0 0;
             }}
             QTabBar#editorTabBar::tab:!selected:hover {{
-                background-color: {c["hover"]};
+                background-color: {c["tab_active_bg"]};
             }}
             QTabBar#editorTabBar::close-button {{
                 subcontrol-position: right;
@@ -563,6 +569,8 @@ class PreviewWidget(QWidget):
         super().__init__()
         self.workspace = Path(workspace).resolve()
         self._current_file: Path | None = None
+        self._hovered_unified_tab_index = -1
+        self._active_action_kind: str = ""
 
         # Single editor panel
         self._panels: list[EditorPanel] = []
@@ -596,8 +604,31 @@ class PreviewWidget(QWidget):
         self._unified_tab_bar.tabCloseRequested.connect(self._on_unified_tab_close)
         self._unified_tab_bar.tabBarDoubleClicked.connect(self._on_unified_tab_double_click)
         self._unified_tab_bar.customContextMenuRequested.connect(self._on_unified_tab_context_menu)
+        self._unified_tab_bar.setTabsClosable(False)
+        self._unified_tab_bar.setMouseTracking(True)
+        self._unified_tab_bar.installEventFilter(self)
         hl.addWidget(self._unified_tab_bar, 1)
         self._unified_tab_bar.setVisible(False)
+        self._run_button = IconActionButton(
+            text="",
+            tooltip="编译 / 运行当前文件",
+            object_name="previewActionBtn",
+            button_size=(24, 24),
+            icon_size=(16, 16),
+        )
+        self._run_button.clicked.connect(self._on_run_clicked)
+        self._run_button.setVisible(False)
+        hl.addWidget(self._run_button)
+        self._preview_button = IconActionButton(
+            text="",
+            tooltip="预览当前文件",
+            object_name="previewActionBtn",
+            button_size=(24, 24),
+            icon_size=(16, 16),
+        )
+        self._preview_button.clicked.connect(self._on_preview_clicked)
+        self._preview_button.setVisible(False)
+        hl.addWidget(self._preview_button)
 
         layout.addWidget(header)
         layout.addWidget(self._build_general_container(), 1)
@@ -672,7 +703,7 @@ class PreviewWidget(QWidget):
                 color: {c["tab_inactive_fg"]};
                 border: none;
                 border-right: 1px solid {c["border"]};
-                padding: 0 12px 0 10px;
+                padding: 0 6px;
                 min-height: 32px;
                 margin: 1px 0 0 0;
                 border-radius: 0px;
@@ -681,20 +712,59 @@ class PreviewWidget(QWidget):
                 background-color: {c["tab_active_bg"]};
                 color: {c["tab_active_fg"]};
                 border-top: 2px solid {c["accent"]};
-                border-left: 1px solid {c["border"]};
                 border-right: 1px solid {c["border"]};
                 border-bottom: 1px solid {c["tab_active_bg"]};
                 margin: 1px 0 0 0;
             }}
             QTabBar#previewTabBar::tab:!selected:hover {{
-                background-color: {c["hover"]};
+                background-color: {c["tab_active_bg"]};
             }}
             QTabBar#previewTabBar::tab:selected:hover {{
                 background-color: {c["tab_active_bg"]};
             }}
+            QPushButton#previewActionBtn {{
+                background-color: {c["compile_bg"]};
+                border: 1px solid {c["border"]};
+                border-radius: {c["radius_sm"]};
+                color: {c["compile_fg"]};
+                padding: 0;
+                margin: 0 6px 0 0;
+            }}
+            QPushButton#previewActionBtn:hover {{
+                background-color: {c["primary_hover"]};
+            }}
             QTabBar#previewTabBar::close-button {{
                 subcontrol-position: right;
-                margin-right: 2px;
+                margin-right: 0px;
+            }}
+            QPushButton#tabCloseBtn {{
+                background-color: {c["border"]};
+                border: none;
+                border-radius: 3px;
+                color: {c["muted"]};
+                padding: 0;
+                margin: 0;
+                font-size: 11px;
+            }}
+            QPushButton#tabCloseBtn:hover {{
+                background-color: {c["muted"]};
+                color: {c["fg"]};
+            }}
+            QLabel#tabDirtyDot {{
+                color: {c["muted"]};
+                background: transparent;
+                border: none;
+                font-size: 12px;
+                padding: 0;
+                margin: 0;
+            }}
+            QLabel#tabAffordanceSpacer {{
+                color: transparent;
+                background: transparent;
+                border: none;
+                font-size: 12px;
+                padding: 0;
+                margin: 0;
             }}
         """)
 
@@ -745,7 +815,7 @@ class PreviewWidget(QWidget):
             for panel in self._panels:
                 for key in panel._tab_order:
                     state = panel._tabs[key]
-                    label = f"{state.path.name}  ●" if state.modified else state.path.name
+                    label = state.path.name
                     tab_idx = self._unified_tab_bar.addTab(label)
                     self._unified_tab_bar.setTabData(tab_idx, key)
                     self._unified_tab_bar.setTabToolTip(tab_idx, state.path.name)
@@ -755,6 +825,8 @@ class PreviewWidget(QWidget):
             if current_index >= 0:
                 self._unified_tab_bar.setCurrentIndex(current_index)
         self._unified_tab_bar.setVisible(self._unified_tab_bar.count() > 0)
+        self._refresh_unified_tab_affordances()
+        self._update_file_actions()
 
         if self._unified_tab_bar.currentIndex() >= 0:
             current_key = self._unified_tab_bar.tabData(self._unified_tab_bar.currentIndex())
@@ -788,6 +860,8 @@ class PreviewWidget(QWidget):
 
         # Emit file changed signal
         self.file_changed.emit(file_path)
+        self._refresh_unified_tab_affordances()
+        self._update_file_actions()
 
     def _on_unified_tab_double_click(self, index: int) -> None:
         """Pin a preview tab and switch to it on double-click."""
@@ -825,6 +899,14 @@ class PreviewWidget(QWidget):
         # Emit file changed signal with None or current active file
         active_file = self.current_file
         self.file_changed.emit(active_file if active_file else Path())
+        self._refresh_unified_tab_affordances()
+        self._update_file_actions()
+
+    def _on_unified_tab_close_by_key(self, key: str) -> None:
+        for i in range(self._unified_tab_bar.count()):
+            if self._unified_tab_bar.tabData(i) == key:
+                self._on_unified_tab_close(i)
+                return
 
     def _on_unified_tab_context_menu(self, pos) -> None:
         """Show context menu for unified tab bar."""
@@ -859,12 +941,133 @@ class PreviewWidget(QWidget):
             for i in range(self._unified_tab_bar.count() - 1, -1, -1):
                 self._on_unified_tab_close(i)
 
+    def _find_tab_state(self, key: str) -> TabState | None:
+        for panel in self._panels:
+            state = panel._tabs.get(key)
+            if state is not None:
+                return state
+        return None
+
+    def _refresh_unified_tab_affordances(self) -> None:
+        def _wrap_affordance(inner: QWidget) -> QWidget:
+            host = QWidget(self._unified_tab_bar)
+            hl = QHBoxLayout(host)
+            hl.setContentsMargins(0, 0, 6, 0)
+            hl.setSpacing(0)
+            hl.addStretch(1)
+            hl.addWidget(inner)
+            host.setFixedSize(18, 12)
+            return host
+
+        for i in range(self._unified_tab_bar.count()):
+            key = self._unified_tab_bar.tabData(i)
+            if not key:
+                self._unified_tab_bar.setTabButton(i, QTabBar.ButtonPosition.RightSide, None)
+                continue
+            state = self._find_tab_state(key)
+            show_close = i == self._hovered_unified_tab_index
+            if show_close:
+                btn = QPushButton("✕", self._unified_tab_bar)
+                btn.setObjectName("tabCloseBtn")
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.setFixedSize(12, 12)
+                btn.clicked.connect(lambda _=False, _k=key: self._on_unified_tab_close_by_key(_k))
+                self._unified_tab_bar.setTabButton(i, QTabBar.ButtonPosition.RightSide, _wrap_affordance(btn))
+            elif state and state.modified:
+                dot = QLabel("●", self._unified_tab_bar)
+                dot.setObjectName("tabDirtyDot")
+                dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                dot.setFixedSize(12, 12)
+                self._unified_tab_bar.setTabButton(i, QTabBar.ButtonPosition.RightSide, _wrap_affordance(dot))
+            else:
+                spacer = QLabel("●", self._unified_tab_bar)
+                spacer.setObjectName("tabAffordanceSpacer")
+                spacer.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                spacer.setFixedSize(12, 12)
+                self._unified_tab_bar.setTabButton(i, QTabBar.ButtonPosition.RightSide, _wrap_affordance(spacer))
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        if obj is self._unified_tab_bar:
+            if event.type() == event.Type.MouseMove:
+                hovered = self._unified_tab_bar.tabAt(event.pos())
+                if hovered != self._hovered_unified_tab_index:
+                    self._hovered_unified_tab_index = hovered
+                    self._refresh_unified_tab_affordances()
+            elif event.type() == event.Type.Leave:
+                if self._hovered_unified_tab_index != -1:
+                    self._hovered_unified_tab_index = -1
+                    self._refresh_unified_tab_affordances()
+        return super().eventFilter(obj, event)
+
     def _on_panel_emptied(self) -> None:
         pass
 
     def _on_split_requested(self, _file_path: str) -> None:
         # Split mode was removed; keep a no-op handler for signal compatibility.
         return
+
+    def _update_file_actions(self) -> None:
+        self._active_action_kind = ""
+        self._run_button.setVisible(False)
+        self._preview_button.setVisible(False)
+        self._run_button.setIcon(get_run_icon(color="#ffffff", size=16))
+        self._preview_button.setIcon(get_preview_icon(color="#ffffff", size=16))
+        if not self._current_file:
+            return
+
+        suffix = self._current_file.suffix.lower()
+        if suffix == ".tex":
+            self._active_action_kind = "tex"
+            self._run_button.setVisible(True)
+            self._preview_button.setVisible(True)
+        elif suffix == ".py":
+            self._active_action_kind = "python"
+            self._run_button.setVisible(True)
+
+    def _on_run_clicked(self) -> None:
+        if not self._current_file:
+            return
+        if self._active_action_kind == "tex":
+            self._compile_tex(self._current_file)
+            return
+        if self._active_action_kind == "python":
+            try:
+                subprocess.Popen(["python", str(self._current_file)], cwd=str(self._current_file.parent))
+            except Exception as exc:
+                QMessageBox.warning(self, "运行失败", f"无法运行 Python 文件:\n{exc}")
+
+    def _on_preview_clicked(self) -> None:
+        if not self._current_file:
+            return
+        if self._active_action_kind != "tex":
+            return
+        pdf_path = self._current_file.with_suffix(".pdf")
+        if not pdf_path.exists():
+            QMessageBox.information(self, "未找到预览文件", f"请先编译生成 PDF:\n{pdf_path.name}")
+            return
+        self.load_file(pdf_path)
+
+    def _compile_tex(self, tex_path: Path) -> None:
+        compiler = shutil.which("xelatex") or shutil.which("lualatex") or shutil.which("pdflatex")
+        if not compiler:
+            QMessageBox.warning(self, "编译失败", "未检测到 LaTeX 编译器（xelatex/lualatex/pdflatex）。")
+            return
+        try:
+            subprocess.run(
+                [compiler, "-interaction=nonstopmode", tex_path.name],
+                cwd=str(tex_path.parent),
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            QMessageBox.information(self, "编译完成", f"{tex_path.name} 已编译完成。")
+        except subprocess.CalledProcessError as exc:
+            tail = (exc.stderr or exc.stdout or "").splitlines()[-6:]
+            detail = "\n".join(tail) if tail else "无详细输出"
+            QMessageBox.warning(self, "编译失败", f"{tex_path.name}\n\n{detail}")
+        except Exception as exc:
+            QMessageBox.warning(self, "编译失败", f"{tex_path.name}\n\n{exc}")
 
     # ------------------------------------------------------------------ #
     #  Selection tracking (for general mode editors)
@@ -921,6 +1124,42 @@ class PreviewWidget(QWidget):
 
             if isinstance(viewer, QsciScintilla):
                 viewer.setSelection(-1, -1, -1, -1)
+
+    def save_current_file(self) -> bool:
+        """Save active text editor content to disk.
+
+        Returns True when a file was saved; False when no editable text file is active.
+        """
+        if not self._current_file:
+            return False
+
+        from PyQt6.Qsci import QsciScintilla
+
+        key = _tab_key(self._current_file)
+        for panel in self._panels:
+            state = panel._tabs.get(key)
+            if state is None:
+                continue
+            if not isinstance(state.viewer, QsciScintilla):
+                return False
+
+            try:
+                self._current_file.write_text(state.viewer.text(), encoding="utf-8")
+            except Exception:
+                logger.exception("Failed saving file: {}", self._current_file)
+                return False
+
+            if state.modified:
+                state.modified = False
+                try:
+                    idx = panel._tab_order.index(key)
+                    panel._tab_bar.setTabText(idx, panel._tab_label_for_state(state))
+                except ValueError:
+                    pass
+                self._sync_tabs_from_panels()
+                panel.tab_changed.emit()
+            return True
+        return False
 
     def refresh_pdf(self) -> None:
         # Kept for API compatibility; unified editor has no dedicated PDF refresh path.

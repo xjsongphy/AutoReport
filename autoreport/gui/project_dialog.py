@@ -266,6 +266,7 @@ class ProjectDialog(QDialog):
             #recentName {{
                 background-color: transparent;
                 border: none;
+                border-bottom: 1px solid transparent;
                 color: {colors["link"]};
                 font-size: 13px;
                 text-align: left;
@@ -273,7 +274,7 @@ class ProjectDialog(QDialog):
             }}
             #recentName:hover {{
                 color: {colors["linkHover"]};
-                text-decoration: underline;
+                border-bottom: 1px solid {colors["linkHover"]};
             }}
             #recentPath {{
                 font-size: 13px;

@@ -14,6 +14,7 @@ _SVG_ICONS: dict[str, str] = {
     "file-text": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z"/><line x1="9" y1="9" x2="10" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>',
     # VSCode Codicons (CC0 1.0 Universal)
     "run": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M4.25 3l1.166-.624 8 5.333v1.248l-8 5.334-1.166-.624V3zm1.5 1.401v7.864l5.898-3.932L5.75 4.401z"/></svg>',
+    "preview": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M8 3c3.5 0 6.5 3 7.4 4.4a1 1 0 0 1 0 1.2C14.5 10 11.5 13 8 13s-6.5-3-7.4-4.4a1 1 0 0 1 0-1.2C1.5 6 4.5 3 8 3Zm0 1.5c-2.7 0-5.1 2.2-6 3.5.9 1.3 3.3 3.5 6 3.5s5.1-2.2 6-3.5c-.9-1.3-3.3-3.5-6-3.5Z"/><path d="M8 6a2 2 0 1 1 0 4a2 2 0 0 1 0-4Z"/></svg>',
 }
 
 _AGENT_ICON_MAP: dict[str, str] = {
@@ -87,6 +88,17 @@ def get_run_icon(color: str = "#4ec9b0", size: int = 18) -> QIcon:
 
     if cache_key not in _ICON_CACHE:
         svg_data = _SVG_ICONS["run"]
+        _ICON_CACHE[cache_key] = _svg_to_icon(svg_data, color, size)
+
+    return _ICON_CACHE[cache_key]
+
+
+def get_preview_icon(color: str = "#4ec9b0", size: int = 18) -> QIcon:
+    """Get QIcon for the preview button (VSCode-style eye icon)."""
+    cache_key = f"preview_{color}_{size}"
+
+    if cache_key not in _ICON_CACHE:
+        svg_data = _SVG_ICONS["preview"]
         _ICON_CACHE[cache_key] = _svg_to_icon(svg_data, color, size)
 
     return _ICON_CACHE[cache_key]

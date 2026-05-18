@@ -42,6 +42,8 @@ def get_theme_colors() -> dict[str, str]:
     # === Base Colors ===
     bg = "#1e1e1e" if dark else "#ffffff"
     surface = "#181818" if dark else "#f3f3f3"
+    panel_bg = "#141414" if dark else "#f3f3f3"
+    messages_bg = "#121212" if dark else "#ffffff"
     border = "#2b2b2b" if dark else "#e0e0e0"
     fg = "#cccccc" if dark else "#616161"
     muted = "#737373" if dark else "#9e9e9e"
@@ -54,6 +56,8 @@ def get_theme_colors() -> dict[str, str]:
         # === Layout ===
         "bg": bg,  # Main content area
         "surface": surface,  # Sidebar/chrome (file tree, header)
+        "panel_bg": panel_bg,  # Agent panel background (darker than editor)
+        "messages_bg": messages_bg,  # Agent conversation area background
         "card": "#252526" if dark else "#f5f5f5",  # Elevated cards
         "border": border,
         "fg": fg,
