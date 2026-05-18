@@ -92,9 +92,12 @@ class CompactTooltipFilter(QObject):
         self._hide()
         tip = QLabel(self._text)
         tip.setWindowFlags(
-            Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint
+            Qt.WindowType.ToolTip
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.NoDropShadowWindowHint
         )
         tip.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        tip.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         tip.setStyleSheet(compact_tooltip_qss())
         tip.adjustSize()
         x = (anchor.width() - tip.width()) // 2

@@ -40,8 +40,8 @@ from .ui_utils import IconActionButton, compact_tooltip_qss, render_svg_icon
 
 # Fixed directory structure
 FIXED_DIRECTORIES = ["data", "references", "theory", "code", "tex"]
-_FILE_TEXT_ICON_GAP_ADJUST = 14
-_FILE_EDITOR_ICON_GAP_ADJUST = 0
+_FILE_TEXT_ICON_GAP_ADJUST = 28
+_FILE_EDITOR_ICON_GAP_ADJUST = -6
 
 
 # ================================================================== #
@@ -295,6 +295,7 @@ class FileTreeWidget(QWidget):
         self._hover_timer.timeout.connect(self._show_pending_hover_tip)
         self._pending_hover_text = ""
         self._pending_hover_pos = QPoint()
+        self._hovered_item: QTreeWidgetItem | None = None
         self._setup_ui()
         self._init_directories()
         self._setup_file_watcher()
@@ -683,6 +684,7 @@ class FileTreeWidget(QWidget):
             self._hide_hover_tip()
             return
 
+        self._hovered_item = item
         self._pending_hover_text = tip
         self._pending_hover_pos = QCursor.pos() + QPoint(10, 2)
         self._hover_timer.start()
@@ -710,15 +712,22 @@ class FileTreeWidget(QWidget):
     def _hide_hover_tip(self) -> None:
         self._hover_timer.stop()
         self._pending_hover_text = ""
+        self._hovered_item = None
         if self._hover_tip is None:
             return
         self._hover_tip.hide()
 
     def eventFilter(self, obj, event):  # noqa: N802
         if obj is self.tree.viewport():
+            if event.type() == event.Type.MouseMove:
+                item = self.tree.itemAt(event.pos())
+                if item is None:
+                    self._hide_hover_tip()
+                elif item is not self._hovered_item:
+                    self._hide_hover_tip()
+                    self._on_item_entered(item, 0)
             if event.type() in (
                 event.Type.Leave,
-                event.Type.MouseMove,
                 event.Type.MouseButtonPress,
                 event.Type.Wheel,
                 event.Type.Hide,
