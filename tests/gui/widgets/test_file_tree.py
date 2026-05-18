@@ -394,3 +394,33 @@ def test_new_file_editor_is_bound_after_start_create(qtbot, tmp_path: Path) -> N
     qtbot.wait(20)
     assert widget._pending_new_item is not None
     assert widget._pending_editor is not None
+
+
+def test_directory_changed_restores_selected_file(qtbot, tmp_path: Path) -> None:
+    target_file = tmp_path / "references" / "keep.txt"
+    target_file.parent.mkdir(parents=True, exist_ok=True)
+    target_file.write_text("x", encoding="utf-8")
+
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    refs_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("references"))
+    assert refs_item is not None
+    refs_item.setExpanded(True)
+    widget._on_item_expanded(refs_item)
+    assert refs_item.childCount() > 0
+
+    selected = None
+    for i in range(refs_item.childCount()):
+        child = refs_item.child(i)
+        if child.data(0, 257) == str(target_file):
+            selected = child
+            break
+    assert selected is not None
+
+    widget.tree.setCurrentItem(selected)
+    widget._on_directory_changed(str((tmp_path / "references").resolve()))
+
+    current = widget.tree.currentItem()
+    assert current is not None
+    assert current.data(0, 257) == str(target_file)
