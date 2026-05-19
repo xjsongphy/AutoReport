@@ -17,6 +17,7 @@ _SVG_ICONS = {
     "copy": "copy.svg",
     "settings": "settings.svg",
 }
+UI_HOVER_DELAY_MS = 2000
 
 
 def render_svg_icon(name: str, color: QColor, size: int = 16) -> QIcon:
@@ -58,7 +59,7 @@ class CompactTooltipFilter(QObject):
         self._tip: QLabel | None = None
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
-        self._timer.setInterval(2000)
+        self._timer.setInterval(UI_HOVER_DELAY_MS)
         self._timer.timeout.connect(self._delayed_show)
         self._anchor: QWidget | None = None
 

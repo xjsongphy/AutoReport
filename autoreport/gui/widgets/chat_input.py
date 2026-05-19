@@ -31,8 +31,8 @@ class ChatInput(QPlainTextEdit):
 
     def _setup_ui(self) -> None:
         self.setPlaceholderText("Message…  (@ file, / command)")
-        self.setMinimumHeight(28)
-        self.setMaximumHeight(100)
+        self.setMinimumHeight(64)
+        self.setMaximumHeight(64)
         self.setSizePolicy(
             self.sizePolicy().horizontalPolicy(),
             self.sizePolicy().verticalPolicy(),
@@ -43,16 +43,16 @@ class ChatInput(QPlainTextEdit):
 
         self.setStyleSheet(f"""
             QPlainTextEdit {{
-                border: 1px solid {c["input_border"]};
-                border-radius: 8px;
-                padding: 4px 6px;
-                background-color: {c["input_bg"]};
+                border: none;
+                border-radius: 0;
+                padding: 6px 8px;
+                background-color: transparent;
                 color: {c["fg"]};
                 font-size: 13px;
                 font-family: "Segoe UI", "SF Pro", sans-serif;
             }}
             QPlainTextEdit:focus {{
-                border: 1px solid {c["focus"]};
+                border: none;
             }}
         """)
 

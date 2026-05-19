@@ -12,6 +12,7 @@ external/skills/
 TODO.md
 bug.md
 ref/
+images
 
 # User config (contains API keys)
 autoreport.config.yaml

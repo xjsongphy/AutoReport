@@ -258,6 +258,7 @@ class TabState:
     viewer: QWidget = field(default=None)  # type: ignore[assignment]
     viewer_type: str = ""
     modified: bool = False
+    saved_text: str = ""
 
 
 def _tab_key(path: Path) -> str:
@@ -349,24 +350,36 @@ class EditorPanel(QWidget):
         self._tab_bar.setTabToolTip(tab_idx, path.name)
         self._tab_bar.setVisible(False)
 
-        # Track dirty state for editable text editors.
+        if hasattr(viewer, "text") and callable(viewer.text):
+            state.saved_text = viewer.text()
         if hasattr(viewer, "textChanged"):
-            viewer.textChanged.connect(lambda _k=key: self._mark_tab_modified(_k))
+            viewer.textChanged.connect(lambda _k=key: self._on_editor_text_changed(_k))
+            self._on_editor_text_changed(key)
 
         self._active_key = key
         self.tab_changed.emit()
 
-    def _mark_tab_modified(self, key: str) -> None:
+    def _set_tab_modified(self, key: str, modified: bool) -> None:
         state = self._tabs.get(key)
-        if not state or state.modified:
+        if not state or state.modified == modified:
             return
-        state.modified = True
+        state.modified = modified
         try:
             idx = self._tab_order.index(key)
         except ValueError:
             return
         self._tab_bar.setTabText(idx, self._tab_label_for_state(state))
         self.tab_changed.emit()
+
+    def _on_editor_text_changed(self, key: str) -> None:
+        state = self._tabs.get(key)
+        if not state or not hasattr(state.viewer, "text"):
+            return
+        try:
+            current = state.viewer.text()
+        except Exception:
+            return
+        self._set_tab_modified(key, current != state.saved_text)
 
     def pin_active_tab(self) -> None:
         """Pin the current preview tab."""
@@ -570,6 +583,7 @@ class PreviewWidget(QWidget):
         self.workspace = Path(workspace).resolve()
         self._current_file: Path | None = None
         self._hovered_unified_tab_index = -1
+        self._hovered_unified_affordance_index = -1
         self._active_action_kind: str = ""
 
         # Single editor panel
@@ -612,8 +626,8 @@ class PreviewWidget(QWidget):
         self._run_button = IconActionButton(
             text="",
             tooltip="编译 / 运行当前文件",
-            object_name="previewActionBtn",
-            button_size=(24, 24),
+            object_name="secondaryBtn",
+            button_size=(22, 22),
             icon_size=(16, 16),
         )
         self._run_button.clicked.connect(self._on_run_clicked)
@@ -622,8 +636,8 @@ class PreviewWidget(QWidget):
         self._preview_button = IconActionButton(
             text="",
             tooltip="预览当前文件",
-            object_name="previewActionBtn",
-            button_size=(24, 24),
+            object_name="secondaryBtn",
+            button_size=(22, 22),
             icon_size=(16, 16),
         )
         self._preview_button.clicked.connect(self._on_preview_clicked)
@@ -722,17 +736,6 @@ class PreviewWidget(QWidget):
             QTabBar#previewTabBar::tab:selected:hover {{
                 background-color: {c["tab_active_bg"]};
             }}
-            QPushButton#previewActionBtn {{
-                background-color: {c["compile_bg"]};
-                border: 1px solid {c["border"]};
-                border-radius: {c["radius_sm"]};
-                color: {c["compile_fg"]};
-                padding: 0;
-                margin: 0 6px 0 0;
-            }}
-            QPushButton#previewActionBtn:hover {{
-                background-color: {c["primary_hover"]};
-            }}
             QTabBar#previewTabBar::close-button {{
                 subcontrol-position: right;
                 margin-right: 0px;
@@ -777,6 +780,8 @@ class PreviewWidget(QWidget):
 
     def load_file(self, file_path: Path) -> None:
         file_path = Path(file_path).resolve()
+        if not self.isVisible():
+            self.show()
         self._current_file = file_path
         self._panels[-1].open_file(file_path, preview=False)
         self._sync_tabs_from_panels()
@@ -949,7 +954,7 @@ class PreviewWidget(QWidget):
         return None
 
     def _refresh_unified_tab_affordances(self) -> None:
-        def _wrap_affordance(inner: QWidget) -> QWidget:
+        def _wrap_affordance(inner: QWidget, tab_index: int, hoverable: bool) -> QWidget:
             host = QWidget(self._unified_tab_bar)
             hl = QHBoxLayout(host)
             hl.setContentsMargins(0, 0, 6, 0)
@@ -957,6 +962,13 @@ class PreviewWidget(QWidget):
             hl.addStretch(1)
             hl.addWidget(inner)
             host.setFixedSize(18, 12)
+            if hoverable:
+                host.setProperty("affordance_tab_index", tab_index)
+                host.setMouseTracking(True)
+                host.installEventFilter(self)
+                inner.setProperty("affordance_tab_index", tab_index)
+                inner.setMouseTracking(True)
+                inner.installEventFilter(self)
             return host
 
         for i in range(self._unified_tab_bar.count()):
@@ -966,27 +978,39 @@ class PreviewWidget(QWidget):
                 continue
             state = self._find_tab_state(key)
             show_close = i == self._hovered_unified_tab_index
+            if state and state.modified:
+                show_close = i == self._hovered_unified_affordance_index
             if show_close:
                 btn = QPushButton("✕", self._unified_tab_bar)
                 btn.setObjectName("tabCloseBtn")
                 btn.setCursor(Qt.CursorShape.PointingHandCursor)
                 btn.setFixedSize(12, 12)
                 btn.clicked.connect(lambda _=False, _k=key: self._on_unified_tab_close_by_key(_k))
-                self._unified_tab_bar.setTabButton(i, QTabBar.ButtonPosition.RightSide, _wrap_affordance(btn))
+                self._unified_tab_bar.setTabButton(i, QTabBar.ButtonPosition.RightSide, _wrap_affordance(btn, i, False))
             elif state and state.modified:
                 dot = QLabel("●", self._unified_tab_bar)
                 dot.setObjectName("tabDirtyDot")
                 dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 dot.setFixedSize(12, 12)
-                self._unified_tab_bar.setTabButton(i, QTabBar.ButtonPosition.RightSide, _wrap_affordance(dot))
+                self._unified_tab_bar.setTabButton(i, QTabBar.ButtonPosition.RightSide, _wrap_affordance(dot, i, True))
             else:
                 spacer = QLabel("●", self._unified_tab_bar)
                 spacer.setObjectName("tabAffordanceSpacer")
                 spacer.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 spacer.setFixedSize(12, 12)
-                self._unified_tab_bar.setTabButton(i, QTabBar.ButtonPosition.RightSide, _wrap_affordance(spacer))
+                self._unified_tab_bar.setTabButton(i, QTabBar.ButtonPosition.RightSide, _wrap_affordance(spacer, i, True))
 
     def eventFilter(self, obj, event):  # noqa: N802
+        affordance_index = obj.property("affordance_tab_index") if hasattr(obj, "property") else None
+        if isinstance(affordance_index, int):
+            if event.type() in (event.Type.Enter, event.Type.MouseMove):
+                if self._hovered_unified_affordance_index != affordance_index:
+                    self._hovered_unified_affordance_index = affordance_index
+                    self._refresh_unified_tab_affordances()
+            elif event.type() == event.Type.Leave:
+                if self._hovered_unified_affordance_index != -1:
+                    self._hovered_unified_affordance_index = -1
+                    self._refresh_unified_tab_affordances()
         if obj is self._unified_tab_bar:
             if event.type() == event.Type.MouseMove:
                 hovered = self._unified_tab_bar.tabAt(event.pos())
@@ -996,6 +1020,7 @@ class PreviewWidget(QWidget):
             elif event.type() == event.Type.Leave:
                 if self._hovered_unified_tab_index != -1:
                     self._hovered_unified_tab_index = -1
+                    self._hovered_unified_affordance_index = -1
                     self._refresh_unified_tab_affordances()
         return super().eventFilter(obj, event)
 
@@ -1007,11 +1032,12 @@ class PreviewWidget(QWidget):
         return
 
     def _update_file_actions(self) -> None:
+        c = get_theme_colors()
         self._active_action_kind = ""
         self._run_button.setVisible(False)
         self._preview_button.setVisible(False)
-        self._run_button.setIcon(get_run_icon(color="#ffffff", size=16))
-        self._preview_button.setIcon(get_preview_icon(color="#ffffff", size=16))
+        self._run_button.setIcon(get_run_icon(color=c["fg"], size=16))
+        self._preview_button.setIcon(get_preview_icon(color=c["fg"], size=16))
         if not self._current_file:
             return
 
@@ -1149,15 +1175,11 @@ class PreviewWidget(QWidget):
                 logger.exception("Failed saving file: {}", self._current_file)
                 return False
 
-            if state.modified:
-                state.modified = False
-                try:
-                    idx = panel._tab_order.index(key)
-                    panel._tab_bar.setTabText(idx, panel._tab_label_for_state(state))
-                except ValueError:
-                    pass
-                self._sync_tabs_from_panels()
-                panel.tab_changed.emit()
+            state.viewer.setModified(False)
+            panel._set_tab_modified(key, False)
+            state.saved_text = state.viewer.text()
+            self._sync_tabs_from_panels()
+            panel.tab_changed.emit()
             return True
         return False
 

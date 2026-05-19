@@ -239,7 +239,19 @@ class MainWindow(QMainWindow):
             }}
             /* ---- Input Container (with working border space) ---- */
             #inputContainer {{
-                background-color: {c["bg"]};
+                background-color: transparent;
+                border: 1px solid {c["border"]};
+                border-radius: {px(10)};
+                margin: {px(8)} {px(10)} {px(14)} {px(10)};
+            }}
+            #composerInputTop {{
+                background-color: {c["input_bg"]};
+                border-top-left-radius: {px(8)};
+                border-top-right-radius: {px(8)};
+            }}
+            #composerDivider {{
+                background-color: {c["border"]};
+                margin: 0;
             }}
 
             /* ---- Input Bar ---- */
@@ -249,7 +261,9 @@ class MainWindow(QMainWindow):
 
             /* ---- Secondary Toolbar ---- */
             #secondaryToolbar {{
-                background-color: {c["bg"]};
+                background-color: {c["input_bg"]};
+                border-bottom-left-radius: {px(8)};
+                border-bottom-right-radius: {px(8)};
             }}
             #secondaryBtn {{
                 background-color: transparent;
@@ -270,40 +284,41 @@ class MainWindow(QMainWindow):
             #sendBtn {{
                 background-color: {c["send_bg"]};
                 color: {c["primaryBtnFg"]};
-                border: none;
-                border-radius: {px(13)};
+                border: 1px solid {c["send_bg"]};
+                border-radius: {px(6)};
                 font-size: {px(14)};
                 font-weight: {c["fw_bold"]};
                 padding: 0;
-                min-width: {px(26)};
-                min-height: {px(26)};
-                max-width: {px(26)};
-                max-height: {px(26)};
+                min-width: {px(22)};
+                min-height: {px(22)};
+                max-width: {px(22)};
+                max-height: {px(22)};
             }}
             #sendBtn:hover {{
                 background-color: {c["send_hover"]};
+                border-color: {c["send_hover"]};
             }}
             #stopBtn {{
-                background-color: {c["stop_bg"]};
-                color: {c["primaryBtnFg"]};
-                border: none;
-                border-radius: {px(13)};
+                background-color: transparent;
+                color: {c["status_error"]};
+                border: 1px solid {c["status_error"]};
+                border-radius: {px(6)};
                 font-size: {px(14)};
                 font-weight: {c["fw_bold"]};
                 padding: 0;
-                min-width: {px(26)};
-                min-height: {px(26)};
-                max-width: {px(26)};
-                max-height: {px(26)};
+                min-width: {px(22)};
+                min-height: {px(22)};
+                max-width: {px(22)};
+                max-height: {px(22)};
             }}
             #stopBtn:hover {{
-                background-color: {c["stop_hover"]};
+                background-color: {c["hover"]};
             }}
 
             /* ---- Context Bar ---- */
             #contextBar {{
-                background-color: {c["context_bg"]};
-                border-top: 1px solid {c["context_border"]};
+                background-color: transparent;
+                border-top: none;
             }}
             #contextLabel {{
                 font-size: {px(11)};

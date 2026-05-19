@@ -37,7 +37,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..theme import get_theme_colors
-from .ui_utils import IconActionButton, compact_tooltip_qss, render_svg_icon
+from .ui_utils import UI_HOVER_DELAY_MS, IconActionButton, compact_tooltip_qss, render_svg_icon
 
 # Fixed directory structure
 FIXED_DIRECTORIES = ["data", "references", "theory", "code", "tex"]
@@ -277,7 +277,7 @@ class FileTreeWidget(QWidget):
         self._hover_tip: QLabel | None = None
         self._hover_timer = QTimer(self)
         self._hover_timer.setSingleShot(True)
-        self._hover_timer.setInterval(2000)
+        self._hover_timer.setInterval(UI_HOVER_DELAY_MS)
         self._hover_timer.timeout.connect(self._show_pending_hover_tip)
         self._pending_hover_text = ""
         self._pending_hover_pos = QPoint()

@@ -61,7 +61,7 @@ class MessagesArea(QScrollArea):
         self.setStyleSheet(f"""
             QScrollArea#messagesArea {{
                 border: none;
-                background-color: {c["messages_bg"]};
+                background-color: {c["panel_bg"]};
             }}
             QWidget#messagesContainer {{
                 background-color: {c["messages_bg"]};

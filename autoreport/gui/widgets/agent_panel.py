@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
 )
 
 from autoreport.core.file_search import FileSearchManager
+from autoreport.gui.icons import get_context_eye_icons
 from autoreport.gui.widgets.chat_input import ChatInput
 from autoreport.gui.widgets.conversation_history import ConversationHistoryDropdown
 from autoreport.gui.widgets.debug_panel import DebugPanel
@@ -56,6 +57,7 @@ class AgentPanel(QWidget):
         self._preview_context: tuple[str, str, int, int] | None = None
         self._opened_file: str | None = None
         self._context_enabled: bool = True
+        self._context_eye_icons = get_context_eye_icons()
         self._current_tool_group = None
         self._pending_tool_groups: list = []
         self._agent_selector: NoWheelComboBox | None = None
@@ -165,6 +167,7 @@ class AgentPanel(QWidget):
 
         # ---- Messages area ----
         self._messages_area = MessagesArea()
+        self._messages_area.setViewportMargins(0, 0, 0, 0)
         self._messages_area.edit_requested.connect(self._on_message_edit_requested)
         self._messages_area.edit_saved.connect(self._on_message_edit_saved)
         self._messages_area.edit_cancelled.connect(self._on_message_edit_cancelled)
@@ -194,25 +197,35 @@ class AgentPanel(QWidget):
         cl.addWidget(self._context_label, 1)
 
         self._context_eye = IconActionButton(
-            text="👁",
+            text="",
             tooltip="Include context (toggle)",
             object_name="contextEye",
             button_size=(24, 24),
+            icon_size=(14, 14),
             on_click=self._on_eye_toggled,
         )
+        self._context_eye.setIcon(self._context_eye_icons["eye"])
         self._context_eye.setCheckable(True)
         self._context_eye.setChecked(True)
         cl.addWidget(self._context_eye)
 
         layout.addWidget(self._context_bar)
 
-        # ---- Input bar (VS Code Copilot-style composer) ----
-        # Single container with input + send button, wrapped by working border
+        # ---- Composer (floating input + dock bar) ----
         self._input_container = QWidget(self)
         self._input_container.setObjectName("inputContainer")
-        icl = QHBoxLayout(self._input_container)
-        icl.setContentsMargins(4, 2, 4, 2)
-        icl.setSpacing(4)
+        self._input_container.setMaximumWidth(760)
+        composer_layout = QVBoxLayout(self._input_container)
+        composer_layout.setContentsMargins(0, 0, 0, 0)
+        composer_layout.setSpacing(0)
+
+        input_top = QWidget(self._input_container)
+        input_top.setObjectName("composerInputTop")
+        input_top.setMinimumHeight(86)
+        input_top.setMaximumHeight(86)
+        icl = QHBoxLayout(input_top)
+        icl.setContentsMargins(12, 10, 12, 10)
+        icl.setSpacing(0)
 
         self._input_field = ChatInput()
         self._input_field.setPlaceholderText("Message…  (@ file, / command)")
@@ -225,30 +238,33 @@ class AgentPanel(QWidget):
         self._send_btn = IconActionButton(
             text="↑",
             object_name="sendBtn",
-            button_size=(26, 26),
+            button_size=(22, 22),
             on_click=self._on_send_btn_clicked,
         )
+        composer_layout.addWidget(input_top)
 
-        icl.addWidget(self._send_btn)
+        divider = QWidget(self._input_container)
+        divider.setObjectName("composerDivider")
+        divider.setFixedHeight(1)
+        composer_layout.addWidget(divider)
 
         # Working border overlays the container
         self._working_border = WorkingBorder(self._input_container)
         self._working_border.show()
 
-        layout.addWidget(self._input_container)
-
-        # ---- Secondary toolbar (VS Code: .chat-secondary-toolbar) ----
-        secondary_bar = QWidget(self)
+        # ---- Dock bar ----
+        secondary_bar = QWidget(self._input_container)
         secondary_bar.setObjectName("secondaryToolbar")
         sl = QHBoxLayout(secondary_bar)
-        sl.setContentsMargins(10, 0, 6, 2)
+        sl.setContentsMargins(12, 4, 12, 4)
         sl.setSpacing(2)
+        sl.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         add_btn = IconActionButton(
             text="+",
             tooltip="添加上下文",
             object_name="secondaryBtn",
-            button_size=(22, 18),
+            button_size=(22, 22),
         )
         sl.addWidget(add_btn)
 
@@ -256,7 +272,7 @@ class AgentPanel(QWidget):
             text="@",
             tooltip="引用文件",
             object_name="secondaryBtn",
-            button_size=(22, 18),
+            button_size=(22, 22),
         )
         sl.addWidget(at_btn)
 
@@ -265,8 +281,10 @@ class AgentPanel(QWidget):
         self._secondary_status = QLabel("")
         self._secondary_status.setObjectName("secondaryStatus")
         sl.addWidget(self._secondary_status)
+        sl.addWidget(self._send_btn)
 
-        layout.addWidget(secondary_bar)
+        composer_layout.addWidget(secondary_bar)
+        layout.addWidget(self._input_container, 0, Qt.AlignmentFlag.AlignHCenter)
 
     def _setup_file_search(self) -> None:
         self._file_search_popup = FileSearchPopup(self)
@@ -482,7 +500,7 @@ class AgentPanel(QWidget):
         self._preview_context = None
         self._context_enabled = True
         self._context_eye.setChecked(True)
-        self._context_eye.setText("👁")
+        self._context_eye.setIcon(self._context_eye_icons["eye"])
         self._context_label.setText(Path(file_path).name)
         self._context_bar.setVisible(True)
 
@@ -491,7 +509,7 @@ class AgentPanel(QWidget):
         self._opened_file = None
         self._context_enabled = True
         self._context_eye.setChecked(True)
-        self._context_eye.setText("👁")
+        self._context_eye.setIcon(self._context_eye_icons["eye"])
         lines = end_line - start_line + 1
         self._context_label.setText(f"{lines} line{'s' if lines > 1 else ''} — {Path(file_path).name}")
         self._context_bar.setVisible(True)
@@ -504,7 +522,7 @@ class AgentPanel(QWidget):
 
     def _on_eye_toggled(self) -> None:
         self._context_enabled = self._context_eye.isChecked()
-        self._context_eye.setText("👁" if self._context_enabled else "🚫")
+        self._context_eye.setIcon(self._context_eye_icons["eye"] if self._context_enabled else self._context_eye_icons["eye_off"])
 
     def set_workspace(self, workspace: Path) -> None:
         self._workspace = Path(workspace).resolve()

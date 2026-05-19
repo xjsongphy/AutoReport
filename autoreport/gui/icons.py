@@ -1,6 +1,6 @@
 """Agent icons from Tabler Icons (MIT License)."""
 
-from PyQt6.QtGui import QIcon, QPixmap, QPainter
+from PyQt6.QtGui import QColor, QIcon, QPainterPath, QPen, QPixmap, QPainter
 from PyQt6.QtCore import QByteArray, Qt
 from PyQt6.QtSvg import QSvgRenderer
 
@@ -102,3 +102,43 @@ def get_preview_icon(color: str = "#4ec9b0", size: int = 18) -> QIcon:
         _ICON_CACHE[cache_key] = _svg_to_icon(svg_data, color, size)
 
     return _ICON_CACHE[cache_key]
+
+
+def get_context_eye_icons(color: str = "#a6a6a6", size: int = 14) -> dict[str, QIcon]:
+    """Get eye / eye-off icons matching API config page style."""
+    eye_key = f"context_eye_{color}_{size}"
+    off_key = f"context_eye_off_{color}_{size}"
+
+    if eye_key not in _ICON_CACHE or off_key not in _ICON_CACHE:
+        pen = QPen()
+        pen.setColor(QColor(color))
+        pen.setWidthF(max(1.4, size * 0.12))
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+
+        eye_pixmap = QPixmap(size, size)
+        eye_pixmap.fill(Qt.GlobalColor.transparent)
+        p = QPainter(eye_pixmap)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        path = QPainterPath()
+        path.moveTo(size * 0.12, size * 0.5)
+        path.cubicTo(size * 0.30, size * 0.20, size * 0.70, size * 0.20, size * 0.88, size * 0.5)
+        path.cubicTo(size * 0.70, size * 0.80, size * 0.30, size * 0.80, size * 0.12, size * 0.5)
+        p.drawPath(path)
+        p.setBrush(QColor(color))
+        p.drawEllipse(int(size * 0.43), int(size * 0.43), int(size * 0.14), int(size * 0.14))
+        p.end()
+
+        off_pixmap = QPixmap(eye_pixmap)
+        p2 = QPainter(off_pixmap)
+        p2.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p2.setPen(pen)
+        p2.drawLine(int(size * 0.16), int(size * 0.84), int(size * 0.84), int(size * 0.16))
+        p2.end()
+
+        _ICON_CACHE[eye_key] = QIcon(eye_pixmap)
+        _ICON_CACHE[off_key] = QIcon(off_pixmap)
+
+    return {"eye": _ICON_CACHE[eye_key], "eye_off": _ICON_CACHE[off_key]}
