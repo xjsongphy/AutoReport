@@ -75,3 +75,25 @@ def test_ctrl_enter_default_behavior(qtbot):
 
     # Default behavior - no signal sent, no text change
     assert "sent" not in signals
+
+
+def test_input_height_grows_and_scrolls_after_10_lines(qtbot):
+    widget = ChatInput()
+    qtbot.addWidget(widget)
+    widget.resize(360, 80)
+
+    h1 = widget.height()
+    widget.setPlainText("\n".join(f"line {i}" for i in range(1, 6)))
+    qtbot.wait(10)
+    h5 = widget.height()
+
+    assert h5 > h1
+    assert widget.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+
+    widget.setPlainText("\n".join(f"line {i}" for i in range(1, 20)))
+    qtbot.wait(10)
+    h19 = widget.height()
+
+    assert widget.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOn
+    assert h19 >= h5
+    assert h19 - h5 < 8 * widget.fontMetrics().lineSpacing()
