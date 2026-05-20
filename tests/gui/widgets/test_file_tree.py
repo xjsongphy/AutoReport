@@ -67,6 +67,15 @@ def test_file_tree_has_drag_drop_handlers() -> None:
     assert hasattr(FileTreeWidget, "dropEvent")
 
 
+def test_file_tree_has_cross_platform_shortcut_handler() -> None:
+    import inspect
+
+    source = inspect.getsource(FileTreeWidget._handle_tree_key)
+    assert "Key_F2" in source
+    assert "Key_Delete" in source
+    assert "Key_Backspace" in source
+
+
 def test_blank_click_selects_project_root(qtbot, tmp_path: Path) -> None:
     widget = FileTreeWidget(tmp_path)
     qtbot.addWidget(widget)
@@ -147,9 +156,9 @@ def test_delete_operations_use_confirmation() -> None:
     delete_file_source = inspect.getsource(FileTreeWidget._delete_file)
     delete_dir_source = inspect.getsource(FileTreeWidget._delete_directory)
 
-    # Both should use QMessageBox for confirmation
-    assert "QMessageBox.question" in delete_file_source
-    assert "QMessageBox.question" in delete_dir_source
+    # Both should use confirmation dialogs (direct QMessageBox or wrapped helper)
+    assert ("QMessageBox.question" in delete_file_source) or ("_ask_confirmation" in delete_file_source)
+    assert ("QMessageBox.question" in delete_dir_source) or ("_ask_confirmation" in delete_dir_source)
 
 
 def test_file_operations_use_correct_paths() -> None:
@@ -339,6 +348,37 @@ def test_drop_target_resolves_nested_directories(qtbot, tmp_path: Path) -> None:
     assert widget._resolve_target_dir(processed_item) == "data/processed"
 
 
+def test_drag_hover_highlights_resolved_directory(qtbot, tmp_path: Path) -> None:
+    target_file = tmp_path / "references" / "note.txt"
+    target_file.parent.mkdir(parents=True, exist_ok=True)
+    target_file.write_text("x", encoding="utf-8")
+
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    refs_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("references"))
+    refs_item.setExpanded(True)
+    widget._on_item_expanded(refs_item)
+    file_item = refs_item.child(0)
+
+    widget._set_drop_target_from_item(file_item)
+    assert widget._drop_target_item is refs_item
+
+    widget._clear_drop_target()
+    assert widget._drop_target_item is None
+
+
+def test_processed_directory_is_draggable_but_fixed_roots_are_not(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    data_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("data"))
+    processed_item = data_item.child(0)
+
+    assert not (data_item.flags() & Qt.ItemFlag.ItemIsDragEnabled)
+    assert processed_item.flags() & Qt.ItemFlag.ItemIsDragEnabled
+
+
 def test_directories_do_not_show_folder_icons(qtbot, tmp_path: Path) -> None:
     widget = FileTreeWidget(tmp_path)
     qtbot.addWidget(widget)
@@ -450,3 +490,83 @@ def test_directory_changed_restores_selected_file(qtbot, tmp_path: Path) -> None
     current = widget.tree.currentItem()
     assert current is not None
     assert current.data(0, 257) == str(target_file)
+
+
+def test_select_moved_path_keeps_selection_on_new_file(qtbot, tmp_path: Path) -> None:
+    moved = tmp_path / "references" / "moved.txt"
+    moved.parent.mkdir(parents=True, exist_ok=True)
+    moved.write_text("x", encoding="utf-8")
+
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    widget._select_moved_path(moved)
+
+    current = widget.tree.currentItem()
+    assert current is not None
+    assert current.data(0, Qt.ItemDataRole.UserRole + 1) == str(moved)
+
+
+def test_internal_move_keeps_references_expand_indicator(qtbot, tmp_path: Path) -> None:
+    source = tmp_path / "data" / "raw.txt"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("x", encoding="utf-8")
+
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    data_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("data"))
+    refs_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("references"))
+    assert data_item is not None
+    assert refs_item is not None
+
+    data_item.setExpanded(True)
+    widget._on_item_expanded(data_item)
+    processed_item = None
+    file_item = None
+    for i in range(data_item.childCount()):
+        child = data_item.child(i)
+        rel = child.data(0, Qt.ItemDataRole.UserRole)
+        if rel == "data/processed":
+            processed_item = child
+        if child.data(0, Qt.ItemDataRole.UserRole + 1) == str(source):
+            file_item = child
+    assert processed_item is not None
+    assert file_item is not None
+
+    widget.tree.clearSelection()
+    file_item.setSelected(True)
+    widget._handle_internal_move(None, processed_item)
+
+    assert (
+        refs_item.childIndicatorPolicy()
+        == QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
+    )
+
+
+def test_clicking_blank_area_selects_root_directory(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.resize(320, 420)
+    widget.show()
+    qtbot.wait(20)
+
+    captured: list[str] = []
+    widget.directory_selected.connect(captured.append)
+
+    viewport = widget.tree.viewport()
+    pos = QPointF(float(viewport.width() - 2), float(viewport.height() - 2))
+    event = QMouseEvent(
+        QEvent.Type.MouseButtonPress,
+        pos,
+        pos,
+        pos,
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(viewport, event)
+
+    assert widget.tree.currentItem() is None
+    assert captured
+    assert captured[-1] == "."
