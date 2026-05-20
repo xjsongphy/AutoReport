@@ -112,6 +112,18 @@ def test_selection_context_label_uses_line_count(agent_panel):
     assert agent_panel._context_attachment_btn.toolTip() == "sections/intro.tex"
 
 
+def test_composer_side_gap_matches_bottom_mask_height(agent_panel, qtbot):
+    agent_panel.resize(420, 600)
+    agent_panel.show()
+    qtbot.wait(10)
+    agent_panel._sync_composer_gap()
+
+    side_gap = agent_panel._input_container.mapTo(agent_panel, agent_panel._input_container.rect().topLeft()).x()
+
+    assert side_gap >= agent_panel._composer_horizontal_margin
+    assert agent_panel._composer_bottom_gap.height() == side_gap
+
+
 def test_set_agent_type_uses_badged_title(agent_panel):
     agent_panel.set_agent_type("theory")
     # Title shows agent name, icon is shown separately in _icon_label

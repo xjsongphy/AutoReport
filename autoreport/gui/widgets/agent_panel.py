@@ -186,7 +186,18 @@ class AgentPanel(QWidget):
         layout.addWidget(self._status_indicator)
 
         # ---- Composer (floating input + dock bar) ----
-        self._input_container = QWidget(self)
+        self._composer_host = QWidget(self)
+        self._composer_host.setObjectName("composerHost")
+        composer_host_layout = QHBoxLayout(self._composer_host)
+        composer_host_layout.setContentsMargins(
+            self._composer_horizontal_margin,
+            0,
+            self._composer_horizontal_margin,
+            0,
+        )
+        composer_host_layout.setSpacing(0)
+
+        self._input_container = QWidget(self._composer_host)
         self._input_container.setObjectName("inputContainer")
         self._input_container.setMaximumWidth(760)
         composer_layout = QVBoxLayout(self._input_container)
@@ -271,7 +282,8 @@ class AgentPanel(QWidget):
         sl.addWidget(self._send_btn)
 
         composer_layout.addWidget(secondary_bar)
-        layout.addWidget(self._input_container, 0, Qt.AlignmentFlag.AlignHCenter)
+        composer_host_layout.addWidget(self._input_container, 1, Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(self._composer_host)
         self._composer_bottom_gap = QWidget(self)
         self._composer_bottom_gap.setObjectName("composerBottomGap")
         self._composer_bottom_gap.setFixedHeight(0)
@@ -329,7 +341,7 @@ class AgentPanel(QWidget):
         """Keep bottom gap height equal to horizontal gutter width around composer."""
         if not hasattr(self, "_composer_bottom_gap"):
             return
-        side_gap = max(0, self._input_container.x() + self._composer_horizontal_margin)
+        side_gap = max(0, self._input_container.mapTo(self, QPoint(0, 0)).x())
         if self._composer_bottom_gap.height() != side_gap:
             self._composer_bottom_gap.setFixedHeight(side_gap)
 

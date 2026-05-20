@@ -238,11 +238,14 @@ class MainWindow(QMainWindow):
                 color: {c["header_action_hover"]};
             }}
             /* ---- Input Container (with working border space) ---- */
+            #composerHost {{
+                background-color: {c["panel_bg"]};
+            }}
             #inputContainer {{
                 background-color: {c["panel_bg"]};
                 border: 1px solid {c["border"]};
                 border-radius: {px(10)};
-                margin: {px(8)} {px(10)} 0 {px(10)};
+                margin: {px(8)} 0 0 0;
             }}
             #composerInputTop {{
                 background-color: {c["input_bg"]};
