@@ -1,6 +1,7 @@
 """Preview widget with a unified editor for all file types."""
 
 from dataclasses import dataclass, field
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -49,6 +50,13 @@ class _TabAffordanceButton(QPushButton):
     def leaveEvent(self, event) -> None:  # noqa: N802
         self.setText("●")
         super().leaveEvent(event)
+
+
+def _create_missing_viewer(path: Path) -> tuple[QLabel, str]:
+    label = QLabel(f"文件不存在或已移动:\n{path}")
+    label.setObjectName("editorPlaceholder")
+    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    return label, "missing"
 
 
 # ================================================================== #
@@ -277,6 +285,7 @@ class TabState:
     viewer_type: str = ""
     modified: bool = False
     saved_text: str = ""
+    missing: bool = False
 
 
 def _tab_key(path: Path) -> str:
@@ -354,10 +363,11 @@ class EditorPanel(QWidget):
             self._close_tab(self._active_key)
 
         # Create viewer
-        viewer, vtype = _create_viewer(path)
+        missing = not path.exists()
+        viewer, vtype = _create_missing_viewer(path) if missing else _create_viewer(path)
         self._stack.addWidget(viewer)
 
-        state = TabState(path=path, pinned=not preview, viewer=viewer, viewer_type=vtype)
+        state = TabState(path=path, pinned=not preview, viewer=viewer, viewer_type=vtype, missing=missing)
         self._tabs[key] = state
         self._tab_order.append(key)
 
@@ -375,6 +385,34 @@ class EditorPanel(QWidget):
 
         self._active_key = key
         self.tab_changed.emit()
+
+    def update_path(self, old_path: Path, new_path: Path) -> None:
+        old_path = old_path.resolve()
+        new_path = new_path.resolve()
+        changed: list[tuple[str, str, TabState]] = []
+        for key, state in list(self._tabs.items()):
+            try:
+                rel = state.path.resolve().relative_to(old_path)
+            except ValueError:
+                if state.path.resolve() != old_path:
+                    continue
+                rel = Path()
+            updated_path = new_path / rel if str(rel) else new_path
+            new_key = _tab_key(updated_path)
+            changed.append((key, new_key, state))
+
+        for old_key, new_key, state in changed:
+            self._tabs.pop(old_key, None)
+            state.path = Path(new_key)
+            state.missing = not state.path.exists()
+            self._tabs[new_key] = state
+            idx = self._tab_order.index(old_key)
+            self._tab_order[idx] = new_key
+            if self._active_key == old_key:
+                self._active_key = new_key
+
+        if changed:
+            self.tab_changed.emit()
 
     def _set_tab_modified(self, key: str, modified: bool) -> None:
         state = self._tabs.get(key)
@@ -599,6 +637,8 @@ class PreviewWidget(QWidget):
         self.workspace = Path(workspace).resolve()
         self._current_file: Path | None = None
         self._active_action_kind: str = ""
+        self._tab_state_path = self.workspace / ".autoreport" / "open_tabs.json"
+        self._restoring_tabs = False
 
         # Single editor panel
         self._panels: list[EditorPanel] = []
@@ -778,6 +818,21 @@ class PreviewWidget(QWidget):
                 background-color: {c["muted"]};
                 color: #ffffff;
             }}
+            QLabel#tabMissingBadge {{
+                color: {c["status_error"]};
+                background: transparent;
+                border: none;
+                font-weight: {c["fw_bold"]};
+                font-size: 11px;
+                padding: 0 3px 0 0;
+            }}
+            QLabel#tabDuplicatePath {{
+                color: {c["muted"]};
+                background: transparent;
+                border: none;
+                font-size: 11px;
+                padding: 0 4px 0 0;
+            }}
             QLabel#tabAffordanceSpacer {{
                 color: transparent;
                 background: transparent;
@@ -840,6 +895,9 @@ class PreviewWidget(QWidget):
                     label = state.path.name
                     tab_idx = self._unified_tab_bar.addTab(label)
                     self._unified_tab_bar.setTabData(tab_idx, key)
+                    if state.missing or not state.path.exists():
+                        state.missing = True
+                        self._unified_tab_bar.setTabTextColor(tab_idx, QColor(get_theme_colors()["status_error"]))
                     if key == active_key or (current_index < 0 and key == panel._active_key):
                         current_index = tab_idx
 
@@ -848,6 +906,8 @@ class PreviewWidget(QWidget):
         self._unified_tab_bar.setVisible(self._unified_tab_bar.count() > 0)
         self._refresh_unified_tab_affordances()
         self._update_file_actions()
+        if not self._restoring_tabs:
+            self.save_open_tabs()
 
         if self._unified_tab_bar.currentIndex() >= 0:
             current_key = self._unified_tab_bar.tabData(self._unified_tab_bar.currentIndex())
@@ -930,6 +990,71 @@ class PreviewWidget(QWidget):
                 self._on_unified_tab_close(i)
                 return
 
+    def update_open_path(self, old_path: Path, new_path: Path) -> None:
+        for panel in self._panels:
+            panel.update_path(old_path, new_path)
+        old_resolved = old_path.resolve()
+        if self._current_file and self._current_file.resolve() == old_resolved:
+            self._current_file = new_path.resolve()
+        self._sync_tabs_from_panels()
+
+    def save_open_tabs(self) -> None:
+        tabs = []
+        for panel in self._panels:
+            for key in panel._tab_order:
+                state = panel._tabs[key]
+                try:
+                    rel_path = str(state.path.relative_to(self.workspace))
+                except ValueError:
+                    rel_path = str(state.path)
+                tabs.append(rel_path)
+        active = None
+        if self.current_file:
+            try:
+                active = str(self.current_file.relative_to(self.workspace))
+            except ValueError:
+                active = str(self.current_file)
+        data = {"tabs": tabs, "active": active}
+        try:
+            self._tab_state_path.parent.mkdir(parents=True, exist_ok=True)
+            self._tab_state_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            logger.warning("Failed to save open tabs: {}", self._tab_state_path)
+
+    def restore_open_tabs(self) -> None:
+        if not self._tab_state_path.exists():
+            return
+        try:
+            data = json.loads(self._tab_state_path.read_text(encoding="utf-8"))
+        except Exception:
+            logger.warning("Failed to read open tabs: {}", self._tab_state_path)
+            return
+        tabs = data.get("tabs") if isinstance(data, dict) else None
+        if not isinstance(tabs, list):
+            return
+        active = data.get("active") if isinstance(data, dict) else None
+        self._restoring_tabs = True
+        try:
+            for item in tabs:
+                if not isinstance(item, str) or not item:
+                    continue
+                path = Path(item)
+                if not path.is_absolute():
+                    path = self.workspace / path
+                self.load_file(path)
+            if isinstance(active, str) and active:
+                active_path = Path(active)
+                if not active_path.is_absolute():
+                    active_path = self.workspace / active_path
+                key = _tab_key(active_path)
+                for i in range(self._unified_tab_bar.count()):
+                    if self._unified_tab_bar.tabData(i) == key:
+                        self._unified_tab_bar.setCurrentIndex(i)
+                        break
+        finally:
+            self._restoring_tabs = False
+        self._sync_tabs_from_panels()
+
     def _on_unified_tab_context_menu(self, pos) -> None:
         """Show context menu for unified tab bar."""
         index = self._unified_tab_bar.tabAt(pos)
@@ -971,14 +1096,33 @@ class PreviewWidget(QWidget):
         return None
 
     def _refresh_unified_tab_affordances(self) -> None:
-        def _wrap_affordance(inner: QWidget, hand_cursor: bool) -> QWidget:
+        duplicate_names = self._duplicate_tab_names()
+
+        def _wrap_affordance(
+            inner: QWidget,
+            hand_cursor: bool,
+            *,
+            path_text: str = "",
+            missing: bool = False,
+        ) -> QWidget:
             host = QWidget(self._unified_tab_bar)
             hl = QHBoxLayout(host)
             hl.setContentsMargins(0, 0, 6, 0)
             hl.setSpacing(0)
             hl.addStretch(1)
+            if path_text:
+                path_label = QLabel(path_text, host)
+                path_label.setObjectName("tabDuplicatePath")
+                path_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                path_label.setMaximumWidth(140)
+                hl.addWidget(path_label)
+            if missing:
+                missing_label = QLabel("D", host)
+                missing_label.setObjectName("tabMissingBadge")
+                missing_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                hl.addWidget(missing_label)
             hl.addWidget(inner)
-            host.setFixedSize(18, 12)
+            host.setFixedSize(18 + (140 if path_text else 0) + (12 if missing else 0), 12)
             if hand_cursor:
                 host.setCursor(Qt.CursorShape.PointingHandCursor)
                 inner.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -990,23 +1134,67 @@ class PreviewWidget(QWidget):
                 self._unified_tab_bar.setTabButton(i, QTabBar.ButtonPosition.RightSide, None)
                 continue
             state = self._find_tab_state(key)
+            path_text = self._duplicate_path_text(state) if state and state.path.name in duplicate_names else ""
+            missing = bool(state and (state.missing or not state.path.exists()))
             if state and state.modified:
                 btn = _TabAffordanceButton(self._unified_tab_bar)
                 btn.clicked.connect(lambda _=False, _k=key: self._on_unified_tab_close_by_key(_k))
-                self._unified_tab_bar.setTabButton(i, QTabBar.ButtonPosition.RightSide, _wrap_affordance(btn, True))
+                self._unified_tab_bar.setTabButton(
+                    i,
+                    QTabBar.ButtonPosition.RightSide,
+                    _wrap_affordance(btn, True, path_text=path_text, missing=missing),
+                )
             elif self._unified_tab_bar.currentIndex() == i:
                 btn = QPushButton("✕", self._unified_tab_bar)
                 btn.setObjectName("tabAffordanceBtn")
                 btn.setCursor(Qt.CursorShape.PointingHandCursor)
                 btn.setFixedSize(12, 12)
                 btn.clicked.connect(lambda _=False, _k=key: self._on_unified_tab_close_by_key(_k))
-                self._unified_tab_bar.setTabButton(i, QTabBar.ButtonPosition.RightSide, _wrap_affordance(btn, True))
+                self._unified_tab_bar.setTabButton(
+                    i,
+                    QTabBar.ButtonPosition.RightSide,
+                    _wrap_affordance(btn, True, path_text=path_text, missing=missing),
+                )
+            elif missing:
+                btn = QPushButton("✕", self._unified_tab_bar)
+                btn.setObjectName("tabAffordanceBtn")
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.setFixedSize(12, 12)
+                btn.clicked.connect(lambda _=False, _k=key: self._on_unified_tab_close_by_key(_k))
+                self._unified_tab_bar.setTabButton(
+                    i,
+                    QTabBar.ButtonPosition.RightSide,
+                    _wrap_affordance(btn, True, path_text=path_text, missing=True),
+                )
             else:
                 spacer = QLabel("●", self._unified_tab_bar)
                 spacer.setObjectName("tabAffordanceSpacer")
                 spacer.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 spacer.setFixedSize(12, 12)
-                self._unified_tab_bar.setTabButton(i, QTabBar.ButtonPosition.RightSide, _wrap_affordance(spacer, False))
+                self._unified_tab_bar.setTabButton(
+                    i,
+                    QTabBar.ButtonPosition.RightSide,
+                    _wrap_affordance(spacer, False, path_text=path_text),
+                )
+
+    def _duplicate_tab_names(self) -> set[str]:
+        counts: dict[str, int] = {}
+        for panel in self._panels:
+            for state in panel._tabs.values():
+                counts[state.path.name] = counts.get(state.path.name, 0) + 1
+        return {name for name, count in counts.items() if count > 1}
+
+    def _duplicate_path_text(self, state: TabState | None) -> str:
+        if state is None:
+            return ""
+        try:
+            rel = state.path.relative_to(self.workspace)
+        except ValueError:
+            rel = state.path
+        parent = rel.parent
+        if str(parent) in ("", "."):
+            return ""
+        return str(parent)
 
     def eventFilter(self, obj, event):  # noqa: N802
         return super().eventFilter(obj, event)

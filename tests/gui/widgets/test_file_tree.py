@@ -14,6 +14,9 @@ verifying the API and methods exist and are callable, rather than full integrati
 from pathlib import Path
 
 import pytest
+from PyQt6.QtCore import QEvent, QPointF, Qt
+from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtWidgets import QApplication
 from PyQt6.QtWidgets import QAbstractItemDelegate, QTreeWidgetItem
 
 from autoreport.gui.widgets.file_tree import FileTreeWidget, FIXED_DIRECTORIES
@@ -62,6 +65,29 @@ def test_file_tree_has_drag_drop_handlers() -> None:
     assert hasattr(FileTreeWidget, "dragEnterEvent")
     assert hasattr(FileTreeWidget, "dragMoveEvent")
     assert hasattr(FileTreeWidget, "dropEvent")
+
+
+def test_blank_click_selects_project_root(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    selected = []
+    widget.directory_selected.connect(selected.append)
+    QApplication.sendEvent(
+        widget.tree.viewport(),
+        QMouseEvent(
+            QEvent.Type.MouseButtonPress,
+            QPointF(10, widget.tree.viewport().height() + 20),
+            QPointF(widget.tree.viewport().mapToGlobal(widget.tree.viewport().rect().bottomLeft())),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        ),
+    )
+
+    assert widget.tree.currentItem() is None
+    assert widget._get_selected_dir() == "."
+    assert selected[-1] == "."
 
 
 def test_file_tree_enables_extended_selection() -> None:

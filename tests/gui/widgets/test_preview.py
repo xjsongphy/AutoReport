@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import QEvent, QPointF, Qt
 from PyQt6.QtGui import QMouseEvent
-from PyQt6.QtWidgets import QApplication, QTabBar, QPushButton
+from PyQt6.QtWidgets import QApplication, QLabel, QTabBar, QPushButton
 from PyQt6.QtWidgets import QMessageBox
 
 from autoreport.gui.theme import get_theme_colors
@@ -192,3 +192,65 @@ def test_dirty_unified_tab_affordance_only_turns_close_on_button_hover(qtbot, tm
 
     QApplication.sendEvent(button, QEvent(QEvent.Type.Leave))
     assert button.text() == "●"
+
+
+def test_open_tab_updates_when_file_path_changes(qtbot, tmp_path: Path) -> None:
+    old_file = tmp_path / "old.txt"
+    new_file = tmp_path / "renamed.txt"
+    old_file.write_text("content", encoding="utf-8")
+
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.load_file(old_file)
+    old_file.rename(new_file)
+
+    widget.update_open_path(old_file, new_file)
+
+    assert widget._unified_tab_bar.tabData(0) == str(new_file.resolve())
+    assert widget._unified_tab_bar.tabText(0) == "renamed.txt"
+    assert widget.current_file == new_file.resolve()
+
+
+def test_open_tabs_are_persisted_and_restored_with_missing_badge(qtbot, tmp_path: Path) -> None:
+    existing = tmp_path / "existing.txt"
+    missing = tmp_path / "missing.txt"
+    existing.write_text("content", encoding="utf-8")
+
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.load_file(existing)
+    widget.load_file(missing)
+    widget.save_open_tabs()
+
+    restored = PreviewWidget(tmp_path)
+    qtbot.addWidget(restored)
+    restored.restore_open_tabs()
+
+    assert restored._unified_tab_bar.count() == 2
+    assert restored._unified_tab_bar.tabText(1) == "missing.txt"
+    host = restored._unified_tab_bar.tabButton(1, QTabBar.ButtonPosition.RightSide)
+    assert host.findChild(QPushButton) is not None
+    assert any(label.text() == "D" for label in host.findChildren(QLabel))
+
+
+def test_duplicate_tab_names_show_relative_parent_path(qtbot, tmp_path: Path) -> None:
+    first = tmp_path / "first" / "note.txt"
+    second = tmp_path / "second" / "note.txt"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_text("first", encoding="utf-8")
+    second.write_text("second", encoding="utf-8")
+
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.load_file(first)
+    widget.load_file(second)
+
+    hosts = [
+        widget._unified_tab_bar.tabButton(i, QTabBar.ButtonPosition.RightSide)
+        for i in range(widget._unified_tab_bar.count())
+    ]
+    labels = [label.text() for host in hosts for label in host.findChildren(QLabel)]
+
+    assert "first" in labels
+    assert "second" in labels

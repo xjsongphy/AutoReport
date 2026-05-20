@@ -698,6 +698,7 @@ class MainWindow(QMainWindow):
         # Don't override minimum width - let FileTreeWidget handle it
         self.file_tree.directory_selected.connect(self._on_directory_selected)
         self.file_tree.file_selected.connect(self._on_file_selected)
+        self.file_tree.path_changed.connect(self._on_file_tree_path_changed)
         main_splitter.addWidget(self.file_tree)
 
         # Center: Preview
@@ -753,6 +754,7 @@ class MainWindow(QMainWindow):
         self.sub_agent_panel.agent_type_changed.connect(self._on_sub_agent_type_changed)
 
         self.preview.selection_changed.connect(self._on_preview_selection_changed)
+        self.preview.restore_open_tabs()
         self.main_agent_panel.set_agent_type("main")
         self.sub_agent_panel.set_agent_type("data_analysis")
         self.main_agent_panel.set_debug_mode("main" in self._debug_agents)
@@ -788,6 +790,9 @@ class MainWindow(QMainWindow):
         self.main_agent_panel.set_opened_file(rel_path)
         self.sub_agent_panel.set_opened_file(rel_path)
         logger.debug("File selected: {}", file_path)
+
+    def _on_file_tree_path_changed(self, old_path: Path, new_path: Path) -> None:
+        self.preview.update_open_path(old_path, new_path)
 
     def _relative_path(self, file_path: Path) -> str:
         try:
@@ -1290,6 +1295,11 @@ class MainWindow(QMainWindow):
     def _subscribe_to_debug_messages(self) -> None:
         self.main_agent_panel.subscribe_to_debug_messages(self.backend.bus)
         self.sub_agent_panel.subscribe_to_debug_messages(self.backend.bus)
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        if hasattr(self, "preview"):
+            self.preview.save_open_tabs()
+        super().closeEvent(event)
 
     def resizeEvent(self, event):
         """Handle window resize to maintain proportional layout."""

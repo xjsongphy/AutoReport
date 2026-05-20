@@ -266,6 +266,7 @@ class FileTreeWidget(QWidget):
 
     directory_selected = pyqtSignal(str)
     file_selected = pyqtSignal(Path)
+    path_changed = pyqtSignal(Path, Path)
 
     def __init__(self, workspace: Path):
         super().__init__()
@@ -283,6 +284,7 @@ class FileTreeWidget(QWidget):
         self._pending_hover_text = ""
         self._pending_hover_pos = QPoint()
         self._hovered_item: QTreeWidgetItem | None = None
+        self._root_selected = False
         self._setup_ui()
         self._init_directories()
         self._setup_file_watcher()
@@ -660,6 +662,7 @@ class FileTreeWidget(QWidget):
                 child.setExpanded(True)
 
     def _on_item_clicked(self, item: QTreeWidgetItem, column: int) -> None:
+        self._root_selected = False
         self._ensure_directory_indicators()
         dir_name = item.data(0, Qt.ItemDataRole.UserRole)
         logger.debug("FileTree: clicked item, dir_name={}", dir_name)
@@ -754,6 +757,12 @@ class FileTreeWidget(QWidget):
 
     def eventFilter(self, obj, event):  # noqa: N802
         if obj is self.tree.viewport():
+            if event.type() == event.Type.MouseButtonPress:
+                item = self.tree.itemAt(event.pos())
+                if item is None:
+                    self._root_selected = True
+                    self.tree.setCurrentItem(None)
+                    self.directory_selected.emit(".")
             if event.type() == event.Type.MouseMove:
                 item = self.tree.itemAt(event.pos())
                 if item is None:
@@ -822,6 +831,7 @@ class FileTreeWidget(QWidget):
             try:
                 old_path.rename(new_path)
                 item.setData(0, Qt.ItemDataRole.UserRole + 1, str(new_path))
+                self.path_changed.emit(old_path, new_path)
                 logger.info("Renamed file: {} -> {}", old_path, new_path)
             except Exception as e:
                 QMessageBox.warning(self, "重命名失败", f"无法重命名:\n{e}")
@@ -844,6 +854,7 @@ class FileTreeWidget(QWidget):
                 else:
                     new_dir_name = new_name
                 item.setData(0, Qt.ItemDataRole.UserRole, new_dir_name)
+                self.path_changed.emit(old_path, new_path)
                 logger.info("Renamed directory: {} -> {}", old_path, new_path)
             except Exception as e:
                 QMessageBox.warning(self, "重命名失败", f"无法重命名:\n{e}")
@@ -1005,6 +1016,8 @@ class FileTreeWidget(QWidget):
         """Get the selected directory path, falling back to 'references'."""
         item = self.tree.currentItem()
         if not item:
+            if self._root_selected:
+                return "."
             return "references"
 
         file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
@@ -1071,6 +1084,7 @@ class FileTreeWidget(QWidget):
                 return  # Invalid target
 
         target_dir = self.workspace / target_dir_name
+        moved_paths: list[Path] = []
 
         # Process each dragged item
         for dragged_item in dragged_items:
@@ -1111,6 +1125,8 @@ class FileTreeWidget(QWidget):
                         counter += 1
 
                 shutil.move(str(source_path), str(target_path))
+                self.path_changed.emit(source_path, target_path)
+                moved_paths.append(target_path)
                 logger.info("Moved {} to {}", source_path, target_path)
             except Exception as e:
                 logger.warning("Failed to move {} to {}: {}", source_path, target_dir, e)
@@ -1121,6 +1137,20 @@ class FileTreeWidget(QWidget):
                 )
 
         self.refresh()
+        if moved_paths:
+            self._select_moved_path(moved_paths[0])
+
+    def _select_moved_path(self, path: Path) -> None:
+        rel_dir = str(path.relative_to(self.workspace).parent)
+        if rel_dir == ".":
+            rel_dir = ""
+        selected_file = str(path) if path.is_file() else None
+        selected_dir = str(path.relative_to(self.workspace)) if path.is_dir() else rel_dir
+        self._restore_selection(selected_file, selected_dir)
+        if path.is_file():
+            self.file_selected.emit(path)
+        else:
+            self.directory_selected.emit(selected_dir or ".")
 
     def _resolve_target_dir(self, target_item) -> str:
         if target_item is None:
