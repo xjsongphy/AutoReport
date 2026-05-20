@@ -18,3 +18,5 @@ docs
 # User config (contains API keys)
 autoreport.config.yaml
 .DS_Store
+.tmp_pytest/
+*.bak
