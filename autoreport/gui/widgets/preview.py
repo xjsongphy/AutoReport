@@ -722,12 +722,12 @@ class PreviewWidget(QWidget):
                 width: 2px;
             }}
             QTabBar#previewTabBar {{
-                background-color: {c["surface"]};
+                background-color: {c["panel_bg"]};
                 border: none;
                 min-height: 35px;
             }}
             QTabBar#previewTabBar::tab {{
-                background-color: {c["surface"]};
+                background-color: {c["panel_bg"]};
                 color: {c["tab_inactive_fg"]};
                 border: none;
                 border-right: 1px solid {c["border"]};
@@ -775,7 +775,7 @@ class PreviewWidget(QWidget):
                 font-size: 11px;
             }}
             QPushButton#tabAffordanceBtn:hover {{
-                background-color: rgba(128, 128, 128, 0.72);
+                background-color: {c["muted"]};
                 color: #ffffff;
             }}
             QLabel#tabAffordanceSpacer {{
@@ -801,6 +801,7 @@ class PreviewWidget(QWidget):
             self.show()
         self._current_file = file_path
         self._panels[-1].open_file(file_path, preview=False)
+        self._connect_selection_tracking()
         self._sync_tabs_from_panels()
 
         # Emit file changed signal
@@ -880,6 +881,7 @@ class PreviewWidget(QWidget):
 
         # Emit file changed signal
         self.file_changed.emit(file_path)
+        self._connect_selection_tracking()
         self._refresh_unified_tab_affordances()
         self._update_file_actions()
 
@@ -1100,13 +1102,27 @@ class PreviewWidget(QWidget):
 
         if isinstance(viewer, QsciScintilla):
             selected_text = viewer.selectedText()
+            rel_path = str(self._current_file.relative_to(self.workspace))
             if not selected_text:
+                self.selection_changed.emit(rel_path, "", 0, 0)
                 return
             line_from, _, line_to, _ = viewer.getSelection()
             start_line = line_from + 1
             end_line = line_to + 1
-            rel_path = str(self._current_file.relative_to(self.workspace))
             self.selection_changed.emit(rel_path, selected_text, start_line, end_line)
+
+    def _connect_selection_tracking(self) -> None:
+        if not self._panels:
+            return
+        viewer = self._panels[-1].get_active_viewer()
+        if not viewer or viewer.property("selection_tracking_connected"):
+            return
+
+        from PyQt6.Qsci import QsciScintilla
+
+        if isinstance(viewer, QsciScintilla):
+            viewer.selectionChanged.connect(self._on_selection_changed)
+            viewer.setProperty("selection_tracking_connected", True)
 
     # ------------------------------------------------------------------ #
     #  Public API (preserved)

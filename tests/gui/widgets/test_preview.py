@@ -1,5 +1,8 @@
 from pathlib import Path
 
+from PyQt6.QtCore import QEvent, QPointF, Qt
+from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtWidgets import QApplication, QTabBar, QPushButton
 from PyQt6.QtWidgets import QMessageBox
 
 from autoreport.gui.theme import get_theme_colors
@@ -127,3 +130,65 @@ def test_preview_clicked_without_pdf_shows_information(qtbot, tmp_path: Path, mo
     widget._on_preview_clicked()
 
     assert called["count"] == 1
+
+
+def test_editor_selection_emits_selected_line_context(qtbot, tmp_path: Path) -> None:
+    text_file = tmp_path / "note.txt"
+    text_file.write_text("first\nsecond\nthird", encoding="utf-8")
+
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.load_file(text_file)
+
+    viewer = widget._panels[0].get_active_viewer()
+    with qtbot.waitSignal(widget.selection_changed, timeout=1000) as blocker:
+        viewer.setSelection(0, 0, 1, 6)
+
+    assert blocker.args[0] == "note.txt"
+    assert blocker.args[2] == 1
+    assert blocker.args[3] == 2
+
+
+def test_dirty_unified_tab_affordance_only_turns_close_on_button_hover(qtbot, tmp_path: Path) -> None:
+    text_file = tmp_path / "note.txt"
+    text_file.write_text("old", encoding="utf-8")
+
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.load_file(text_file)
+
+    key = str(text_file.resolve())
+    state = widget._panels[0]._tabs[key]
+    state.viewer.setText("changed")
+    qtbot.wait(10)
+    widget._sync_tabs_from_panels()
+
+    host = widget._unified_tab_bar.tabButton(0, QTabBar.ButtonPosition.RightSide)
+    button = host.findChild(QPushButton)
+
+    assert button is not None
+    assert button.text() == "●"
+    assert button.cursor().shape() == Qt.CursorShape.PointingHandCursor
+
+    tab_center = widget._unified_tab_bar.tabRect(0).center()
+    QApplication.sendEvent(
+        widget._unified_tab_bar,
+        QMouseEvent(
+            QEvent.Type.MouseMove,
+            QPointF(tab_center),
+            QPointF(widget._unified_tab_bar.mapToGlobal(tab_center)),
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+        ),
+    )
+    host = widget._unified_tab_bar.tabButton(0, QTabBar.ButtonPosition.RightSide)
+    button = host.findChild(QPushButton)
+    assert button is not None
+    assert button.text() == "●"
+
+    QApplication.sendEvent(button, QEvent(QEvent.Type.Enter))
+    assert button.text() == "✕"
+
+    QApplication.sendEvent(button, QEvent(QEvent.Type.Leave))
+    assert button.text() == "●"
