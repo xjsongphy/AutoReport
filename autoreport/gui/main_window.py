@@ -239,10 +239,10 @@ class MainWindow(QMainWindow):
             }}
             /* ---- Input Container (with working border space) ---- */
             #inputContainer {{
-                background-color: transparent;
+                background-color: {c["panel_bg"]};
                 border: 1px solid {c["border"]};
                 border-radius: {px(10)};
-                margin: {px(8)} {px(10)} {px(14)} {px(10)};
+                margin: {px(8)} {px(10)} 0 {px(10)};
             }}
             #composerInputTop {{
                 background-color: {c["input_bg"]};
@@ -264,6 +264,9 @@ class MainWindow(QMainWindow):
                 background-color: {c["input_bg"]};
                 border-bottom-left-radius: {px(8)};
                 border-bottom-right-radius: {px(8)};
+            }}
+            #composerBottomGap {{
+                background-color: {c["panel_bg"]};
             }}
             #secondaryBtn {{
                 background-color: transparent;
@@ -315,24 +318,24 @@ class MainWindow(QMainWindow):
                 background-color: {c["hover"]};
             }}
 
-            /* ---- Context Bar ---- */
-            #contextBar {{
-                background-color: transparent;
-                border-top: none;
-            }}
-            #contextLabel {{
+            #contextSeparator {{
                 font-size: {px(11)};
                 color: {c["muted"]};
-                font-family: "Cascadia Code", "Consolas", "Courier New", monospace;
+                padding: 0 {px(2)};
             }}
-            #contextEye {{
+            #contextAttachmentBtn {{
                 background-color: transparent;
                 border: none;
                 border-radius: {px(4)};
-                font-size: {px(12)};
+                color: {c["muted"]};
+                font-size: {px(11)};
+                padding: 0 {px(6)};
+                min-height: {px(22)};
+                max-height: {px(22)};
             }}
-            #contextEye:hover {{
+            #contextAttachmentBtn:hover {{
                 background-color: {c["hover"]};
+                color: {c["fg"]};
             }}
 
             /* ---- User Message — right-aligned bubble ---- */
@@ -767,6 +770,10 @@ class MainWindow(QMainWindow):
         self._file_just_selected = False
 
     def _on_preview_selection_changed(self, file_path: str, selected_text: str, start_line: int, end_line: int) -> None:
+        if not selected_text:
+            self.main_agent_panel.set_opened_file(file_path)
+            self.sub_agent_panel.set_opened_file(file_path)
+            return
         self.main_agent_panel.set_preview_context(file_path, selected_text, start_line, end_line)
         self.sub_agent_panel.set_preview_context(file_path, selected_text, start_line, end_line)
 

@@ -90,6 +90,28 @@ def test_set_queue_preview_empty_hides(agent_panel):
     assert not agent_panel._queue_preview.isVisible()
 
 
+def test_file_context_lives_in_dock_bar_and_toggles(agent_panel):
+    agent_panel.set_opened_file("sections/intro.tex")
+
+    assert not agent_panel._context_separator.isHidden()
+    assert not agent_panel._context_attachment_btn.isHidden()
+    assert agent_panel._context_attachment_btn.text() == "intro.tex"
+    assert agent_panel._context_enabled is True
+
+    file_icon_key = agent_panel._context_attachment_btn.icon().cacheKey()
+    agent_panel._context_attachment_btn.click()
+
+    assert agent_panel._context_enabled is False
+    assert agent_panel._context_attachment_btn.icon().cacheKey() != file_icon_key
+
+
+def test_selection_context_label_uses_line_count(agent_panel):
+    agent_panel.set_preview_context("sections/intro.tex", "a\nb", 3, 4)
+
+    assert agent_panel._context_attachment_btn.text() == "2 lines selected"
+    assert agent_panel._context_attachment_btn.toolTip() == "sections/intro.tex"
+
+
 def test_set_agent_type_uses_badged_title(agent_panel):
     agent_panel.set_agent_type("theory")
     # Title shows agent name, icon is shown separately in _icon_label

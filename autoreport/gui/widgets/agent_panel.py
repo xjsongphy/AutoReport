@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import QPoint, Qt, pyqtSignal
+from PyQt6.QtCore import QPoint, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -12,11 +12,13 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QSizePolicy,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
 
 from autoreport.core.file_search import FileSearchManager
+from autoreport.gui.scale import scaled
 from autoreport.gui.icons import get_context_eye_icons
 from autoreport.gui.widgets.chat_input import ChatInput
 from autoreport.gui.widgets.conversation_history import ConversationHistoryDropdown
@@ -61,6 +63,7 @@ class AgentPanel(QWidget):
         self._current_tool_group = None
         self._pending_tool_groups: list = []
         self._agent_selector: NoWheelComboBox | None = None
+        self._composer_horizontal_margin = scaled(10)
 
         self._file_search_manager = FileSearchManager(self._workspace)
         self._file_search_popup: FileSearchPopup | None = None
@@ -182,35 +185,6 @@ class AgentPanel(QWidget):
         self._status_indicator = StatusIndicator()
         layout.addWidget(self._status_indicator)
 
-        # ---- Context chip bar ----
-        self._context_bar = QWidget(self)
-        self._context_bar.setObjectName("contextBar")
-        self._context_bar.setVisible(False)
-        cl = QHBoxLayout(self._context_bar)
-        cl.setContentsMargins(16, 4, 12, 4)
-        cl.setSpacing(6)
-
-        self._context_label = QLabel()
-        self._context_label.setObjectName("contextLabel")
-        self._context_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self._context_label.setWordWrap(True)
-        cl.addWidget(self._context_label, 1)
-
-        self._context_eye = IconActionButton(
-            text="",
-            tooltip="Include context (toggle)",
-            object_name="contextEye",
-            button_size=(24, 24),
-            icon_size=(14, 14),
-            on_click=self._on_eye_toggled,
-        )
-        self._context_eye.setIcon(self._context_eye_icons["eye"])
-        self._context_eye.setCheckable(True)
-        self._context_eye.setChecked(True)
-        cl.addWidget(self._context_eye)
-
-        layout.addWidget(self._context_bar)
-
         # ---- Composer (floating input + dock bar) ----
         self._input_container = QWidget(self)
         self._input_container.setObjectName("inputContainer")
@@ -221,8 +195,6 @@ class AgentPanel(QWidget):
 
         input_top = QWidget(self._input_container)
         input_top.setObjectName("composerInputTop")
-        input_top.setMinimumHeight(86)
-        input_top.setMaximumHeight(86)
         icl = QHBoxLayout(input_top)
         icl.setContentsMargins(12, 10, 12, 10)
         icl.setSpacing(0)
@@ -276,6 +248,21 @@ class AgentPanel(QWidget):
         )
         sl.addWidget(at_btn)
 
+        self._context_separator = QLabel("|")
+        self._context_separator.setObjectName("contextSeparator")
+        self._context_separator.setVisible(False)
+        sl.addWidget(self._context_separator)
+
+        self._context_file_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon)
+        self._context_attachment_btn = QPushButton("")
+        self._context_attachment_btn.setObjectName("contextAttachmentBtn")
+        self._context_attachment_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._context_attachment_btn.setCheckable(True)
+        self._context_attachment_btn.setChecked(True)
+        self._context_attachment_btn.setVisible(False)
+        self._context_attachment_btn.clicked.connect(self._on_context_attachment_toggled)
+        sl.addWidget(self._context_attachment_btn)
+
         sl.addStretch()
 
         self._secondary_status = QLabel("")
@@ -285,6 +272,11 @@ class AgentPanel(QWidget):
 
         composer_layout.addWidget(secondary_bar)
         layout.addWidget(self._input_container, 0, Qt.AlignmentFlag.AlignHCenter)
+        self._composer_bottom_gap = QWidget(self)
+        self._composer_bottom_gap.setObjectName("composerBottomGap")
+        self._composer_bottom_gap.setFixedHeight(0)
+        layout.addWidget(self._composer_bottom_gap)
+        self._layout = layout
 
     def _setup_file_search(self) -> None:
         self._file_search_popup = FileSearchPopup(self)
@@ -326,6 +318,20 @@ class AgentPanel(QWidget):
         gap_count = max(0, len(widgets) - 1)
         min_width = margin_total + content_width + (gap_count * spacing) + 24
         self.setMinimumWidth(min_width)
+        self._sync_composer_gap()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._sync_composer_gap()
+        QTimer.singleShot(0, self._sync_composer_gap)
+
+    def _sync_composer_gap(self) -> None:
+        """Keep bottom gap height equal to horizontal gutter width around composer."""
+        if not hasattr(self, "_composer_bottom_gap"):
+            return
+        side_gap = max(0, self._input_container.x() + self._composer_horizontal_margin)
+        if self._composer_bottom_gap.height() != side_gap:
+            self._composer_bottom_gap.setFixedHeight(side_gap)
 
     # ---- File reference handling ----
 
@@ -499,30 +505,35 @@ class AgentPanel(QWidget):
         self._opened_file = file_path
         self._preview_context = None
         self._context_enabled = True
-        self._context_eye.setChecked(True)
-        self._context_eye.setIcon(self._context_eye_icons["eye"])
-        self._context_label.setText(Path(file_path).name)
-        self._context_bar.setVisible(True)
+        self._set_context_attachment(Path(file_path).name, file_path)
 
     def set_preview_context(self, file_path: str, selected_text: str, start_line: int, end_line: int) -> None:
         self._preview_context = (file_path, selected_text, start_line, end_line)
         self._opened_file = None
         self._context_enabled = True
-        self._context_eye.setChecked(True)
-        self._context_eye.setIcon(self._context_eye_icons["eye"])
         lines = end_line - start_line + 1
-        self._context_label.setText(f"{lines} line{'s' if lines > 1 else ''} — {Path(file_path).name}")
-        self._context_bar.setVisible(True)
+        label = f"{lines} line{'s' if lines > 1 else ''} selected"
+        self._set_context_attachment(label, file_path)
 
     def clear_file_context(self) -> None:
         """Clear attached file/selection context so next message won't include it."""
         self._opened_file = None
         self._preview_context = None
-        self._context_bar.setVisible(False)
+        self._context_separator.setVisible(False)
+        self._context_attachment_btn.setVisible(False)
 
-    def _on_eye_toggled(self) -> None:
-        self._context_enabled = self._context_eye.isChecked()
-        self._context_eye.setIcon(self._context_eye_icons["eye"] if self._context_enabled else self._context_eye_icons["eye_off"])
+    def _set_context_attachment(self, label: str, tooltip_path: str) -> None:
+        self._context_attachment_btn.setChecked(True)
+        self._context_attachment_btn.setText(label)
+        self._context_attachment_btn.setToolTip(tooltip_path)
+        self._context_attachment_btn.setIcon(self._context_file_icon)
+        self._context_separator.setVisible(True)
+        self._context_attachment_btn.setVisible(True)
+
+    def _on_context_attachment_toggled(self) -> None:
+        self._context_enabled = self._context_attachment_btn.isChecked()
+        icon = self._context_file_icon if self._context_enabled else self._context_eye_icons["eye_off"]
+        self._context_attachment_btn.setIcon(icon)
 
     def set_workspace(self, workspace: Path) -> None:
         self._workspace = Path(workspace).resolve()
@@ -848,7 +859,8 @@ class AgentPanel(QWidget):
 
         self._preview_context = None
         self._opened_file = None
-        self._context_bar.setVisible(False)
+        self._context_separator.setVisible(False)
+        self._context_attachment_btn.setVisible(False)
 
     def _on_send_btn_clicked(self) -> None:
         """Handle send button click — send or interrupt based on state."""
