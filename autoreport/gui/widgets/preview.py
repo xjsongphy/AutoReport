@@ -1,4 +1,4 @@
-"""Preview widget with a unified editor for all file types."""
+﻿"""Preview widget with a unified editor for all file types."""
 
 from dataclasses import dataclass, field
 import json
@@ -8,7 +8,7 @@ import subprocess
 
 import pandas as pd
 from loguru import logger
-from PyQt6.QtCore import QSignalBlocker, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QSignalBlocker, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtPdf import QPdfDocument
 from PyQt6.QtWidgets import (
@@ -16,16 +16,17 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMenu,
+    QMessageBox,
+    QFrame,
+    QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSplitter,
     QStackedWidget,
     QTabBar,
     QTableView,
     QVBoxLayout,
     QWidget,
-    QPushButton,
-    QMessageBox,
-    QHBoxLayout,
 )
 
 from ..scale import scaled, scaled_size
@@ -35,25 +36,26 @@ from .ui_utils import IconActionButton, render_svg_icon
 
 
 class _TabAffordanceButton(QPushButton):
-    """Single dirty-dot/close affordance to avoid cursor flicker from widget swaps."""
+    """Dirty-dot affordance shown when a tab has unsaved changes."""
 
     def __init__(self, parent: QWidget | None = None):
-        super().__init__("●", parent)
+        super().__init__("•", parent)
+        self.setObjectName("tabAffordanceBtn")
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.setFixedSize(12, 12)
+        self.setEnabled(False)
+
+
+class _TabCloseButton(QPushButton):
+    """Always-visible close button for unified tabs."""
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__("✕", parent)
         self.setObjectName("tabAffordanceBtn")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedSize(12, 12)
-
-    def enterEvent(self, event) -> None:  # noqa: N802
-        self.setText("✕")
-        super().enterEvent(event)
-
-    def leaveEvent(self, event) -> None:  # noqa: N802
-        self.setText("●")
-        super().leaveEvent(event)
-
-
 def _create_missing_viewer(path: Path) -> tuple[QLabel, str]:
-    label = QLabel(f"文件不存在或已移动:\n{path}")
+    label = QLabel(f"文件不存在或已移动\n{path}")
     label.setObjectName("editorPlaceholder")
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
     return label, "missing"
@@ -63,7 +65,7 @@ def _create_missing_viewer(path: Path) -> tuple[QLabel, str]:
 #  File-type routing
 # ================================================================== #
 
-# suffix → (lexer_class_name, editable)
+# suffix 鈫?(lexer_class_name, editable)
 _SUFFIX_MAP: dict[str, tuple[str, bool]] = {
     ".py": ("QsciLexerPython", True),
     ".tex": ("QsciLexerTeX", True),
@@ -95,7 +97,7 @@ def _create_scintilla(path: Path, lexer_name: str) -> tuple:
         object_name="fileEditor",
         line_numbers=True,
         read_only=False,
-        content_bg=c["editor_margin"],
+        content_bg=c["editor_bg"],
     )
 
     if lexer_name:
@@ -104,7 +106,7 @@ def _create_scintilla(path: Path, lexer_name: str) -> tuple:
         if lexer_cls:
             lexer = lexer_cls(sci)
             sci.setLexer(lexer)
-            configure_lexer_colors(lexer, paper_color=c["editor_margin"])
+            configure_lexer_colors(lexer, paper_color=c["editor_bg"])
 
     try:
         content = path.read_text(encoding="utf-8", errors="replace")
@@ -160,7 +162,7 @@ def _create_image_viewer(path: Path) -> tuple:
         label.setText("无法加载图片")
     else:
         label.setPixmap(pixmap)
-        label._source_pixmap = pixmap  # noqa: SLT001 — store for resize scaling
+        label._source_pixmap = pixmap  # noqa: SLT001 鈥?store for resize scaling
 
     return label, "image"
 
@@ -293,7 +295,7 @@ def _tab_key(path: Path) -> str:
 
 
 # ================================================================== #
-#  EditorPanel — one panel with tabs + content
+#  EditorPanel 鈥?one panel with tabs + content
 # ================================================================== #
 
 
@@ -565,9 +567,9 @@ class EditorPanel(QWidget):
         menu = QMenu(self)
         menu.setObjectName("tabContextMenu")
 
-        close_act = menu.addAction("关闭")
-        close_others_act = menu.addAction("关闭其他")
-        close_all_act = menu.addAction("关闭所有")
+        close_act = menu.addAction("Close")
+        close_others_act = menu.addAction("Close Others")
+        close_all_act = menu.addAction("Close All")
 
         action = menu.exec(self._tab_bar.mapToGlobal(pos))
         if action == close_act:
@@ -582,12 +584,12 @@ class EditorPanel(QWidget):
         c = get_theme_colors()
         self._tab_bar.setStyleSheet(f"""
             QTabBar#editorTabBar {{
-                background-color: {c["surface"]};
+                background-color: {c["tab_inactive_bg"]};
                 border-bottom: 1px solid {c["border"]};
                 min-height: 35px;
             }}
             QTabBar#editorTabBar::tab {{
-                background-color: {c["surface"]};
+                background-color: {c["tab_inactive_bg"]};
                 color: {c["tab_inactive_fg"]};
                 border: none;
                 border-right: 1px solid {c["border"]};
@@ -622,7 +624,7 @@ class EditorPanel(QWidget):
 
 
 # ================================================================== #
-#  PreviewWidget — top-level, same external API
+#  PreviewWidget 鈥?top-level, same external API
 # ================================================================== #
 
 
@@ -639,6 +641,7 @@ class PreviewWidget(QWidget):
         self._active_action_kind: str = ""
         self._tab_state_path = self.workspace / ".autoreport" / "open_tabs.json"
         self._restoring_tabs = False
+        self._tab_area_hovered = False
 
         # Single editor panel
         self._panels: list[EditorPanel] = []
@@ -666,6 +669,8 @@ class PreviewWidget(QWidget):
         self._unified_tab_bar.setExpanding(False)
         self._unified_tab_bar.setMovable(True)
         self._unified_tab_bar.setTabsClosable(True)
+        self._unified_tab_bar.setUsesScrollButtons(False)
+        self._unified_tab_bar.setElideMode(Qt.TextElideMode.ElideNone)
         self._unified_tab_bar.setDocumentMode(True)
         self._unified_tab_bar.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._unified_tab_bar.currentChanged.connect(self._on_unified_tab_changed)
@@ -674,8 +679,21 @@ class PreviewWidget(QWidget):
         self._unified_tab_bar.customContextMenuRequested.connect(self._on_unified_tab_context_menu)
         self._unified_tab_bar.setTabsClosable(False)
         self._unified_tab_bar.setMouseTracking(True)
-        self._unified_tab_bar.installEventFilter(self)
-        hl.addWidget(self._unified_tab_bar, 1)
+        self._unified_tab_bar.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
+        self._tab_scroll = QScrollArea(self)
+        self._tab_scroll.setObjectName("previewTabScrollArea")
+        self._tab_scroll.setWidget(self._unified_tab_bar)
+        self._tab_scroll.setWidgetResizable(False)
+        self._tab_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._tab_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._tab_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._tab_scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._tab_scroll.viewport().setMouseTracking(True)
+        self._tab_scroll.installEventFilter(self)
+        self._tab_scroll.viewport().installEventFilter(self)
+
+        hl.addWidget(self._tab_scroll, 1)
         self._unified_tab_bar.setVisible(False)
         self._run_button = IconActionButton(
             text="",
@@ -736,7 +754,7 @@ class PreviewWidget(QWidget):
                 background-color: {c["bg"]};
             }}
             #previewHeader {{
-                background-color: {c["surface"]};
+                background-color: {c["tab_inactive_bg"]};
                 border-bottom: 1px solid {c["border"]};
                 padding: 0;
                 padding-right: 1px;
@@ -762,12 +780,12 @@ class PreviewWidget(QWidget):
                 width: 2px;
             }}
             QTabBar#previewTabBar {{
-                background-color: {c["panel_bg"]};
+                background-color: {c["tab_inactive_bg"]};
                 border: none;
                 min-height: 35px;
             }}
             QTabBar#previewTabBar::tab {{
-                background-color: {c["panel_bg"]};
+                background-color: {c["tab_inactive_bg"]};
                 color: {c["tab_inactive_fg"]};
                 border: none;
                 border-right: 1px solid {c["border"]};
@@ -794,6 +812,43 @@ class PreviewWidget(QWidget):
                 subcontrol-position: right;
                 margin-right: 0px;
             }}
+            QTabBar#previewTabBar QToolButton {{
+                width: 0px;
+                max-width: 0px;
+                border: none;
+                padding: 0;
+                margin: 0;
+            }}
+            QScrollArea#previewTabScrollArea {{
+                background: transparent;
+                border: none;
+            }}
+            QScrollArea#previewTabScrollArea > QWidget > QWidget {{
+                background: transparent;
+            }}
+            QScrollArea#previewTabScrollArea QScrollBar:horizontal {{
+                height: 6px;
+                background: transparent;
+            }}
+            QScrollArea#previewTabScrollArea QScrollBar::handle:horizontal {{
+                background-color: {c["scrollbar"]};
+                min-width: 24px;
+                border-radius: 0px;
+            }}
+            QScrollArea#previewTabScrollArea QScrollBar::handle:horizontal:hover {{
+                background-color: {c["scrollbar_hover"]};
+            }}
+            QScrollArea#previewTabScrollArea QScrollBar::add-line:horizontal,
+            QScrollArea#previewTabScrollArea QScrollBar::sub-line:horizontal {{
+                width: 0px;
+                margin: 0;
+                border: none;
+                background: transparent;
+            }}
+            QScrollArea#previewTabScrollArea QScrollBar::add-page:horizontal,
+            QScrollArea#previewTabScrollArea QScrollBar::sub-page:horizontal {{
+                background: transparent;
+            }}
             #explorerToolbarBtn {{
                 background-color: transparent;
                 border: none;
@@ -809,14 +864,14 @@ class PreviewWidget(QWidget):
                 background-color: transparent;
                 border: none;
                 border-radius: 3px;
-                color: #ffffff;
+                color: {c["tab_inactive_fg"]};
                 padding: 0;
                 margin: 0;
                 font-size: 11px;
             }}
             QPushButton#tabAffordanceBtn:hover {{
-                background-color: {c["muted"]};
-                color: #ffffff;
+                background-color: {c["hover"]};
+                color: {c["fg"]};
             }}
             QLabel#tabMissingBadge {{
                 color: {c["status_error"]};
@@ -831,7 +886,7 @@ class PreviewWidget(QWidget):
                 background: transparent;
                 border: none;
                 font-size: 11px;
-                padding: 0 4px 0 0;
+                padding: 0 2px 0 0;
             }}
             QLabel#tabAffordanceSpacer {{
                 color: transparent;
@@ -905,6 +960,7 @@ class PreviewWidget(QWidget):
                 self._unified_tab_bar.setCurrentIndex(current_index)
         self._unified_tab_bar.setVisible(self._unified_tab_bar.count() > 0)
         self._refresh_unified_tab_affordances()
+        self._sync_unified_tab_bar_width()
         self._update_file_actions()
         if not self._restoring_tabs:
             self.save_open_tabs()
@@ -961,17 +1017,25 @@ class PreviewWidget(QWidget):
                 panel._tabs[key].pinned = True
                 break
 
-    def _on_unified_tab_close(self, index: int) -> None:
+    def _on_unified_tab_close(self, index: int) -> bool:
         """Handle unified tab close."""
         file_path_str = self._unified_tab_bar.tabData(index)
         if not file_path_str:
-            return
+            return False
 
         file_path = Path(file_path_str)
+        key = _tab_key(file_path)
+        state = self._find_tab_state(key)
+        if state and state.modified:
+            choice = self._confirm_close_modified_tab(state.path)
+            if choice == QMessageBox.StandardButton.Cancel:
+                return False
+            if choice == QMessageBox.StandardButton.Save:
+                if not self._save_tab_by_key(key):
+                    return False
 
         # Close tab in panel
         for panel in self._panels:
-            key = _tab_key(file_path)
             if key in panel._tabs:
                 panel._close_tab(key)
                 break
@@ -983,12 +1047,50 @@ class PreviewWidget(QWidget):
         self.file_changed.emit(active_file if active_file else Path())
         self._refresh_unified_tab_affordances()
         self._update_file_actions()
+        return True
 
     def _on_unified_tab_close_by_key(self, key: str) -> None:
         for i in range(self._unified_tab_bar.count()):
             if self._unified_tab_bar.tabData(i) == key:
                 self._on_unified_tab_close(i)
                 return
+
+    def _confirm_close_modified_tab(self, path: Path) -> QMessageBox.StandardButton:
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Warning)
+        msg.setWindowTitle("保存更改")
+        msg.setText(f"是否保存对 {path.name} 的更改？")
+        msg.setInformativeText("你的更改尚未保存。")
+        msg.setStandardButtons(
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel
+        )
+        msg.setDefaultButton(QMessageBox.StandardButton.Save)
+        return QMessageBox.StandardButton(msg.exec())
+
+    def _save_tab_by_key(self, key: str) -> bool:
+        state = self._find_tab_state(key)
+        if state is None:
+            return True
+        viewer = state.viewer
+        if not hasattr(viewer, "text"):
+            return True
+        try:
+            content = viewer.text()
+            state.path.write_text(content, encoding="utf-8")
+        except Exception as exc:
+            logger.error("Failed to save file {}: {}", state.path, exc)
+            QMessageBox.warning(self, "保存失败", f"无法保存文件:\n{state.path}\n\n{exc}")
+            return False
+        state.saved_text = content
+        state.modified = False
+        for panel in self._panels:
+            if key in panel._tabs:
+                panel._set_tab_modified(key, False)
+                break
+        self._sync_tabs_from_panels()
+        return True
 
     def update_open_path(self, old_path: Path, new_path: Path) -> None:
         for panel in self._panels:
@@ -1070,9 +1172,9 @@ class PreviewWidget(QWidget):
         menu = QMenu(self)
         menu.setObjectName("tabContextMenu")
 
-        close_act = menu.addAction("关闭")
-        close_others_act = menu.addAction("关闭其他")
-        close_all_act = menu.addAction("关闭所有")
+        close_act = menu.addAction("Close")
+        close_others_act = menu.addAction("Close Others")
+        close_all_act = menu.addAction("Close All")
 
         action = menu.exec(self._unified_tab_bar.mapToGlobal(pos))
 
@@ -1082,11 +1184,13 @@ class PreviewWidget(QWidget):
             # Close all except this one
             for i in range(self._unified_tab_bar.count() - 1, -1, -1):
                 if i != index:
-                    self._on_unified_tab_close(i)
+                    if not self._on_unified_tab_close(i):
+                        break
         elif action == close_all_act:
             # Close all tabs
             for i in range(self._unified_tab_bar.count() - 1, -1, -1):
-                self._on_unified_tab_close(i)
+                if not self._on_unified_tab_close(i):
+                    break
 
     def _find_tab_state(self, key: str) -> TabState | None:
         for panel in self._panels:
@@ -1107,14 +1211,19 @@ class PreviewWidget(QWidget):
         ) -> QWidget:
             host = QWidget(self._unified_tab_bar)
             hl = QHBoxLayout(host)
-            hl.setContentsMargins(0, 0, 6, 0)
-            hl.setSpacing(0)
+            hl.setContentsMargins(0, 0, 2, 0)
+            hl.setSpacing(1)
             hl.addStretch(1)
             if path_text:
                 path_label = QLabel(path_text, host)
                 path_label.setObjectName("tabDuplicatePath")
                 path_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                path_label.setMaximumWidth(140)
+                path_label.setMinimumWidth(96)
+                path_label.setMaximumWidth(120)
+                path_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+                path_label.setWordWrap(False)
+                path_label.setTextFormat(Qt.TextFormat.PlainText)
+                path_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
                 hl.addWidget(path_label)
             if missing:
                 missing_label = QLabel("D", host)
@@ -1122,7 +1231,9 @@ class PreviewWidget(QWidget):
                 missing_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 hl.addWidget(missing_label)
             hl.addWidget(inner)
-            host.setFixedSize(18 + (140 if path_text else 0) + (12 if missing else 0), 12)
+            inner_w = max(12, inner.sizeHint().width())
+            host_w = inner_w + (120 if path_text else 0) + (12 if missing else 0) + 4
+            host.setFixedSize(host_w, 12)
             if hand_cursor:
                 host.setCursor(Qt.CursorShape.PointingHandCursor)
                 inner.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1136,46 +1247,20 @@ class PreviewWidget(QWidget):
             state = self._find_tab_state(key)
             path_text = self._duplicate_path_text(state) if state and state.path.name in duplicate_names else ""
             missing = bool(state and (state.missing or not state.path.exists()))
+            right = QWidget(self._unified_tab_bar)
+            rl = QHBoxLayout(right)
+            rl.setContentsMargins(0, 0, 0, 0)
+            rl.setSpacing(1)
             if state and state.modified:
-                btn = _TabAffordanceButton(self._unified_tab_bar)
-                btn.clicked.connect(lambda _=False, _k=key: self._on_unified_tab_close_by_key(_k))
-                self._unified_tab_bar.setTabButton(
-                    i,
-                    QTabBar.ButtonPosition.RightSide,
-                    _wrap_affordance(btn, True, path_text=path_text, missing=missing),
-                )
-            elif self._unified_tab_bar.currentIndex() == i:
-                btn = QPushButton("✕", self._unified_tab_bar)
-                btn.setObjectName("tabAffordanceBtn")
-                btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                btn.setFixedSize(12, 12)
-                btn.clicked.connect(lambda _=False, _k=key: self._on_unified_tab_close_by_key(_k))
-                self._unified_tab_bar.setTabButton(
-                    i,
-                    QTabBar.ButtonPosition.RightSide,
-                    _wrap_affordance(btn, True, path_text=path_text, missing=missing),
-                )
-            elif missing:
-                btn = QPushButton("✕", self._unified_tab_bar)
-                btn.setObjectName("tabAffordanceBtn")
-                btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                btn.setFixedSize(12, 12)
-                btn.clicked.connect(lambda _=False, _k=key: self._on_unified_tab_close_by_key(_k))
-                self._unified_tab_bar.setTabButton(
-                    i,
-                    QTabBar.ButtonPosition.RightSide,
-                    _wrap_affordance(btn, True, path_text=path_text, missing=True),
-                )
-            else:
-                spacer = QLabel("●", self._unified_tab_bar)
-                spacer.setObjectName("tabAffordanceSpacer")
-                spacer.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                spacer.setFixedSize(12, 12)
-                self._unified_tab_bar.setTabButton(
-                    i,
-                    QTabBar.ButtonPosition.RightSide,
-                    _wrap_affordance(spacer, False, path_text=path_text),
-                )
+                rl.addWidget(_TabAffordanceButton(self._unified_tab_bar))
+            close_btn = _TabCloseButton(self._unified_tab_bar)
+            close_btn.clicked.connect(lambda _=False, _k=key: self._on_unified_tab_close_by_key(_k))
+            rl.addWidget(close_btn)
+            self._unified_tab_bar.setTabButton(
+                i,
+                QTabBar.ButtonPosition.RightSide,
+                _wrap_affordance(right, True, path_text=path_text, missing=missing),
+            )
 
     def _duplicate_tab_names(self) -> set[str]:
         counts: dict[str, int] = {}
@@ -1197,7 +1282,26 @@ class PreviewWidget(QWidget):
         return str(parent)
 
     def eventFilter(self, obj, event):  # noqa: N802
+        if obj in (self._tab_scroll, self._tab_scroll.viewport()):
+            if event.type() in (QEvent.Type.Enter, QEvent.Type.HoverEnter):
+                self._tab_area_hovered = True
+                self._tab_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            elif event.type() in (QEvent.Type.Leave, QEvent.Type.HoverLeave):
+                self._tab_area_hovered = False
+                self._tab_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         return super().eventFilter(obj, event)
+
+    def _sync_unified_tab_bar_width(self) -> None:
+        total_w = 0
+        for i in range(self._unified_tab_bar.count()):
+            total_w += self._unified_tab_bar.tabRect(i).width()
+        min_w = max(total_w + 4, self._tab_scroll.viewport().width())
+        self._unified_tab_bar.setMinimumWidth(min_w)
+        self._unified_tab_bar.resize(min_w, self._unified_tab_bar.sizeHint().height())
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._sync_unified_tab_bar_width()
 
     def _on_panel_emptied(self) -> None:
         pass
@@ -1235,7 +1339,7 @@ class PreviewWidget(QWidget):
             try:
                 subprocess.Popen(["python", str(self._current_file)], cwd=str(self._current_file.parent))
             except Exception as exc:
-                QMessageBox.warning(self, "运行失败", f"无法运行 Python 文件:\n{exc}")
+                QMessageBox.warning(self, "Run Failed", f"Unable to run Python file:\n{exc}")
 
     def _on_preview_clicked(self) -> None:
         if not self._current_file:
@@ -1244,14 +1348,14 @@ class PreviewWidget(QWidget):
             return
         pdf_path = self._current_file.with_suffix(".pdf")
         if not pdf_path.exists():
-            QMessageBox.information(self, "未找到预览文件", f"请先编译生成 PDF:\n{pdf_path.name}")
+            QMessageBox.information(self, "Preview Not Found", f"Please compile first to generate PDF:\n{pdf_path.name}")
             return
         self.load_file(pdf_path)
 
     def _compile_tex(self, tex_path: Path) -> None:
         compiler = shutil.which("xelatex") or shutil.which("lualatex") or shutil.which("pdflatex")
         if not compiler:
-            QMessageBox.warning(self, "编译失败", "未检测到 LaTeX 编译器（xelatex/lualatex/pdflatex）。")
+            QMessageBox.warning(self, "Compile Failed", "No LaTeX compiler found (xelatex/lualatex/pdflatex).")
             return
         try:
             subprocess.run(
@@ -1262,13 +1366,13 @@ class PreviewWidget(QWidget):
                 text=True,
                 timeout=120,
             )
-            QMessageBox.information(self, "编译完成", f"{tex_path.name} 已编译完成。")
+            QMessageBox.information(self, "Compile Complete", f"{tex_path.name} compiled successfully.")
         except subprocess.CalledProcessError as exc:
             tail = (exc.stderr or exc.stdout or "").splitlines()[-6:]
-            detail = "\n".join(tail) if tail else "无详细输出"
-            QMessageBox.warning(self, "编译失败", f"{tex_path.name}\n\n{detail}")
+            detail = "\n".join(tail) if tail else "No detailed output."
+            QMessageBox.warning(self, "Compile Failed", f"{tex_path.name}\n\n{detail}")
         except Exception as exc:
-            QMessageBox.warning(self, "编译失败", f"{tex_path.name}\n\n{exc}")
+            QMessageBox.warning(self, "Compile Failed", f"{tex_path.name}\n\n{exc}")
 
     # ------------------------------------------------------------------ #
     #  Selection tracking (for general mode editors)
@@ -1381,3 +1485,4 @@ class PreviewWidget(QWidget):
         if self._panels:
             return self._panels[-1].active_path()
         return None
+

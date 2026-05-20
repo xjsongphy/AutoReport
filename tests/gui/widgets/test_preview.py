@@ -1,7 +1,6 @@
-from pathlib import Path
+﻿from pathlib import Path
 
-from PyQt6.QtCore import QEvent, QPointF, Qt
-from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtCore import QEvent, Qt
 from PyQt6.QtWidgets import QApplication, QLabel, QTabBar, QPushButton
 from PyQt6.QtWidgets import QMessageBox
 
@@ -89,6 +88,14 @@ def test_file_action_buttons_follow_active_suffix(qtbot, tmp_path: Path) -> None
     widget.load_file(txt_file)
     assert widget._active_action_kind == ""
     assert not widget._run_button.isVisible()
+
+
+def test_file_action_button_tooltips_are_chinese(qtbot, tmp_path: Path) -> None:
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    assert widget._run_button._compact_tooltip_filter._text == "编译 / 运行当前文件"
+    assert widget._preview_button._compact_tooltip_filter._text == "预览当前文件"
     assert not widget._preview_button.isVisible()
 
 
@@ -149,10 +156,35 @@ def test_editor_selection_emits_selected_line_context(qtbot, tmp_path: Path) -> 
     assert blocker.args[3] == 2
 
 
-def test_dirty_unified_tab_affordance_only_turns_close_on_button_hover(qtbot, tmp_path: Path) -> None:
+def test_dirty_unified_tab_shows_dot_and_close_for_unselected_tab(qtbot, tmp_path: Path) -> None:
     text_file = tmp_path / "note.txt"
     text_file.write_text("old", encoding="utf-8")
+    other = tmp_path / "other.txt"
+    other.write_text("other", encoding="utf-8")
 
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.load_file(text_file)
+    widget.load_file(other)
+
+    key = str(text_file.resolve())
+    state = widget._panels[0]._tabs[key]
+    state.viewer.setText("changed")
+    qtbot.wait(10)
+    widget._sync_tabs_from_panels()
+    widget._unified_tab_bar.setCurrentIndex(1)
+
+    host = widget._unified_tab_bar.tabButton(0, QTabBar.ButtonPosition.RightSide)
+    buttons = host.findChildren(QPushButton)
+    texts = [b.text() for b in buttons]
+
+    assert "•" in texts
+    assert "✕" in texts
+
+
+def test_close_modified_tab_cancel_keeps_tab_open(qtbot, tmp_path: Path, monkeypatch) -> None:
+    text_file = tmp_path / "note.txt"
+    text_file.write_text("old", encoding="utf-8")
     widget = PreviewWidget(tmp_path)
     qtbot.addWidget(widget)
     widget.load_file(text_file)
@@ -161,37 +193,36 @@ def test_dirty_unified_tab_affordance_only_turns_close_on_button_hover(qtbot, tm
     state = widget._panels[0]._tabs[key]
     state.viewer.setText("changed")
     qtbot.wait(10)
-    widget._sync_tabs_from_panels()
 
-    host = widget._unified_tab_bar.tabButton(0, QTabBar.ButtonPosition.RightSide)
-    button = host.findChild(QPushButton)
-
-    assert button is not None
-    assert button.text() == "●"
-    assert button.cursor().shape() == Qt.CursorShape.PointingHandCursor
-
-    tab_center = widget._unified_tab_bar.tabRect(0).center()
-    QApplication.sendEvent(
-        widget._unified_tab_bar,
-        QMouseEvent(
-            QEvent.Type.MouseMove,
-            QPointF(tab_center),
-            QPointF(widget._unified_tab_bar.mapToGlobal(tab_center)),
-            Qt.MouseButton.NoButton,
-            Qt.MouseButton.NoButton,
-            Qt.KeyboardModifier.NoModifier,
-        ),
+    monkeypatch.setattr(
+        PreviewWidget,
+        "_confirm_close_modified_tab",
+        lambda self, path: QMessageBox.StandardButton.Cancel,
     )
-    host = widget._unified_tab_bar.tabButton(0, QTabBar.ButtonPosition.RightSide)
-    button = host.findChild(QPushButton)
-    assert button is not None
-    assert button.text() == "●"
+    assert widget._on_unified_tab_close(0) is False
+    assert widget._unified_tab_bar.count() == 1
 
-    QApplication.sendEvent(button, QEvent(QEvent.Type.Enter))
-    assert button.text() == "✕"
 
-    QApplication.sendEvent(button, QEvent(QEvent.Type.Leave))
-    assert button.text() == "●"
+def test_close_modified_tab_save_then_close(qtbot, tmp_path: Path, monkeypatch) -> None:
+    text_file = tmp_path / "note.txt"
+    text_file.write_text("old", encoding="utf-8")
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.load_file(text_file)
+
+    key = str(text_file.resolve())
+    state = widget._panels[0]._tabs[key]
+    state.viewer.setText("changed")
+    qtbot.wait(10)
+
+    monkeypatch.setattr(
+        PreviewWidget,
+        "_confirm_close_modified_tab",
+        lambda self, path: QMessageBox.StandardButton.Save,
+    )
+    assert widget._on_unified_tab_close(0) is True
+    assert widget._unified_tab_bar.count() == 0
+    assert text_file.read_text(encoding="utf-8") == "changed"
 
 
 def test_open_tab_updates_when_file_path_changes(qtbot, tmp_path: Path) -> None:
@@ -254,3 +285,32 @@ def test_duplicate_tab_names_show_relative_parent_path(qtbot, tmp_path: Path) ->
 
     assert "first" in labels
     assert "second" in labels
+
+
+def test_unified_tab_bar_disables_scroll_buttons(qtbot, tmp_path: Path) -> None:
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+    assert widget._unified_tab_bar.usesScrollButtons() is False
+
+
+def test_tab_scrollbar_shows_on_hover_and_hides_on_leave(qtbot, tmp_path: Path) -> None:
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    assert (
+        widget._tab_scroll.horizontalScrollBarPolicy()
+        == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    )
+    enter_event = QEvent(QEvent.Type.Enter)
+    leave_event = QEvent(QEvent.Type.Leave)
+    QApplication.sendEvent(widget._tab_scroll.viewport(), enter_event)
+    assert (
+        widget._tab_scroll.horizontalScrollBarPolicy()
+        == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+    )
+    QApplication.sendEvent(widget._tab_scroll.viewport(), leave_event)
+    assert (
+        widget._tab_scroll.horizontalScrollBarPolicy()
+        == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    )
+

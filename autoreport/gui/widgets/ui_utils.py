@@ -11,11 +11,15 @@ from ..theme import get_theme_colors
 
 
 _SVG_ICONS = {
+    "file": "file.svg",
     "new-file": "new-file.svg",
     "new-folder": "new-folder.svg",
     "refresh": "refresh.svg",
     "copy": "copy.svg",
     "settings": "settings.svg",
+    "run": "run.svg",
+    "preview": "preview.svg",
+    "eye-off": "eye-off.svg",
 }
 UI_HOVER_DELAY_MS = 2000
 
