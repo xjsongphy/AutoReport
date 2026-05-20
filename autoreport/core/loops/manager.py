@@ -16,7 +16,6 @@ from ..tools import (
     DeleteFileTool,
     EditFileTool,
     ExecTool,
-    FileStateManager,
     ListCheckpointsTool,
     ListDirTool,
     ManageTasksTool,
@@ -62,7 +61,6 @@ class LoopManager:
         self.skill_loader = SkillLoader()
         self._task_board = TaskBoard()
         self.manifest_manager = ManifestManager(self.workspace)
-        self.file_state_manager = FileStateManager()
 
         # Subscribe to restart requests
         self.bus.subscribe(RestartRequest, self._handle_restart_request)
@@ -228,10 +226,7 @@ class LoopManager:
         registry = ToolRegistry()
 
         # Common tools for all agents
-        registry.register(ReadFileTool(
-            workspace=self.workspace,
-            file_state_manager=self.file_state_manager,
-        ))
+        registry.register(ReadFileTool(workspace=self.workspace))
         registry.register(ListDirTool(workspace=self.workspace))
 
         # Determine write allowed directory based on agent type
@@ -251,21 +246,18 @@ class LoopManager:
             write_allowed_dir=write_dir,
             manifest_manager=self.manifest_manager,
             agent_type=agent_type.value,
-            file_state_manager=self.file_state_manager,
         ))
         registry.register(EditFileTool(
             workspace=self.workspace,
             write_allowed_dir=write_dir,
             manifest_manager=self.manifest_manager,
             agent_type=agent_type.value,
-            file_state_manager=self.file_state_manager,
         ))
         registry.register(DeleteFileTool(
             workspace=self.workspace,
             write_allowed_dir=write_dir,
             manifest_manager=self.manifest_manager,
             agent_type=agent_type.value,
-            file_state_manager=self.file_state_manager,
         ))
 
         # Execution tools (for data analysis, plotting, and main agent)
