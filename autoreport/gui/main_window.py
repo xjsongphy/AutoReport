@@ -64,6 +64,7 @@ class MainWindow(QMainWindow):
         self._async_loop: asyncio.AbstractEventLoop | None = None
         self._debug_agents = {str(a) for a in (debug_agents or [])}
         self._title_bar: TitleBar | None = None
+        self._splitter_sizes_initialized = False
 
         self.setWindowTitle("AutoReport")
         self.resize(1400, 900)
@@ -88,6 +89,8 @@ class MainWindow(QMainWindow):
 
         self._apply_theme()
         self._setup_ui()
+        QTimer.singleShot(0, self._apply_splitter_sizes)
+        QTimer.singleShot(100, self._apply_splitter_sizes)
         # Load persisted histories for main and currently selected sub-agent.
         # Do an immediate load plus a deferred reload after the first event-loop
         # tick to avoid startup ordering glitches in the sub-agent selector.
@@ -726,7 +729,7 @@ class MainWindow(QMainWindow):
 
         # Store main_splitter for resize handling
         self._main_splitter = main_splitter
-        self._apply_splitter_sizes()
+        self._apply_splitter_sizes(force=True)
 
         # macOS reliability: make Cmd+Q work even when menu role shortcut
         # isn't dispatched by the native menu chain.
@@ -1304,7 +1307,14 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event):
         """Handle window resize to maintain proportional layout."""
         super().resizeEvent(event)
-        self._apply_splitter_sizes()
+        if not self._splitter_sizes_initialized:
+            self._apply_splitter_sizes(force=True)
+
+    def showEvent(self, event) -> None:
+        """Finalize splitter sizing after child widgets compute minimum widths."""
+        super().showEvent(event)
+        QTimer.singleShot(0, lambda: self._apply_splitter_sizes(force=True))
+        QTimer.singleShot(120, lambda: self._apply_splitter_sizes(force=True))
 
     def changeEvent(self, event) -> None:
         """Handle window state changes (maximize/restore/fullscreen)."""
@@ -1317,8 +1327,10 @@ class MainWindow(QMainWindow):
                     bool(is_maximized or is_fullscreen)
                 )
 
-    def _apply_splitter_sizes(self) -> None:
+    def _apply_splitter_sizes(self, force: bool = False) -> None:
         if not hasattr(self, "_main_splitter"):
+            return
+        if self._splitter_sizes_initialized and not force:
             return
         total_width = self._main_splitter.width()
         if total_width <= 0:
@@ -1351,3 +1363,4 @@ class MainWindow(QMainWindow):
 
         sizes = [file_tree_size, preview_size, sub_agent_size, main_agent_size]
         self._main_splitter.setSizes(sizes)
+        self._splitter_sizes_initialized = True

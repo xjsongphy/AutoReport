@@ -4,7 +4,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import QPoint, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QPoint, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -12,19 +13,17 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QSizePolicy,
-    QStyle,
     QVBoxLayout,
     QWidget,
 )
 
 from autoreport.core.file_search import FileSearchManager
 from autoreport.gui.scale import scaled
-from autoreport.gui.icons import get_context_eye_icons
 from autoreport.gui.widgets.chat_input import ChatInput
 from autoreport.gui.widgets.conversation_history import ConversationHistoryDropdown
 from autoreport.gui.widgets.debug_panel import DebugPanel
 from autoreport.gui.widgets.file_search_popup import FileSearchPopup
-from autoreport.gui.widgets.ui_utils import IconActionButton, NoWheelComboBox
+from autoreport.gui.widgets.ui_utils import IconActionButton, NoWheelComboBox, render_svg_icon
 from autoreport.utils.agent_labels import get_agent_badge, get_agent_title, get_agent_icon
 from autoreport.gui.widgets.messages_area import MessagesArea
 from autoreport.gui.widgets.status_indicator import StatusIndicator
@@ -32,6 +31,13 @@ from autoreport.gui.widgets.working_border import WorkingBorder
 from autoreport.interfaces.types import ApiDebugMessage
 from autoreport.utils.logging_config import ui_logger
 from ..theme import get_theme_colors
+
+
+def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
+    color = hex_color.lstrip("#")
+    if len(color) != 6:
+        return (0, 0, 0)
+    return (int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16))
 
 
 class AgentPanel(QWidget):
@@ -59,11 +65,10 @@ class AgentPanel(QWidget):
         self._preview_context: tuple[str, str, int, int] | None = None
         self._opened_file: str | None = None
         self._context_enabled: bool = True
-        self._context_eye_icons = get_context_eye_icons()
         self._current_tool_group = None
         self._pending_tool_groups: list = []
         self._agent_selector: NoWheelComboBox | None = None
-        self._composer_horizontal_margin = scaled(10)
+        self._composer_horizontal_margin = scaled(16)
 
         self._file_search_manager = FileSearchManager(self._workspace)
         self._file_search_popup: FileSearchPopup | None = None
@@ -186,6 +191,20 @@ class AgentPanel(QWidget):
         layout.addWidget(self._status_indicator)
 
         # ---- Composer (floating input + dock bar) ----
+        c = get_theme_colors()
+        r, g, b = _hex_to_rgb(c["panel_bg"])
+        self._composer_top_fade = QWidget(self)
+        self._composer_top_fade.setObjectName("composerTopFade")
+        self._composer_top_fade.setFixedHeight(scaled(18))
+        self._composer_top_fade.setStyleSheet(
+            "QWidget#composerTopFade {"
+            "border: none;"
+            "background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+            f"stop:0 rgba({r}, {g}, {b}, 255), stop:1 rgba({r}, {g}, {b}, 127));"
+            "}"
+        )
+        layout.addWidget(self._composer_top_fade)
+
         self._composer_host = QWidget(self)
         self._composer_host.setObjectName("composerHost")
         composer_host_layout = QHBoxLayout(self._composer_host)
@@ -196,10 +215,14 @@ class AgentPanel(QWidget):
             0,
         )
         composer_host_layout.setSpacing(0)
+        self._composer_host_layout = composer_host_layout
 
         self._input_container = QWidget(self._composer_host)
         self._input_container.setObjectName("inputContainer")
-        self._input_container.setMaximumWidth(760)
+        self._input_container.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
         composer_layout = QVBoxLayout(self._input_container)
         composer_layout.setContentsMargins(0, 0, 0, 0)
         composer_layout.setSpacing(0)
@@ -264,10 +287,13 @@ class AgentPanel(QWidget):
         self._context_separator.setVisible(False)
         sl.addWidget(self._context_separator)
 
-        self._context_file_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon)
+        c = get_theme_colors()
+        self._context_file_icon = render_svg_icon("file", QColor(c["fg"]), size=14)
+        self._context_disabled_icon = render_svg_icon("eye-off", QColor(c["muted"]), size=14)
         self._context_attachment_btn = QPushButton("")
         self._context_attachment_btn.setObjectName("contextAttachmentBtn")
         self._context_attachment_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._context_attachment_btn.setIconSize(QSize(14, 14))
         self._context_attachment_btn.setCheckable(True)
         self._context_attachment_btn.setChecked(True)
         self._context_attachment_btn.setVisible(False)
@@ -282,7 +308,7 @@ class AgentPanel(QWidget):
         sl.addWidget(self._send_btn)
 
         composer_layout.addWidget(secondary_bar)
-        composer_host_layout.addWidget(self._input_container, 1, Qt.AlignmentFlag.AlignHCenter)
+        composer_host_layout.addWidget(self._input_container, 1)
         layout.addWidget(self._composer_host)
         self._composer_bottom_gap = QWidget(self)
         self._composer_bottom_gap.setObjectName("composerBottomGap")
@@ -334,8 +360,19 @@ class AgentPanel(QWidget):
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
+        self._update_composer_alignment()
         self._sync_composer_gap()
+        QTimer.singleShot(0, self._update_composer_alignment)
         QTimer.singleShot(0, self._sync_composer_gap)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        # Initial splitter/layout negotiation can leave an outdated minimum width
+        # until first maximize/restore; refresh once when panel is shown.
+        self._update_width()
+        self._update_composer_alignment()
+        QTimer.singleShot(0, self._update_width)
+        QTimer.singleShot(0, self._update_composer_alignment)
 
     def _sync_composer_gap(self) -> None:
         """Keep bottom gap height equal to horizontal gutter width around composer."""
@@ -344,6 +381,41 @@ class AgentPanel(QWidget):
         side_gap = max(0, self._input_container.mapTo(self, QPoint(0, 0)).x())
         if self._composer_bottom_gap.height() != side_gap:
             self._composer_bottom_gap.setFixedHeight(side_gap)
+        self._composer_host.raise_()
+        self._composer_bottom_gap.raise_()
+
+    def _composer_anchor_bounds(self) -> tuple[int, int]:
+        """Return (left, right) anchor x positions for composer in panel coordinates."""
+        panel_w = max(1, self.width())
+        left = self._composer_horizontal_margin
+        if hasattr(self, "_icon_label") and self._icon_label is not None:
+            left = self._icon_label.mapTo(self, QPoint(0, 0)).x()
+
+        right = panel_w - left
+        rows = self._messages_area.get_message_rows()
+        for row in reversed(rows):
+            bubble = getattr(row, "_user_bubble_container", None)
+            if bubble is None:
+                continue
+            right = bubble.mapTo(self, bubble.rect().topRight()).x()
+            break
+
+        min_width = 220
+        max_right = panel_w - self._composer_horizontal_margin
+        right = min(max_right, max(right, left + min_width))
+        left = max(0, left)
+        return left, right
+
+    def _update_composer_alignment(self) -> None:
+        """Align composer to avatar-left and latest user-bubble right edge."""
+        if not hasattr(self, "_composer_host_layout"):
+            return
+        left, right = self._composer_anchor_bounds()
+        right_gap = max(0, self.width() - right)
+        margins = self._composer_host_layout.contentsMargins()
+        if margins.left() != left or margins.right() != right_gap:
+            self._composer_host_layout.setContentsMargins(left, 0, right_gap, 0)
+        self._sync_composer_gap()
 
     # ---- File reference handling ----
 
@@ -544,7 +616,7 @@ class AgentPanel(QWidget):
 
     def _on_context_attachment_toggled(self) -> None:
         self._context_enabled = self._context_attachment_btn.isChecked()
-        icon = self._context_file_icon if self._context_enabled else self._context_eye_icons["eye_off"]
+        icon = self._context_file_icon if self._context_enabled else self._context_disabled_icon
         self._context_attachment_btn.setIcon(icon)
 
     def set_workspace(self, workspace: Path) -> None:
@@ -618,6 +690,7 @@ class AgentPanel(QWidget):
             detail=detail,
             expandable=expandable,
         )
+        self._update_composer_alignment()
 
     def _ensure_agent_anchor_for_tools(self) -> None:
         rows = self._messages_area.get_message_rows()
@@ -631,6 +704,7 @@ class AgentPanel(QWidget):
             timestamp=ts,
             agent_name=agent_name,
         )
+        self._update_composer_alignment()
 
     def add_tool_call(
         self,
@@ -938,6 +1012,7 @@ class AgentPanel(QWidget):
     def clear_conversation(self) -> None:
         """Clear messages and notify backend."""
         self._messages_area.clear()
+        self._update_composer_alignment()
         self._pending_tool_groups.clear()
         self._current_tool_group = None
         self.conversation_cleared.emit()

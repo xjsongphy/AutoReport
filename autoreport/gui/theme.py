@@ -41,9 +41,9 @@ def get_theme_colors() -> dict[str, str]:
 
     # === Base Colors ===
     bg = "#1e1e1e" if dark else "#ffffff"
-    surface = "#181818" if dark else "#f3f3f3"
-    panel_bg = "#141414" if dark else "#f3f3f3"
-    messages_bg = "#121212" if dark else "#ffffff"
+    surface = "#181818" if dark else "#f0f0f0"
+    panel_bg = "#141414" if dark else "#f0f0f0"
+    messages_bg = "#121212" if dark else "#f0f0f0"
     border = "#2b2b2b" if dark else "#e0e0e0"
     fg = "#cccccc" if dark else "#616161"
     muted = "#737373" if dark else "#9e9e9e"
@@ -132,15 +132,15 @@ def get_theme_colors() -> dict[str, str]:
         # === Editor/Preview ===
         "editor_bg": bg,
         "editor_fg": "#d4d4d4" if dark else "#333333",
-        "editor_margin": bg if dark else "#f0f0f0",
+        "editor_margin": bg if dark else "#ffffff",
         "editor_caret_fg": "#ffffff" if dark else "#000000",
         "accent": "#0078d4" if dark else "#0090ff",
         "compile_bg": "#0e639c" if dark else "#0078d4",
         "compile_fg": "#ffffff",
 
         # === Tabs ===
-        "tab_active_bg": bg if dark else "#f3f3f3",
-        "tab_inactive_bg": bg if dark else "#ececec",
+        "tab_active_bg": bg if dark else "#ffffff",
+        "tab_inactive_bg": bg if dark else "#f0f0f0",
         "tab_active_fg": "#ffffff" if dark else "#1a1a1a",
         "tab_inactive_fg": "#969696" if dark else "#888888",
 

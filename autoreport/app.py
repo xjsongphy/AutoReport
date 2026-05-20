@@ -6,6 +6,16 @@ import sys
 from pathlib import Path
 from typing import Annotated, Any, Dict
 
+# Force UTF-8 encoding for all I/O operations
+# This fixes Chinese character display issues on Windows systems
+if sys.platform == "win32":
+    import os
+    os.environ["PYTHONIOENCODING"] = "utf-8"
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
+
 import typer
 from loguru import logger
 from PyQt6.QtWidgets import QApplication, QDialog

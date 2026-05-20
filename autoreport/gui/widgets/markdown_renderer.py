@@ -46,7 +46,7 @@ class _QtCompatTreeprocessor(Treeprocessor):
         inline_code_fg = c["editor_fg"]
         accent = c["accent"]
         muted = c["muted"]
-        th_bg = c["card"]
+        th_bg = c["card"] if _is_dark_mode() else "#ffffff"
 
         # Qt rich text doesn't support <pre>, convert to styled <div>
         for pre in root.iter("pre"):
