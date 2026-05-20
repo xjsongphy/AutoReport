@@ -56,7 +56,8 @@ class CompactTooltipFilter(QObject):
     def __init__(self, text: str, parent: QWidget):
         super().__init__(parent)
         self._text = text
-        self._tip: QLabel | None = None
+        self._tip: QWidget | None = None
+        self._tip_label: QLabel | None = None
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(UI_HOVER_DELAY_MS)
@@ -91,19 +92,29 @@ class CompactTooltipFilter(QObject):
 
     def _show(self, anchor: QWidget) -> None:
         self._hide()
-        tip = QLabel(self._text)
+        tip = QWidget()
         tip.setWindowFlags(
             Qt.WindowType.ToolTip
             | Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.NoDropShadowWindowHint
         )
+        tip.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        tip.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         tip.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        tip.setStyleSheet(compact_tooltip_qss())
-        tip.adjustSize()
+        tip.setStyleSheet("background: transparent; border: none;")
+
+        bubble = QLabel(self._text, tip)
+        bubble.setObjectName("compactTooltipBubble")
+        bubble.setStyleSheet(compact_tooltip_qss("QLabel#compactTooltipBubble"))
+        bubble.adjustSize()
+        tip.resize(bubble.size())
+        bubble.move(0, 0)
+
         x = (anchor.width() - tip.width()) // 2
         tip.move(anchor.mapToGlobal(QPoint(x, anchor.height() + 3)))
         tip.show()
         self._tip = tip
+        self._tip_label = bubble
 
     def _hide(self) -> None:
         if self._tip is None:
@@ -111,6 +122,7 @@ class CompactTooltipFilter(QObject):
         self._tip.hide()
         self._tip.deleteLater()
         self._tip = None
+        self._tip_label = None
 
 
 def compact_tooltip_qss(selector: str = "QLabel") -> str:

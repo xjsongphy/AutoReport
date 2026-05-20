@@ -274,7 +274,8 @@ class FileTreeWidget(QWidget):
         self._pending_new_item: QTreeWidgetItem | None = None
         self._pending_new_kind: str | None = None  # "file" | "folder"
         self._pending_editor: QLineEdit | None = None
-        self._hover_tip: QLabel | None = None
+        self._hover_tip: QWidget | None = None
+        self._hover_tip_label: QLabel | None = None
         self._hover_timer = QTimer(self)
         self._hover_timer.setSingleShot(True)
         self._hover_timer.setInterval(UI_HOVER_DELAY_MS)
@@ -723,16 +724,23 @@ class FileTreeWidget(QWidget):
 
     def _show_hover_tip(self, text: str, global_pos: QPoint) -> None:
         if self._hover_tip is None:
-            self._hover_tip = QLabel(self)
+            self._hover_tip = QWidget()
             self._hover_tip.setWindowFlags(
                 Qt.WindowType.ToolTip
                 | Qt.WindowType.FramelessWindowHint
                 | Qt.WindowType.NoDropShadowWindowHint
             )
+            self._hover_tip.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            self._hover_tip.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
             self._hover_tip.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-            self._hover_tip.setStyleSheet(compact_tooltip_qss("QLabel"))
-        self._hover_tip.setText(text)
-        self._hover_tip.adjustSize()
+            self._hover_tip.setStyleSheet("background: transparent; border: none;")
+            self._hover_tip_label = QLabel(self._hover_tip)
+            self._hover_tip_label.setObjectName("fileTreeHoverTip")
+            self._hover_tip_label.setStyleSheet(compact_tooltip_qss("QLabel#fileTreeHoverTip"))
+        self._hover_tip_label.setText(text)
+        self._hover_tip_label.adjustSize()
+        self._hover_tip.resize(self._hover_tip_label.size())
+        self._hover_tip_label.move(0, 0)
         self._hover_tip.move(global_pos)
         self._hover_tip.show()
 
