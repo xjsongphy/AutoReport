@@ -642,6 +642,7 @@ class PreviewWidget(QWidget):
         self._tab_state_path = self.workspace / ".autoreport" / "open_tabs.json"
         self._restoring_tabs = False
         self._tab_area_hovered = False
+        self._tab_hovered_index = -1
 
         # Single editor panel
         self._panels: list[EditorPanel] = []
@@ -679,6 +680,7 @@ class PreviewWidget(QWidget):
         self._unified_tab_bar.customContextMenuRequested.connect(self._on_unified_tab_context_menu)
         self._unified_tab_bar.setTabsClosable(False)
         self._unified_tab_bar.setMouseTracking(True)
+        self._unified_tab_bar.installEventFilter(self)
         self._unified_tab_bar.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
         self._tab_scroll = QScrollArea(self)
@@ -796,7 +798,7 @@ class PreviewWidget(QWidget):
             }}
             QTabBar#previewTabBar::tab:selected {{
                 background-color: {c["tab_active_bg"]};
-                color: {c["tab_active_fg"]};
+                color: {c["tab_inactive_fg"]};
                 border-top: 2px solid {c["accent"]};
                 border-right: 1px solid {c["border"]};
                 border-bottom: 1px solid {c["tab_active_bg"]};
@@ -886,7 +888,7 @@ class PreviewWidget(QWidget):
                 background: transparent;
                 border: none;
                 font-size: 11px;
-                padding: 0 2px 0 0;
+                padding: 0 1px 0 0;
             }}
             QLabel#tabAffordanceSpacer {{
                 color: transparent;
@@ -950,14 +952,12 @@ class PreviewWidget(QWidget):
                     label = state.path.name
                     tab_idx = self._unified_tab_bar.addTab(label)
                     self._unified_tab_bar.setTabData(tab_idx, key)
-                    if state.missing or not state.path.exists():
-                        state.missing = True
-                        self._unified_tab_bar.setTabTextColor(tab_idx, QColor(get_theme_colors()["status_error"]))
                     if key == active_key or (current_index < 0 and key == panel._active_key):
                         current_index = tab_idx
 
             if current_index >= 0:
                 self._unified_tab_bar.setCurrentIndex(current_index)
+            self._apply_unified_tab_text_colors()
         self._unified_tab_bar.setVisible(self._unified_tab_bar.count() > 0)
         self._refresh_unified_tab_affordances()
         self._sync_unified_tab_bar_width()
@@ -998,8 +998,23 @@ class PreviewWidget(QWidget):
         # Emit file changed signal
         self.file_changed.emit(file_path)
         self._connect_selection_tracking()
+        self._apply_unified_tab_text_colors()
         self._refresh_unified_tab_affordances()
         self._update_file_actions()
+
+    def _apply_unified_tab_text_colors(self) -> None:
+        c = get_theme_colors()
+        active = self._unified_tab_bar.currentIndex()
+        for i in range(self._unified_tab_bar.count()):
+            key = self._unified_tab_bar.tabData(i)
+            state = self._find_tab_state(key) if key else None
+            if state and (state.missing or not state.path.exists()):
+                color = QColor(c["status_error"])
+            elif i == active:
+                color = QColor(c["tab_active_fg"])
+            else:
+                color = QColor(c["tab_inactive_fg"])
+            self._unified_tab_bar.setTabTextColor(i, color)
 
     def _on_unified_tab_double_click(self, index: int) -> None:
         """Pin a preview tab and switch to it on double-click."""
@@ -1201,6 +1216,7 @@ class PreviewWidget(QWidget):
 
     def _refresh_unified_tab_affordances(self) -> None:
         duplicate_names = self._duplicate_tab_names()
+        current_index = self._unified_tab_bar.currentIndex()
 
         def _wrap_affordance(
             inner: QWidget,
@@ -1212,15 +1228,14 @@ class PreviewWidget(QWidget):
             host = QWidget(self._unified_tab_bar)
             hl = QHBoxLayout(host)
             hl.setContentsMargins(0, 0, 2, 0)
-            hl.setSpacing(1)
-            hl.addStretch(1)
+            hl.setSpacing(2)
             if path_text:
                 path_label = QLabel(path_text, host)
                 path_label.setObjectName("tabDuplicatePath")
                 path_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                path_label.setMinimumWidth(96)
-                path_label.setMaximumWidth(120)
-                path_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+                path_label.setMinimumWidth(0)
+                path_label.setFixedWidth(96)
+                path_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
                 path_label.setWordWrap(False)
                 path_label.setTextFormat(Qt.TextFormat.PlainText)
                 path_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
@@ -1232,7 +1247,7 @@ class PreviewWidget(QWidget):
                 hl.addWidget(missing_label)
             hl.addWidget(inner)
             inner_w = max(12, inner.sizeHint().width())
-            host_w = inner_w + (120 if path_text else 0) + (12 if missing else 0) + 4
+            host_w = inner_w + (96 if path_text else 0) + (12 if missing else 0) + 4
             host.setFixedSize(host_w, 12)
             if hand_cursor:
                 host.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1253,9 +1268,15 @@ class PreviewWidget(QWidget):
             rl.setSpacing(1)
             if state and state.modified:
                 rl.addWidget(_TabAffordanceButton(self._unified_tab_bar))
-            close_btn = _TabCloseButton(self._unified_tab_bar)
-            close_btn.clicked.connect(lambda _=False, _k=key: self._on_unified_tab_close_by_key(_k))
-            rl.addWidget(close_btn)
+            show_close = bool(
+                i == current_index
+                or i == self._tab_hovered_index
+                or (state and state.modified)
+            )
+            if show_close:
+                close_btn = _TabCloseButton(self._unified_tab_bar)
+                close_btn.clicked.connect(lambda _=False, _k=key: self._on_unified_tab_close_by_key(_k))
+                rl.addWidget(close_btn)
             self._unified_tab_bar.setTabButton(
                 i,
                 QTabBar.ButtonPosition.RightSide,
@@ -1282,6 +1303,16 @@ class PreviewWidget(QWidget):
         return str(parent)
 
     def eventFilter(self, obj, event):  # noqa: N802
+        if obj is self._unified_tab_bar:
+            if event.type() == QEvent.Type.MouseMove:
+                idx = self._unified_tab_bar.tabAt(event.position().toPoint())
+                if idx != self._tab_hovered_index:
+                    self._tab_hovered_index = idx
+                    self._refresh_unified_tab_affordances()
+            elif event.type() in (QEvent.Type.Leave, QEvent.Type.HoverLeave):
+                if self._tab_hovered_index != -1:
+                    self._tab_hovered_index = -1
+                    self._refresh_unified_tab_affordances()
         if obj in (self._tab_scroll, self._tab_scroll.viewport()):
             if event.type() in (QEvent.Type.Enter, QEvent.Type.HoverEnter):
                 self._tab_area_hovered = True

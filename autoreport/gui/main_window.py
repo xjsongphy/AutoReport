@@ -335,7 +335,7 @@ class MainWindow(QMainWindow):
                 border-radius: {px(4)};
                 color: {c["muted"]};
                 font-size: {px(11)};
-                padding: 0 {px(6)};
+                padding: 0 {px(3)};
                 min-height: {px(22)};
                 max-height: {px(22)};
             }}

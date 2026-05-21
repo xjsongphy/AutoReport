@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import QPoint, QSize, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QLinearGradient, QPainter
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -33,11 +33,31 @@ from autoreport.utils.logging_config import ui_logger
 from ..theme import get_theme_colors
 
 
-def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
-    color = hex_color.lstrip("#")
-    if len(color) != 6:
-        return (0, 0, 0)
-    return (int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16))
+class _ComposerTopFade(QWidget):
+    """Top fade mask above composer: alpha from 100% to 50%."""
+
+    def __init__(self, base_color: QColor, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._base_color = QColor(base_color)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAutoFillBackground(False)
+
+    def set_base_color(self, base_color: QColor) -> None:
+        self._base_color = QColor(base_color)
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        super().paintEvent(event)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        grad = QLinearGradient(0, 0, 0, max(1, self.height()))
+        top = QColor(self._base_color)
+        bottom = QColor(self._base_color)
+        top.setAlpha(255)
+        bottom.setAlpha(127)
+        grad.setColorAt(0.0, top)
+        grad.setColorAt(1.0, bottom)
+        p.fillRect(self.rect(), grad)
 
 
 class AgentPanel(QWidget):
@@ -192,17 +212,10 @@ class AgentPanel(QWidget):
 
         # ---- Composer (floating input + dock bar) ----
         c = get_theme_colors()
-        r, g, b = _hex_to_rgb(c["panel_bg"])
-        self._composer_top_fade = QWidget(self)
+        self._composer_top_fade = _ComposerTopFade(QColor(c["panel_bg"]), self)
         self._composer_top_fade.setObjectName("composerTopFade")
         self._composer_top_fade.setFixedHeight(scaled(18))
-        self._composer_top_fade.setStyleSheet(
-            "QWidget#composerTopFade {"
-            "border: none;"
-            "background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
-            f"stop:0 rgba({r}, {g}, {b}, 255), stop:1 rgba({r}, {g}, {b}, 127));"
-            "}"
-        )
+        self._composer_top_fade.setStyleSheet("QWidget#composerTopFade { border: none; background: transparent; }")
         layout.addWidget(self._composer_top_fade)
 
         self._composer_host = QWidget(self)

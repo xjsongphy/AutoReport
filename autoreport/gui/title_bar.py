@@ -133,7 +133,7 @@ class TitleBar(QWidget):
 
         self.setStyleSheet(f"""
             #titleBar {{
-                background-color: {c["surface"]};
+                background-color: {c["titlebar_bg"]};
                 border-bottom: 1px solid {c["border"]};
             }}
             #titleBarMenuBar {{
@@ -145,7 +145,7 @@ class TitleBar(QWidget):
             #titleBarMenuBar::item {{
                 background-color: transparent;
                 color: {c["fg"]};
-                padding: 0px {int(8 * s)}px;
+                padding: 0px {int(5 * s)}px;
                 border-radius: {int(4 * s)}px;
                 font-size: {int(13 * s)}px;
                 min-height: {max(16, self._title_height - int(10 * s))}px;
