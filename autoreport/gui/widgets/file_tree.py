@@ -44,6 +44,7 @@ FIXED_DIRECTORIES = ["data", "references", "theory", "code", "tex"]
 _FILE_TEXT_ICON_GAP_ADJUST = 28
 _FILE_EDITOR_LEFT_ADJUST = -26
 _INDICATOR_PLACEHOLDER_ROLE = Qt.ItemDataRole.UserRole + 99
+_NON_DRAGGABLE_DIRS = {"data/processed"}
 
 
 # ================================================================== #
@@ -66,6 +67,9 @@ class _FileTreeDelegate(QStyledItemDelegate):
             return
 
         item = tree_widget.itemFromIndex(index)
+        if item is not None and item.data(0, _INDICATOR_PLACEHOLDER_ROLE):
+            return
+
         has_icon = item is not None and not item.icon(0).isNull()
         file_tree_widget = getattr(tree_widget, "_file_tree_widget", None)
         is_drop_target = item is not None and item is getattr(file_tree_widget, "_drop_target_item", None)
@@ -115,6 +119,14 @@ class _FileTreeDelegate(QStyledItemDelegate):
         icon.paint(painter, icon_x, icon_y, icon_sz.width(), icon_sz.height())
         painter.restore()
 
+    def sizeHint(self, option, index):  # noqa: N802
+        tree_widget = option.widget
+        if tree_widget:
+            item = tree_widget.itemFromIndex(index)
+            if item is not None and item.data(0, _INDICATOR_PLACEHOLDER_ROLE):
+                return QSize(0, 0)
+        return super().sizeHint(option, index)
+
     def updateEditorGeometry(self, editor, option, index):  # noqa: N802
         super().updateEditorGeometry(editor, option, index)
         tree_widget = option.widget
@@ -157,6 +169,12 @@ class _DragDropTreeWidget(QTreeWidget):
         super().__init__(parent)
         self._file_tree_widget = file_tree_widget
 
+    def drawBranches(self, painter, rect, index):  # noqa: N802
+        item = self.itemFromIndex(index)
+        if item is not None and item is getattr(self._file_tree_widget, "_drop_target_item", None):
+            painter.fillRect(rect, QColor(get_theme_colors()["tree_sel_bg"]))
+        super().drawBranches(painter, rect, index)
+
     def startDrag(self, supportedActions: Qt.DropAction) -> None:
         """Override to create a compact drag preview that doesn't stretch.
 
@@ -176,7 +194,12 @@ class _DragDropTreeWidget(QTreeWidget):
             and not file_path_str
             and dir_name in FIXED_DIRECTORIES
         )
-        if is_top_level_fixed_dir:
+        is_non_draggable_dir = (
+            not file_path_str
+            and self._file_tree_widget is not None
+            and self._file_tree_widget._is_non_draggable_directory(dir_name)
+        )
+        if is_top_level_fixed_dir or is_non_draggable_dir:
             return  # Don't allow dragging fixed directories
 
         # Get the icon for the item
@@ -454,6 +477,7 @@ class FileTreeWidget(QWidget):
                 background-color: {c["surface"]};
                 border: none;
                 outline: none;
+                show-decoration-selected: 1;
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
                 font-size: 13px;
                 alternate-background-color: {c["surface"]};
@@ -476,6 +500,12 @@ class FileTreeWidget(QWidget):
             #fileTree::item:selected:!active {{
                 background-color: {c["tree_sel_bg"]};
                 color: {c["fg"]};
+            }}
+            #fileTree::branch:selected {{
+                background-color: {c["tree_sel_bg"]};
+            }}
+            #fileTree::branch:selected:!active {{
+                background-color: {c["tree_sel_bg"]};
             }}
 
             /* Inline edit input - gray background with blue border on focus */
@@ -570,14 +600,14 @@ class FileTreeWidget(QWidget):
                 processed_item = QTreeWidgetItem(item)
                 processed_item.setText(0, DIR_LABELS.get("processed", "processed"))
                 processed_item.setData(0, Qt.ItemDataRole.UserRole, "data/processed")
-                self._mark_movable_directory_item(processed_item)
+                self._mark_fixed_directory_item(processed_item)
                 self._show_directory_indicator(processed_item)
 
     def _show_directory_indicator(self, item: QTreeWidgetItem) -> None:
         item.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
 
     def _ensure_indicator_placeholder(self, item: QTreeWidgetItem) -> None:
-        """Keep a hidden child on empty directories so branch arrows stay stable."""
+        """Keep a zero-height child on empty directories so branch arrows stay stable."""
         dir_name = item.data(0, Qt.ItemDataRole.UserRole)
         file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
         if not dir_name or file_path_str:
@@ -587,7 +617,6 @@ class FileTreeWidget(QWidget):
                 return
         placeholder = QTreeWidgetItem(item)
         placeholder.setData(0, _INDICATOR_PLACEHOLDER_ROLE, True)
-        placeholder.setHidden(True)
         placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
 
     def _drop_target_dir_item(self, target_item: QTreeWidgetItem | None) -> QTreeWidgetItem | None:
@@ -634,6 +663,10 @@ class FileTreeWidget(QWidget):
     def _mark_file_item(self, item: QTreeWidgetItem) -> None:
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsDragEnabled | Qt.ItemFlag.ItemIsEditable)
 
+    @staticmethod
+    def _is_non_draggable_directory(dir_name: str | None) -> bool:
+        return bool(dir_name and dir_name in _NON_DRAGGABLE_DIRS)
+
     def _ensure_directory_indicators(self, root: QTreeWidgetItem | None = None) -> None:
         node = root if root is not None else self.tree.invisibleRootItem()
         for i in range(node.childCount()):
@@ -642,7 +675,7 @@ class FileTreeWidget(QWidget):
             file_path_str = child.data(0, Qt.ItemDataRole.UserRole + 1)
             if dir_name and not file_path_str:
                 self._show_directory_indicator(child)
-                if child.childCount() == 0 and not child.isExpanded():
+                if child.childCount() == 0:
                     self._ensure_indicator_placeholder(child)
             self._ensure_directory_indicators(child)
 
@@ -1073,7 +1106,10 @@ class FileTreeWidget(QWidget):
                         rel = self._workspace_rel(entry)
                         child.setData(0, Qt.ItemDataRole.UserRole, rel)
                         child.setText(0, entry.name)
-                        self._mark_movable_directory_item(child)
+                        if self._is_non_draggable_directory(rel):
+                            self._mark_fixed_directory_item(child)
+                        else:
+                            self._mark_movable_directory_item(child)
                         self._show_directory_indicator(child)
                     else:
                         child.setIcon(0, _get_file_icon(entry.suffix, style, entry))
@@ -1081,7 +1117,7 @@ class FileTreeWidget(QWidget):
                         child.setData(0, Qt.ItemDataRole.UserRole, rel)
                         child.setData(0, Qt.ItemDataRole.UserRole + 1, str(entry))
                         self._mark_file_item(child)
-                if item.childCount() == 0 and not item.isExpanded():
+                if item.childCount() == 0:
                     self._ensure_indicator_placeholder(item)
 
         except PermissionError as e:

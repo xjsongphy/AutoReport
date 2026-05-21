@@ -19,7 +19,7 @@ from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtWidgets import QAbstractItemDelegate, QTreeWidgetItem
 
-from autoreport.gui.widgets.file_tree import FileTreeWidget, FIXED_DIRECTORIES
+from autoreport.gui.widgets.file_tree import FileTreeWidget, FIXED_DIRECTORIES, _INDICATOR_PLACEHOLDER_ROLE
 
 
 def test_fixed_directories_constant() -> None:
@@ -368,15 +368,23 @@ def test_drag_hover_highlights_resolved_directory(qtbot, tmp_path: Path) -> None
     assert widget._drop_target_item is None
 
 
-def test_processed_directory_is_draggable_but_fixed_roots_are_not(qtbot, tmp_path: Path) -> None:
+def test_processed_directory_is_not_draggable_but_files_inside_are(qtbot, tmp_path: Path) -> None:
+    processed_file = tmp_path / "data" / "processed" / "result.txt"
+    processed_file.parent.mkdir(parents=True, exist_ok=True)
+    processed_file.write_text("ok", encoding="utf-8")
+
     widget = FileTreeWidget(tmp_path)
     qtbot.addWidget(widget)
 
     data_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("data"))
     processed_item = data_item.child(0)
+    processed_item.setExpanded(True)
+    widget._on_item_expanded(processed_item)
+    file_item = processed_item.child(0)
 
     assert not (data_item.flags() & Qt.ItemFlag.ItemIsDragEnabled)
-    assert processed_item.flags() & Qt.ItemFlag.ItemIsDragEnabled
+    assert not (processed_item.flags() & Qt.ItemFlag.ItemIsDragEnabled)
+    assert file_item.flags() & Qt.ItemFlag.ItemIsDragEnabled
 
 
 def test_directories_do_not_show_folder_icons(qtbot, tmp_path: Path) -> None:
@@ -399,7 +407,16 @@ def test_empty_directory_keeps_expand_indicator_after_reload(qtbot, tmp_path: Pa
     references_item.setExpanded(True)
     widget._on_item_expanded(references_item)
 
-    assert references_item.childCount() == 0
+    real_children = [
+        references_item.child(i)
+        for i in range(references_item.childCount())
+        if not references_item.child(i).data(0, _INDICATOR_PLACEHOLDER_ROLE)
+    ]
+    assert len(real_children) == 0
+    assert any(
+        references_item.child(i).data(0, _INDICATOR_PLACEHOLDER_ROLE)
+        for i in range(references_item.childCount())
+    )
     assert (
         references_item.childIndicatorPolicy()
         == QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
@@ -519,6 +536,46 @@ def test_internal_move_keeps_references_expand_indicator(qtbot, tmp_path: Path) 
     refs_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("references"))
     assert data_item is not None
     assert refs_item is not None
+
+    data_item.setExpanded(True)
+    widget._on_item_expanded(data_item)
+    processed_item = None
+    file_item = None
+    for i in range(data_item.childCount()):
+        child = data_item.child(i)
+        rel = child.data(0, Qt.ItemDataRole.UserRole)
+        if rel == "data/processed":
+            processed_item = child
+        if child.data(0, Qt.ItemDataRole.UserRole + 1) == str(source):
+            file_item = child
+    assert processed_item is not None
+    assert file_item is not None
+
+    widget.tree.clearSelection()
+    file_item.setSelected(True)
+    widget._handle_internal_move(None, processed_item)
+
+    assert (
+        refs_item.childIndicatorPolicy()
+        == QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
+    )
+
+
+def test_internal_move_keeps_indicator_when_references_is_expanded(qtbot, tmp_path: Path) -> None:
+    source = tmp_path / "data" / "raw.txt"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("x", encoding="utf-8")
+
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    data_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("data"))
+    refs_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("references"))
+    assert data_item is not None
+    assert refs_item is not None
+
+    refs_item.setExpanded(True)
+    widget._on_item_expanded(refs_item)
 
     data_item.setExpanded(True)
     widget._on_item_expanded(data_item)
