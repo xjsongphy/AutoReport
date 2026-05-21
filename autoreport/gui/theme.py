@@ -43,6 +43,7 @@ def get_theme_colors() -> dict[str, str]:
     bg = "#1e1e1e" if dark else "#ffffff"
     surface = "#181818" if dark else "#f0f0f0"
     panel_bg = "#141414" if dark else "#f0f0f0"
+    titlebar_bg = "#141414" if dark else "#e6e6e6"
     messages_bg = "#121212" if dark else "#f0f0f0"
     border = "#2b2b2b" if dark else "#e0e0e0"
     fg = "#cccccc" if dark else "#616161"
@@ -57,6 +58,7 @@ def get_theme_colors() -> dict[str, str]:
         "bg": bg,  # Main content area
         "surface": surface,  # Sidebar/chrome (file tree, header)
         "panel_bg": panel_bg,  # Agent panel background (darker than editor)
+        "titlebar_bg": titlebar_bg,  # Custom window title bar background
         "messages_bg": messages_bg,  # Agent conversation area background
         "card": "#252526" if dark else "#f5f5f5",  # Elevated cards
         "border": border,
@@ -106,8 +108,8 @@ def get_theme_colors() -> dict[str, str]:
         "scrollbar_hover": "#8a8a8a" if dark else "#a8a8a8",
 
         # === Chat/Agent Panel ===
-        "bubble_bg": "#2a2a2a" if dark else "#f0f0f0",
-        "bubble_hover": "#333333" if dark else "#e8e8e8",
+        "bubble_bg": "#2a2a2a" if dark else "#ffffff",
+        "bubble_hover": "#333333" if dark else "#ffffff",
         "edit_bubble_bg": "#3c3c3c" if dark else "#ffffff",
         "edit_bubble_border": "transparent" if dark else "#616161",
         "avatar_bg": "#3c3c3c" if dark else "#e0e0e0",
@@ -140,7 +142,7 @@ def get_theme_colors() -> dict[str, str]:
 
         # === Tabs ===
         "tab_active_bg": bg if dark else "#ffffff",
-        "tab_inactive_bg": bg if dark else "#f0f0f0",
+        "tab_inactive_bg": surface if dark else "#f0f0f0",
         "tab_active_fg": "#ffffff" if dark else "#1a1a1a",
         "tab_inactive_fg": "#969696" if dark else "#888888",
 
