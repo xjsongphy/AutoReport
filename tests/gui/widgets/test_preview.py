@@ -46,13 +46,13 @@ def test_loading_existing_file_switches_back_to_its_tab(qtbot, tmp_path: Path) -
     assert widget._unified_tab_bar.tabData(0) == str(first.resolve())
 
 
-def test_unselected_unified_tabs_use_inactive_background(qtbot, tmp_path: Path) -> None:
+def test_unselected_unified_tabs_use_surface_background(qtbot, tmp_path: Path) -> None:
     widget = PreviewWidget(tmp_path)
     qtbot.addWidget(widget)
 
     colors = get_theme_colors()
 
-    assert f'background-color: {colors["tab_inactive_bg"]};' in widget.styleSheet()
+    assert f'background-color: {colors["surface"]};' in widget.styleSheet()
 
 
 def test_selected_unified_tabs_use_active_background(qtbot, tmp_path: Path) -> None:

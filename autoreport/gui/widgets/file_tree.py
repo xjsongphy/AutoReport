@@ -11,10 +11,10 @@ import shutil
 from pathlib import Path
 
 from loguru import logger
-from PyQt6.QtCore import QFileInfo, QFileSystemWatcher, QMimeData, QPoint, QSize, QSignalBlocker, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QFileInfo, QFileSystemWatcher, QMimeData, QPoint, QRect, QSize, QSignalBlocker, Qt, QTimer, pyqtSignal
 
 from autoreport.utils.logging_config import ui_logger
-from PyQt6.QtGui import QColor, QCursor, QDrag, QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QDropEvent, QIcon, QPalette, QPainter, QPixmap
+from PyQt6.QtGui import QColor, QCursor, QDrag, QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QDropEvent, QIcon, QPalette, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemDelegate,
     QAbstractItemView,
@@ -43,6 +43,7 @@ from .ui_utils import UI_HOVER_DELAY_MS, IconActionButton, compact_tooltip_qss, 
 FIXED_DIRECTORIES = ["data", "references", "theory", "code", "tex"]
 _FILE_TEXT_ICON_GAP_ADJUST = 28
 _FILE_EDITOR_LEFT_ADJUST = -26
+_DIRECTORY_EDITOR_LEFT_ADJUST = 4
 _INDICATOR_PLACEHOLDER_ROLE = Qt.ItemDataRole.UserRole + 99
 _NON_DRAGGABLE_DIRS = {"data/processed"}
 
@@ -60,6 +61,19 @@ class _FileTreeDelegate(QStyledItemDelegate):
     at the arrow position (center of the indentation column).
     """
 
+    def _display_option(self, option, index) -> QStyleOptionViewItem:
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        opt.state &= ~(
+            QStyle.StateFlag.State_Selected
+            | QStyle.StateFlag.State_MouseOver
+            | QStyle.StateFlag.State_HasFocus
+        )
+        c = get_theme_colors()
+        opt.palette.setColor(QPalette.ColorRole.Text, QColor(c["fg"]))
+        opt.palette.setColor(QPalette.ColorRole.HighlightedText, QColor(c["fg"]))
+        return opt
+
     def paint(self, painter, option, index):
         tree_widget = option.widget
         if not tree_widget:
@@ -71,18 +85,10 @@ class _FileTreeDelegate(QStyledItemDelegate):
             return
 
         has_icon = item is not None and not item.icon(0).isNull()
-        file_tree_widget = getattr(tree_widget, "_file_tree_widget", None)
-        is_drop_target = item is not None and item is getattr(file_tree_widget, "_drop_target_item", None)
-
         if not has_icon:
-            if is_drop_target:
-                opt = QStyleOptionViewItem(option)
-                self.initStyleOption(opt, index)
-                opt.state |= QStyle.StateFlag.State_Selected | QStyle.StateFlag.State_Active
-                style = opt.widget.style() if opt.widget else QApplication.style()
-                style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
-                return
-            super().paint(painter, option, index)
+            opt = self._display_option(option, index)
+            style = opt.widget.style() if opt.widget else QApplication.style()
+            style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
             return
 
         # Save icon reference
@@ -91,10 +97,7 @@ class _FileTreeDelegate(QStyledItemDelegate):
 
         # Draw selection bg + text without decoration, but do not mutate model
         # data in paint path (that can cause unstable click/edit behavior).
-        opt = QStyleOptionViewItem(option)
-        self.initStyleOption(opt, index)
-        if is_drop_target:
-            opt.state |= QStyle.StateFlag.State_Selected | QStyle.StateFlag.State_Active
+        opt = self._display_option(option, index)
         opt.icon = QIcon()
         style = opt.widget.style() if opt.widget else QApplication.style()
         # Keep icon fixed; pull text closer so file rows visually match folder rows.
@@ -135,11 +138,13 @@ class _FileTreeDelegate(QStyledItemDelegate):
         item = tree_widget.itemFromIndex(index)
         if item is None:
             return
-        # Leave clear branch/arrow area so expanded arrows are never covered
-        # by the inline filename editor.
+        rect = editor.geometry()
+        # Keep the editor inside the text area; the unified row background stays
+        # visible under both the branch arrow and transparent editor.
         if not item.icon(0).isNull():
-            rect = editor.geometry()
             editor.setGeometry(rect.adjusted(_FILE_EDITOR_LEFT_ADJUST, 0, 0, 0))
+        else:
+            editor.setGeometry(rect.adjusted(_DIRECTORY_EDITOR_LEFT_ADJUST, 0, 0, 0))
 
 # Directory display labels (VSCode style: concise, title case)
 DIR_LABELS = {
@@ -169,11 +174,72 @@ class _DragDropTreeWidget(QTreeWidget):
         super().__init__(parent)
         self._file_tree_widget = file_tree_widget
 
-    def drawBranches(self, painter, rect, index):  # noqa: N802
+    def _row_background_color(self, item: QTreeWidgetItem | None) -> QColor | None:
+        if item is None:
+            return None
+        c = get_theme_colors()
+        if (
+            self._file_tree_widget is not None
+            and self._file_tree_widget._is_drop_highlight_item(item)
+        ):
+            return QColor(c["tree_hover"])
+        if self._file_tree_widget is not None and item is getattr(self._file_tree_widget, "_editing_item", None):
+            return QColor(c["tree_sel_bg"])
+        if self.selectionModel() is not None and self.selectionModel().isSelected(self.indexFromItem(item, 0)):
+            return QColor(c["tree_sel_bg"])
+        hover_item = self.itemAt(self.viewport().mapFromGlobal(QCursor.pos()))
+        if item is hover_item:
+            return QColor(c["tree_hover"])
+        return None
+
+    def drawRow(self, painter, option, index):  # noqa: N802
         item = self.itemFromIndex(index)
-        if item is not None and item is getattr(self._file_tree_widget, "_drop_target_item", None):
-            painter.fillRect(rect, QColor(get_theme_colors()["tree_sel_bg"]))
-        super().drawBranches(painter, rect, index)
+        color = self._row_background_color(item)
+        if color is not None:
+            rect = QRect(0, option.rect.y(), self.viewport().width(), option.rect.height())
+            painter.fillRect(rect, color)
+        super().drawRow(painter, option, index)
+
+    def drawBranches(self, painter, rect, index):  # noqa: N802
+        """Paint branch background and disclosure arrow without native branch fill."""
+        item = self.itemFromIndex(index)
+        color = self._row_background_color(item)
+        if color is not None:
+            painter.fillRect(rect, color)
+        if item is None:
+            return
+
+        has_indicator = (
+            item.childCount() > 0
+            or item.childIndicatorPolicy() == QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
+        )
+        if not has_indicator:
+            return
+
+        depth = 0
+        parent = item.parent()
+        root = self.invisibleRootItem()
+        while parent is not None and parent is not root:
+            depth += 1
+            parent = parent.parent()
+
+        indent = self.indentation()
+        center_x = depth * indent + indent // 2
+        center_y = rect.y() + rect.height() // 2
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor(get_theme_colors()["fg"]), 1.4)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        if item.isExpanded():
+            painter.drawLine(center_x - 4, center_y - 2, center_x, center_y + 2)
+            painter.drawLine(center_x, center_y + 2, center_x + 4, center_y - 2)
+        else:
+            painter.drawLine(center_x - 2, center_y - 4, center_x + 2, center_y)
+            painter.drawLine(center_x + 2, center_y, center_x - 2, center_y + 4)
+        painter.restore()
 
     def startDrag(self, supportedActions: Qt.DropAction) -> None:
         """Override to create a compact drag preview that doesn't stretch.
@@ -477,7 +543,7 @@ class FileTreeWidget(QWidget):
                 background-color: {c["surface"]};
                 border: none;
                 outline: none;
-                show-decoration-selected: 1;
+                show-decoration-selected: 0;
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
                 font-size: 13px;
                 alternate-background-color: {c["surface"]};
@@ -489,25 +555,24 @@ class FileTreeWidget(QWidget):
             }}
 
             #fileTree::item:hover {{
-                background-color: {c["tree_hover"]};
+                background-color: transparent;
             }}
 
             #fileTree::item:selected {{
-                background-color: {c["tree_sel_bg"]};
-                color: {c["tree_sel_fg"]};
+                background-color: transparent;
+                color: {c["fg"]};
             }}
 
             #fileTree::item:selected:!active {{
-                background-color: {c["tree_sel_bg"]};
+                background-color: transparent;
                 color: {c["fg"]};
             }}
             #fileTree::branch:selected {{
-                background-color: {c["tree_sel_bg"]};
+                background-color: transparent;
             }}
             #fileTree::branch:selected:!active {{
-                background-color: {c["tree_sel_bg"]};
+                background-color: transparent;
             }}
-
             /* Inline edit input - gray background with blue border on focus */
             #fileTree QLineEdit {{
                 background-color: {c["bg"]};
@@ -631,23 +696,39 @@ class FileTreeWidget(QWidget):
             return target_item.parent()
         return None
 
+    def _is_drop_highlight_item(self, item: QTreeWidgetItem | None) -> bool:
+        target = self._drop_target_item
+        if item is None or target is None:
+            return False
+        current = item
+        while current is not None:
+            if current is target:
+                return True
+            current = current.parent()
+        return False
+
     def _set_drop_target_from_item(self, target_item: QTreeWidgetItem | None) -> None:
         new_target = self._drop_target_dir_item(target_item)
         if new_target is self._drop_target_item:
             return
 
-        old_target = self._drop_target_item
         self._drop_target_item = new_target
-        for item in (old_target, new_target):
-            if item is not None:
-                self.tree.viewport().update(self.tree.visualItemRect(item))
+        self.tree.viewport().update()
 
     def _clear_drop_target(self) -> None:
         if self._drop_target_item is None:
             return
-        old_target = self._drop_target_item
         self._drop_target_item = None
-        self.tree.viewport().update(self.tree.visualItemRect(old_target))
+        self.tree.viewport().update()
+
+    def _set_editing_item(self, item: QTreeWidgetItem | None) -> None:
+        if item is self._editing_item:
+            return
+        old_item = self._editing_item
+        self._editing_item = item
+        for row_item in (old_item, item):
+            if row_item is not None:
+                self.tree.viewport().update(self.tree.visualItemRect(row_item))
 
     def _mark_fixed_directory_item(self, item: QTreeWidgetItem) -> None:
         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
@@ -921,13 +1002,13 @@ class FileTreeWidget(QWidget):
 
         # For new items, only update icon during editing, don't create file yet
         if is_new_item:
-            self._editing_item = item
+            self._set_editing_item(item)
             return  # Don't create file yet, wait for editor to close
 
         # Empty name for existing items - revert
         if not new_name and not is_new_item:
             self._remove_item(item)
-            self._editing_item = None
+            self._set_editing_item(None)
             if self._pending_new_item == item:
                 self._pending_new_item = None
                 self._pending_new_kind = None
@@ -943,10 +1024,10 @@ class FileTreeWidget(QWidget):
                 original_name = DIR_LABELS.get(dir_name, dir_name)
 
         if original_name.lower() == new_name.lower():
-            self._editing_item = None
+            self._set_editing_item(None)
             return
 
-        self._editing_item = item
+        self._set_editing_item(item)
 
         if file_path_str:
             old_path = Path(file_path_str)
@@ -954,7 +1035,7 @@ class FileTreeWidget(QWidget):
             if old_path != new_path and new_path.exists():
                 QMessageBox.warning(self, "重命名失败", f"文件名 '{new_name}' 已存在")
                 self._revert_item_name(item)
-                self._editing_item = None
+                self._set_editing_item(None)
                 return
             try:
                 old_path.rename(new_path)
@@ -964,14 +1045,14 @@ class FileTreeWidget(QWidget):
             except Exception as e:
                 QMessageBox.warning(self, "重命名失败", f"无法重命名:\n{e}")
                 self._revert_item_name(item)
-                self._editing_item = None
+                self._set_editing_item(None)
         elif dir_name:
             old_path = self.workspace / dir_name
             new_path = old_path.parent / new_name
             if old_path != new_path and new_path.exists():
                 QMessageBox.warning(self, "重命名失败", f"文件夹名 '{new_name}' 已存在")
                 self._revert_item_name(item)
-                self._editing_item = None
+                self._set_editing_item(None)
                 return
             try:
                 old_path.rename(new_path)
@@ -987,9 +1068,9 @@ class FileTreeWidget(QWidget):
             except Exception as e:
                 QMessageBox.warning(self, "重命名失败", f"无法重命名:\n{e}")
                 self._revert_item_name(item)
-                self._editing_item = None
+                self._set_editing_item(None)
 
-        self._editing_item = None
+        self._set_editing_item(None)
 
     def _remove_item(self, item: QTreeWidgetItem) -> None:
         parent = item.parent()
@@ -1002,6 +1083,7 @@ class FileTreeWidget(QWidget):
 
     def _on_close_editor(self, editor, hint: QAbstractItemDelegate.EndEditHint) -> None:
         if self._pending_new_item is None:
+            self._set_editing_item(None)
             return
         # Ignore close events from unrelated editors.
         if self._pending_editor is not None and editor is not self._pending_editor:
@@ -1573,6 +1655,7 @@ class FileTreeWidget(QWidget):
         self.tree.setCurrentItem(new_item)
         self._pending_new_item = new_item
         self._pending_new_kind = "folder" if is_folder else "file"
+        self._set_editing_item(new_item)
         self.tree.editItem(new_item, 0)
         self._bind_create_editor_live_updates(new_item)
         self._focus_inline_editor()
@@ -1587,6 +1670,7 @@ class FileTreeWidget(QWidget):
         self._pending_new_item = None
         self._pending_new_kind = None
         self._pending_editor = None
+        self._set_editing_item(None)
 
     def _finalize_pending_new_item(self) -> None:
         if self._pending_new_item is None:
@@ -1632,9 +1716,11 @@ class FileTreeWidget(QWidget):
             self._pending_new_item = None
             self._pending_new_kind = None
             self._pending_editor = None
+            self._set_editing_item(None)
 
     def _rename_file(self, file_path: Path, item: QTreeWidgetItem) -> None:
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+        self._set_editing_item(item)
         self.tree.editItem(item, 0)
 
     def _delete_file(self, file_path: Path, item: QTreeWidgetItem) -> None:
@@ -1659,6 +1745,7 @@ class FileTreeWidget(QWidget):
 
     def _rename_directory(self, dir_path: Path, item: QTreeWidgetItem) -> None:
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+        self._set_editing_item(item)
         self.tree.editItem(item, 0)
 
     def _delete_directory(self, dir_path: Path, item: QTreeWidgetItem) -> None:

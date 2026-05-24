@@ -19,7 +19,13 @@ from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtWidgets import QAbstractItemDelegate, QTreeWidgetItem
 
-from autoreport.gui.widgets.file_tree import FileTreeWidget, FIXED_DIRECTORIES, _INDICATOR_PLACEHOLDER_ROLE
+from autoreport.gui.theme import get_theme_colors
+from autoreport.gui.widgets.file_tree import (
+    FIXED_DIRECTORIES,
+    FileTreeWidget,
+    _DragDropTreeWidget,
+    _INDICATOR_PLACEHOLDER_ROLE,
+)
 
 
 def test_fixed_directories_constant() -> None:
@@ -350,8 +356,11 @@ def test_drop_target_resolves_nested_directories(qtbot, tmp_path: Path) -> None:
 
 def test_drag_hover_highlights_resolved_directory(qtbot, tmp_path: Path) -> None:
     target_file = tmp_path / "references" / "note.txt"
+    nested_file = tmp_path / "references" / "nested" / "deep.txt"
     target_file.parent.mkdir(parents=True, exist_ok=True)
+    nested_file.parent.mkdir(parents=True, exist_ok=True)
     target_file.write_text("x", encoding="utf-8")
+    nested_file.write_text("deep", encoding="utf-8")
 
     widget = FileTreeWidget(tmp_path)
     qtbot.addWidget(widget)
@@ -359,13 +368,86 @@ def test_drag_hover_highlights_resolved_directory(qtbot, tmp_path: Path) -> None
     refs_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("references"))
     refs_item.setExpanded(True)
     widget._on_item_expanded(refs_item)
-    file_item = refs_item.child(0)
+    file_item = None
+    nested_item = None
+    nested_child = None
+    for i in range(refs_item.childCount()):
+        child = refs_item.child(i)
+        if child.data(0, Qt.ItemDataRole.UserRole + 1) == str(target_file):
+            file_item = child
+        if child.data(0, Qt.ItemDataRole.UserRole) == "references/nested":
+            nested_item = child
+            child.setExpanded(True)
+            widget._on_item_expanded(child)
+            nested_child = child.child(0)
+    assert file_item is not None
+    assert nested_item is not None
+    assert nested_child is not None
 
     widget._set_drop_target_from_item(file_item)
     assert widget._drop_target_item is refs_item
+    assert widget.tree._row_background_color(refs_item).name() == get_theme_colors()["tree_hover"]
+    assert widget.tree._row_background_color(file_item).name() == get_theme_colors()["tree_hover"]
+    assert widget.tree._row_background_color(nested_item).name() == get_theme_colors()["tree_hover"]
+    assert widget.tree._row_background_color(nested_child).name() == get_theme_colors()["tree_hover"]
 
     widget._clear_drop_target()
     assert widget._drop_target_item is None
+    assert not widget._is_drop_highlight_item(refs_item)
+
+
+def test_tree_row_states_paint_row_and_branch_with_same_color(qtbot, tmp_path: Path) -> None:
+    import inspect
+
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    colors = get_theme_colors()
+    refs_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("references"))
+    assert refs_item is not None
+
+    widget.tree.setCurrentItem(refs_item)
+    refs_item.setSelected(True)
+    assert widget.tree._row_background_color(refs_item).name() == colors["tree_sel_bg"]
+
+    widget.tree.clearSelection()
+    refs_item.setSelected(False)
+    widget._set_drop_target_from_item(refs_item)
+    assert widget.tree._row_background_color(refs_item).name() == colors["tree_hover"]
+
+    widget._clear_drop_target()
+    widget._editing_item = refs_item
+    assert widget.tree._row_background_color(refs_item).name() == colors["tree_sel_bg"]
+    widget._set_editing_item(None)
+
+    widget._new_file_in_dir("references")
+    pending = widget._pending_new_item
+    assert pending is not None
+    assert widget._editing_item is pending
+    assert widget.tree._row_background_color(pending).name() == colors["tree_sel_bg"]
+    widget._cancel_pending_new_item()
+
+    refs_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("references"))
+    assert refs_item is not None
+    widget._rename_directory(tmp_path / "references", refs_item)
+    assert widget._editing_item is refs_item
+    assert widget.tree._row_background_color(refs_item).name() == colors["tree_sel_bg"]
+    widget._set_editing_item(None)
+
+    row_color_source = inspect.getsource(_DragDropTreeWidget._row_background_color)
+    draw_row_source = inspect.getsource(_DragDropTreeWidget.drawRow)
+    draw_branch_source = inspect.getsource(_DragDropTreeWidget.drawBranches)
+    stylesheet = widget.styleSheet()
+
+    assert "tree_sel_bg" in row_color_source
+    assert "tree_hover" in row_color_source
+    assert "fillRect(rect, color)" in draw_row_source
+    assert "fillRect(rect, color)" in draw_branch_source
+    assert "super().drawBranches" not in draw_branch_source
+    assert "drawLine" in draw_branch_source
+    assert "#fileTree::item:hover" in stylesheet
+    assert "show-decoration-selected: 0;" in stylesheet
+    assert f'background-color: {colors["bg"]};' in stylesheet
 
 
 def test_processed_directory_is_not_draggable_but_files_inside_are(qtbot, tmp_path: Path) -> None:

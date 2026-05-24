@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
+from pathlib import PureWindowsPath
 import shutil
 import subprocess
 
@@ -584,12 +585,12 @@ class EditorPanel(QWidget):
         c = get_theme_colors()
         self._tab_bar.setStyleSheet(f"""
             QTabBar#editorTabBar {{
-                background-color: {c["tab_inactive_bg"]};
+                background-color: {c["surface"]};
                 border-bottom: 1px solid {c["border"]};
                 min-height: 35px;
             }}
             QTabBar#editorTabBar::tab {{
-                background-color: {c["tab_inactive_bg"]};
+                background-color: {c["surface"]};
                 color: {c["tab_inactive_fg"]};
                 border: none;
                 border-right: 1px solid {c["border"]};
@@ -608,7 +609,7 @@ class EditorPanel(QWidget):
                 margin: 1px 0 0 0;
             }}
             QTabBar#editorTabBar::tab:!selected:hover {{
-                background-color: {c["tab_active_bg"]};
+                background-color: {c["hover"]};
             }}
             QTabBar#editorTabBar::close-button {{
                 subcontrol-position: right;
@@ -756,7 +757,7 @@ class PreviewWidget(QWidget):
                 background-color: {c["bg"]};
             }}
             #previewHeader {{
-                background-color: {c["tab_inactive_bg"]};
+                background-color: {c["surface"]};
                 border-bottom: 1px solid {c["border"]};
                 padding: 0;
                 padding-right: 1px;
@@ -782,12 +783,12 @@ class PreviewWidget(QWidget):
                 width: 2px;
             }}
             QTabBar#previewTabBar {{
-                background-color: {c["tab_inactive_bg"]};
+                background-color: {c["surface"]};
                 border: none;
                 min-height: 35px;
             }}
             QTabBar#previewTabBar::tab {{
-                background-color: {c["tab_inactive_bg"]};
+                background-color: {c["surface"]};
                 color: {c["tab_inactive_fg"]};
                 border: none;
                 border-right: 1px solid {c["border"]};
@@ -798,14 +799,14 @@ class PreviewWidget(QWidget):
             }}
             QTabBar#previewTabBar::tab:selected {{
                 background-color: {c["tab_active_bg"]};
-                color: {c["tab_inactive_fg"]};
+                color: {c["tab_active_fg"]};
                 border-top: 2px solid {c["accent"]};
                 border-right: 1px solid {c["border"]};
                 border-bottom: 1px solid {c["tab_active_bg"]};
                 margin: 1px 0 0 0;
             }}
             QTabBar#previewTabBar::tab:!selected:hover {{
-                background-color: {c["tab_active_bg"]};
+                background-color: {c["hover"]};
             }}
             QTabBar#previewTabBar::tab:selected:hover {{
                 background-color: {c["tab_active_bg"]};
@@ -907,8 +908,41 @@ class PreviewWidget(QWidget):
     #  File switching
     # ------------------------------------------------------------------ #
 
+    def _resolve_cross_platform_path(self, value: str | Path) -> Path:
+        """Resolve persisted/opened file paths across Windows/macOS separators.
+
+        - Normalizes backslashes to forward slashes for project-relative paths.
+        - Maps relative paths into current workspace.
+        - Best-effort maps Windows absolute paths to current workspace suffix.
+        """
+        raw = str(value).strip()
+        if not raw:
+            return self.workspace
+
+        if raw.startswith("project://"):
+            raw = raw[len("project://"):]
+
+        normalized = raw.replace("\\", "/")
+        path = Path(normalized)
+        if path.is_absolute():
+            return path.resolve()
+
+        # On POSIX, Windows absolute paths (e.g. C:\repo\...) are not absolute.
+        win_path = PureWindowsPath(raw)
+        if win_path.is_absolute():
+            win_parts = [p for p in win_path.parts if p != win_path.anchor]
+            workspace_name = self.workspace.name
+            if workspace_name in win_parts:
+                idx = win_parts.index(workspace_name)
+                rel = Path(*win_parts[idx + 1:]) if idx + 1 < len(win_parts) else Path()
+                return (self.workspace / rel).resolve()
+            # Fallback: keep basename to avoid impossible cross-disk absolute mapping.
+            return (self.workspace / win_path.name).resolve()
+
+        return (self.workspace / path).resolve()
+
     def load_file(self, file_path: Path) -> None:
-        file_path = Path(file_path).resolve()
+        file_path = self._resolve_cross_platform_path(file_path)
         if not self.isVisible():
             self.show()
         self._current_file = file_path
@@ -1155,14 +1189,10 @@ class PreviewWidget(QWidget):
             for item in tabs:
                 if not isinstance(item, str) or not item:
                     continue
-                path = Path(item)
-                if not path.is_absolute():
-                    path = self.workspace / path
+                path = self._resolve_cross_platform_path(item)
                 self.load_file(path)
             if isinstance(active, str) and active:
-                active_path = Path(active)
-                if not active_path.is_absolute():
-                    active_path = self.workspace / active_path
+                active_path = self._resolve_cross_platform_path(active)
                 key = _tab_key(active_path)
                 for i in range(self._unified_tab_bar.count()):
                     if self._unified_tab_bar.tabData(i) == key:
