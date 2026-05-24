@@ -1,8 +1,10 @@
 """Tests for MessageRow component — Cline-style flat timeline."""
 
 import pytest
+from PyQt6.QtCore import QEvent, Qt
 from PyQt6.QtWidgets import QApplication
 from autoreport.gui.widgets.message_row import MessageRow
+from autoreport.gui.widgets.ui_utils import compact_tooltip_qss
 
 
 def test_user_message_renders_badge_style(qtbot):
@@ -102,3 +104,84 @@ def test_agent_message_can_render_collapsed_summary(qtbot):
     assert not widget.is_expanded()
     widget._summary_btn.click()
     assert widget.is_expanded()
+
+
+def test_user_bubble_width_stable_when_actions_toggle(qtbot):
+    widget = MessageRow(role="user", content="Width stability check")
+    qtbot.addWidget(widget)
+    widget.resize(900, 200)
+    widget.mark_complete()
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    before = widget._user_bubble_container.sizeHint().width()
+    widget._set_user_actions_visible(True)
+    qtbot.wait(10)
+    after_show = widget._user_bubble_container.sizeHint().width()
+    widget._set_user_actions_visible(False)
+    qtbot.wait(10)
+    after_hide = widget._user_bubble_container.sizeHint().width()
+
+    assert before == after_show == after_hide
+
+
+def test_tooltip_delay_is_2s_for_action_buttons(qtbot):
+    widget = MessageRow(role="agent", content="tooltip check")
+    qtbot.addWidget(widget)
+    timer = widget._copy_btn._compact_tooltip_filter._timer
+    assert timer.interval() == 2000
+
+
+def test_tooltip_hides_on_leave(qtbot):
+    widget = MessageRow(role="agent", content="tooltip check")
+    qtbot.addWidget(widget)
+    filt = widget._copy_btn._compact_tooltip_filter
+    filt._show(widget._copy_btn)
+    assert filt._tip is not None
+    QApplication.sendEvent(widget._copy_btn, QEvent(QEvent.Type.Leave))
+    assert filt._tip is None
+
+
+def test_tooltip_radius_is_larger():
+    qss = compact_tooltip_qss()
+    assert "border-radius: 6px;" in qss
+
+
+def test_edit_mode_expands_user_bubble_and_shows_cancel_send(qtbot):
+    widget = MessageRow(role="user", content="edit me")
+    qtbot.addWidget(widget)
+    widget.resize(800, 220)
+    widget.mark_complete()
+    widget.set_editable(True)
+    widget.enter_edit_mode()
+
+    assert widget._editing is True
+    assert widget._cancel_btn is not None and widget._cancel_btn.text() == "取消"
+    assert widget._save_btn is not None and widget._save_btn.text() == "发送"
+    assert widget._user_bubble_container.width() >= 700
+
+
+def test_edit_input_height_grows_and_caps_at_10_lines(qtbot):
+    widget = MessageRow(role="user", content="edit me")
+    qtbot.addWidget(widget)
+    widget.resize(800, 220)
+    widget.mark_complete()
+    widget.set_editable(True)
+    widget.enter_edit_mode()
+
+    assert widget._edit_widget is not None
+    edit = widget._edit_widget
+    h1 = edit.height()
+    edit.setPlainText("\n".join(f"line {i}" for i in range(1, 6)))
+    qtbot.wait(10)
+    h5 = edit.height()
+    assert edit.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    edit.setPlainText("\n".join(f"line {i}" for i in range(1, 20)))
+    qtbot.wait(10)
+    h19 = edit.height()
+    assert edit.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+
+    assert h5 > h1
+    assert h19 >= h5
+    # capped around 10 lines (not unbounded growth)
+    assert h19 - h5 < 8 * edit.fontMetrics().lineSpacing()

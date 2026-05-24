@@ -1,6 +1,6 @@
 """Scrollable messages area container for chat display."""
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QTimer, Qt, pyqtSignal
 from PyQt6.QtWidgets import QScrollArea, QVBoxLayout, QWidget
 
 from ..theme import get_theme_colors
@@ -42,7 +42,7 @@ class MessagesArea(QScrollArea):
     def _setup_ui(self) -> None:
         """Setup the UI layout."""
         # Container widget for all messages
-        self._container = QWidget()
+        self._container = QWidget(self)
         self._container.setObjectName("messagesContainer")
 
         self._layout = QVBoxLayout(self._container)
@@ -61,10 +61,10 @@ class MessagesArea(QScrollArea):
         self.setStyleSheet(f"""
             QScrollArea#messagesArea {{
                 border: none;
-                background-color: transparent;
+                background-color: {c["panel_bg"]};
             }}
             QWidget#messagesContainer {{
-                background-color: transparent;
+                background-color: {c["messages_bg"]};
             }}
             QScrollBar:vertical {{
                 background-color: transparent;
@@ -168,7 +168,7 @@ class MessagesArea(QScrollArea):
             summary=summary,
             detail=detail,
             expandable=expandable,
-            parent=None,
+            parent=self._container,
         )
 
         # Connect edit signals for user messages
@@ -187,6 +187,10 @@ class MessagesArea(QScrollArea):
             row.set_editable(True)
             # User messages are immediately complete (non-streaming),
             # so hover toolbar and context actions should be available.
+            row.mark_complete()
+        else:
+            # Non-user rows are added as complete messages, so hover actions
+            # (e.g. agent copy button) should be available immediately.
             row.mark_complete()
 
         # Find the stretch item and insert before it
@@ -230,7 +234,7 @@ class MessagesArea(QScrollArea):
             content=text,
             timestamp="",
             is_coordination=True,
-            parent=None,
+            parent=self._container,
         )
 
         # Find the stretch item and insert before it
@@ -244,6 +248,14 @@ class MessagesArea(QScrollArea):
         """Scroll to the bottom of the messages area."""
         scrollbar = self.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
+
+    def follow_streaming_if_enabled(self) -> None:
+        """Keep following streaming output unless user has scrolled up."""
+        self._update_auto_scroll_state()
+        if not self._auto_scroll_enabled:
+            return
+        # Defer until layout/size updates from appended text are applied.
+        QTimer.singleShot(0, self.scroll_to_bottom)
 
     def clear(self) -> None:
         """Remove all messages from the container."""
@@ -287,6 +299,38 @@ class MessagesArea(QScrollArea):
                 break
 
         # Auto-scroll if enabled
+        if self._auto_scroll_enabled:
+            self.scroll_to_bottom()
+
+    def retract_from_row(self, row: MessageRow) -> None:
+        """Remove `row` and every following message/tool row."""
+        start_index = -1
+        for i in range(self._layout.count() - 1):  # Exclude stretch spacer
+            item = self._layout.itemAt(i)
+            if item and item.widget() == row:
+                start_index = i
+                break
+
+        if start_index < 0:
+            return
+
+        for i in range(self._layout.count() - 2, start_index - 1, -1):
+            item = self._layout.itemAt(i)
+            if not item or not item.widget():
+                continue
+            widget = item.widget()
+            self._layout.removeWidget(widget)
+            widget.deleteLater()
+
+        self._latest_user_row = None
+        self._editing_row = None
+        rows = self.get_message_rows()
+        for msg_row in reversed(rows):
+            if msg_row._role == "user":
+                self._latest_user_row = msg_row
+                msg_row.set_editable(True)
+                break
+
         if self._auto_scroll_enabled:
             self.scroll_to_bottom()
 

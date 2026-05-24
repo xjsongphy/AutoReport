@@ -23,7 +23,8 @@ from ..config.manager import ConfigManager
 from ..config.presets import ProviderPreset, get_presets_by_category, load_presets
 from ..config.schema import ApiConfig
 from ..core.preset_sync import is_cached, sync_presets
-from .widgets.ui_utils import NoWheelComboBox, combo_box_qss
+from .theme import get_theme_colors
+from .widgets.ui_utils import NoWheelComboBox, combo_box_qss, line_edit_qss
 
 CATEGORY_LABELS = {
     "official": "官方",
@@ -181,6 +182,7 @@ class ConfigCard(QFrame):
 
         Matches the lucide Eye / EyeOff style used in cc-switch.
         """
+        c = get_theme_colors()
         size = 64  # Render at 64px for crisp scaling
         half = size // 2
 
@@ -189,7 +191,8 @@ class ConfigCard(QFrame):
         eye_pixmap.fill(Qt.GlobalColor.transparent)
         p = QPainter(eye_pixmap)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#888"), 3.5)
+        pen_color = QColor(c["muted"])
+        pen = QPen(pen_color, 3.5)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
         p.setPen(pen)
@@ -200,7 +203,7 @@ class ConfigCard(QFrame):
         path.cubicTo(size - 16, size - 12, 16, size - 12, 6, half)
         p.drawPath(path)
         # Pupil circle
-        p.setBrush(QColor("#888"))
+        p.setBrush(pen_color)
         p.drawEllipse(QPointF(half, half), 8, 8)
         p.end()
 
@@ -313,7 +316,7 @@ class PresetSelectorDialog(QDialog):
         scroll.setWidgetResizable(True)
         scroll.setFrameStyle(QFrame.Shape.NoFrame)
 
-        scroll_content = QWidget()
+        scroll_content = QWidget(self)
         scroll_layout = QVBoxLayout(scroll_content)
         scroll_layout.setSpacing(12)
 
@@ -390,7 +393,7 @@ class ConfigDialog(QDialog):
         root.setSpacing(0)
 
         # Header
-        header = QWidget()
+        header = QWidget(self)
         header.setObjectName("dialogHeader")
         header_layout = QVBoxLayout(header)
         header_layout.setContentsMargins(24, 20, 24, 16)
@@ -409,7 +412,7 @@ class ConfigDialog(QDialog):
 
         header_layout.addLayout(title_row)
 
-        subtitle = QLabel("管理 API 配置。选择活跃配置后所有 Agent 将使用该服务商。\n预设模板数据来自 cc-switch 仓库，点击「同步预设」获取最新。")
+        subtitle = QLabel("管理 API 配置。选择启用配置后所有 Agent 将使用该服务商。\n预设模板数据来自 cc-switch 仓库，点击「同步预设」获取最新。")
         subtitle.setObjectName("dialogSubtitle")
         subtitle.setWordWrap(True)
         header_layout.addWidget(subtitle)
@@ -422,20 +425,19 @@ class ConfigDialog(QDialog):
         warning.setWordWrap(True)
         header_layout.addWidget(warning)
 
-        # Active config switcher
-        active_row = QHBoxLayout()
-        active_row.setSpacing(8)
-        active_label = QLabel("活跃配置:")
-        active_label.setObjectName("activeLabel")
-        active_row.addWidget(active_label)
+        # Enabled config selector
+        enabled_row = QHBoxLayout()
+        enabled_row.setSpacing(8)
+        enabled_label = QLabel("启用配置:")
+        enabled_label.setObjectName("activeLabel")
+        enabled_row.addWidget(enabled_label)
 
-        self.active_combo = NoWheelComboBox()
-        self.active_combo.setMinimumWidth(200)
-        self._refresh_active_combo()
-        active_row.addWidget(self.active_combo, 1)
-        active_row.addStretch()
+        self.enabled_combo = NoWheelComboBox()
+        self.enabled_combo.setMinimumWidth(200)
+        enabled_row.addWidget(self.enabled_combo, 1)
+        enabled_row.addStretch()
 
-        header_layout.addLayout(active_row)
+        header_layout.addLayout(enabled_row)
         root.addWidget(header)
 
         # Scrollable config cards
@@ -444,7 +446,7 @@ class ConfigDialog(QDialog):
         scroll.setFrameStyle(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        self.scroll_content = QWidget()
+        self.scroll_content = QWidget(self)
         self.scroll_layout = QVBoxLayout(self.scroll_content)
         self.scroll_layout.setContentsMargins(20, 8, 20, 8)
         self.scroll_layout.setSpacing(12)
@@ -456,6 +458,7 @@ class ConfigDialog(QDialog):
         self._empty_hint.setWordWrap(True)
 
         self._rebuild_cards()
+        self._refresh_enabled_combo()
         self.scroll_layout.addStretch()
         scroll.setWidget(self.scroll_content)
         root.addWidget(scroll, 1)
@@ -474,7 +477,7 @@ class ConfigDialog(QDialog):
         root.addLayout(add_row)
 
         # Footer
-        footer = QWidget()
+        footer = QWidget(self)
         footer.setObjectName("dialogFooter")
         footer_layout = QHBoxLayout(footer)
         footer_layout.setContentsMargins(24, 12, 24, 16)
@@ -500,22 +503,40 @@ class ConfigDialog(QDialog):
 
         root.addWidget(footer)
 
-    def _refresh_active_combo(self) -> None:
-        self.active_combo.clear()
+    def _refresh_enabled_combo(self) -> None:
+        """Refresh the enabled config dropdown with auto-detection.
+
+        Auto-detection logic:
+        1. Try to match the saved active_id
+        2. If no match, auto-select the first enabled config
+        3. If no enabled configs, select the first config
+        """
+        self.enabled_combo.clear()
         configs = [c.get_config() for c in self._cards] if self._cards else []
         active_id = self._config_manager.config.providers.active
 
         matched = False
-        for cfg in configs:
-            label = f"{cfg.name} ({PROVIDER_LABELS.get(cfg.provider, cfg.provider)})"
-            self.active_combo.addItem(label, cfg.id)
-            if cfg.id == active_id:
-                self.active_combo.setCurrentIndex(self.active_combo.count() - 1)
-                matched = True
+        first_enabled_idx = -1
 
+        for i, cfg in enumerate(configs):
+            label = f"{cfg.name} ({PROVIDER_LABELS.get(cfg.provider, cfg.provider)})"
+            self.enabled_combo.addItem(label, cfg.id)
+            if cfg.id == active_id:
+                self.enabled_combo.setCurrentIndex(self.enabled_combo.count() - 1)
+                matched = True
+            # Track first enabled config
+            if first_enabled_idx < 0 and cfg.enabled and cfg.api_key:
+                first_enabled_idx = self.enabled_combo.count() - 1
+
+        # Auto-detect: if no match, select first enabled config
         if not matched and configs:
-            self._config_manager.config.providers.active = configs[0].id
-            self.active_combo.setCurrentIndex(0)
+            if first_enabled_idx >= 0:
+                self.enabled_combo.setCurrentIndex(first_enabled_idx)
+                self._config_manager.config.providers.active = configs[first_enabled_idx].id
+            else:
+                # No enabled configs, select first one
+                self._config_manager.config.providers.active = configs[0].id
+                self.enabled_combo.setCurrentIndex(0)
         elif not configs:
             self._config_manager.config.providers.active = ""
 
@@ -561,7 +582,7 @@ class ConfigDialog(QDialog):
             self._config_manager.config.providers.active = self._cards[0].get_config().id
         elif was_active:
             self._config_manager.config.providers.active = ""
-        self._refresh_active_combo()
+        self._refresh_enabled_combo()
         self._update_empty_hint_visibility()
 
     def _add_card(self, cfg: ApiConfig) -> None:
@@ -569,7 +590,7 @@ class ConfigDialog(QDialog):
         card.delete_btn.clicked.connect(lambda checked, c=card: self._remove_card(c))
         self.scroll_layout.insertWidget(self.scroll_layout.count() - 2, card)
         self._cards.append(card)
-        self._refresh_active_combo()
+        self._refresh_enabled_combo()
         self._update_empty_hint_visibility()
 
     def _add_config(self) -> None:
@@ -638,8 +659,8 @@ class ConfigDialog(QDialog):
         new_configs = [card.get_config() for card in self._cards]
         cfg.providers.configurations = new_configs
 
-        if self.active_combo.currentData():
-            cfg.providers.active = self.active_combo.currentData()
+        if self.enabled_combo.currentData():
+            cfg.providers.active = self.enabled_combo.currentData()
         elif new_configs:
             cfg.providers.active = new_configs[0].id
 
@@ -667,7 +688,7 @@ class ConfigDialog(QDialog):
             if item and item.widget():
                 item.widget().deleteLater()
         self._rebuild_cards()
-        self._refresh_active_combo()
+        self._refresh_enabled_combo()
 
         logger.info("Configuration reset to defaults")
         QMessageBox.information(self, "重置完成", "配置已恢复为默认值。请重新配置 API Key。")
@@ -682,65 +703,66 @@ class ConfigDialog(QDialog):
         return False
 
     def _apply_style(self) -> None:
-        dark = self._is_dark_mode()
-
         from PyQt6.QtGui import QPalette
+        c0 = get_theme_colors()
         palette = self.palette()
-        palette.setColor(QPalette.ColorRole.Window, QColor("#1f1f1f" if dark else "#ffffff"))
+        palette.setColor(QPalette.ColorRole.Window, QColor(c0["bg"]))
         self.setPalette(palette)
         self.setAutoFillBackground(True)
 
         c = {
-            "headerBg": "#181818" if dark else "#f8fafc",
-            "headerBorder": "#2b2b2b" if dark else "#e2e8f0",
-            "titleFg": "#e5e5e7" if dark else "#0f172a",
-            "subtitleFg": "#858585" if dark else "#64748b",
-            "activeFg": "#e5e5e7" if dark else "#1e293b",
-            "footerBg": "#181818" if dark else "#f8fafc",
-            "footerBorder": "#2b2b2b" if dark else "#e2e8f0",
-            "cardBg": "#1f1f1f" if dark else "#ffffff",
-            "cardBorder": "#2b2b2b" if dark else "#e2e8f0",
-            "primaryBtnBg": "#0078d4" if dark else "#2563eb",
-            "primaryBtnFg": "#ffffff",
-            "primaryBtnHover": "#026ec1" if dark else "#1d4ed8",
-            "primaryBtnPressed": "#005a9e" if dark else "#1e40af",
-            "secondaryBtnBg": "#181818" if dark else "#ffffff",
-            "secondaryBtnFg": "#cccccc" if dark else "#374151",
-            "secondaryBtnBorder": "#2b2b2b" if dark else "#d1d5db",
-            "secondaryBtnHoverBg": "#2a2d2e" if dark else "#f9fafb",
-            "secondaryBtnHoverBorder": "#3c3c3c" if dark else "#9ca3af",
-            "resetFg": "#858585" if dark else "#6b7280",
-            "resetHoverFg": "#f44747" if dark else "#dc2626",
-            "testFg": "#0078d4" if dark else "#2563eb",
-            "testBorder": "#0078d4" if dark else "#2563eb",
-            "testHoverBg": "#1a3a5c" if dark else "#eff6ff",
-            "testDisabledFg": "#48484a" if dark else "#cbd5d1",
-            "testDisabledBorder": "#2b2b2b" if dark else "#e2e8f0",
-            "deleteFg": "#858585" if dark else "#94a3b8",
-            "deleteHoverFg": "#f44747" if dark else "#ef4444",
-            "deleteHoverBg": "#3a1a1a" if dark else "#fef2f2",
-            "inputBorder": "#3c3c3c" if dark else "#d1d5db",
-            "inputFocusBorder": "#0078d4" if dark else "#2563eb",
-            "inputBg": "#1f1f1f" if dark else "#ffffff",
-            "inputFg": "#cccccc" if dark else "#1e293b",
-            "inputDisabledBg": "#181818" if dark else "#f1f5f9",
-            "inputDisabledFg": "#5a5a5a" if dark else "#94a3b8",
-            "checkFg": "#cccccc" if dark else "#374151",
-            "warningFg": "#f44747" if dark else "#dc2626",
-            "warningBg": "#3a1a1a" if dark else "#fef2f2",
-            "warningBorder": "#5a1a1a" if dark else "#fecaca",
-            "bodyBg": "#1f1f1f" if dark else "#ffffff",
-            "categoryFg": "#858585" if dark else "#64748b",
-            "presetBtnBg": "#1f1f1f" if dark else "#f8fafc",
-            "presetBtnFg": "#cccccc" if dark else "#334155",
-            "presetBtnBorder": "#2b2b2b" if dark else "#e2e8f0",
-            "presetBtnHoverBg": "#2a2d2e" if dark else "#f1f5f9",
-            "addBtnFg": "#0078d4" if dark else "#2563eb",
-            "addBtnBorder": "#0078d4" if dark else "#2563eb",
-            "addBtnHoverBg": "#1a3a5c" if dark else "#eff6ff",
-            "syncBtnFg": "#30d158" if dark else "#059669",
-            "syncBtnBorder": "#30d158" if dark else "#059669",
-            "syncBtnHoverBg": "#1a3a1a" if dark else "#ecfdf5",
+            "headerBg": c0["surface"],
+            "headerBorder": c0["border"],
+            "titleFg": c0["fg"],
+            "subtitleFg": c0["muted"],
+            "activeFg": c0["activeFg"],
+            "footerBg": c0["surface"],
+            "footerBorder": c0["border"],
+            "cardBg": c0["cardBg"],
+            "cardBorder": c0["cardBorder"],
+            "primaryBtnBg": c0["primaryBtnBg"],
+            "primaryBtnFg": c0["primaryBtnFg"],
+            "primaryBtnHover": c0["primaryBtnHover"],
+            "primaryBtnPressed": c0["primaryBtnPressed"],
+            "secondaryBtnBg": c0["secondaryBtnBg"],
+            "secondaryBtnFg": c0["secondaryBtnFg"],
+            "secondaryBtnBorder": c0["secondaryBtnBorder"],
+            "secondaryBtnHoverBg": c0["secondaryBtnHoverBg"],
+            "secondaryBtnHoverBorder": c0["secondaryBtnHoverBorder"],
+            "resetFg": c0["subtitleFg"],
+            "resetHoverFg": c0["deleteFg"],
+            "testFg": c0["primaryBtnBg"],
+            "testBorder": c0["primaryBtnBg"],
+            "testHoverBg": c0["hover"],
+            "testDisabledFg": c0["inputDisabledFg"],
+            "testDisabledBorder": c0["border"],
+            "deleteFg": c0["subtitleFg"],
+            "deleteHoverFg": c0["deleteFg"],
+            "deleteHoverBg": c0["warningBg"],
+            "inputBorder": c0["inputBorder"],
+            "inputFocusBorder": c0["inputFocusBorder"],
+            "inputBg": c0["inputBg"],
+            "inputFg": c0["inputFg"],
+            "inputDisabledBg": c0["inputDisabledBg"],
+            "inputDisabledFg": c0["inputDisabledFg"],
+            "checkFg": c0["checkFg"],
+            "warningFg": c0["warningFg"],
+            "warningBg": c0["warningBg"],
+            "warningBorder": c0["warningBorder"],
+            "bodyBg": c0["bodyBg"],
+            "categoryFg": c0["subtitleFg"],
+            "presetBtnBg": c0["presetBtnBg"],
+            "presetBtnFg": c0["presetBtnFg"],
+            "presetBtnBorder": c0["presetBtnBorder"],
+            "presetBtnHoverBg": c0["presetBtnHoverBg"],
+            "addBtnFg": c0["primaryBtnBg"],
+            "addBtnBorder": c0["primaryBtnBg"],
+            "addBtnHoverBg": c0["hover"],
+            "syncBtnFg": c0["checkFg"],
+            "syncBtnBorder": c0["checkFg"],
+            "syncBtnHoverBg": c0["hover"],
+            "fw_semibold": "600",
+            "fw_bold": "700",
         }
 
         self.setStyleSheet(f"""
@@ -753,7 +775,7 @@ class ConfigDialog(QDialog):
             }}
             #dialogTitle {{
                 font-size: 20px;
-                font-weight: 600;
+                font-weight: {c["fw_semibold"]};
                 color: {c["titleFg"]};
             }}
             #dialogSubtitle {{
@@ -767,7 +789,7 @@ class ConfigDialog(QDialog):
                 padding: 6px 10px;
                 background-color: {c["warningBg"]};
                 border: 1px solid {c["warningBorder"]};
-                border-radius: 6px;
+                border-radius: {c["radius_md"]};
                 margin-top: 8px;
             }}
             #emptyHint {{
@@ -777,7 +799,7 @@ class ConfigDialog(QDialog):
             }}
             #activeLabel {{
                 font-size: 13px;
-                font-weight: 600;
+                font-weight: {c["fw_semibold"]};
                 color: {c["activeFg"]};
             }}
             #dialogFooter {{
@@ -787,11 +809,11 @@ class ConfigDialog(QDialog):
             #providerCard {{
                 background-color: {c["cardBg"]};
                 border: 1px solid {c["cardBorder"]};
-                border-radius: 8px;
+                border-radius: {c["radius_lg"]};
             }}
             #categoryLabel {{
                 font-size: 12px;
-                font-weight: 600;
+                font-weight: {c["fw_semibold"]};
                 color: {c["categoryFg"]};
                 text-transform: uppercase;
                 margin-top: 4px;
@@ -800,9 +822,9 @@ class ConfigDialog(QDialog):
                 background-color: {c["primaryBtnBg"]};
                 color: {c["primaryBtnFg"]};
                 border: none;
-                border-radius: 6px;
+                border-radius: {c["radius_md"]};
                 padding: 8px 24px;
-                font-weight: 600;
+                font-weight: {c["fw_semibold"]};
                 font-size: 13px;
             }}
             #saveBtn:hover {{ background-color: {c["primaryBtnHover"]}; }}
@@ -811,7 +833,7 @@ class ConfigDialog(QDialog):
                 background-color: {c["secondaryBtnBg"]};
                 color: {c["secondaryBtnFg"]};
                 border: 1px solid {c["secondaryBtnBorder"]};
-                border-radius: 6px;
+                border-radius: {c["radius_md"]};
                 padding: 8px 20px;
                 font-size: 13px;
             }}
@@ -831,7 +853,7 @@ class ConfigDialog(QDialog):
                 background-color: transparent;
                 color: {c["testFg"]};
                 border: 1px solid {c["testBorder"]};
-                border-radius: 4px;
+                border-radius: {c["radius_sm"]};
                 padding: 4px 12px;
                 font-size: 12px;
             }}
@@ -844,9 +866,9 @@ class ConfigDialog(QDialog):
                 background-color: transparent;
                 color: {c["deleteFg"]};
                 border: 1px solid transparent;
-                border-radius: 4px;
+                border-radius: {c["radius_sm"]};
                 font-size: 16px;
-                font-weight: bold;
+                font-weight: {c["fw_bold"]};
             }}
             #deleteBtn:hover {{
                 color: {c["deleteHoverFg"]};
@@ -857,7 +879,7 @@ class ConfigDialog(QDialog):
                 background-color: transparent;
                 color: {c["addBtnFg"]};
                 border: 1px dashed {c["addBtnBorder"]};
-                border-radius: 6px;
+                border-radius: {c["radius_md"]};
                 padding: 8px 16px;
                 font-size: 13px;
             }}
@@ -866,7 +888,7 @@ class ConfigDialog(QDialog):
                 background-color: transparent;
                 color: {c["syncBtnFg"]};
                 border: 1px solid {c["syncBtnBorder"]};
-                border-radius: 4px;
+                border-radius: {c["radius_sm"]};
                 padding: 4px 12px;
                 font-size: 12px;
             }}
@@ -875,7 +897,7 @@ class ConfigDialog(QDialog):
                 background-color: {c["presetBtnBg"]};
                 color: {c["presetBtnFg"]};
                 border: 1px solid {c["presetBtnBorder"]};
-                border-radius: 6px;
+                border-radius: {c["radius_md"]};
                 padding: 10px 14px;
                 font-size: 13px;
                 text-align: left;
@@ -885,7 +907,7 @@ class ConfigDialog(QDialog):
                 background-color: transparent;
                 color: {c["subtitleFg"]};
                 border: 1px dashed {c["inputBorder"]};
-                border-radius: 4px;
+                border-radius: {c["radius_sm"]};
                 padding: 6px 14px;
                 font-size: 12px;
             }}
@@ -893,19 +915,18 @@ class ConfigDialog(QDialog):
                 color: {c["primaryBtnBg"]};
                 border-color: {c["primaryBtnBg"]};
             }}
-            QLineEdit {{
-                border: 1px solid {c["inputBorder"]};
-                border-radius: 4px;
-                padding: 6px 10px;
-                font-size: 13px;
-                background-color: {c["inputBg"]};
-                color: {c["inputFg"]};
-            }}
-            QLineEdit:focus {{ border-color: {c["inputFocusBorder"]}; }}
-            QLineEdit:disabled {{
-                background-color: {c["inputDisabledBg"]};
-                color: {c["inputDisabledFg"]};
-            }}
+            {line_edit_qss(
+                "",
+                border_color=c["inputBorder"],
+                focus_border_color=c["inputFocusBorder"],
+                background_color=c["inputBg"],
+                foreground_color=c["inputFg"],
+                disabled_bg=c["inputDisabledBg"],
+                disabled_fg=c["inputDisabledFg"],
+                radius=c["radius_sm"],
+                font_size=13,
+                padding="6px 10px",
+            )}
             QCheckBox {{ font-size: 13px; color: {c["checkFg"]}; }}
             {combo_box_qss(
                 "",
@@ -917,6 +938,9 @@ class ConfigDialog(QDialog):
                 selection_fg=c["primaryBtnFg"],
                 font_size=13,
                 padding="6px 30px 6px 10px",
+                radius=c["radius_md"],
+                popup_radius=c["radius_md"],
+                item_radius="4px",
             )}
             QScrollArea {{
                 background-color: {c["bodyBg"]};

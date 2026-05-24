@@ -1,12 +1,9 @@
 """File tree widget for project directory structure.
 
-Based on VSCode explorer design:
+Uses native QTreeWidget styling with:
 - 22px row height
 - 16px icons with proper alignment
-- Flexbox-like layout for icon + text
-- Text overflow ellipsis
-- Subtle hover/focus states
-- Full-width selection background (via custom delegate)
+- Native Qt selection, hover, and branch rendering
 - Drag and drop file import support
 """
 
@@ -14,12 +11,13 @@ import shutil
 from pathlib import Path
 
 from loguru import logger
-from PyQt6.QtCore import QFileSystemWatcher, QMimeData, QRect, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QFileInfo, QFileSystemWatcher, QMimeData, QPoint, QSize, QSignalBlocker, Qt, QTimer, pyqtSignal
 
 from autoreport.utils.logging_config import ui_logger
-from PyQt6.QtGui import QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QIcon, QPainter, QPen
+from PyQt6.QtGui import QColor, QCursor, QDrag, QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QDropEvent, QIcon, QPalette, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemDelegate,
+    QAbstractItemView,
     QApplication,
     QHeaderView,
     QHBoxLayout,
@@ -28,7 +26,7 @@ from PyQt6.QtWidgets import (
     QMenu,
     QMessageBox,
     QProgressDialog,
-    QPushButton,
+    QFileIconProvider,
     QStyle,
     QStyleOptionViewItem,
     QStyledItemDelegate,
@@ -39,115 +37,109 @@ from PyQt6.QtWidgets import (
 )
 
 from ..theme import get_theme_colors
-from .ui_utils import IconActionButton, compact_tooltip_qss, render_svg_icon
+from .ui_utils import UI_HOVER_DELAY_MS, IconActionButton, compact_tooltip_qss, render_svg_icon
 
 # Fixed directory structure
 FIXED_DIRECTORIES = ["data", "references", "theory", "code", "tex"]
+_FILE_TEXT_ICON_GAP_ADJUST = 28
+_FILE_EDITOR_LEFT_ADJUST = -26
+_INDICATOR_PLACEHOLDER_ROLE = Qt.ItemDataRole.UserRole + 99
+_NON_DRAGGABLE_DIRS = {"data/processed"}
 
 
 # ================================================================== #
-#  Custom Delegate for Full-Width Selection
+#  Custom Delegate for Icon Alignment
 # ================================================================== #
 
 
-class _FullRowDelegate(QStyledItemDelegate):
-    """Delegate that paints selection background across full row width.
+class _FileTreeDelegate(QStyledItemDelegate):
+    """Delegate that draws file icons aligned with folder arrows.
 
-    This creates VSCode-style selection where the background extends
-    from the left edge (including branch area) to the right edge.
-
-    Also draws VSCode-style guide lines for nested items.
+    Problem: files have icons that push text right; folders don't.
+    Fix: suppress Qt's icon, draw text as if no icon, then paint icon
+    at the arrow position (center of the indentation column).
     """
 
     def paint(self, painter, option, index):
-        """Paint the item with full-width selection background and guide lines.
-
-        We fully control selection/hover rendering here. Qt's default painting
-        is suppressed for these states to avoid double-painting.
-        """
         tree_widget = option.widget
-        c = get_theme_colors()
+        if not tree_widget:
+            super().paint(painter, option, index)
+            return
 
-        # --- Draw guide lines BEFORE anything else ---
+        item = tree_widget.itemFromIndex(index)
+        if item is not None and item.data(0, _INDICATOR_PLACEHOLDER_ROLE):
+            return
+
+        has_icon = item is not None and not item.icon(0).isNull()
+        file_tree_widget = getattr(tree_widget, "_file_tree_widget", None)
+        is_drop_target = item is not None and item is getattr(file_tree_widget, "_drop_target_item", None)
+
+        if not has_icon:
+            if is_drop_target:
+                opt = QStyleOptionViewItem(option)
+                self.initStyleOption(opt, index)
+                opt.state |= QStyle.StateFlag.State_Selected | QStyle.StateFlag.State_Active
+                style = opt.widget.style() if opt.widget else QApplication.style()
+                style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
+                return
+            super().paint(painter, option, index)
+            return
+
+        # Save icon reference
+        icon = item.icon(0)
+        icon_sz = tree_widget.iconSize()  # QSize(16, 16)
+
+        # Draw selection bg + text without decoration, but do not mutate model
+        # data in paint path (that can cause unstable click/edit behavior).
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        if is_drop_target:
+            opt.state |= QStyle.StateFlag.State_Selected | QStyle.StateFlag.State_Active
+        opt.icon = QIcon()
+        style = opt.widget.style() if opt.widget else QApplication.style()
+        # Keep icon fixed; pull text closer so file rows visually match folder rows.
+        opt.rect = opt.rect.adjusted(-_FILE_TEXT_ICON_GAP_ADJUST, 0, 0, 0)
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
+
+        # Draw icon at the same X as the branch arrow for this depth.
+        # Qt draws the arrow centred in the column at  depth * indentation.
+        indent = tree_widget.indentation()
+        depth = 0
+        p = item.parent()
+        root = tree_widget.invisibleRootItem()
+        while p is not None and p is not root:
+            depth += 1
+            p = p.parent()
+
+        # Keep icon strictly anchored to the branch column center.
+        icon_x = depth * indent + (indent - icon_sz.width()) // 2
+        icon_y = option.rect.y() + (option.rect.height() - icon_sz.height()) // 2
+
+        painter.save()
+        icon.paint(painter, icon_x, icon_y, icon_sz.width(), icon_sz.height())
+        painter.restore()
+
+    def sizeHint(self, option, index):  # noqa: N802
+        tree_widget = option.widget
         if tree_widget:
             item = tree_widget.itemFromIndex(index)
-            if item and item.parent():
-                self._draw_guide_lines(painter, option, item, tree_widget)
+            if item is not None and item.data(0, _INDICATOR_PLACEHOLDER_ROLE):
+                return QSize(0, 0)
+        return super().sizeHint(option, index)
 
-        # --- Draw selection background ourselves ---
-        is_selected = (option.state & QStyle.StateFlag.State_Selected) == QStyle.StateFlag.State_Selected
-        has_focus = tree_widget and tree_widget.hasFocus() if tree_widget else False
-
-        if is_selected and has_focus:
-            # Focused + selected: paint a subtle selection background across full row
-            painter.fillRect(option.rect, QColor(c["tree_sel_bg"]))
-        elif is_selected:
-            # Selected but no focus: very subtle or no highlight
-            inactive = QColor(c["hover"])
-            inactive.setAlpha(80)
-            painter.fillRect(option.rect, inactive)
-
-        # Remove Qt's built-in selection/hover painting to avoid double effects
-        option.state &= ~QStyle.StateFlag.State_MouseOver
-        # Keep State_Selected so text color changes via CSS, but we already painted bg
-
-        super().paint(painter, option, index)
-
-    def _draw_guide_lines(self, painter, option, item, tree_widget):
-        """Draw VSCode-style vertical guide lines for nested items.
-
-        Args:
-            painter: QPainter instance.
-            option: Style option for the item.
-            item: Tree item being painted.
-            tree_widget: The tree widget.
-        """
-        is_selected = (option.state & QStyle.StateFlag.State_Selected) == QStyle.StateFlag.State_Selected
-        mouse_hover = tree_widget.underMouse()
-
-        # Use theme-aware colors that are visible in both light and dark modes
-        # Selected = dark gray (more visible), unselected = light gray (less visible)
-        if is_selected:
-            # Selected: deep gray, fully opaque
-            guide_color = QColor("#555555")
-        elif mouse_hover:
-            # Mouse in tree, unselected: light gray, semi-transparent
-            guide_color = QColor("#aaaaaa")
-            guide_color.setAlpha(160)
-        else:
-            # No mouse in tree: very subtle
-            guide_color = QColor("#cccccc")
-            guide_color.setAlpha(60)
-
-        indentation = tree_widget.indentation()
-        depth = self._get_item_depth(item)
-
-        if depth > 0:
-            pen = QPen(guide_color, 1)
-            painter.setPen(pen)
-            for level in range(depth):
-                x_pos = indentation * (level + 1) - (indentation // 2)
-                top_y = option.rect.top()
-                bottom_y = option.rect.bottom()
-                painter.drawLine(int(x_pos), int(top_y), int(x_pos), int(bottom_y))
-
-    def _get_item_depth(self, item):
-        """Get the depth level of an item (0 for root items)."""
-        depth = 0
-        parent = item.parent()
-        while parent is not None:
-            depth += 1
-            parent = parent.parent()
-        return depth
-
-    def _get_ancestor_at_level(self, item, level):
-        """Get the ancestor at the given level (0 = parent, 1 = grandparent, etc.)."""
-        ancestor = item
-        for _ in range(level + 1):
-            if ancestor is None:
-                return None
-            ancestor = ancestor.parent()
-        return ancestor
+    def updateEditorGeometry(self, editor, option, index):  # noqa: N802
+        super().updateEditorGeometry(editor, option, index)
+        tree_widget = option.widget
+        if not tree_widget:
+            return
+        item = tree_widget.itemFromIndex(index)
+        if item is None:
+            return
+        # Leave clear branch/arrow area so expanded arrows are never covered
+        # by the inline filename editor.
+        if not item.icon(0).isNull():
+            rect = editor.geometry()
+            editor.setGeometry(rect.adjusted(_FILE_EDITOR_LEFT_ADJUST, 0, 0, 0))
 
 # Directory display labels (VSCode style: concise, title case)
 DIR_LABELS = {
@@ -170,186 +162,196 @@ DIR_DESCRIPTIONS = {
 }
 
 
-class _ChevronTreeWidget(QTreeWidget):
-    """QTreeWidget with drag-drop support for the file tree."""
+class _DragDropTreeWidget(QTreeWidget):
+    """QTreeWidget with drag-drop support for external file import and internal file moving."""
 
     def __init__(self, file_tree_widget=None, parent=None):
         super().__init__(parent)
         self._file_tree_widget = file_tree_widget
-        self._hovered_item: QTreeWidgetItem | None = None
 
-    def mouseMoveEvent(self, event) -> None:  # noqa: N802
-        self._hovered_item = self.itemAt(event.pos())
-        self.viewport().update()
-        super().mouseMoveEvent(event)
+    def drawBranches(self, painter, rect, index):  # noqa: N802
+        item = self.itemFromIndex(index)
+        if item is not None and item is getattr(self._file_tree_widget, "_drop_target_item", None):
+            painter.fillRect(rect, QColor(get_theme_colors()["tree_sel_bg"]))
+        super().drawBranches(painter, rect, index)
 
-    def leaveEvent(self, event) -> None:  # noqa: N802
-        self._hovered_item = None
-        self.viewport().update()
-        super().leaveEvent(event)
+    def startDrag(self, supportedActions: Qt.DropAction) -> None:
+        """Override to create a compact drag preview that doesn't stretch.
 
-    def paintEvent(self, event) -> None:  # noqa: N802
-        c = get_theme_colors()
-        painter = QPainter(self.viewport())
-        try:
-            for item in self._visible_items():
-                rect = self.visualItemRect(item)
-                if not rect.isValid():
-                    continue
-                row_rect = QRect(0, rect.top(), self.viewport().width(), rect.height())
-                if item.isSelected():
-                    painter.fillRect(row_rect, QColor(c["tree_sel_bg"]))
-                elif item is self._hovered_item:
-                    painter.fillRect(row_rect, QColor(c["tree_hover"]))
-        finally:
+        Prevents the drag pixmap from expanding to full filename width.
+        """
+        current_item = self.currentItem()
+        if not current_item:
+            return
+
+        # Only block dragging top-level fixed directories.
+        # File nodes store parent dir in UserRole, so we must not use UserRole
+        # alone to decide draggable status.
+        dir_name = current_item.data(0, Qt.ItemDataRole.UserRole)
+        file_path_str = current_item.data(0, Qt.ItemDataRole.UserRole + 1)
+        is_top_level_fixed_dir = (
+            current_item.parent() is None
+            and not file_path_str
+            and dir_name in FIXED_DIRECTORIES
+        )
+        is_non_draggable_dir = (
+            not file_path_str
+            and self._file_tree_widget is not None
+            and self._file_tree_widget._is_non_draggable_directory(dir_name)
+        )
+        if is_top_level_fixed_dir or is_non_draggable_dir:
+            return  # Don't allow dragging fixed directories
+
+        # Get the icon for the item
+        icon = current_item.icon(0)
+        if icon.isNull():
+            # Create a default icon if none exists
+            from PyQt6.QtWidgets import QApplication
+            from PyQt6.QtGui import QPainter
+            pixmap = QPixmap(16, 16)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pixmap)
+            painter.setPen(self.palette().color(QPalette.ColorRole.Text))
+            painter.drawRect(0, 0, 15, 15)
             painter.end()
-        super().paintEvent(event)
-        self._paint_chevrons()
+            drag_icon = QIcon(pixmap)
+        else:
+            # Use the item's icon but limit size
+            drag_icon = icon
 
-    def _paint_chevrons(self) -> None:
-        """Overlay stable VSCode-style chevrons after Qt paints the tree."""
-        c = get_theme_colors()
-        painter = QPainter(self.viewport())
-        try:
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            pen = QPen(QColor(c["fg"]), 1.5)
-            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-            painter.setPen(pen)
-            for item in self._visible_items():
-                if not self._has_chevron(item):
-                    continue
-                rect = self.visualItemRect(item)
-                if not rect.isValid():
-                    continue
-                x = self._chevron_x(item)
-                y = rect.center().y()
-                if item.isExpanded():
-                    painter.drawLine(x, y - 2, x + 4, y + 2)
-                    painter.drawLine(x + 4, y + 2, x + 8, y - 2)
-                else:
-                    painter.drawLine(x + 2, y - 4, x + 6, y)
-                    painter.drawLine(x + 6, y, x + 2, y + 4)
-        finally:
-            painter.end()
+        # Create a compact pixmap (just the icon, no text)
+        drag_pixmap = drag_icon.pixmap(16, 16)
 
-    def _has_chevron(self, item: QTreeWidgetItem) -> bool:
-        policy = item.childIndicatorPolicy()
-        if policy == QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator:
-            return True
-        return item.childCount() > 0
+        # Create the drag object with our custom pixmap
+        drag = QDrag(self)
+        drag.setPixmap(drag_pixmap)
+        drag.setHotSpot(QPoint(8, 8))
 
-    def _chevron_x(self, item: QTreeWidgetItem) -> int:
-        return self._item_depth(item) * self.indentation() + 4
+        # Set mime data (mimeData expects iterable, not single item)
+        mime = self.mimeData([current_item])
+        drag.setMimeData(mime)
 
-    def _item_depth(self, item: QTreeWidgetItem) -> int:
-        depth = 0
-        parent = item.parent()
-        while parent is not None:
-            depth += 1
-            parent = parent.parent()
-        return depth
-
-    def _visible_items(self) -> list[QTreeWidgetItem]:
-        root = self.invisibleRootItem()
-        items: list[QTreeWidgetItem] = []
-
-        def walk(parent: QTreeWidgetItem) -> None:
-            for i in range(parent.childCount()):
-                child = parent.child(i)
-                items.append(child)
-                if child.isExpanded():
-                    walk(child)
-
-        walk(root)
-        return items
+        # Execute the drag
+        drag.exec(supportedActions)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        """Handle drag enter - accept file URLs."""
-        if event.mimeData().hasUrls():
+        # Accept both external files (urls) and internal items
+        if event.mimeData().hasUrls() or event.mimeData().hasFormat("application/x-qabstractitemmodeldatalist"):
             event.acceptProposedAction()
         else:
             event.ignore()
 
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:
-        """Handle drag move - accept file URLs."""
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
+        # Check if we're dragging over a valid target
+        target_item = self.itemAt(event.position().toPoint())
+        if target_item:
+            # Allow dropping into any directory
+            if event.mimeData().hasUrls() or event.mimeData().hasFormat("application/x-qabstractitemmodeldatalist"):
+                if self._file_tree_widget:
+                    self._file_tree_widget._set_drop_target_from_item(target_item)
+                event.acceptProposedAction()
+            else:
+                if self._file_tree_widget:
+                    self._file_tree_widget._clear_drop_target()
+                event.ignore()
         else:
+            if self._file_tree_widget:
+                self._file_tree_widget._clear_drop_target()
             event.ignore()
+
+    def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:
+        if self._file_tree_widget:
+            self._file_tree_widget._clear_drop_target()
+        super().dragLeaveEvent(event)
 
     def dropEvent(self, event: QDropEvent) -> None:
-        """Handle drop - process dropped files."""
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-            if self._file_tree_widget:
-                self._file_tree_widget._handle_drop(event)
-        else:
+        target_item = self.itemAt(event.position().toPoint())
+
+        try:
+            # Handle external file drops
+            if event.mimeData().hasUrls():
+                if self._file_tree_widget:
+                    self._file_tree_widget._handle_drop(event)
+                event.acceptProposedAction()
+                return
+
+            # Handle internal item drops (moving files/folders)
+            if event.mimeData().hasFormat("application/x-qabstractitemmodeldatalist") and target_item:
+                if self._file_tree_widget:
+                    self._file_tree_widget._handle_internal_move(event, target_item)
+                event.acceptProposedAction()
+                # Don't call parent's dropEvent - we handle the file move ourselves
+                return
+
             event.ignore()
+        finally:
+            if self._file_tree_widget:
+                self._file_tree_widget._clear_drop_target()
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if self._file_tree_widget and self._file_tree_widget._handle_tree_key(event):
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
-def _get_file_icon(ext: str, style: QStyle = None) -> QIcon:
-    """Get file icon by extension using QStyle standard icons."""
+
+
+def _get_file_icon(ext: str, style: QStyle = None, file_path: Path | None = None) -> QIcon:
+    """Get file icon by extension, preferring system file-type icons."""
     if style is None:
         from PyQt6.QtWidgets import QApplication
         style = QApplication.style()
+    provider = QFileIconProvider()
+    if file_path is not None:
+        icon = provider.icon(QFileInfo(str(file_path)))
+        if not icon.isNull():
+            return icon
 
-    ext = ext.lower()
-    # Map extensions to QStyle standard icons
-    icon_map = {
-        ".py": QStyle.StandardPixmap.SP_FileIcon,
-        ".txt": QStyle.StandardPixmap.SP_FileIcon,
-        ".md": QStyle.StandardPixmap.SP_FileIcon,
-        ".csv": QStyle.StandardPixmap.SP_FileIcon,
-        ".json": QStyle.StandardPixmap.SP_FileIcon,
-        ".yaml": QStyle.StandardPixmap.SP_FileIcon,
-        ".yml": QStyle.StandardPixmap.SP_FileIcon,
-        ".tex": QStyle.StandardPixmap.SP_FileIcon,
-        ".pdf": QStyle.StandardPixmap.SP_FileIcon,
-        ".png": QStyle.StandardPixmap.SP_FileIcon,
-        ".jpg": QStyle.StandardPixmap.SP_FileIcon,
-        ".jpeg": QStyle.StandardPixmap.SP_FileIcon,
-        ".gif": QStyle.StandardPixmap.SP_FileIcon,
-        ".svg": QStyle.StandardPixmap.SP_FileIcon,
-        ".bmp": QStyle.StandardPixmap.SP_FileIcon,
-        ".html": QStyle.StandardPixmap.SP_FileIcon,
-        ".css": QStyle.StandardPixmap.SP_FileIcon,
-        ".js": QStyle.StandardPixmap.SP_FileIcon,
-        ".ts": QStyle.StandardPixmap.SP_FileIcon,
-    }
-    standard_icon = icon_map.get(ext, QStyle.StandardPixmap.SP_FileIcon)
-    return style.standardIcon(standard_icon)
+    ext = ext.lower() or ".txt"
+    icon = provider.icon(QFileInfo(f"placeholder{ext}"))
+    if not icon.isNull():
+        return icon
+    return style.standardIcon(QStyle.StandardPixmap.SP_FileIcon)
 
 
 class FileTreeWidget(QWidget):
-    """File tree widget showing project structure (VSCode explorer style)."""
+    """File tree widget showing project structure with native Qt styling."""
 
     directory_selected = pyqtSignal(str)
     file_selected = pyqtSignal(Path)
+    path_changed = pyqtSignal(Path, Path)
 
     def __init__(self, workspace: Path):
-        """Initialize file tree widget.
-
-        Args:
-            workspace: Project workspace directory.
-        """
         super().__init__()
         self.workspace = Path(workspace).resolve()
-        self._editing_item: QTreeWidgetItem | None = None  # Track item being edited
+        self._editing_item: QTreeWidgetItem | None = None
         self._pending_new_item: QTreeWidgetItem | None = None
         self._pending_new_kind: str | None = None  # "file" | "folder"
+        self._pending_editor: QLineEdit | None = None
+        self._hover_tip: QWidget | None = None
+        self._hover_tip_label: QLabel | None = None
+        self._hover_timer = QTimer(self)
+        self._hover_timer.setSingleShot(True)
+        self._hover_timer.setInterval(UI_HOVER_DELAY_MS)
+        self._hover_timer.timeout.connect(self._show_pending_hover_tip)
+        self._pending_hover_text = ""
+        self._pending_hover_pos = QPoint()
+        self._hovered_item: QTreeWidgetItem | None = None
+        self._drop_target_item: QTreeWidgetItem | None = None
+        self._root_selected = False
         self._setup_ui()
         self._init_directories()
+        self._ensure_directory_indicators()
         self._setup_file_watcher()
 
     def _setup_ui(self) -> None:
-        """Setup user interface (VSCode explorer style)."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Explorer header (VSCode style) with toolbar
-        header = QWidget()
+        # Explorer header with toolbar
+        header = QWidget(self)
         header.setObjectName("explorerHeader")
         header.setFixedHeight(36)
         hlayout = QHBoxLayout(header)
@@ -363,7 +365,6 @@ class FileTreeWidget(QWidget):
 
         hlayout.addStretch()
 
-        # Toolbar buttons (using VSCode Codicons)
         self._new_file_btn = IconActionButton(
             tooltip="新建文件",
             object_name="explorerToolbarBtn",
@@ -391,59 +392,60 @@ class FileTreeWidget(QWidget):
         )
         hlayout.addWidget(self._refresh_btn)
 
-        # Set icons on toolbar buttons
         self._setup_toolbar_icons()
 
         layout.addWidget(header)
 
-        # File tree with drag-drop support
-        self.tree = _ChevronTreeWidget(file_tree_widget=self)
+        # File tree — native QTreeWidget with drag-drop
+        self.tree = _DragDropTreeWidget(file_tree_widget=self)
         self.tree.setObjectName("fileTree")
-        # Keep native branch/twisty rendering stable; custom delegate can interfere
-        # with unselected arrow visibility on some platforms/styles.
+        self.tree.setItemDelegate(_FileTreeDelegate(self.tree))
         self.tree.setHeaderLabels(["名称"])
         self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.tree.header().setStretchLastSection(True)
         self.tree.setDragEnabled(True)
         self.tree.setAcceptDrops(True)
         self.tree.setDropIndicatorShown(True)
-        self.tree.setMouseTracking(True)
-        self.tree.viewport().setMouseTracking(True)
-        self.tree.setIndentation(12)  # VSCode: 12px indentation
+        self.tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        # Enable both internal move and external drag-drop
+        self.tree.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.tree.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.tree.setIndentation(14)
         self.tree.setRootIsDecorated(True)
         self.tree.setItemsExpandable(True)
-        self.tree.setAnimated(False)  # Disable expand/collapse animation
+        self.tree.setAnimated(False)
+        self.tree.setMouseTracking(True)
         self.tree.itemClicked.connect(self._on_item_clicked)
+        self.tree.itemEntered.connect(self._on_item_entered)
+        self.tree.viewport().installEventFilter(self)
         self.tree.itemExpanded.connect(self._on_item_expanded)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
-        # Enable inline editing
         self.tree.setEditTriggers(QTreeWidget.EditTrigger.EditKeyPressed)
-        self.tree.setItemDelegate(_FullRowDelegate(self.tree))
         self.tree.itemChanged.connect(self._on_item_changed)
         self.tree.itemDelegate().closeEditor.connect(self._on_close_editor)
         layout.addWidget(self.tree)
+
+        # Use native margins to keep top-level branch spacing consistent.
+        self.tree.setContentsMargins(0, 0, 0, 0)
 
         self.tree.header().hide()
 
         self._apply_style()
 
     def _apply_style(self) -> None:
-        """Apply VSCode explorer style."""
+        """Apply minimal styling — let Qt handle selection, hover, branches natively."""
         c = get_theme_colors()
 
         self.setStyleSheet(f"""
-            /* Base styles */
             QWidget {{
                 color: {c["fg"]};
             }}
 
-            /* Explorer widget background */
             FileTreeWidget {{
                 background-color: {c["surface"]};
             }}
 
-            /* Explorer header */
             #explorerHeader {{
                 background-color: {c["surface"]};
                 border-bottom: 1px solid {c["border"]};
@@ -451,17 +453,16 @@ class FileTreeWidget(QWidget):
 
             #explorerTitle {{
                 font-size: 11px;
-                font-weight: 600;
+                font-weight: {c["fw_semibold"]};
                 color: {c["fg"]};
                 text-transform: uppercase;
                 letter-spacing: 1px;
             }}
 
-            /* Explorer toolbar buttons (VSCode Codicons) */
             #explorerToolbarBtn {{
                 background-color: transparent;
                 border: none;
-                border-radius: 3px;
+                border-radius: {c["radius_sm"]};
                 font-family: "codicon", "Segoe UI Symbol", "Apple Symbols", sans-serif;
                 font-size: 18px;
                 padding: 0;
@@ -471,67 +472,53 @@ class FileTreeWidget(QWidget):
                 background-color: {c["tree_hover"]};
             }}
 
-            /* File tree */
+            /* File tree — native styling with theme colors */
             #fileTree {{
                 background-color: {c["surface"]};
                 border: none;
                 outline: none;
+                show-decoration-selected: 1;
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
                 font-size: 13px;
-                selection-background-color: transparent;
-                selection-color: {c["tree_sel_fg"]};
+                alternate-background-color: {c["surface"]};
             }}
 
-            /* Tree items - VSCode 22px row height */
             #fileTree::item {{
                 height: 22px;
-                border: none;
-                padding: 0 12px 0 0;
-                border-radius: 0px;
-                show-decoration-selected: 0;
+                padding: 0 4px;
             }}
 
             #fileTree::item:hover {{
-                background-color: transparent;
+                background-color: {c["tree_hover"]};
             }}
 
             #fileTree::item:selected {{
-                background-color: transparent;
+                background-color: {c["tree_sel_bg"]};
                 color: {c["tree_sel_fg"]};
-                border: none;
-            }}
-
-            #fileTree::item:selected:hover {{
-                background-color: transparent;
             }}
 
             #fileTree::item:selected:!active {{
-                background-color: transparent;
+                background-color: {c["tree_sel_bg"]};
                 color: {c["fg"]};
-                border: none;
+            }}
+            #fileTree::branch:selected {{
+                background-color: {c["tree_sel_bg"]};
+            }}
+            #fileTree::branch:selected:!active {{
+                background-color: {c["tree_sel_bg"]};
             }}
 
-            /* Branch area (arrow/indentation) — fully transparent, no borders */
-            #fileTree::branch {{
-                image: none;
-                border-image: none;
-                background-color: transparent;
-                border: none;
-                border-left: none;
+            /* Inline edit input - gray background with blue border on focus */
+            #fileTree QLineEdit {{
+                background-color: {c["bg"]};
+                color: {c["fg"]};
+                border: 1px solid {c["border"]};
+                border-radius: {c["radius_sm"]};
+                padding: 2px 2px;
+                selection-background-color: {c["accent"]};
             }}
-            #fileTree::branch:hover,
-            #fileTree::branch:selected,
-            #fileTree::branch:has-children,
-            #fileTree::branch:has-children:hover,
-            #fileTree::branch:has-children:selected,
-            #fileTree::branch:open,
-            #fileTree::branch:open:hover,
-            #fileTree::branch:closed,
-            #fileTree::branch:closed:hover,
-            #fileTree::branch:selected:hover {{
-                background-color: transparent;
-                border: none;
-                border-left: none;
+            #fileTree QLineEdit:focus {{
+                border: 1px solid {c["accent"]};
             }}
 
             /* Scrollbar */
@@ -544,7 +531,7 @@ class FileTreeWidget(QWidget):
             QScrollBar::handle:vertical {{
                 background-color: {c["scrollbar"]};
                 min-height: 30px;
-                border-radius: 5px;
+                border-radius: {c["radius_md"]};
             }}
 
             QScrollBar::handle:vertical:hover {{
@@ -563,12 +550,12 @@ class FileTreeWidget(QWidget):
             #explorerContextMenu {{
                 background-color: {c["bg"]};
                 border: 1px solid {c["border"]};
-                border-radius: 6px;
+                border-radius: {c["radius_md"]};
                 padding: 4px;
             }}
             #explorerContextMenu::item {{
                 padding: 6px 24px;
-                border-radius: 3px;
+                border-radius: {c["radius_sm"]};
             }}
             #explorerContextMenu::item:selected {{
                 background-color: {c["tree_sel_bg"]};
@@ -576,17 +563,11 @@ class FileTreeWidget(QWidget):
             }}
         """)
 
-        # Set row height
         self.tree.setIconSize(QSize(16, 16))
-
-        # Set adaptive width: max(minimum_width, calculated_proportional_width)
         self._update_width()
-
-        # Update toolbar icons for current theme
         self._setup_toolbar_icons()
 
     def _setup_toolbar_icons(self) -> None:
-        """Set icons on toolbar buttons using VSCode Codicon style."""
         theme = get_theme_colors()
         icon_color = QColor(theme["fg"])
 
@@ -595,93 +576,222 @@ class FileTreeWidget(QWidget):
         self._refresh_btn.setIcon(render_svg_icon("refresh", icon_color))
 
     def _update_width(self) -> None:
-        """Update widget width to be adaptive.
-
-        Calculate minimum width needed for header content (title + 3 buttons).
-        Let splitter control actual width through stretch factor.
-        """
-        # Width policy: max(preset proportional width handled by splitter, computed minimum).
-        # We only enforce the computed minimum needed to keep header controls fully visible.
         fm = self.fontMetrics()
         title_width = fm.horizontalAdvance("EXPLORER")
-        # Header minimum: left/right margins + title + 3 toolbar buttons + internal spacing.
-        # Add extra pixels for title letter-spacing to avoid clipping trailing chars.
         min_width = 12 + title_width + (22 * 3) + (4 * 2) + 12 + 10
-
-        # Only set minimum width, let splitter control actual width
         self.setMinimumWidth(min_width)
-        # Remove maximum width constraint - let splitter handle it
-        self.setMaximumWidth(16777215)  # QWIDGETSIZE_MAX
+        self.setMaximumWidth(16777215)
 
     def _init_directories(self) -> None:
-        """Initialize fixed directory structure."""
-        from PyQt6.QtWidgets import QApplication
-        style = QApplication.style()
-
         for dir_name in FIXED_DIRECTORIES:
             dir_path = self.workspace / dir_name
             dir_path.mkdir(parents=True, exist_ok=True)
 
             item = QTreeWidgetItem(self.tree)
             item.setText(0, DIR_LABELS.get(dir_name, dir_name))
-            # Folders don't show icons (only chevron arrows)
             item.setData(0, Qt.ItemDataRole.UserRole, dir_name)
-            item.setToolTip(0, DIR_DESCRIPTIONS.get(dir_name, dir_name))
-            # Always show expand arrow even if empty (VSCode style)
-            item.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
+            self._mark_fixed_directory_item(item)
+            self._show_directory_indicator(item)
 
-            # Add subdirectory for data/processed
             if dir_name == "data":
                 processed_path = dir_path / "processed"
                 processed_path.mkdir(parents=True, exist_ok=True)
 
                 processed_item = QTreeWidgetItem(item)
                 processed_item.setText(0, DIR_LABELS.get("processed", "processed"))
-                # Folders don't show icons
                 processed_item.setData(0, Qt.ItemDataRole.UserRole, "data/processed")
-                processed_item.setToolTip(0, DIR_DESCRIPTIONS.get("processed", ""))
-                # Always show expand arrow even if empty
-                processed_item.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
+                self._mark_fixed_directory_item(processed_item)
+                self._show_directory_indicator(processed_item)
+
+    def _show_directory_indicator(self, item: QTreeWidgetItem) -> None:
+        item.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
+
+    def _ensure_indicator_placeholder(self, item: QTreeWidgetItem) -> None:
+        """Keep a zero-height child on empty directories so branch arrows stay stable."""
+        dir_name = item.data(0, Qt.ItemDataRole.UserRole)
+        file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
+        if not dir_name or file_path_str:
+            return
+        for i in range(item.childCount()):
+            if item.child(i).data(0, _INDICATOR_PLACEHOLDER_ROLE):
+                return
+        placeholder = QTreeWidgetItem(item)
+        placeholder.setData(0, _INDICATOR_PLACEHOLDER_ROLE, True)
+        placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
+
+    def _drop_target_dir_item(self, target_item: QTreeWidgetItem | None) -> QTreeWidgetItem | None:
+        if target_item is None:
+            return None
+
+        dir_name = target_item.data(0, Qt.ItemDataRole.UserRole)
+        file_path_str = target_item.data(0, Qt.ItemDataRole.UserRole + 1)
+        if dir_name and not file_path_str:
+            return target_item
+        if file_path_str:
+            return target_item.parent()
+        return None
+
+    def _set_drop_target_from_item(self, target_item: QTreeWidgetItem | None) -> None:
+        new_target = self._drop_target_dir_item(target_item)
+        if new_target is self._drop_target_item:
+            return
+
+        old_target = self._drop_target_item
+        self._drop_target_item = new_target
+        for item in (old_target, new_target):
+            if item is not None:
+                self.tree.viewport().update(self.tree.visualItemRect(item))
+
+    def _clear_drop_target(self) -> None:
+        if self._drop_target_item is None:
+            return
+        old_target = self._drop_target_item
+        self._drop_target_item = None
+        self.tree.viewport().update(self.tree.visualItemRect(old_target))
+
+    def _mark_fixed_directory_item(self, item: QTreeWidgetItem) -> None:
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
+
+    def _mark_movable_directory_item(self, item: QTreeWidgetItem) -> None:
+        item.setFlags(
+            item.flags()
+            | Qt.ItemFlag.ItemIsDragEnabled
+            | Qt.ItemFlag.ItemIsDropEnabled
+            | Qt.ItemFlag.ItemIsEditable
+        )
+
+    def _mark_file_item(self, item: QTreeWidgetItem) -> None:
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsDragEnabled | Qt.ItemFlag.ItemIsEditable)
+
+    @staticmethod
+    def _is_non_draggable_directory(dir_name: str | None) -> bool:
+        return bool(dir_name and dir_name in _NON_DRAGGABLE_DIRS)
+
+    def _ensure_directory_indicators(self, root: QTreeWidgetItem | None = None) -> None:
+        node = root if root is not None else self.tree.invisibleRootItem()
+        for i in range(node.childCount()):
+            child = node.child(i)
+            dir_name = child.data(0, Qt.ItemDataRole.UserRole)
+            file_path_str = child.data(0, Qt.ItemDataRole.UserRole + 1)
+            if dir_name and not file_path_str:
+                self._show_directory_indicator(child)
+                if child.childCount() == 0:
+                    self._ensure_indicator_placeholder(child)
+            self._ensure_directory_indicators(child)
+
+    def _workspace_rel(self, path: Path) -> str:
+        return path.relative_to(self.workspace).as_posix()
+
+    @staticmethod
+    def _tilde_path(path: Path) -> str:
+        resolved = path.resolve()
+        home = Path.home().resolve()
+        try:
+            rel = resolved.relative_to(home)
+            return "~" if not rel.parts else f"~/{rel.as_posix()}"
+        except ValueError:
+            return resolved.as_posix()
+
+    def _hover_text_for_item(self, item: QTreeWidgetItem) -> str:
+        file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
+        if file_path_str:
+            return self._tilde_path(Path(file_path_str))
+
+        dir_name = item.data(0, Qt.ItemDataRole.UserRole)
+        if dir_name:
+            return self._tilde_path(self.workspace / dir_name)
+
+        return item.text(0)
+
+    def _collapse_other_top_level_dirs(self, keep_dir: str) -> None:
+        root = self.tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            sibling = root.child(i)
+            sibling_dir = sibling.data(0, Qt.ItemDataRole.UserRole)
+            if sibling_dir in FIXED_DIRECTORIES and sibling_dir != keep_dir and sibling.isExpanded():
+                sibling.setExpanded(False)
 
     def _setup_file_watcher(self) -> None:
-        """Setup QFileSystemWatcher to detect external file changes."""
         self._file_watcher = QFileSystemWatcher(self)
-        # Watch all fixed directories
         for dir_name in FIXED_DIRECTORIES:
             dir_path = str(self.workspace / dir_name)
             self._file_watcher.addPath(dir_path)
-        # Watch data/processed subdirectory
         self._file_watcher.addPath(str(self.workspace / "data" / "processed"))
-        # Connect signal to refresh on change
         self._file_watcher.directoryChanged.connect(self._on_directory_changed)
 
     def _on_directory_changed(self, path: str) -> None:
-        """Handle directory change - refresh the tree if directory is currently expanded."""
         path_obj = Path(path)
-        # Find which directory changed
-        rel_path = str(path_obj.relative_to(self.workspace))
+        rel_path = self._workspace_rel(path_obj)
+        selected_file = None
+        selected_dir = None
+        current_item = self.tree.currentItem()
+        if current_item is not None:
+            selected_file = current_item.data(0, Qt.ItemDataRole.UserRole + 1)
+            if not selected_file:
+                selected_dir = current_item.data(0, Qt.ItemDataRole.UserRole)
+        if self._pending_new_item is not None:
+            pending_parent = self._pending_new_item.data(0, Qt.ItemDataRole.UserRole + 2)
+            if pending_parent == rel_path:
+                return
 
-        # Check if this directory is currently expanded
         root = self.tree.invisibleRootItem()
         for i in range(root.childCount()):
             item = root.child(i)
             item_dir = item.data(0, Qt.ItemDataRole.UserRole)
             if item_dir == rel_path and item.isExpanded():
-                # Refresh this specific directory
-                item.setExpanded(False)
-                item.setExpanded(True)
+                self._refresh_expanded_item_preserve_state(item)
                 break
-            # Check subdirectories (like data/processed)
             for j in range(item.childCount()):
                 child = item.child(j)
                 child_dir = child.data(0, Qt.ItemDataRole.UserRole)
                 if child_dir == rel_path and child.isExpanded():
-                    child.setExpanded(False)
-                    child.setExpanded(True)
+                    self._refresh_expanded_item_preserve_state(child)
                     break
+        self._restore_selection(selected_file, selected_dir)
+        self._ensure_directory_indicators()
+        self.tree.viewport().update()
+
+    def _restore_selection(self, selected_file: str | None, selected_dir: str | None) -> None:
+        if not selected_file and not selected_dir:
+            return
+
+        root = self.tree.invisibleRootItem()
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            for i in range(node.childCount()):
+                child = node.child(i)
+                file_path_str = child.data(0, Qt.ItemDataRole.UserRole + 1)
+                dir_name = child.data(0, Qt.ItemDataRole.UserRole)
+                if selected_file and file_path_str == selected_file:
+                    self.tree.setCurrentItem(child)
+                    return
+                if not selected_file and selected_dir and dir_name == selected_dir:
+                    self.tree.setCurrentItem(child)
+                    return
+                stack.append(child)
+
+    def _refresh_expanded_item_preserve_state(self, item: QTreeWidgetItem) -> None:
+        """Refresh an expanded directory item while preserving direct child expansions."""
+        expanded_child_dirs: set[str] = set()
+        for i in range(item.childCount()):
+            child = item.child(i)
+            dir_name = child.data(0, Qt.ItemDataRole.UserRole)
+            file_path_str = child.data(0, Qt.ItemDataRole.UserRole + 1)
+            if dir_name and not file_path_str and child.isExpanded():
+                expanded_child_dirs.add(dir_name)
+
+        self._on_item_expanded(item)
+        for i in range(item.childCount()):
+            child = item.child(i)
+            dir_name = child.data(0, Qt.ItemDataRole.UserRole)
+            file_path_str = child.data(0, Qt.ItemDataRole.UserRole + 1)
+            if dir_name in expanded_child_dirs and not file_path_str:
+                child.setExpanded(True)
 
     def _on_item_clicked(self, item: QTreeWidgetItem, column: int) -> None:
-        """Handle item click - toggle folder expansion or select file."""
+        self._root_selected = False
+        self._ensure_directory_indicators()
         dir_name = item.data(0, Qt.ItemDataRole.UserRole)
         logger.debug("FileTree: clicked item, dir_name={}", dir_name)
         if not dir_name:
@@ -702,7 +812,6 @@ class FileTreeWidget(QWidget):
                     self.directory_selected.emit(top_level)
             return
 
-        # Directory clicked - toggle expansion
         top_level = dir_name.split("/")[0]
         if "/" in dir_name:
             ui_logger.debug("FileTree: clicked sub-directory {}, emitting {}", dir_name, top_level)
@@ -713,18 +822,110 @@ class FileTreeWidget(QWidget):
             logger.debug("FileTree: directory clicked: {}, emitting: {}", dir_name, dir_name)
             self.directory_selected.emit(dir_name)
 
-        # Toggle expand/collapse (VSCode behavior)
-        item.setExpanded(not item.isExpanded())
+        # Toggle expansion on single click, but only if click is on the
+        # text area (not the decoration/arrow where Qt already toggles).
+        cursor_x = self.tree.viewport().mapFromGlobal(QCursor.pos()).x()
+        depth = 0
+        p = item.parent()
+        while p is not None:
+            depth += 1
+            p = p.parent()
+        text_start = (depth + 1) * self.tree.indentation()
+        if cursor_x >= text_start:
+            item.setExpanded(not item.isExpanded())
+        self._ensure_directory_indicators()
+        self.tree.viewport().update()
+
+    def _on_item_entered(self, item: QTreeWidgetItem, column: int) -> None:
+        """Show compact tooltip close to cursor with full path context."""
+        tip = self._hover_text_for_item(item)
+
+        if not tip:
+            self._hide_hover_tip()
+            return
+
+        self._hovered_item = item
+        self._pending_hover_text = tip
+        self._pending_hover_pos = QCursor.pos() + QPoint(10, 2)
+        self._hover_timer.start()
+
+    def _show_pending_hover_tip(self) -> None:
+        if self._pending_hover_text:
+            self._show_hover_tip(self._pending_hover_text, self._pending_hover_pos)
+
+    def _show_hover_tip(self, text: str, global_pos: QPoint) -> None:
+        if self._hover_tip is None:
+            self._hover_tip = QWidget()
+            self._hover_tip.setWindowFlags(
+                Qt.WindowType.ToolTip
+                | Qt.WindowType.FramelessWindowHint
+                | Qt.WindowType.NoDropShadowWindowHint
+            )
+            self._hover_tip.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            self._hover_tip.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+            self._hover_tip.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+            self._hover_tip.setStyleSheet("background: transparent; border: none;")
+            self._hover_tip_label = QLabel(self._hover_tip)
+            self._hover_tip_label.setObjectName("fileTreeHoverTip")
+            self._hover_tip_label.setStyleSheet(compact_tooltip_qss("QLabel#fileTreeHoverTip"))
+        self._hover_tip_label.setText(text)
+        self._hover_tip_label.adjustSize()
+        self._hover_tip.resize(self._hover_tip_label.size())
+        self._hover_tip_label.move(0, 0)
+        self._hover_tip.move(global_pos)
+        self._hover_tip.show()
+
+    def _hide_hover_tip(self) -> None:
+        self._hover_timer.stop()
+        self._pending_hover_text = ""
+        self._hovered_item = None
+        if self._hover_tip is None:
+            return
+        self._hover_tip.hide()
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        if obj is self.tree.viewport():
+            if event.type() == event.Type.MouseButtonPress:
+                item = self.tree.itemAt(event.pos())
+                if item is None:
+                    self._root_selected = True
+                    self.tree.setCurrentItem(None)
+                    self.directory_selected.emit(".")
+            if event.type() == event.Type.MouseMove:
+                item = self.tree.itemAt(event.pos())
+                if item is None:
+                    self._hide_hover_tip()
+                elif item is not self._hovered_item:
+                    self._hide_hover_tip()
+                    self._on_item_entered(item, 0)
+            if event.type() in (
+                event.Type.Leave,
+                event.Type.MouseButtonPress,
+                event.Type.Wheel,
+                event.Type.Hide,
+            ):
+                self._hide_hover_tip()
+        return super().eventFilter(obj, event)
 
     def _on_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
-        """Handle inline edit completion - create new file/folder or rename."""
-        # Prevent recursive calls during editing
         if self._editing_item is not None and self._editing_item != item:
             return
 
         new_name = item.text(0).strip()
-        if not new_name:
-            # Remove item if name is empty (user cancelled)
+
+        dir_name = item.data(0, Qt.ItemDataRole.UserRole)
+        file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
+
+        # Check if this is a new item being created
+        is_new_item = (self._pending_new_item == item and not dir_name and not file_path_str)
+
+        # For new items, only update icon during editing, don't create file yet
+        if is_new_item:
+            self._editing_item = item
+            return  # Don't create file yet, wait for editor to close
+
+        # Empty name for existing items - revert
+        if not new_name and not is_new_item:
             self._remove_item(item)
             self._editing_item = None
             if self._pending_new_item == item:
@@ -732,53 +933,6 @@ class FileTreeWidget(QWidget):
                 self._pending_new_kind = None
             return
 
-        # Check if this is a new item (no UserRole data set yet)
-        dir_name = item.data(0, Qt.ItemDataRole.UserRole)
-        file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
-
-        if not dir_name and not file_path_str:
-            # This is a new item being created
-            self._editing_item = item
-            parent = item.parent()
-            if parent:
-                parent_dir = parent.data(0, Qt.ItemDataRole.UserRole)
-                if parent_dir:
-                    parent_path = self.workspace / parent_dir
-                    # Check if it's a file or folder based on name
-                    if "." in new_name:
-                        # It's a file
-                        new_file = parent_path / new_name
-                        try:
-                            new_file.touch()
-                            # Update item data
-                            from PyQt6.QtWidgets import QApplication
-                            style = QApplication.style()
-                            item.setIcon(0, _get_file_icon(new_file.suffix, style))
-                            item.setData(0, Qt.ItemDataRole.UserRole, parent_dir)
-                            item.setData(0, Qt.ItemDataRole.UserRole + 1, str(new_file))
-                            logger.info("Created file: {}", new_file)
-                        except Exception as e:
-                            QMessageBox.warning(self, "创建失败", f"无法创建文件:\n{e}")
-                            self._remove_item(item)
-                    else:
-                        # It's a folder
-                        new_folder = parent_path / new_name
-                        try:
-                            new_folder.mkdir(exist_ok=True)
-                            # Update item data
-                            new_dir_name = f"{parent_dir}/{new_name}"
-                            item.setData(0, Qt.ItemDataRole.UserRole, new_dir_name)
-                            logger.info("Created folder: {}", new_folder)
-                        except Exception as e:
-                            QMessageBox.warning(self, "创建失败", f"无法创建文件夹:\n{e}")
-                            self._remove_item(item)
-            if self._pending_new_item == item:
-                self._pending_new_item = None
-                self._pending_new_kind = None
-            self._editing_item = None
-            return
-
-        # Existing item rename logic - only proceed if name actually changed
         original_name = ""
         if file_path_str:
             original_name = Path(file_path_str).name
@@ -789,14 +943,12 @@ class FileTreeWidget(QWidget):
                 original_name = DIR_LABELS.get(dir_name, dir_name)
 
         if original_name.lower() == new_name.lower():
-            # Name hasn't actually changed (case-insensitive comparison)
             self._editing_item = None
             return
 
         self._editing_item = item
 
         if file_path_str:
-            # Renaming a file
             old_path = Path(file_path_str)
             new_path = old_path.parent / new_name
             if old_path != new_path and new_path.exists():
@@ -807,13 +959,13 @@ class FileTreeWidget(QWidget):
             try:
                 old_path.rename(new_path)
                 item.setData(0, Qt.ItemDataRole.UserRole + 1, str(new_path))
+                self.path_changed.emit(old_path, new_path)
                 logger.info("Renamed file: {} -> {}", old_path, new_path)
             except Exception as e:
                 QMessageBox.warning(self, "重命名失败", f"无法重命名:\n{e}")
                 self._revert_item_name(item)
                 self._editing_item = None
         elif dir_name:
-            # Renaming a directory
             old_path = self.workspace / dir_name
             new_path = old_path.parent / new_name
             if old_path != new_path and new_path.exists():
@@ -823,7 +975,6 @@ class FileTreeWidget(QWidget):
                 return
             try:
                 old_path.rename(new_path)
-                # Update the user role data
                 if "/" in dir_name:
                     parts = dir_name.split("/")
                     parts[-1] = new_name
@@ -831,6 +982,7 @@ class FileTreeWidget(QWidget):
                 else:
                     new_dir_name = new_name
                 item.setData(0, Qt.ItemDataRole.UserRole, new_dir_name)
+                self.path_changed.emit(old_path, new_path)
                 logger.info("Renamed directory: {} -> {}", old_path, new_path)
             except Exception as e:
                 QMessageBox.warning(self, "重命名失败", f"无法重命名:\n{e}")
@@ -849,36 +1001,59 @@ class FileTreeWidget(QWidget):
             self.tree.setCurrentItem(None)
 
     def _on_close_editor(self, editor, hint: QAbstractItemDelegate.EndEditHint) -> None:
-        """Finalize placeholder create items on focus-out / Esc, VSCode-like behavior."""
         if self._pending_new_item is None:
             return
-        item = self._pending_new_item
-        text = item.text(0).strip()
+        # Ignore close events from unrelated editors.
+        if self._pending_editor is not None and editor is not self._pending_editor:
+            return
+        text = self._pending_new_item.text(0).strip()
+        if isinstance(editor, QLineEdit):
+            text = editor.text().strip()
+            with QSignalBlocker(self.tree):
+                self._pending_new_item.setText(0, text)
         if not text:
-            self._remove_item(item)
-        self._pending_new_item = None
-        self._pending_new_kind = None
+            self._cancel_pending_new_item()
+            return
+        self._finalize_pending_new_item()
+
+    def _pending_create_text(self) -> str:
+        if self._pending_new_item is None:
+            return ""
+        editor = self._pending_editor
+        if not isinstance(editor, QLineEdit):
+            focus_widget = self.tree.focusWidget()
+            if isinstance(focus_widget, QLineEdit):
+                editor = focus_widget
+        if isinstance(editor, QLineEdit):
+            return editor.text().strip()
+        return self._pending_new_item.text(0).strip()
 
     def _bind_create_editor_live_updates(self, item: QTreeWidgetItem) -> None:
-        """Bind live name/type UI updates while inline creating a new item."""
-        if self._pending_new_kind != "file":
-            return
-
         def _attach() -> None:
             editor = self.tree.focusWidget()
             if isinstance(editor, QLineEdit):
-                def _on_text_changed(text: str) -> None:
-                    if self._pending_new_item is not item:
-                        return
-                    ext = Path(text.strip()).suffix or ".txt"
-                    item.setIcon(0, _get_file_icon(ext, QApplication.style()))
-
-                editor.textChanged.connect(_on_text_changed)
+                self._pending_editor = editor
+                editor.destroyed.connect(lambda *_: self._clear_pending_editor(editor))
 
         QTimer.singleShot(0, _attach)
 
+    def _focus_inline_editor(self) -> None:
+        def _apply_focus() -> None:
+            editor = self.tree.focusWidget()
+            if not isinstance(editor, QLineEdit):
+                editor = self.tree.findChild(QLineEdit)
+            if isinstance(editor, QLineEdit):
+                self._pending_editor = editor
+                editor.destroyed.connect(lambda *_: self._clear_pending_editor(editor))
+                editor.setFocus(Qt.FocusReason.OtherFocusReason)
+
+        QTimer.singleShot(0, _apply_focus)
+
+    def _clear_pending_editor(self, editor: QLineEdit) -> None:
+        if self._pending_editor is editor:
+            self._pending_editor = None
+
     def _revert_item_name(self, item: QTreeWidgetItem) -> None:
-        """Revert item name to original after failed edit."""
         file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
         if file_path_str:
             item.setText(0, Path(file_path_str).name)
@@ -892,7 +1067,6 @@ class FileTreeWidget(QWidget):
                 item.setText(0, DIR_LABELS.get(dir_name, dir_name))
 
     def _on_item_expanded(self, item: QTreeWidgetItem) -> None:
-        """Handle item expansion to load files."""
         from PyQt6.QtWidgets import QApplication
         style = QApplication.style()
 
@@ -904,52 +1078,67 @@ class FileTreeWidget(QWidget):
         if not dir_path.is_dir():
             return
 
-        # Clear existing children
-        while item.childCount() > 0:
-            child = item.child(0)
-            item.removeChild(child)
-
-        # Add files and subdirectories (sorted: dirs first, then files, case-insensitive)
+        # IMPORTANT: Block updates and set ShowIndicator BEFORE clearing children.
+        # Qt evaluates arrow visibility based on policy AND current state.
+        # If we clear children first, Qt may hide the arrow before we can
+        # re-apply the policy, especially during rapid user interactions.
+        self.tree.setUpdatesEnabled(False)
         try:
-            entries = sorted(
-                dir_path.iterdir(),
-                key=lambda e: (not e.is_dir(), e.name.lower()),
-            )
-            for entry in entries:
-                if entry.name.startswith("."):
-                    continue
+            with QSignalBlocker(self.tree):
+                self._show_directory_indicator(item)
 
-                child = QTreeWidgetItem(item)
-                child.setText(0, entry.name)
-                child.setToolTip(0, entry.name)
+                while item.childCount() > 0:
+                    child = item.child(0)
+                    item.removeChild(child)
 
-                if entry.is_dir():
-                    # Folders don't show icons
-                    rel = str(entry.relative_to(self.workspace))
-                    child.setData(0, Qt.ItemDataRole.UserRole, rel)
+                entries = sorted(
+                    dir_path.iterdir(),
+                    key=lambda e: (not e.is_dir(), e.name.lower()),
+                )
+                for entry in entries:
+                    if entry.name.startswith("."):
+                        continue
+
+                    child = QTreeWidgetItem(item)
                     child.setText(0, entry.name)
-                    child.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
-                else:
-                    # Files show type-specific icons
-                    child.setIcon(0, _get_file_icon(entry.suffix, style))
-                    rel = str(entry.parent.relative_to(self.workspace))
-                    child.setData(0, Qt.ItemDataRole.UserRole, rel)
-                    child.setData(0, Qt.ItemDataRole.UserRole + 1, str(entry))
+
+                    if entry.is_dir():
+                        rel = self._workspace_rel(entry)
+                        child.setData(0, Qt.ItemDataRole.UserRole, rel)
+                        child.setText(0, entry.name)
+                        if self._is_non_draggable_directory(rel):
+                            self._mark_fixed_directory_item(child)
+                        else:
+                            self._mark_movable_directory_item(child)
+                        self._show_directory_indicator(child)
+                    else:
+                        child.setIcon(0, _get_file_icon(entry.suffix, style, entry))
+                        rel = self._workspace_rel(entry.parent)
+                        child.setData(0, Qt.ItemDataRole.UserRole, rel)
+                        child.setData(0, Qt.ItemDataRole.UserRole + 1, str(entry))
+                        self._mark_file_item(child)
+                if item.childCount() == 0:
+                    self._ensure_indicator_placeholder(item)
 
         except PermissionError as e:
             logger.warning("Permission denied accessing {}: {}", dir_path, e)
+        finally:
+            with QSignalBlocker(self.tree):
+                self._show_directory_indicator(item)
+            self.tree.setUpdatesEnabled(True)
+            self.tree.viewport().update()
 
     def refresh(self) -> None:
-        """Refresh file tree contents."""
         root = self.tree.invisibleRootItem()
         for i in range(root.childCount()):
             item = root.child(i)
             if item.isExpanded():
                 item.setExpanded(False)
                 item.setExpanded(True)
+        self._ensure_directory_indicators(root)
+        self.tree.viewport().update()
 
     def get_selected_file(self) -> Path | None:
-        """Get currently selected file path."""
         item = self.tree.currentItem()
         if not item:
             return None
@@ -958,29 +1147,47 @@ class FileTreeWidget(QWidget):
             return Path(file_path_str)
         return None
 
-    def _handle_drop(self, event: QDropEvent) -> None:
-        """Handle file drop event - import files into the project.
+    def _get_selected_dir(self) -> str:
+        """Get the selected directory path, falling back to 'references'."""
+        item = self.tree.currentItem()
+        if not item:
+            if self._root_selected:
+                return "."
+            return "references"
 
-        VS Code-style behavior:
-        - Files dropped on a fixed directory -> copy into that directory
-        - Files dropped on a sub-directory/file -> resolve up to the fixed directory
-        - Files dropped on empty area -> default to references
-        - Never creates, renames, or deletes the 5 fixed directories
-        """
+        file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
+        dir_name = item.data(0, Qt.ItemDataRole.UserRole)
+
+        # Directory node (top-level or nested): use it directly.
+        if dir_name and not file_path_str:
+            return dir_name
+
+        # File node: use its parent directory role.
+        if dir_name:
+            return dir_name
+
+        # Walk up to find parent fixed directory
+        parent = item.parent()
+        while parent is not None:
+            parent_dir = parent.data(0, Qt.ItemDataRole.UserRole)
+            if parent_dir in FIXED_DIRECTORIES:
+                return parent_dir
+            parent = parent.parent()
+        return "references"
+
+    def _handle_drop(self, event: QDropEvent) -> None:
         mime = event.mimeData()
         urls = mime.urls()
         if not urls:
             return
 
-        # Resolve target: must be inside one of the 5 fixed directories
-        target_item = self.tree.itemAt(event.position())
+        target_item = self.tree.itemAt(event.position().toPoint())
         target_dir_name = self._resolve_target_dir(target_item)
 
         target_dir = self.workspace / target_dir_name
         if not target_dir.exists():
             target_dir.mkdir(parents=True, exist_ok=True)
 
-        # Extract file paths from URLs
         source_files = []
         for url in urls:
             if url.isLocalFile():
@@ -991,39 +1198,172 @@ class FileTreeWidget(QWidget):
         if not source_files:
             return
 
-        # Copy files with progress dialog
         self._copy_files_with_progress(source_files, target_dir)
-
-        # Refresh the tree to show new files
         self.refresh()
+        self._ensure_directory_path_loaded(target_dir)
+        self._ensure_directory_indicators()
+        self.tree.viewport().update()
+
+    def _handle_internal_move(self, event: QDropEvent, target_item: QTreeWidgetItem) -> None:
+        """Handle internal drag-drop for moving files/folders within the project."""
+        # Get the dragged item(s)
+        dragged_items = self.tree.selectedItems()
+        if not dragged_items:
+            return
+
+        # Get target directory
+        target_dir_name = target_item.data(0, Qt.ItemDataRole.UserRole)
+        if not target_dir_name:
+            # Target is a file, get its parent directory
+            file_path_str = target_item.data(0, Qt.ItemDataRole.UserRole + 1)
+            if file_path_str:
+                target_dir_name = target_item.data(0, Qt.ItemDataRole.UserRole)
+            else:
+                return  # Invalid target
+
+        target_dir = self.workspace / target_dir_name
+        moved_paths: list[Path] = []
+        changed_dirs: set[Path] = {target_dir}
+
+        # Process each dragged item
+        for dragged_item in dragged_items:
+            dir_name = dragged_item.data(0, Qt.ItemDataRole.UserRole)
+            file_path_str = dragged_item.data(0, Qt.ItemDataRole.UserRole + 1)
+
+            # Determine source path
+            if file_path_str:
+                # It's a file
+                source_path = Path(file_path_str)
+            elif dir_name:
+                # It's a directory
+                source_path = self.workspace / dir_name
+            else:
+                continue  # Skip invalid items
+
+            # Skip if target is the same as source parent
+            if source_path.parent == target_dir:
+                continue
+            changed_dirs.add(source_path.parent)
+
+            # Check if trying to move into a subdirectory of itself
+            try:
+                target_dir.relative_to(source_path)
+                continue  # Would create a cycle, skip
+            except ValueError:
+                pass  # Not a subdirectory, OK to move
+
+            # Perform the move
+            try:
+                target_path = target_dir / source_path.name
+
+                # Handle name conflicts
+                if target_path.exists():
+                    base, ext = source_path.stem, source_path.suffix
+                    counter = 1
+                    while target_path.exists():
+                        target_path = target_dir / f"{base}_{counter}{ext}"
+                        counter += 1
+
+                shutil.move(str(source_path), str(target_path))
+                self.path_changed.emit(source_path, target_path)
+                moved_paths.append(target_path)
+                logger.info("Moved {} to {}", source_path, target_path)
+            except Exception as e:
+                logger.warning("Failed to move {} to {}: {}", source_path, target_dir, e)
+                QMessageBox.warning(
+                    self,
+                    "移动失败",
+                    f"无法移动 '{source_path.name}' 到 '{target_dir_name}':\n{e}"
+                )
+
+        self.refresh()
+        for changed_dir in changed_dirs:
+            self._ensure_directory_path_loaded(changed_dir)
+        self._ensure_directory_indicators()
+        self.tree.viewport().update()
+        if moved_paths:
+            self._select_moved_path(moved_paths[0])
+
+    def _select_moved_path(self, path: Path) -> None:
+        self._ensure_directory_path_loaded(path.parent)
+        rel_dir = str(path.relative_to(self.workspace).parent)
+        if rel_dir == ".":
+            rel_dir = ""
+        selected_file = str(path) if path.is_file() else None
+        selected_dir = str(path.relative_to(self.workspace)) if path.is_dir() else rel_dir
+        self._restore_selection(selected_file, selected_dir)
+        if path.is_file():
+            self.file_selected.emit(path)
+        else:
+            self.directory_selected.emit(selected_dir or ".")
+
+    def _ensure_directory_path_loaded(self, dir_path: Path) -> None:
+        """Expand and load tree nodes for a workspace-relative directory path."""
+        try:
+            rel = dir_path.resolve().relative_to(self.workspace).as_posix()
+        except ValueError:
+            return
+        if rel in ("", "."):
+            return
+
+        parts = rel.split("/")
+        root = self.tree.invisibleRootItem()
+        current = None
+        current_rel = ""
+
+        # Top-level directory
+        top = parts[0]
+        for i in range(root.childCount()):
+            candidate = root.child(i)
+            if candidate.data(0, Qt.ItemDataRole.UserRole) == top:
+                current = candidate
+                break
+        if current is None:
+            return
+
+        if not current.isExpanded():
+            current.setExpanded(True)
+            self._on_item_expanded(current)
+        current_rel = top
+
+        # Nested directories
+        for part in parts[1:]:
+            target_rel = f"{current_rel}/{part}"
+            next_item = None
+            for j in range(current.childCount()):
+                child = current.child(j)
+                if child.data(0, Qt.ItemDataRole.UserRole) == target_rel:
+                    next_item = child
+                    break
+            if next_item is None:
+                return
+            current = next_item
+            if not current.isExpanded():
+                current.setExpanded(True)
+                self._on_item_expanded(current)
+            current_rel = target_rel
 
     def _resolve_target_dir(self, target_item) -> str:
-        """Resolve drop target to one of the 5 fixed directory names.
-
-        Walks up the tree hierarchy until it finds a top-level fixed directory.
-        Falls back to 'references' if no valid target is found.
-        """
         if target_item is None:
             return "references"
 
-        # Check if this item IS a top-level fixed directory
         dir_name = target_item.data(0, Qt.ItemDataRole.UserRole)
-        if dir_name in FIXED_DIRECTORIES:
+        file_path_str = target_item.data(0, Qt.ItemDataRole.UserRole + 1)
+        if dir_name and not file_path_str:
+            return dir_name
+        if dir_name:
             return dir_name
 
-        # Walk up to find parent fixed directory
         parent = target_item.parent()
         while parent is not None:
             parent_dir = parent.data(0, Qt.ItemDataRole.UserRole)
-            if parent_dir in FIXED_DIRECTORIES:
+            if parent_dir:
                 return parent_dir
             parent = parent.parent()
 
-        # Fallback
         return "references"
 
     def _copy_files_with_progress(self, source_files: list[Path], target_dir: Path) -> None:
-        """Copy files to target directory with progress dialog."""
         progress = QProgressDialog("Copying files...", "Cancel", 0, len(source_files), self)
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setWindowTitle("Import Files")
@@ -1041,7 +1381,6 @@ class FileTreeWidget(QWidget):
             target_file = target_dir / source_file_name
 
             try:
-                # Handle name conflicts
                 if target_file.exists():
                     base, ext = source_file.stem, source_file.suffix
                     counter = 1
@@ -1074,7 +1413,6 @@ class FileTreeWidget(QWidget):
     # ------------------------------------------------------------------ #
 
     def _show_context_menu(self, pos) -> None:
-        """Show context menu for right-click on item."""
         item = self.tree.itemAt(pos)
         if not item:
             return
@@ -1086,7 +1424,6 @@ class FileTreeWidget(QWidget):
         menu.setObjectName("explorerContextMenu")
 
         if file_path_str:
-            # File item
             file_path = Path(file_path_str)
             rename_action = menu.addAction("重命名")
             delete_action = menu.addAction("删除")
@@ -1097,7 +1434,6 @@ class FileTreeWidget(QWidget):
             elif action == delete_action:
                 self._delete_file(file_path, item)
         elif dir_name:
-            # Directory item
             new_file_action = menu.addAction("新建文件")
             new_folder_action = menu.addAction("新建文件夹")
 
@@ -1126,15 +1462,12 @@ class FileTreeWidget(QWidget):
     # ------------------------------------------------------------------ #
 
     def _new_file(self) -> None:
-        """Create new file in references directory (default)."""
-        self._new_file_in_dir("references")
+        self._new_file_in_dir(self._get_selected_dir())
 
     def _new_folder(self) -> None:
-        """Create new folder in references directory (default)."""
-        self._new_folder_in_dir("references")
+        self._new_folder_in_dir(self._get_selected_dir())
 
     def _new_file_in_dir(self, dir_name: str) -> None:
-        """Create new file in specified directory using inline edit."""
         from PyQt6.QtWidgets import QApplication
         style = QApplication.style()
 
@@ -1142,7 +1475,6 @@ class FileTreeWidget(QWidget):
         if not dir_path.exists():
             dir_path.mkdir(parents=True, exist_ok=True)
 
-        # Expand the directory first
         root = self.tree.invisibleRootItem()
         for i in range(root.childCount()):
             item = root.child(i)
@@ -1154,12 +1486,10 @@ class FileTreeWidget(QWidget):
         self._start_inline_create(dir_name=dir_name, is_folder=False, style=style)
 
     def _new_folder_in_dir(self, dir_name: str) -> None:
-        """Create new folder in specified directory using inline edit."""
         dir_path = self.workspace / dir_name
         if not dir_path.exists():
             dir_path.mkdir(parents=True, exist_ok=True)
 
-        # Expand the directory first
         root = self.tree.invisibleRootItem()
         for i in range(root.childCount()):
             item = root.child(i)
@@ -1171,39 +1501,143 @@ class FileTreeWidget(QWidget):
         self._start_inline_create(dir_name=dir_name, is_folder=True, style=QApplication.style())
 
     def _start_inline_create(self, dir_name: str, is_folder: bool, style: QStyle) -> None:
-        """Create a VSCode-like inline creation placeholder item and start editing."""
-        root = self.tree.invisibleRootItem()
-        for i in range(root.childCount()):
-            parent_item = root.child(i)
-            item_dir = parent_item.data(0, Qt.ItemDataRole.UserRole)
-            if item_dir != dir_name:
-                continue
+        # Handle repeated "new file/folder" clicks while an inline-create is pending.
+        if self._pending_new_item is not None:
+            pending_text = self._pending_create_text()
 
-            new_item = QTreeWidgetItem()
-            new_item.setText(0, "")
-            new_item.setFlags(new_item.flags() | Qt.ItemFlag.ItemIsEditable)
-            if is_folder:
-                # VSCode-like: new folder line shows twisty arrow placeholder + input box.
-                new_item.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
+            if not pending_text:
+                self._cancel_pending_new_item()
             else:
-                # VSCode-like: new file defaults to text-file icon; updates with suffix while typing.
-                new_item.setIcon(0, _get_file_icon(".txt", style))
-            parent_item.addChild(new_item)
-            parent_item.setExpanded(True)
-            self.tree.setCurrentItem(new_item)
-            self._pending_new_item = new_item
-            self._pending_new_kind = "folder" if is_folder else "file"
-            self.tree.editItem(new_item, 0)
-            self._bind_create_editor_live_updates(new_item)
+                with QSignalBlocker(self.tree):
+                    self._pending_new_item.setText(0, pending_text)
+                self._finalize_pending_new_item()
+
+        # Find the target directory item (could be nested like data/processed)
+        target_item = None
+
+        if "/" in dir_name:
+            # Handle nested directories
+            parts = dir_name.split("/")
+            root = self.tree.invisibleRootItem()
+            current = None
+            for i in range(root.childCount()):
+                if root.child(i).data(0, Qt.ItemDataRole.UserRole) == parts[0]:
+                    current = root.child(i)
+                    break
+
+            if current and len(parts) > 1:
+                # Navigate to subdirectory
+                for j in range(current.childCount()):
+                    if current.child(j).data(0, Qt.ItemDataRole.UserRole) == dir_name:
+                        target_item = current.child(j)
+                        break
+                if not target_item:
+                    # Subdirectory item not found, create it
+                    target_item = QTreeWidgetItem(current)
+                    target_item.setText(0, DIR_LABELS.get(parts[1], parts[1]))
+                    target_item.setData(0, Qt.ItemDataRole.UserRole, dir_name)
+                    self._mark_movable_directory_item(target_item)
+                    self._show_directory_indicator(target_item)
+            else:
+                target_item = current
+        else:
+            # Top-level directory
+            root = self.tree.invisibleRootItem()
+            for i in range(root.childCount()):
+                item = root.child(i)
+                if item.data(0, Qt.ItemDataRole.UserRole) == dir_name:
+                    target_item = item
+                    break
+
+        if not target_item:
             return
 
+        # Expand and load existing children before inserting the temporary
+        # editor item. Expanding after insertion rebuilds children and can
+        # remove the inline editor for collapsed nested directories.
+        if not target_item.isExpanded():
+            target_item.setExpanded(True)
+
+        new_item = QTreeWidgetItem()
+        new_item.setText(0, "")
+        new_item.setFlags(new_item.flags() | Qt.ItemFlag.ItemIsEditable)
+        # Store the parent directory path in UserRole+2 to use during file creation
+        new_item.setData(0, Qt.ItemDataRole.UserRole + 2, dir_name)
+        if is_folder:
+            self._mark_movable_directory_item(new_item)
+            self._show_directory_indicator(new_item)
+        else:
+            self._mark_file_item(new_item)
+            new_item.setIcon(0, _get_file_icon(".txt", style))
+        target_item.addChild(new_item)
+        self.tree.setCurrentItem(new_item)
+        self._pending_new_item = new_item
+        self._pending_new_kind = "folder" if is_folder else "file"
+        self.tree.editItem(new_item, 0)
+        self._bind_create_editor_live_updates(new_item)
+        self._focus_inline_editor()
+
+    def _cancel_pending_new_item(self) -> None:
+        if self._pending_new_item is None:
+            return
+        parent = self._pending_new_item.parent()
+        self._remove_item(self._pending_new_item)
+        if parent and parent.childCount() == 0:
+            self._show_directory_indicator(parent)
+        self._pending_new_item = None
+        self._pending_new_kind = None
+        self._pending_editor = None
+
+    def _finalize_pending_new_item(self) -> None:
+        if self._pending_new_item is None:
+            return
+
+        item = self._pending_new_item
+        new_name = item.text(0).strip()
+        parent_dir = item.data(0, Qt.ItemDataRole.UserRole + 2)
+        is_folder = self._pending_new_kind == "folder"
+
+        if not new_name or not parent_dir:
+            self._cancel_pending_new_item()
+            return
+
+        parent_path = self.workspace / parent_dir
+        try:
+            if is_folder:
+                new_folder = parent_path / new_name
+                new_folder.mkdir(exist_ok=False)
+                new_dir_name = f"{parent_dir}/{new_name}" if parent_dir else new_name
+                with QSignalBlocker(self.tree):
+                    item.setData(0, Qt.ItemDataRole.UserRole, new_dir_name)
+                    item.setData(0, Qt.ItemDataRole.UserRole + 2, "")
+                logger.info("Created folder: {}", new_folder)
+            else:
+                new_file = parent_path / new_name
+                new_file.touch(exist_ok=False)
+                with QSignalBlocker(self.tree):
+                    item.setIcon(0, _get_file_icon(new_file.suffix or ".txt", file_path=new_file))
+                    item.setData(0, Qt.ItemDataRole.UserRole, parent_dir)
+                    item.setData(0, Qt.ItemDataRole.UserRole + 1, str(new_file))
+                    item.setData(0, Qt.ItemDataRole.UserRole + 2, "")
+                logger.info("Created file: {}", new_file)
+        except FileExistsError:
+            kind = "文件夹" if is_folder else "文件"
+            QMessageBox.warning(self, "创建失败", f"{kind} '{new_name}' 已存在")
+            self._remove_item(item)
+        except Exception as e:
+            title = "无法创建文件夹" if is_folder else "无法创建文件"
+            QMessageBox.warning(self, "创建失败", f"{title}:\n{e}")
+            self._remove_item(item)
+        finally:
+            self._pending_new_item = None
+            self._pending_new_kind = None
+            self._pending_editor = None
+
     def _rename_file(self, file_path: Path, item: QTreeWidgetItem) -> None:
-        """Rename a file using inline edit."""
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
         self.tree.editItem(item, 0)
 
     def _delete_file(self, file_path: Path, item: QTreeWidgetItem) -> None:
-        """Delete a file."""
         reply = QMessageBox.question(
             self,
             "删除文件",
@@ -1224,12 +1658,10 @@ class FileTreeWidget(QWidget):
                 QMessageBox.warning(self, "删除失败", f"无法删除文件:\n{e}")
 
     def _rename_directory(self, dir_path: Path, item: QTreeWidgetItem) -> None:
-        """Rename a directory using inline edit."""
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
         self.tree.editItem(item, 0)
 
     def _delete_directory(self, dir_path: Path, item: QTreeWidgetItem) -> None:
-        """Delete a directory."""
         reply = QMessageBox.question(
             self,
             "删除文件夹",
@@ -1248,3 +1680,141 @@ class FileTreeWidget(QWidget):
                 logger.info("Deleted directory: {}", dir_path)
             except Exception as e:
                 QMessageBox.warning(self, "删除失败", f"无法删除文件夹:\n{e}")
+
+    def _handle_tree_key(self, event) -> bool:
+        if self.tree.state() == QAbstractItemView.State.EditingState:
+            return False
+
+        key = event.key()
+        mods = event.modifiers()
+        current = self.tree.currentItem()
+        if current is None:
+            return False
+
+        is_delete = (
+            key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace)
+            or (mods & Qt.KeyboardModifier.MetaModifier and key == Qt.Key.Key_Backspace)
+        )
+        if is_delete:
+            self._delete_item_from_shortcut(current)
+            return True
+
+        is_rename = key == Qt.Key.Key_F2 or key in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+        if is_rename and mods == Qt.KeyboardModifier.NoModifier:
+            self._rename_item_from_shortcut(current)
+            return True
+        return False
+
+    def _rename_item_from_shortcut(self, item: QTreeWidgetItem) -> None:
+        dir_name = item.data(0, Qt.ItemDataRole.UserRole)
+        file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
+        if file_path_str:
+            self._rename_file(Path(file_path_str), item)
+            return
+        if dir_name and dir_name not in FIXED_DIRECTORIES:
+            self._rename_directory(self.workspace / dir_name, item)
+
+    def _delete_item_from_shortcut(self, item: QTreeWidgetItem) -> None:
+        dir_name = item.data(0, Qt.ItemDataRole.UserRole)
+        file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
+        if file_path_str:
+            self._delete_file(Path(file_path_str), item)
+            return
+        if dir_name and dir_name not in FIXED_DIRECTORIES:
+            self._delete_directory(self.workspace / dir_name, item)
+
+    def _styled_message_box(
+        self,
+        icon: QMessageBox.Icon,
+        title: str,
+        text: str,
+        buttons: QMessageBox.StandardButton,
+    ) -> QMessageBox:
+        c = get_theme_colors()
+        box = QMessageBox(self)
+        if hasattr(QMessageBox, "Option"):
+            box.setOption(QMessageBox.Option.DontUseNativeDialog, True)
+        box.setIcon(icon)
+        box.setWindowTitle(title)
+        box.setText(text)
+        box.setStandardButtons(buttons)
+        box.setStyleSheet(f"""
+            QMessageBox {{
+                background-color: {c["bg"]};
+                color: {c["fg"]};
+            }}
+            QMessageBox QLabel {{
+                color: {c["fg"]};
+            }}
+            QMessageBox QPushButton {{
+                background-color: {c["surface"]};
+                color: {c["fg"]};
+                border: 1px solid {c["border"]};
+                border-radius: {c["radius_sm"]};
+                min-width: 72px;
+                min-height: 28px;
+                padding: 2px 10px;
+            }}
+            QMessageBox QPushButton:hover {{
+                background-color: {c["hover"]};
+            }}
+        """)
+        return box
+
+    def _ask_confirmation(self, title: str, text: str) -> QMessageBox.StandardButton:
+        box = self._styled_message_box(
+            QMessageBox.Icon.Warning,
+            title,
+            text,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        yes_button = box.button(QMessageBox.StandardButton.Yes)
+        no_button = box.button(QMessageBox.StandardButton.No)
+        if yes_button is not None:
+            yes_button.setText("删除")
+        if no_button is not None:
+            no_button.setText("取消")
+        return QMessageBox.StandardButton(box.exec())
+
+    def _show_warning(self, title: str, text: str) -> None:
+        box = self._styled_message_box(
+            QMessageBox.Icon.Warning,
+            title,
+            text,
+            QMessageBox.StandardButton.Ok,
+        )
+        ok_button = box.button(QMessageBox.StandardButton.Ok)
+        if ok_button is not None:
+            ok_button.setText("确定")
+        box.exec()
+
+    def _delete_file(self, file_path: Path, item: QTreeWidgetItem) -> None:  # type: ignore[override]
+        reply = self._ask_confirmation("删除文件", f"确定要删除 '{file_path.name}' 吗？")
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                file_path.unlink()
+                parent = item.parent()
+                if parent:
+                    parent.removeChild(item)
+                else:
+                    root = self.tree.invisibleRootItem()
+                    root.removeChild(item)
+                logger.info("Deleted file: {}", file_path)
+            except Exception as e:
+                self._show_warning("删除失败", f"无法删除文件:\n{e}")
+
+    def _delete_directory(self, dir_path: Path, item: QTreeWidgetItem) -> None:  # type: ignore[override]
+        reply = self._ask_confirmation("删除文件夹", f"确定要删除 '{dir_path.name}' 及其所有内容吗？")
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                shutil.rmtree(dir_path)
+                parent = item.parent()
+                if parent:
+                    parent.removeChild(item)
+                else:
+                    root = self.tree.invisibleRootItem()
+                    root.removeChild(item)
+                logger.info("Deleted directory: {}", dir_path)
+            except Exception as e:
+                self._show_warning("删除失败", f"无法删除文件夹:\n{e}")

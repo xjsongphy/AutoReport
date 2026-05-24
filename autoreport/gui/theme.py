@@ -40,8 +40,11 @@ def get_theme_colors() -> dict[str, str]:
     dark = is_dark_mode()
 
     # === Base Colors ===
-    bg = "#1f1f1f" if dark else "#ffffff"
-    surface = "#181818" if dark else "#f3f3f3"
+    bg = "#1e1e1e" if dark else "#ffffff"
+    surface = "#181818" if dark else "#f0f0f0"
+    panel_bg = "#141414" if dark else "#f0f0f0"
+    titlebar_bg = "#141414" if dark else "#e6e6e6"
+    messages_bg = "#121212" if dark else "#f0f0f0"
     border = "#2b2b2b" if dark else "#e0e0e0"
     fg = "#cccccc" if dark else "#616161"
     muted = "#737373" if dark else "#9e9e9e"
@@ -54,10 +57,22 @@ def get_theme_colors() -> dict[str, str]:
         # === Layout ===
         "bg": bg,  # Main content area
         "surface": surface,  # Sidebar/chrome (file tree, header)
+        "panel_bg": panel_bg,  # Agent panel background (darker than editor)
+        "titlebar_bg": titlebar_bg,  # Custom window title bar background
+        "messages_bg": messages_bg,  # Agent conversation area background
         "card": "#252526" if dark else "#f5f5f5",  # Elevated cards
         "border": border,
         "fg": fg,
         "muted": muted,
+        "radius_sm": "4px",
+        "radius_md": "6px",
+        "radius_lg": "10px",
+
+        # === Font Weights ===
+        "fw_normal": "400",
+        "fw_medium": "500",
+        "fw_semibold": "600",
+        "fw_bold": "700",
 
         # === Aliases for specific components ===
         "bg_header": surface,  # Header background
@@ -74,6 +89,7 @@ def get_theme_colors() -> dict[str, str]:
         # === Input ===
         "input_bg": "#313131" if dark else "#ffffff",
         "input_border": "#3c3c3c" if dark else "#e0e0e0",
+        "input_border_width": "1px",
 
         # === Buttons ===
         "primary": "#0078d4" if dark else "#0090ff",
@@ -92,8 +108,10 @@ def get_theme_colors() -> dict[str, str]:
         "scrollbar_hover": "#8a8a8a" if dark else "#a8a8a8",
 
         # === Chat/Agent Panel ===
-        "bubble_bg": "#2a2a2a" if dark else "#f0f0f0",
-        "bubble_hover": "#333333" if dark else "#e8e8e8",
+        "bubble_bg": "#2a2a2a" if dark else "#ffffff",
+        "bubble_hover": "#333333" if dark else "#ffffff",
+        "edit_bubble_bg": "#3c3c3c" if dark else "#ffffff",
+        "edit_bubble_border": "transparent" if dark else "#616161",
         "avatar_bg": "#3c3c3c" if dark else "#e0e0e0",
         "avatar_fg": "#cccccc" if dark else "#616161",
 
@@ -114,22 +132,25 @@ def get_theme_colors() -> dict[str, str]:
         "tree_sel_fg": "#ffffff" if dark else "#202020",
 
         # === Editor/Preview ===
-        "editor_bg": "#1f1f1f" if dark else "#ffffff",
+        "editor_bg": bg,
         "editor_fg": "#d4d4d4" if dark else "#333333",
-        "editor_margin": "#252526" if dark else "#f3f3f3",
+        "editor_margin": bg if dark else "#ffffff",
+        "editor_caret_fg": "#ffffff" if dark else "#000000",
         "accent": "#0078d4" if dark else "#0090ff",
         "compile_bg": "#0e639c" if dark else "#0078d4",
         "compile_fg": "#ffffff",
 
         # === Tabs ===
-        "tab_active_bg": "#1f1f1f" if dark else "#f3f3f3",
-        "tab_inactive_bg": "#2d2d2d" if dark else "#ececec",
+        "tab_active_bg": bg if dark else "#ffffff",
+        "tab_inactive_bg": surface if dark else "#f0f0f0",
         "tab_active_fg": "#ffffff" if dark else "#1a1a1a",
         "tab_inactive_fg": "#969696" if dark else "#888888",
 
         # === Context Menu ===
-        "context_bg": "#1f1f1f" if dark else "#f3f3f3",
+        "context_bg": bg if dark else "#f3f3f3",
         "context_border": "#2b2b2b" if dark else "#e0e0e0",
+        "popup_fg": "#cccccc" if dark else "#333333",
+        "popup_hover": "#2a2d2e" if dark else "#f5f5f5",
 
         # === Spinner ===
         "spinner_fg": "#0078d4" if dark else "#0090ff",
@@ -220,6 +241,7 @@ def get_theme_colors() -> dict[str, str]:
         "warningBg": "#4c3c26" if dark else "#fff4e5",
         "warningBorder": "#cca700" if dark else "#bf8900",
         "warningFg": "#ffd866" if dark else "#7b5000",
+        "successFg": "#4ec9b0" if dark else "#008000",
     }
 
 

@@ -62,7 +62,7 @@ class ToolCallGroup(QWidget):
         self._header_btn.clicked.connect(self._on_toggle)
         layout.addWidget(self._header_btn)
 
-        self._details = QWidget()
+        self._details = QWidget(self)
         self._details.setObjectName("toolCallDetails")
         self._details_layout = QVBoxLayout(self._details)
         self._details_layout.setContentsMargins(0, 2, 0, 0)
@@ -164,8 +164,8 @@ class ToolCallGroup(QWidget):
 
     def _duration_text(self, duration_ms: int) -> str:
         if duration_ms <= 0:
-            return ""
-        return f"{duration_ms / 1000:.1f}s"
+            return "0s"
+        return f"{round(duration_ms / 1000)}s"
 
     def _status_text_for_call(self, call: ToolCall) -> str:
         if call.success is None:
@@ -230,8 +230,7 @@ class ToolCallGroup(QWidget):
             ]
             parts = [arrow, ", ".join(names)]
             total_ms = sum(call.duration_ms for call in self._calls)
-            if total_ms > 0:
-                parts.append(f"{total_ms / 1000:.1f}s")
+            parts.append(self._duration_text(total_ms))
             status = self._status_counts_text()
             if status:
                 parts.append(status)

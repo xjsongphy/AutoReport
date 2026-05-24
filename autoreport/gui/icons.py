@@ -1,6 +1,6 @@
 """Agent icons from Tabler Icons (MIT License)."""
 
-from PyQt6.QtGui import QIcon, QPixmap, QPainter
+from PyQt6.QtGui import QColor, QIcon, QPainterPath, QPen, QPixmap, QPainter
 from PyQt6.QtCore import QByteArray, Qt
 from PyQt6.QtSvg import QSvgRenderer
 
@@ -12,6 +12,9 @@ _SVG_ICONS: dict[str, str] = {
     "line-chart": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M4 16l4-4 4 4 4-6 4 4"/></svg>',
     "pencil": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4"/><path d="M13.5 6.5l4 4"/></svg>',
     "file-text": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z"/><line x1="9" y1="9" x2="10" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>',
+    # VSCode Codicons (CC0 1.0 Universal)
+    "run": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M4.25 3l1.166-.624 8 5.333v1.248l-8 5.334-1.166-.624V3zm1.5 1.401v7.864l5.898-3.932L5.75 4.401z"/></svg>',
+    "preview": '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M8 3c3.5 0 6.5 3 7.4 4.4a1 1 0 0 1 0 1.2C14.5 10 11.5 13 8 13s-6.5-3-7.4-4.4a1 1 0 0 1 0-1.2C1.5 6 4.5 3 8 3Zm0 1.5c-2.7 0-5.1 2.2-6 3.5.9 1.3 3.3 3.5 6 3.5s5.1-2.2 6-3.5c-.9-1.3-3.3-3.5-6-3.5Z"/><path d="M8 6a2 2 0 1 1 0 4a2 2 0 0 1 0-4Z"/></svg>',
 }
 
 _AGENT_ICON_MAP: dict[str, str] = {
@@ -72,3 +75,70 @@ def get_agent_icon(agent_type: str, color: str | None = None, size: int = 24) ->
         _ICON_CACHE[cache_key] = _svg_to_icon(svg_data, color, size)
 
     return _ICON_CACHE[cache_key]
+
+
+def get_run_icon(color: str = "#4ec9b0", size: int = 18) -> QIcon:
+    """Get QIcon for the run/play button (VSCode Codicon).
+
+    Args:
+        color: Icon color (default VSCode green: #4ec9b0).
+        size: Icon size in pixels (default 18).
+    """
+    cache_key = f"run_{color}_{size}"
+
+    if cache_key not in _ICON_CACHE:
+        svg_data = _SVG_ICONS["run"]
+        _ICON_CACHE[cache_key] = _svg_to_icon(svg_data, color, size)
+
+    return _ICON_CACHE[cache_key]
+
+
+def get_preview_icon(color: str = "#4ec9b0", size: int = 18) -> QIcon:
+    """Get QIcon for the preview button (VSCode-style eye icon)."""
+    cache_key = f"preview_{color}_{size}"
+
+    if cache_key not in _ICON_CACHE:
+        svg_data = _SVG_ICONS["preview"]
+        _ICON_CACHE[cache_key] = _svg_to_icon(svg_data, color, size)
+
+    return _ICON_CACHE[cache_key]
+
+
+def get_context_eye_icons(color: str = "#a6a6a6", size: int = 14) -> dict[str, QIcon]:
+    """Get eye / eye-off icons matching API config page style."""
+    eye_key = f"context_eye_{color}_{size}"
+    off_key = f"context_eye_off_{color}_{size}"
+
+    if eye_key not in _ICON_CACHE or off_key not in _ICON_CACHE:
+        pen = QPen()
+        pen.setColor(QColor(color))
+        pen.setWidthF(max(1.4, size * 0.12))
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+
+        eye_pixmap = QPixmap(size, size)
+        eye_pixmap.fill(Qt.GlobalColor.transparent)
+        p = QPainter(eye_pixmap)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        path = QPainterPath()
+        path.moveTo(size * 0.12, size * 0.5)
+        path.cubicTo(size * 0.30, size * 0.20, size * 0.70, size * 0.20, size * 0.88, size * 0.5)
+        path.cubicTo(size * 0.70, size * 0.80, size * 0.30, size * 0.80, size * 0.12, size * 0.5)
+        p.drawPath(path)
+        p.setBrush(QColor(color))
+        p.drawEllipse(int(size * 0.43), int(size * 0.43), int(size * 0.14), int(size * 0.14))
+        p.end()
+
+        off_pixmap = QPixmap(eye_pixmap)
+        p2 = QPainter(off_pixmap)
+        p2.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p2.setPen(pen)
+        p2.drawLine(int(size * 0.16), int(size * 0.84), int(size * 0.84), int(size * 0.16))
+        p2.end()
+
+        _ICON_CACHE[eye_key] = QIcon(eye_pixmap)
+        _ICON_CACHE[off_key] = QIcon(off_pixmap)
+
+    return {"eye": _ICON_CACHE[eye_key], "eye_off": _ICON_CACHE[off_key]}

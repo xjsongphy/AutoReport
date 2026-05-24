@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 
 from ..config import ConfigManager
 from ..core.recent_projects import RecentProjects
+from .theme import format_stylesheet, get_theme_colors, is_dark_mode
 
 PROJECT_DIRECTORIES = ["data", "data/processed", "references", "theory", "code", "tex"]
 
@@ -94,7 +95,7 @@ class ProjectDialog(QDialog):
         root.setSpacing(0)
 
         # ---- Header ----
-        header = QWidget()
+        header = QWidget(self)
         header.setObjectName("header")
         header_layout = QVBoxLayout(header)
         header_layout.setContentsMargins(40, 36, 40, 28)
@@ -115,7 +116,7 @@ class ProjectDialog(QDialog):
         root.addWidget(header)
 
         # ---- Action buttons ----
-        actions = QWidget()
+        actions = QWidget(self)
         actions.setObjectName("actionBar")
         actions_layout = QHBoxLayout(actions)
         actions_layout.setContentsMargins(40, 12, 40, 16)
@@ -144,7 +145,7 @@ class ProjectDialog(QDialog):
         root.addWidget(actions)
 
         # ---- Recent projects ----
-        recent_header = QWidget()
+        recent_header = QWidget(self)
         recent_header.setObjectName("sectionHeader")
         recent_header_layout = QHBoxLayout(recent_header)
         recent_header_layout.setContentsMargins(40, 24, 40, 10)
@@ -160,7 +161,7 @@ class ProjectDialog(QDialog):
         scroll.setFrameStyle(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        self._list_container = QWidget()
+        self._list_container = QWidget(self)
         self._list_container.setObjectName("listContainer")
         self._list_layout = QVBoxLayout(self._list_container)
         self._list_layout.setContentsMargins(40, 0, 40, 0)
@@ -171,7 +172,7 @@ class ProjectDialog(QDialog):
         root.addWidget(scroll, 1)
 
         # ---- Footer ----
-        footer = QWidget()
+        footer = QWidget(self)
         footer.setObjectName("footer")
         footer_layout = QHBoxLayout(footer)
         footer_layout.setContentsMargins(40, 12, 40, 16)
@@ -183,105 +184,78 @@ class ProjectDialog(QDialog):
         root.addWidget(footer)
 
     def _apply_style(self) -> None:
-        dark = self._get_dark_mode()
-
-        link_color = "#3794ff" if dark else "#005fb8"
-        link_hover = "#5cb3ff" if dark else "#007acc"
-
-        c = {
-            "bg": "#1f1f1f" if dark else "#f3f3f3",
-            "headerBg": "#181818" if dark else "#f3f3f3",
-            "titleFg": "#e0e0e0" if dark else "#1a1a1a",
-            "subtitleFg": "#999" if dark else "#666",
-            "border": "#2b2b2b" if dark else "#e0e0e0",
-            "sectionFg": "#ccc" if dark else "#555",
-            "primaryBg": "#0078d4" if dark else "#0078d4",
-            "primaryFg": "#ffffff",
-            "primaryHover": "#026ec1" if dark else "#106ebe",
-            "secondaryBorder": "#555" if dark else "#ccc",
-            "secondaryFg": "#ddd" if dark else "#333333",
-            "secondaryHoverBg": "#2a2d2e" if dark else "#e9e9e9",
-            "link": link_color,
-            "linkHover": link_hover,
-            "pathFg": "#858585" if dark else "#888888",
-            "deleteFg": "#858585" if dark else "#999",
-            "deleteHoverFg": "#f44747" if dark else "#d32f2f",
-            "deleteHoverBg": "#3a1a1a" if dark else "#fef2f2",
-            "cancelFg": "#858585" if dark else "#888888",
-            "cancelHoverFg": "#ccc" if dark else "#333333",
-        }
-
-        self.setStyleSheet(f"""
+        colors = get_theme_colors()
+        stylesheet = f"""
             ProjectDialog {{
-                background-color: {c["bg"]};
+                background-color: {colors["bg"]};
             }}
             #header {{
-                background-color: {c["headerBg"]};
+                background-color: {colors["surface"]};
             }}
             #title {{
                 font-size: 28px;
-                font-weight: 700;
-                color: {c["titleFg"]};
+                font-weight: {colors["fw_bold"]};
+                color: {colors["title"]};
             }}
             #subtitle {{
                 font-size: 13px;
-                color: {c["subtitleFg"]};
+                color: {colors["subtitleFg"]};
                 line-height: 1.5;
             }}
             #actionBar {{
-                background-color: {c["bg"]};
+                background-color: {colors["bg"]};
             }}
             #primaryBtn {{
-                background-color: {c["primaryBg"]};
-                color: {c["primaryFg"]};
+                background-color: {colors["primary"]};
+                color: {colors["primaryFg"]};
                 border: none;
-                border-radius: 4px;
+                border-radius: {colors["radius_sm"]};
                 padding: 8px 20px;
                 font-size: 13px;
-                font-weight: 600;
+                font-weight: {colors["fw_semibold"]};
             }}
-            #primaryBtn:hover {{ background-color: {c["primaryHover"]}; }}
+            #primaryBtn:hover {{ background-color: {colors["primaryHover"]}; }}
             #secondaryBtn {{
                 background-color: transparent;
-                color: {c["secondaryFg"]};
-                border: 1px solid {c["secondaryBorder"]};
-                border-radius: 4px;
+                color: {colors["secondaryFg"]};
+                border: 1px solid {colors["secondaryBorder"]};
+                border-radius: {colors["radius_sm"]};
                 padding: 8px 20px;
                 font-size: 13px;
             }}
             #secondaryBtn:hover {{
-                background-color: {c["secondaryHoverBg"]};
+                background-color: {colors["secondaryHoverBg"]};
             }}
             #configBtn {{
                 background-color: transparent;
-                color: {c["secondaryFg"]};
-                border: 1px solid {c["secondaryBorder"]};
-                border-radius: 4px;
+                color: {colors["secondaryFg"]};
+                border: 1px solid {colors["secondaryBorder"]};
+                border-radius: {colors["radius_sm"]};
                 padding: 8px 20px;
                 font-size: 13px;
             }}
             #configBtn:hover {{
-                background-color: {c["secondaryHoverBg"]};
+                background-color: {colors["secondaryHoverBg"]};
             }}
             #sectionHeader {{
-                background-color: {c["bg"]};
+                background-color: {colors["bg"]};
             }}
             #sectionLabel {{
                 font-size: 12px;
-                font-weight: 600;
-                color: {c["sectionFg"]};
+                font-weight: {colors["fw_semibold"]};
+                color: {colors["sectionFg"]};
                 text-transform: uppercase;
                 letter-spacing: 0.5px;
             }}
             #recentScroll {{
-                background-color: {c["bg"]};
+                background-color: {colors["bg"]};
                 border: none;
             }}
             #recentScroll > QWidget {{
-                background-color: {c["bg"]};
+                background-color: {colors["bg"]};
             }}
             #listContainer {{
-                background-color: {c["bg"]};
+                background-color: {colors["bg"]};
             }}
 
             /* Recent item row — VSCode button-link style, no card */
@@ -292,58 +266,55 @@ class ProjectDialog(QDialog):
             #recentName {{
                 background-color: transparent;
                 border: none;
-                color: {c["link"]};
+                border-bottom: 1px solid transparent;
+                color: {colors["link"]};
                 font-size: 13px;
                 text-align: left;
                 padding: 2px 0;
             }}
             #recentName:hover {{
-                color: {c["linkHover"]};
-                text-decoration: underline;
+                color: {colors["linkHover"]};
+                border-bottom: 1px solid {colors["linkHover"]};
             }}
             #recentPath {{
                 font-size: 13px;
-                color: {c["pathFg"]};
+                color: {colors["pathFg"]};
                 padding-left: 8px;
             }}
             #recentDeleteBtn {{
                 background-color: transparent;
                 color: transparent;
                 border: none;
-                border-radius: 3px;
+                border-radius: {colors["radius_sm"]};
                 font-size: 11px;
                 padding: 0;
             }}
             #recentItem:hover #recentDeleteBtn {{
-                color: {c["deleteFg"]};
+                color: {colors["muted"]};
             }}
             #recentDeleteBtn:hover {{
-                background-color: {c["deleteHoverBg"]};
-                color: {c["deleteHoverFg"]};
+                background-color: {colors["hover"]};
+                color: {colors["danger"]};
             }}
 
             #footer {{
-                background-color: {c["headerBg"]};
+                background-color: {colors["surface"]};
             }}
             #cancelBtn {{
                 background-color: transparent;
-                color: {c["cancelFg"]};
+                color: {colors["cancelFg"]};
                 border: none;
                 padding: 6px 16px;
                 font-size: 12px;
             }}
             #cancelBtn:hover {{
-                color: {c["cancelHoverFg"]};
+                color: {colors["cancelHoverFg"]};
             }}
             QScrollArea {{
                 border: none;
             }}
-        """)
-
-    def _get_dark_mode(self) -> bool:
-        from PyQt6.QtWidgets import QApplication
-        hints = QApplication.styleHints()
-        return hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
+        """
+        self.setStyleSheet(stylesheet)
 
     # ---- Data loading ----
 

@@ -8,6 +8,7 @@ from autoreport.gui.widgets.message_row import (
     _parse_code_blocks,
 )
 from autoreport.gui.widgets.markdown_renderer import render_markdown
+import autoreport.gui.widgets.markdown_renderer as markdown_renderer
 
 
 class TestMarkdownRenderer:
@@ -60,6 +61,12 @@ class TestMarkdownRenderer:
         html = render_markdown(md)
         assert "A" in html
         assert "1" in html
+
+    def test_table_header_is_white_in_light_mode(self, monkeypatch):
+        monkeypatch.setattr(markdown_renderer, "_is_dark_mode", lambda: False)
+        md = "| A | B |\n|---|---|\n| 1 | 2 |"
+        html = render_markdown(md)
+        assert 'bgcolor="#ffffff"' in html
 
 
 class TestCodeBlockParsing:

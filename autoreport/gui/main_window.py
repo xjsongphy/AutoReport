@@ -1,14 +1,20 @@
 """Main application window."""
 
 import asyncio
+import sys
 from pathlib import Path
 
 from loguru import logger
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QTimer, Qt, pyqtSignal
+from PyQt6.QtGui import QAction, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QMainWindow,
+    QMenu,
+    QMenuBar,
     QSplitter,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -30,10 +36,11 @@ from ..utils.agent_labels import get_agent_badge, get_agent_title
 from ..utils.logging_config import ui_logger
 from .scale import dpi_scale
 from .theme import get_theme_colors
+from .title_bar import TitleBar
 from .widgets.agent_panel import AgentPanel
 from .widgets.file_tree import FileTreeWidget
 from .widgets.preview import PreviewWidget
-from .widgets.ui_utils import compact_tooltip_qss
+from .widgets.ui_utils import combo_box_qss, compact_tooltip_qss
 
 
 class MainWindow(QMainWindow):
@@ -56,21 +63,66 @@ class MainWindow(QMainWindow):
         self.workspace = Path(workspace).resolve()
         self._async_loop: asyncio.AbstractEventLoop | None = None
         self._debug_agents = {str(a) for a in (debug_agents or [])}
+        self._title_bar: TitleBar | None = None
+        self._splitter_sizes_initialized = False
 
         self.setWindowTitle("AutoReport")
         self.resize(1400, 900)
+
+        # Set frameless window flag for custom title bar
+        # Different handling for each platform
+        if sys.platform == "darwin":
+            # macOS: Use CustomizeWindowHint without FramelessWindowHint
+            # This keeps the window draggable but allows custom title bar
+            # We'll hide system buttons via the custom title bar
+            flags = self.windowFlags() | Qt.WindowType.CustomizeWindowHint
+            self.setWindowFlags(flags)
+        else:
+            # Windows/Linux: Use full FramelessWindowHint
+            flags = self.windowFlags() | Qt.WindowType.FramelessWindowHint
+            self.setWindowFlags(flags)
+
+        # Add window shadow for depth (platform-specific)
+        self._apply_window_shadow()
 
         self._conv_store = ConversationStore(workspace)
 
         self._apply_theme()
         self._setup_ui()
-        # No longer auto-load history — each session starts fresh
+        QTimer.singleShot(0, self._apply_splitter_sizes)
+        QTimer.singleShot(100, self._apply_splitter_sizes)
+        # Load persisted histories for main and currently selected sub-agent.
+        # Do an immediate load plus a deferred reload after the first event-loop
+        # tick to avoid startup ordering glitches in the sub-agent selector.
+        self._load_conversations()
+        QTimer.singleShot(0, self._load_conversations)
 
         self._message_signal.connect(self._dispatch_backend_message)
         self.backend.subscribe_to_messages(self._on_bus_message)
         self._subscribe_to_debug_messages()
 
         logger.info("Main window initialized for workspace: {}", self.workspace)
+
+    def _apply_window_shadow(self) -> None:
+        """Apply window shadow effect for platform-appropriate appearance."""
+        if sys.platform == "win32":
+            # Windows: Use native DWM shadow
+            import ctypes
+            from ctypes import wintypes
+
+            # Enable DWM blur behind window
+            try:
+                hwnd = int(self.winId())
+                attribute = ctypes.c_int(2)  # DWMWA_EXTENDED_FRAME_BOUNDS
+                if hasattr(ctypes, "windll"):
+                    # This is a simplified version - full implementation would
+                    # use DwmExtendFrameIntoClientArea for proper Aero glass effect
+                    pass
+            except Exception:
+                pass
+        elif sys.platform == "darwin":
+            # macOS: Shadow is automatic for windows
+            pass
 
     def _apply_theme(self) -> None:
         """Apply theme matching VS Code Copilot Chat color variables."""
@@ -91,7 +143,7 @@ class MainWindow(QMainWindow):
             }}
             QWidget {{
                 color: {c["fg"]};
-                font-family: "Segoe UI", "SF Pro", -apple-system, sans-serif;
+                font-family: "SF Pro Text", "PingFang SC", "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
                 font-size: {px(13)};
             }}
             QSplitter::handle {{
@@ -145,23 +197,38 @@ class MainWindow(QMainWindow):
 
             /* ---- Panel Header ---- */
             #panelHeader {{
-                background-color: {c["surface"]};
+                background-color: {c["panel_bg"]};
                 border-bottom: 1px solid {c["border"]};
                 padding-right: 1px;
             }}
             /* Agent Panel background */
             AgentPanel {{
-                background-color: {c["surface"]};
+                background-color: {c["panel_bg"]};
             }}
             #panelTitle {{
                 font-size: {px(13)};
-                font-weight: 600;
+                font-weight: {c["fw_semibold"]};
                 color: {c["fg"]};
+                font-family: "SF Pro Text", "PingFang SC", "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             #panelStatus {{
                 font-size: {px(11)};
                 color: {c["status_idle"]};
             }}
+            {combo_box_qss(
+                "#subAgentSelector",
+                border_color=c["border"],
+                background_color=c["surface"],
+                foreground_color=c["fg"],
+                hover_border_color=c["focus"],
+                selection_bg=c["selection"],
+                selection_fg=c["fg"],
+                font_size=12,
+                padding="2px 24px 2px 8px",
+                radius=c["radius_md"],
+                popup_radius=c["radius_md"],
+                item_radius=c["radius_sm"],
+            )}
             #headerAction {{
                 background-color: transparent;
                 color: {c["header_action"]};
@@ -174,8 +241,23 @@ class MainWindow(QMainWindow):
                 color: {c["header_action_hover"]};
             }}
             /* ---- Input Container (with working border space) ---- */
+            #composerHost {{
+                background-color: {c["panel_bg"]};
+            }}
             #inputContainer {{
-                background-color: {c["bg"]};
+                background-color: {c["panel_bg"]};
+                border: 1px solid {c["border"]};
+                border-radius: {px(10)};
+                margin: {px(8)} 0 0 0;
+            }}
+            #composerInputTop {{
+                background-color: {c["input_bg"]};
+                border-top-left-radius: {px(8)};
+                border-top-right-radius: {px(8)};
+            }}
+            #composerDivider {{
+                background-color: {c["border"]};
+                margin: 0;
             }}
 
             /* ---- Input Bar ---- */
@@ -185,7 +267,12 @@ class MainWindow(QMainWindow):
 
             /* ---- Secondary Toolbar ---- */
             #secondaryToolbar {{
-                background-color: {c["bg"]};
+                background-color: {c["input_bg"]};
+                border-bottom-left-radius: {px(8)};
+                border-bottom-right-radius: {px(8)};
+            }}
+            #composerBottomGap {{
+                background-color: {c["panel_bg"]};
             }}
             #secondaryBtn {{
                 background-color: transparent;
@@ -205,55 +292,56 @@ class MainWindow(QMainWindow):
             /* VS Code send button */
             #sendBtn {{
                 background-color: {c["send_bg"]};
-                color: #ffffff;
-                border: none;
-                border-radius: {px(13)};
+                color: {c["primaryBtnFg"]};
+                border: 1px solid {c["send_bg"]};
+                border-radius: {px(6)};
                 font-size: {px(14)};
-                font-weight: 700;
+                font-weight: {c["fw_bold"]};
                 padding: 0;
-                min-width: {px(26)};
-                min-height: {px(26)};
-                max-width: {px(26)};
-                max-height: {px(26)};
+                min-width: {px(22)};
+                min-height: {px(22)};
+                max-width: {px(22)};
+                max-height: {px(22)};
             }}
             #sendBtn:hover {{
                 background-color: {c["send_hover"]};
+                border-color: {c["send_hover"]};
             }}
             #stopBtn {{
-                background-color: {c["stop_bg"]};
-                color: #ffffff;
-                border: none;
-                border-radius: {px(13)};
+                background-color: transparent;
+                color: {c["status_error"]};
+                border: 1px solid {c["status_error"]};
+                border-radius: {px(6)};
                 font-size: {px(14)};
-                font-weight: 700;
+                font-weight: {c["fw_bold"]};
                 padding: 0;
-                min-width: {px(26)};
-                min-height: {px(26)};
-                max-width: {px(26)};
-                max-height: {px(26)};
+                min-width: {px(22)};
+                min-height: {px(22)};
+                max-width: {px(22)};
+                max-height: {px(22)};
             }}
             #stopBtn:hover {{
-                background-color: {c["stop_hover"]};
+                background-color: {c["hover"]};
             }}
 
-            /* ---- Context Bar ---- */
-            #contextBar {{
-                background-color: {c["context_bg"]};
-                border-top: 1px solid {c["context_border"]};
-            }}
-            #contextLabel {{
+            #contextSeparator {{
                 font-size: {px(11)};
                 color: {c["muted"]};
-                font-family: "SF Mono", "Consolas", monospace;
+                padding: 0 {px(2)};
             }}
-            #contextEye {{
+            #contextAttachmentBtn {{
                 background-color: transparent;
                 border: none;
                 border-radius: {px(4)};
-                font-size: {px(12)};
+                color: {c["muted"]};
+                font-size: {px(11)};
+                padding: 0 {px(3)};
+                min-height: {px(22)};
+                max-height: {px(22)};
             }}
-            #contextEye:hover {{
+            #contextAttachmentBtn:hover {{
                 background-color: {c["hover"]};
+                color: {c["fg"]};
             }}
 
             /* ---- User Message — right-aligned bubble ---- */
@@ -268,10 +356,16 @@ class MainWindow(QMainWindow):
             #userMessageBubble:hover {{
                 background-color: {c["bubble_hover"]};
             }}
+            #userEditBubble {{
+                background-color: {c["edit_bubble_bg"]};
+                border: 1px solid {c["edit_bubble_border"]};
+                border-radius: {px(12)};
+            }}
             #userMessageText {{
                 color: {c["editor_fg"]};
                 font-size: {px(13)};
                 line-height: 1.5;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             #userMessageBubbleContainer {{
                 background-color: transparent;
@@ -294,12 +388,13 @@ class MainWindow(QMainWindow):
             }}
             #userSaveBtn {{
                 background-color: {c["primary"]};
-                color: #ffffff;
+                color: {c["primaryBtnFg"]};
                 border: none;
                 border-radius: {px(4)};
                 padding: {px(4)} {px(10)};
                 font-size: {px(12)};
-                font-weight: 600;
+                font-weight: {c["fw_semibold"]};
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             #userSaveBtn:hover {{
                 background-color: {c["primary_hover"]};
@@ -315,6 +410,7 @@ class MainWindow(QMainWindow):
                 border-radius: {px(4)};
                 padding: {px(4)} {px(10)};
                 font-size: {px(12)};
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             #userCancelBtn:hover {{
                 background-color: {c["hover"]};
@@ -327,7 +423,7 @@ class MainWindow(QMainWindow):
             #queueTitle {{
                 font-size: {px(11)};
                 color: {c["muted"]};
-                font-weight: 600;
+                font-weight: {c["fw_semibold"]};
             }}
             #queueItems {{
                 font-size: {px(12)};
@@ -347,8 +443,9 @@ class MainWindow(QMainWindow):
             }}
             #agentUsername {{
                 font-size: {px(13)};
-                font-weight: 600;
+                font-weight: {c["fw_semibold"]};
                 color: {c["fg"]};
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             #agentMessageRow {{
                 background-color: transparent;
@@ -358,6 +455,7 @@ class MainWindow(QMainWindow):
                 font-size: {px(13)};
                 line-height: 1.5;
                 background-color: transparent;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             #msgCoordination {{
                 font-size: {px(11)};
@@ -427,9 +525,9 @@ class MainWindow(QMainWindow):
                 background-color: transparent;
                 border: none;
                 color: {c["tool_fg"]};
-                font-family: "Segoe UI", "SF Pro", -apple-system, sans-serif;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
                 font-size: {px(12)};
-                font-weight: 500;
+                font-weight: {c["fw_medium"]};
                 text-align: left;
                 padding: {px(2)} 0;
                 border-radius: {px(4)};
@@ -456,27 +554,160 @@ class MainWindow(QMainWindow):
             }}
         """)
 
+    def _setup_menu_bar(self, menubar: QMenuBar) -> None:
+        """Setup the application menu bar."""
+        menubar.setObjectName("mainMenuBar")
+
+        # File menu
+        file_menu = menubar.addMenu("文件")
+        file_menu.setObjectName("fileMenu")
+
+        logger.info("Menu bar created - File menu added")
+
+        # Add menu items
+        new_file_act = file_menu.addAction("新建文件")
+        new_file_act.triggered.connect(self._on_new_file)
+
+        new_folder_act = file_menu.addAction("新建文件夹")
+        new_folder_act.triggered.connect(self._on_new_folder)
+
+        file_menu.addSeparator()
+
+        open_file_act = file_menu.addAction("打开文件...")
+        open_file_act.triggered.connect(self._on_open_file)
+
+        open_folder_act = file_menu.addAction("打开文件夹...")
+        open_folder_act.triggered.connect(self._on_open_folder)
+
+        file_menu.addSeparator()
+
+        save_act = file_menu.addAction("保存")
+        save_act.setShortcut(QKeySequence.StandardKey.Save)
+        save_act.triggered.connect(self._on_save_file)
+
+        file_menu.addSeparator()
+
+        new_window_act = file_menu.addAction("新建窗口")
+        new_window_act.triggered.connect(self._on_new_window)
+
+        file_menu.addSeparator()
+        quit_act = QAction("退出 AutoReport", self)
+        quit_act.setShortcut(QKeySequence.StandardKey.Quit)
+        quit_act.setMenuRole(QAction.MenuRole.QuitRole)
+        quit_act.triggered.connect(QApplication.closeAllWindows)
+        file_menu.addAction(quit_act)
+
+        # Set window title bar color (Windows only)
+        if hasattr(self, "setWindowProperty"):
+            self.setWindowProperty("Appearance", "DWMWindowAccentPolicy", 0)  # Disable accent
+
+    def _update_window_title(self) -> None:
+        """Update window title to show current file."""
+        base_title = "AutoReport"
+
+        # Check if preview exists (may not during initialization)
+        if not hasattr(self, 'preview'):
+            self.setWindowTitle(base_title)
+            return
+
+        current_file = self.preview.current_file
+
+        if current_file:
+            rel_path = current_file.relative_to(self.workspace)
+            self.setWindowTitle(f"{rel_path} - {base_title}")
+        else:
+            self.setWindowTitle(base_title)
+
+    def _on_new_file(self) -> None:
+        """Handle new file action."""
+        # Delegate to file tree
+        self.file_tree._new_file()
+
+    def _on_new_folder(self) -> None:
+        """Handle new folder action."""
+        # Delegate to file tree
+        self.file_tree._new_folder()
+
+    def _on_open_file(self) -> None:
+        """Handle open file action."""
+        from PyQt6.QtWidgets import QFileDialog
+
+        file_path, _ = QFileDialog.getOpenFileName(self, "打开文件")
+        if file_path:
+            # TODO: Import/open the file
+            logger.info("Open file requested: {}", file_path)
+
+    def _on_open_folder(self) -> None:
+        """Handle open folder action."""
+        from PyQt6.QtWidgets import QFileDialog
+
+        folder_path = QFileDialog.getExistingDirectory(self, "打开文件夹")
+        if folder_path:
+            # TODO: Switch workspace
+            logger.info("Open folder requested: {}", folder_path)
+
+    def _on_save_file(self) -> None:
+        """Save the active file in the preview panel."""
+        if not self.preview.save_current_file():
+            logger.debug("Save skipped: no editable active file")
+
+    def _on_new_window(self) -> None:
+        """Handle new window action."""
+        # TODO: Launch new window
+        logger.info("New window requested")
+
     def _setup_ui(self) -> None:
-        central_widget = QWidget()
+        # Create container
+        central_widget = QWidget(self)
         self.setCentralWidget(central_widget)
 
-        main_layout = QHBoxLayout(central_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0)
+        if sys.platform == "darwin":
+            # macOS: Use native title bar with system menu bar
+            main_layout = QHBoxLayout(central_widget)
+            main_layout.setContentsMargins(0, 0, 0, 0)
 
-        main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        main_splitter.setChildrenCollapsible(False)
-        main_layout.addWidget(main_splitter)
+            # Use system menu bar
+            self._setup_menu_bar(self.menuBar())
+            self._title_bar = None
+
+            main_splitter = QSplitter(Qt.Orientation.Horizontal)
+            main_splitter.setChildrenCollapsible(False)
+            main_layout.addWidget(main_splitter)
+        else:
+            # Windows/Linux: Use custom title bar
+            main_layout = QVBoxLayout(central_widget)
+            main_layout.setContentsMargins(0, 0, 0, 0)
+            main_layout.setSpacing(0)
+
+            # Custom title bar
+            self._title_bar = TitleBar(self)
+            main_layout.addWidget(self._title_bar)
+
+            # Setup menu bar in custom title bar
+            self._setup_menu_bar(self._title_bar.get_menu_bar())
+
+            # Main content area
+            content_area = QWidget(self)
+            content_layout = QHBoxLayout(content_area)
+            content_layout.setContentsMargins(0, 0, 0, 0)
+            main_layout.addWidget(content_area)
+
+            main_splitter = QSplitter(Qt.Orientation.Horizontal)
+            main_splitter.setChildrenCollapsible(False)
+            content_layout.addWidget(main_splitter)
 
         # Left: File tree
         self.file_tree = FileTreeWidget(self.workspace)
         # Don't override minimum width - let FileTreeWidget handle it
         self.file_tree.directory_selected.connect(self._on_directory_selected)
         self.file_tree.file_selected.connect(self._on_file_selected)
+        self.file_tree.path_changed.connect(self._on_file_tree_path_changed)
         main_splitter.addWidget(self.file_tree)
 
         # Center: Preview
         self.preview = PreviewWidget(self.workspace)
         self.preview.setMinimumWidth(300)
+        self.preview.file_changed.connect(self._update_window_title)
         main_splitter.addWidget(self.preview)
 
         # Right: Agent panels side-by-side (Sub Agent | Main Agent)
@@ -498,7 +729,14 @@ class MainWindow(QMainWindow):
 
         # Store main_splitter for resize handling
         self._main_splitter = main_splitter
-        self._apply_splitter_sizes()
+        self._apply_splitter_sizes(force=True)
+
+        # macOS reliability: make Cmd+Q work even when menu role shortcut
+        # isn't dispatched by the native menu chain.
+        self._quit_shortcut = QShortcut(QKeySequence.StandardKey.Quit, self)
+        self._quit_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._quit_shortcut.activated.connect(self.close)
+        self._setup_app_shortcuts()
 
         # Connect signals
         self.main_agent_panel.message_sent.connect(self._on_main_agent_message)
@@ -516,9 +754,12 @@ class MainWindow(QMainWindow):
         self.sub_agent_panel.rename_session_requested.connect(self._on_rename_session)
         self.main_agent_panel.interrupt_requested.connect(lambda: self._on_interrupt("main"))
         self.sub_agent_panel.interrupt_requested.connect(lambda: self._on_interrupt(self.sub_agent_panel.agent_type))
+        self.sub_agent_panel.agent_type_changed.connect(self._on_sub_agent_type_changed)
 
         self.preview.selection_changed.connect(self._on_preview_selection_changed)
+        self.preview.restore_open_tabs()
         self.main_agent_panel.set_agent_type("main")
+        self.sub_agent_panel.set_agent_type("data_analysis")
         self.main_agent_panel.set_debug_mode("main" in self._debug_agents)
         self.sub_agent_panel.set_debug_mode(self.sub_agent_panel.agent_type in self._debug_agents)
 
@@ -529,35 +770,18 @@ class MainWindow(QMainWindow):
 
     def _on_directory_selected(self, directory: str) -> None:
         ui_logger.debug("MainWindow: directory selected {}", directory)
-        self.preview.set_directory(directory)
-        agent_map = {
-            "data": "data_analysis",
-            "refs": "main",
-            "theory": "theory",
-            "code": "plotting",
-            "tex": "report",
-        }
-        agent_type = agent_map.get(directory, "sub")
-
-        # Clear file context when user switches directories by clicking a folder.
-        # Skip if this was triggered by clicking a file (file_selected fires first).
+        # Directory navigation is decoupled from sub-agent switching.
+        # Keep current contexts when the event is triggered by file click.
         if not getattr(self, "_file_just_selected", False):
             self.main_agent_panel.clear_file_context()
             self.sub_agent_panel.clear_file_context()
         self._file_just_selected = False
 
-        if agent_type != self.sub_agent_panel.agent_type:
-            sizes = self._main_splitter.sizes() if hasattr(self, "_main_splitter") else None
-            ui_logger.debug("MainWindow: switching sub-agent panel to {}", agent_type)
-            self.sub_agent_panel._messages_area.clear()
-            self.sub_agent_panel.set_agent_type(agent_type)
-            self.sub_agent_panel.set_debug_mode(agent_type in self._debug_agents)
-            if agent_type != "sub":
-                self._load_conversations_for_agent(agent_type, self.sub_agent_panel)
-            if sizes:
-                self._main_splitter.setSizes(sizes)
-
     def _on_preview_selection_changed(self, file_path: str, selected_text: str, start_line: int, end_line: int) -> None:
+        if not selected_text:
+            self.main_agent_panel.set_opened_file(file_path)
+            self.sub_agent_panel.set_opened_file(file_path)
+            return
         self.main_agent_panel.set_preview_context(file_path, selected_text, start_line, end_line)
         self.sub_agent_panel.set_preview_context(file_path, selected_text, start_line, end_line)
 
@@ -570,59 +794,63 @@ class MainWindow(QMainWindow):
         self.sub_agent_panel.set_opened_file(rel_path)
         logger.debug("File selected: {}", file_path)
 
+    def _on_file_tree_path_changed(self, old_path: Path, new_path: Path) -> None:
+        self.preview.update_open_path(old_path, new_path)
+
     def _relative_path(self, file_path: Path) -> str:
         try:
             return file_path.relative_to(self.workspace).as_posix()
         except ValueError:
             return file_path.as_posix()
 
+    def _setup_app_shortcuts(self) -> None:
+        """Install platform-native application shortcuts for editing actions."""
+        self._save_shortcut = QShortcut(QKeySequence.StandardKey.Save, self)
+        self._save_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._save_shortcut.activated.connect(self._on_save_file)
+
+        self._copy_shortcut = QShortcut(QKeySequence.StandardKey.Copy, self)
+        self._copy_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._copy_shortcut.activated.connect(lambda: self._dispatch_standard_edit("copy"))
+
+        self._paste_shortcut = QShortcut(QKeySequence.StandardKey.Paste, self)
+        self._paste_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._paste_shortcut.activated.connect(lambda: self._dispatch_standard_edit("paste"))
+
+        self._cut_shortcut = QShortcut(QKeySequence.StandardKey.Cut, self)
+        self._cut_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._cut_shortcut.activated.connect(lambda: self._dispatch_standard_edit("cut"))
+
+        self._undo_shortcut = QShortcut(QKeySequence.StandardKey.Undo, self)
+        self._undo_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._undo_shortcut.activated.connect(lambda: self._dispatch_standard_edit("undo"))
+
+        self._redo_shortcut = QShortcut(QKeySequence.StandardKey.Redo, self)
+        self._redo_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._redo_shortcut.activated.connect(lambda: self._dispatch_standard_edit("redo"))
+
+        self._select_all_shortcut = QShortcut(QKeySequence.StandardKey.SelectAll, self)
+        self._select_all_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._select_all_shortcut.activated.connect(
+            lambda: self._dispatch_standard_edit("selectAll")
+        )
+
+    def _dispatch_standard_edit(self, method_name: str) -> None:
+        """Dispatch standard edit command to focused widget when available."""
+        widget = QApplication.focusWidget()
+        if widget is None:
+            return
+        method = getattr(widget, method_name, None)
+        if callable(method):
+            method()
+
     def _load_conversations(self) -> None:
-        # Only restore main agent history. Sub-agents start fresh each session.
-        agent_type = "main"
-        records = self._conv_store.load_messages(agent_type)
-        if records:
-            panel = self._get_panel_for_agent(agent_type)
-            for rec in records:
-                role = rec.get("role", "")
-                content = rec.get("content", "")
-                if role == "user":
-                    panel.add_message(
-                        "user",
-                        content,
-                        summary=rec.get("summary"),
-                        detail=rec.get("detail"),
-                        expandable=rec.get("expandable", True),
-                    )
-                elif role == "agent":
-                    panel.add_message(
-                        "agent",
-                        content,
-                        summary=rec.get("summary"),
-                        detail=rec.get("detail"),
-                        expandable=rec.get("expandable", True),
-                    )
-                elif role == "tool_call":
-                    panel.add_tool_call(
-                        content,
-                        rec.get("arguments", {}),
-                        summary=rec.get("summary"),
-                        detail=rec.get("detail"),
-                        expandable=rec.get("expandable", True),
-                    )
-                elif role == "tool_result":
-                    panel.add_tool_result(
-                        content,
-                        rec.get("result"),
-                        rec.get("error"),
-                        summary=rec.get("summary"),
-                        detail=rec.get("detail"),
-                        expandable=rec.get("expandable"),
-                    )
-                elif role == "error":
-                    panel.add_error(rec.get("source", ""), content)
-            logger.info("Loaded {} messages for agent {}", len(records), agent_type)
+        # Restore main + currently selected sub-agent history on startup.
+        self._load_conversations_for_agent("main", self.main_agent_panel)
+        self._load_conversations_for_agent(self.sub_agent_panel.agent_type, self.sub_agent_panel)
 
     def _load_conversations_for_agent(self, agent_type: str, panel: AgentPanel) -> None:
+        panel._messages_area.clear()
         records = self._conv_store.load_messages(agent_type)
         if not records:
             return
@@ -681,11 +909,13 @@ class MainWindow(QMainWindow):
 
     def _on_sub_agent_message(self, content: str) -> None:
         agent_type = self.sub_agent_panel.agent_type
-        if agent_type == "sub":
-            self.main_agent_panel.add_message("agent", "请先在左侧文件树选择目录以激活对应的子 Agent。")
-            return
         self._conv_store.append_message(agent_type, "user", content)
         self._submit_coroutine(self.backend.send_user_message(content, agent_type))
+
+    def _on_sub_agent_type_changed(self, agent_type: str) -> None:
+        self.sub_agent_panel.set_agent_type(agent_type)
+        self.sub_agent_panel.set_debug_mode(agent_type in self._debug_agents)
+        self._load_conversations_for_agent(agent_type, self.sub_agent_panel)
 
     def _on_interrupt(self, agent_type: str) -> None:
         """Handle interrupt request from GUI."""
@@ -730,6 +960,10 @@ class MainWindow(QMainWindow):
 
     def _handle_agent_response(self, message: AgentResponse) -> None:
         agent_str = str(message.agent_type)
+        if agent_str != "main" and agent_str != self.sub_agent_panel.agent_type:
+            if not message.streaming and message.content:
+                self._conv_store.append_message(agent_str, "agent", message.content)
+            return
         panel = self._get_panel_for_agent(agent_str)
         # Empty non-streaming message = completion signal for streaming
         if not message.streaming and not message.content:
@@ -757,6 +991,14 @@ class MainWindow(QMainWindow):
 
     def _handle_user_message(self, message: UserMessage) -> None:
         agent_str = str(message.agent_type)
+        if agent_str != "main" and agent_str != self.sub_agent_panel.agent_type:
+            self._conv_store.append_message(
+                agent_str,
+                "user",
+                message.content,
+                extra={"source": message.source},
+            )
+            return
         source_key = str(message.source or "user")
         is_agent_message = source_key not in {"user", "system"}
         is_coordination = source_key == "main_agent"
@@ -798,6 +1040,9 @@ class MainWindow(QMainWindow):
 
     def _handle_tool_call(self, message: ToolCall) -> None:
         agent_str = str(message.agent_type)
+        if agent_str != "main" and agent_str != self.sub_agent_panel.agent_type:
+            self._conv_store.append_tool_call(agent_str, message.tool_name, message.arguments)
+            return
         panel = self._get_panel_for_agent(agent_str)
         summary = None
         detail = None
@@ -827,6 +1072,15 @@ class MainWindow(QMainWindow):
 
     def _handle_tool_result(self, message: ToolResult) -> None:
         agent_str = str(message.agent_type)
+        if agent_str != "main" and agent_str != self.sub_agent_panel.agent_type:
+            result_str = str(message.result) if message.result else None
+            self._conv_store.append_tool_result(
+                agent_str,
+                message.tool_name,
+                result_str,
+                message.error,
+            )
+            return
         panel = self._get_panel_for_agent(agent_str)
         result_str = str(message.result) if message.result else None
         summary = None
@@ -921,7 +1175,10 @@ class MainWindow(QMainWindow):
         return (summary, detail, bool(detail))
 
     def _handle_status_change(self, message: StatusChange) -> None:
-        panel = self._get_panel_for_agent(message.agent_type)
+        agent_str = str(message.agent_type)
+        if agent_str != "main" and agent_str != self.sub_agent_panel.agent_type:
+            return
+        panel = self._get_panel_for_agent(agent_str)
         panel.set_status(message.status, message.extra)
 
     def _handle_error(self, message: Error) -> None:
@@ -960,11 +1217,15 @@ class MainWindow(QMainWindow):
 
     def _handle_queue_update(self, message: QueueUpdateMessage) -> None:
         agent_str = str(message.agent_type)
+        if agent_str != "main" and agent_str != self.sub_agent_panel.agent_type:
+            return
         panel = self._get_panel_for_agent(agent_str)
         panel.set_queue_preview(message.queued_messages)
 
     def _handle_checkpoint(self, message: Checkpoint) -> None:
         agent_str = str(message.agent_type) if hasattr(message, "agent_type") else "main"
+        if agent_str != "main" and agent_str != self.sub_agent_panel.agent_type:
+            return
         panel = self._get_panel_for_agent(agent_str)
         panel.add_checkpoint(message.checkpoint_id, message.description)
 
@@ -1038,13 +1299,38 @@ class MainWindow(QMainWindow):
         self.main_agent_panel.subscribe_to_debug_messages(self.backend.bus)
         self.sub_agent_panel.subscribe_to_debug_messages(self.backend.bus)
 
+    def closeEvent(self, event) -> None:  # noqa: N802
+        if hasattr(self, "preview"):
+            self.preview.save_open_tabs()
+        super().closeEvent(event)
+
     def resizeEvent(self, event):
         """Handle window resize to maintain proportional layout."""
         super().resizeEvent(event)
-        self._apply_splitter_sizes()
+        if not self._splitter_sizes_initialized:
+            self._apply_splitter_sizes(force=True)
 
-    def _apply_splitter_sizes(self) -> None:
+    def showEvent(self, event) -> None:
+        """Finalize splitter sizing after child widgets compute minimum widths."""
+        super().showEvent(event)
+        QTimer.singleShot(0, lambda: self._apply_splitter_sizes(force=True))
+        QTimer.singleShot(120, lambda: self._apply_splitter_sizes(force=True))
+
+    def changeEvent(self, event) -> None:
+        """Handle window state changes (maximize/restore/fullscreen)."""
+        super().changeEvent(event)
+        if event.type() == event.Type.WindowStateChange:
+            if self._title_bar:
+                is_maximized = self.windowState() & Qt.WindowState.WindowMaximized
+                is_fullscreen = self.windowState() & Qt.WindowState.WindowFullScreen
+                self._title_bar.update_maximize_button(
+                    bool(is_maximized or is_fullscreen)
+                )
+
+    def _apply_splitter_sizes(self, force: bool = False) -> None:
         if not hasattr(self, "_main_splitter"):
+            return
+        if self._splitter_sizes_initialized and not force:
             return
         total_width = self._main_splitter.width()
         if total_width <= 0:
@@ -1077,3 +1363,4 @@ class MainWindow(QMainWindow):
 
         sizes = [file_tree_size, preview_size, sub_agent_size, main_agent_size]
         self._main_splitter.setSizes(sizes)
+        self._splitter_sizes_initialized = True
