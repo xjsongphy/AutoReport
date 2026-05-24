@@ -174,6 +174,32 @@ class _DragDropTreeWidget(QTreeWidget):
         super().__init__(parent)
         self._file_tree_widget = file_tree_widget
 
+    def _is_drag_blocked_item(self, item: QTreeWidgetItem | None) -> bool:
+        if item is None or self._file_tree_widget is None:
+            return False
+        dir_name = item.data(0, Qt.ItemDataRole.UserRole)
+        file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
+        is_top_level_fixed_dir = (
+            item.parent() is None
+            and not file_path_str
+            and dir_name in FIXED_DIRECTORIES
+        )
+        is_non_draggable_dir = (
+            not file_path_str
+            and self._file_tree_widget._is_non_draggable_directory(dir_name)
+        )
+        return is_top_level_fixed_dir or is_non_draggable_dir
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        """Prevent drag gesture on blocked directories from becoming multi-select."""
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            item = self.currentItem()
+            if self._is_drag_blocked_item(item):
+                # Keep single selection stable; do not enter Qt's drag/selection fallback.
+                event.accept()
+                return
+        super().mouseMoveEvent(event)
+
     def _row_background_color(self, item: QTreeWidgetItem | None) -> QColor | None:
         if item is None:
             return None
@@ -255,17 +281,7 @@ class _DragDropTreeWidget(QTreeWidget):
         # alone to decide draggable status.
         dir_name = current_item.data(0, Qt.ItemDataRole.UserRole)
         file_path_str = current_item.data(0, Qt.ItemDataRole.UserRole + 1)
-        is_top_level_fixed_dir = (
-            current_item.parent() is None
-            and not file_path_str
-            and dir_name in FIXED_DIRECTORIES
-        )
-        is_non_draggable_dir = (
-            not file_path_str
-            and self._file_tree_widget is not None
-            and self._file_tree_widget._is_non_draggable_directory(dir_name)
-        )
-        if is_top_level_fixed_dir or is_non_draggable_dir:
+        if self._is_drag_blocked_item(current_item):
             return  # Don't allow dragging fixed directories
 
         # Get the icon for the item

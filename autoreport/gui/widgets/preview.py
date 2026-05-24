@@ -9,7 +9,7 @@ import subprocess
 
 import pandas as pd
 from loguru import logger
-from PyQt6.QtCore import QEvent, QSignalBlocker, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QSignalBlocker, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtPdf import QPdfDocument
 from PyQt6.QtWidgets import (
@@ -724,6 +724,22 @@ class PreviewWidget(QWidget):
 
         self._apply_style()
 
+    def _update_tab_scrollbar_visibility(self) -> None:
+        """Show horizontal tab scrollbar only when hovering the tab-strip area."""
+        hovered = (
+            self._tab_scroll.underMouse()
+            or self._tab_scroll.viewport().underMouse()
+            or self._unified_tab_bar.underMouse()
+        )
+        self._tab_area_hovered = hovered
+        policy = (
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+            if hovered
+            else Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        if self._tab_scroll.horizontalScrollBarPolicy() != policy:
+            self._tab_scroll.setHorizontalScrollBarPolicy(policy)
+
     def _build_general_container(self) -> QWidget:
         container = QWidget(self)
         cl = QVBoxLayout(container)
@@ -806,7 +822,7 @@ class PreviewWidget(QWidget):
                 margin: 1px 0 0 0;
             }}
             QTabBar#previewTabBar::tab:!selected:hover {{
-                background-color: {c["hover"]};
+                background-color: {c["tab_active_bg"]};
             }}
             QTabBar#previewTabBar::tab:selected:hover {{
                 background-color: {c["tab_active_bg"]};
@@ -1343,13 +1359,15 @@ class PreviewWidget(QWidget):
                 if self._tab_hovered_index != -1:
                     self._tab_hovered_index = -1
                     self._refresh_unified_tab_affordances()
-        if obj in (self._tab_scroll, self._tab_scroll.viewport()):
-            if event.type() in (QEvent.Type.Enter, QEvent.Type.HoverEnter):
-                self._tab_area_hovered = True
-                self._tab_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-            elif event.type() in (QEvent.Type.Leave, QEvent.Type.HoverLeave):
-                self._tab_area_hovered = False
-                self._tab_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        if obj in (self._tab_scroll, self._tab_scroll.viewport(), self._unified_tab_bar):
+            if event.type() in (
+                QEvent.Type.Enter,
+                QEvent.Type.HoverEnter,
+                QEvent.Type.Leave,
+                QEvent.Type.HoverLeave,
+                QEvent.Type.MouseMove,
+            ):
+                QTimer.singleShot(0, self._update_tab_scrollbar_visibility)
         return super().eventFilter(obj, event)
 
     def _sync_unified_tab_bar_width(self) -> None:
