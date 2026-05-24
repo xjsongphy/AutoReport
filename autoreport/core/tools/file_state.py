@@ -56,8 +56,18 @@ class FileState:
 class FileStateManager:
     """Manages file read-state tracking per agent session."""
 
-    def __init__(self):
+    def __init__(self, workspace: Path | None = None):
+        self.workspace = Path(workspace).resolve() if workspace is not None else None
         self._states: Dict[str, FileState] = {}
+
+    def _display_path(self, file_path: Path) -> str:
+        """Return a tool-friendly relative path when workspace is known."""
+        if self.workspace is not None:
+            try:
+                return file_path.relative_to(self.workspace).as_posix()
+            except ValueError:
+                pass
+        return file_path.name
 
     def record_read(self, file_path: Path) -> None:
         """Record the current state of a file after reading it.
@@ -97,12 +107,13 @@ class FileStateManager:
         recorded = self._states.get(key)
 
         if recorded is None:
+            display_path = self._display_path(file_path)
             return {
                 "has_read": False,
                 "is_stale": False,
                 "warning": (
                     f"⚠️ You are about to modify '{file_path.name}' without having read it first. "
-                    f"Use read_file('{file_path.relative_to(file_path.anchor).as_posix()}') first to "
+                    f"Use read_file('{display_path}') first to "
                     f"see the current content and avoid accidentally overwriting changes."
                 ),
                 "state": None,

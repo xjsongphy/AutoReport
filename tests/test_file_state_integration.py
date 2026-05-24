@@ -8,10 +8,7 @@ Verifies the full lifecycle:
 """
 import asyncio
 import hashlib
-import os
-import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -193,10 +190,10 @@ class TestFileStateManager:
 # ---------------------------------------------------------------------------
 
 class TestReadFileIntegration:
-    async def test_read_records_state(self, workspace: Path, read_tool: ReadFileTool, fsm: FileStateManager):
+    def test_read_records_state(self, workspace: Path, read_tool: ReadFileTool, fsm: FileStateManager):
         f = workspace / "test.txt"
         f.write_text("hello\nworld\n", encoding="utf-8")
-        result = await read_tool(path="test.txt")
+        result = asyncio.run(read_tool(path="test.txt"))
         assert result["path"] is not None
         assert "content" in result
         # Should be recorded in FSM
@@ -204,63 +201,85 @@ class TestReadFileIntegration:
         assert state is not None, "read_file should record state in FSM"
         assert state.size == f.stat().st_size
 
-    async def test_read_binary_returns_error(self, workspace: Path, read_tool: ReadFileTool):
+    def test_read_binary_returns_error(self, workspace: Path, read_tool: ReadFileTool):
         f = workspace / "binary.bin"
         f.write_bytes(b"\x80\x81\x82\x83")  # invalid UTF-8
-        result = await read_tool(path="binary.bin")
+        result = asyncio.run(read_tool(path="binary.bin"))
         assert "error" in result
         assert "binary" in result["error"].lower() or "utf-8" in result["error"].lower()
 
-    async def test_read_then_edit_passes(self, workspace: Path, allowed_dir: Path,
-                                          read_tool: ReadFileTool, edit_tool: EditFileTool):
+    def test_read_then_edit_passes(self, workspace: Path, allowed_dir: Path,
+                                   read_tool: ReadFileTool, edit_tool: EditFileTool):
         f = allowed_dir / "read_edit.txt"
         f.write_text("line1\nline2\nline3\n", encoding="utf-8")
         # Read first
-        await read_tool(path="output/read_edit.txt")
+        asyncio.run(read_tool(path="output/read_edit.txt"))
         # Edit should succeed without warning
-        result = await edit_tool(path="output/read_edit.txt", old_text="line2", new_text="modified")
+        result = asyncio.run(edit_tool(path="output/read_edit.txt", old_text="line2", new_text="modified"))
         assert "warning" not in result, f"Unexpected warning: {result.get('warning')}"
         assert result["replacements_made"] >= 1
 
-    async def test_edit_without_read_returns_warning(self, allowed_dir: Path, edit_tool: EditFileTool):
+    def test_edit_without_read_returns_warning(self, allowed_dir: Path, edit_tool: EditFileTool):
         f = allowed_dir / "no_read.txt"
         f.write_text("content\n", encoding="utf-8")
-        result = await edit_tool(path="output/no_read.txt", old_text="content", new_text="changed")
+        result = asyncio.run(edit_tool(path="output/no_read.txt", old_text="content", new_text="changed"))
         assert "warning" in result
         assert "without having read it" in result["warning"]
 
-    async def test_write_without_read_returns_warning(self, allowed_dir: Path, write_tool: WriteFileTool):
+    def test_write_without_read_returns_warning(self, allowed_dir: Path, write_tool: WriteFileTool):
         f = allowed_dir / "write_no_read.txt"
         f.write_text("original\n", encoding="utf-8")
-        result = await write_tool(path="output/write_no_read.txt", content="new content\n")
+        result = asyncio.run(write_tool(path="output/write_no_read.txt", content="new content\n"))
         assert "warning" in result
         assert "without having read it" in result["warning"]
 
-    async def test_edit_stale_after_change(self, workspace: Path, allowed_dir: Path,
-                                             read_tool: ReadFileTool, edit_tool: EditFileTool):
+    def test_edit_stale_after_change(self, workspace: Path, allowed_dir: Path,
+                                     read_tool: ReadFileTool, edit_tool: EditFileTool):
         f = allowed_dir / "stale_edit.txt"
         f.write_text("original\n", encoding="utf-8")
         # Read
-        await read_tool(path="output/stale_edit.txt")
+        asyncio.run(read_tool(path="output/stale_edit.txt"))
         # External modification (simulated)
         f.write_text("externally modified\n", encoding="utf-8")
         # Edit should warn about staleness
-        result = await edit_tool(path="output/stale_edit.txt", old_text="externally", new_text="changed")
+        result = asyncio.run(edit_tool(path="output/stale_edit.txt", old_text="externally", new_text="changed"))
         assert "warning" in result
         assert "changed" in result["warning"]
 
-    async def test_delete_file_no_safety_check(self, allowed_dir: Path, delete_tool: DeleteFileTool):
+    def test_delete_file_no_safety_check(self, allowed_dir: Path, delete_tool: DeleteFileTool):
         """DeleteFileTool doesn't enforce read-before-delete (by design)."""
         f = allowed_dir / "delete_me.txt"
         f.write_text("delete me\n", encoding="utf-8")
-        result = await delete_tool(path="output/delete_me.txt")
+        result = asyncio.run(delete_tool(path="output/delete_me.txt"))
         assert result["deleted"] is True
 
-    async def test_new_file_write_no_warning(self, allowed_dir: Path, write_tool: WriteFileTool):
+    def test_new_file_write_no_warning(self, allowed_dir: Path, write_tool: WriteFileTool):
         """Writing a brand-new file (not yet existing) should NOT trigger safety warning."""
-        result = await write_tool(path="output/brand_new.txt", content="fresh\n")
+        result = asyncio.run(write_tool(path="output/brand_new.txt", content="fresh\n"))
         assert "warning" not in result, f"Unexpected warning: {result.get('warning')}"
         assert result["success"] is True
+
+    def test_read_state_isolated_between_agents(self, workspace: Path, allowed_dir: Path, manifest: ManifestManager):
+        """Read state should be isolated per agent (no cross-agent sharing)."""
+        fsm_a = FileStateManager()
+        fsm_b = FileStateManager()
+        read_a = ReadFileTool(workspace, file_state_manager=fsm_a)
+        edit_b = EditFileTool(
+            workspace,
+            write_allowed_dir=allowed_dir,
+            manifest_manager=manifest,
+            agent_type="agent_b",
+            file_state_manager=fsm_b,
+        )
+        file_path = allowed_dir / "isolated.txt"
+        file_path.write_text("hello\n", encoding="utf-8")
+
+        # Agent A reads file
+        asyncio.run(read_a(path="output/isolated.txt"))
+        # Agent B should still be blocked by read-before-edit
+        result = asyncio.run(edit_b(path="output/isolated.txt", old_text="hello", new_text="world"))
+        assert "warning" in result
+        assert result["has_read"] is False
 
 
 # ---------------------------------------------------------------------------
