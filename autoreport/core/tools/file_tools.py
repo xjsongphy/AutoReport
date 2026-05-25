@@ -56,7 +56,20 @@ class WriteEnabledTool(Tool, FileSafetyMixin):
         self._agent_type = agent_type
         self._file_state_manager = file_state_manager
 
+    def _is_internal_metadata_path(self, file_path: Path) -> bool:
+        """Check if path is in internal metadata directories (.autoreport, .checkpoints)."""
+        try:
+            rel = file_path.relative_to(self.workspace)
+        except ValueError:
+            return False
+        return rel.parts and rel.parts[0] in {".autoreport", ".checkpoints"}
+
     def _check_write_permission(self, file_path: Path, action: str = "Write") -> None:
+        if self._is_internal_metadata_path(file_path):
+            raise PermissionError(
+                f"{action} not allowed in internal metadata directories (.autoreport, .checkpoints). Attempted: {file_path}"
+            )
+
         if not self.write_allowed_dir:
             return
         try:
@@ -93,7 +106,7 @@ class ReadFileTool(Tool):
             rel = file_path.relative_to(self.workspace)
         except ValueError:
             return False
-        return rel.parts[:1] in {".autoreport", ".checkpoints"}
+        return rel.parts and rel.parts[0] in {".autoreport", ".checkpoints"}
 
     async def __call__(
         self,
