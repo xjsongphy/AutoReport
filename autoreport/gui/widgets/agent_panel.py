@@ -608,8 +608,7 @@ class AgentPanel(QWidget):
         self._opened_file = file_path
         self._preview_context = None
         self._context_enabled = True
-        # Show file attachment indicator (visual only, no signal)
-        self._set_context_attachment(Path(file_path).name, file_path, emit_signal=False)
+        self._set_context_attachment(Path(file_path).name, file_path)
 
     def set_preview_context(self, file_path: str, selected_text: str, start_line: int, end_line: int) -> None:
         self._preview_context = (file_path, selected_text, start_line, end_line)
@@ -617,8 +616,7 @@ class AgentPanel(QWidget):
         self._context_enabled = True
         lines = end_line - start_line + 1
         label = f"{lines} line{'s' if lines > 1 else ''} selected"
-        # Show selection attachment indicator (visual only, no signal)
-        self._set_context_attachment(label, file_path, emit_signal=False)
+        self._set_context_attachment(label, file_path)
 
     def clear_file_context(self) -> None:
         """Clear attached file/selection context so next message won't include it."""
@@ -627,24 +625,13 @@ class AgentPanel(QWidget):
         self._context_separator.setVisible(False)
         self._context_attachment_btn.setVisible(False)
 
-    def _set_context_attachment(self, label: str, tooltip_path: str, emit_signal: bool = True) -> None:
+    def _set_context_attachment(self, label: str, tooltip_path: str) -> None:
         self._context_attachment_btn.setChecked(True)
         self._context_attachment_btn.setText(label)
         self._context_attachment_btn.setToolTip(tooltip_path)
         self._context_attachment_btn.setIcon(self._context_file_icon)
         self._context_separator.setVisible(True)
         self._context_attachment_btn.setVisible(True)
-        if emit_signal:
-            self.file_context_attached.emit({
-                "type": "file" if not self._preview_context else "selection",
-                "file": tooltip_path,
-                "start_line": self._preview_context[1] if self._preview_context else None,
-                "end_line": self._preview_context[2] if self._preview_context else None,
-                "content": self._preview_context[1] if self._preview_context else None,
-            }) if self._preview_context else {
-                "type": "file",
-                "file": tooltip_path,
-            }
 
     def _on_context_attachment_toggled(self) -> None:
         self._context_enabled = self._context_attachment_btn.isChecked()
@@ -742,11 +729,6 @@ class AgentPanel(QWidget):
         detail: str | None = None,
         expandable: bool = True,
     ) -> None:
-        # Ensure thinking is complete before adding tool calls
-        if self._thinking_row is not None:
-            self.finish_thinking()
-
-        # Ensure previous agent streaming message is complete
         last = self._messages_area.last_timeline_widget()
         if (
             getattr(last, "_role", "") == "agent"
@@ -754,7 +736,6 @@ class AgentPanel(QWidget):
             and not getattr(last, "_complete", True)
         ):
             last.mark_complete()
-
         # Merge adjacent identical tool calls to avoid long noisy rows.
         merge_target = None
         if (
@@ -799,34 +780,35 @@ class AgentPanel(QWidget):
                 summary=summary,
             )
 
-    def append_thinking(self, thinking: str) -> None:
-        # Don't create row until we have actual content
-        if not thinking:
+    def start_thinking(self) -> None:
+        if self._thinking_row is not None:
             return
+        self._thinking_started_at = time.monotonic()
+        self._thinking_detail = ""
+        ts = datetime.now().strftime("%H:%M")
+        agent_name = self._title_label.text() or "Agent"
+        self._thinking_row = self._messages_area.add_message_row(
+            role="agent",
+            content="",
+            timestamp=ts,
+            agent_name=agent_name,
+            summary="Thought for 1s",
+            detail="",
+            expandable=True,
+        )
+        self._thinking_row._complete = False
+        self._thinking_row.set_thinking_row_style(True)
+        self._thinking_timer.start()
+        self._update_composer_alignment()
+
+    def append_thinking(self, thinking: str) -> None:
+        self.start_thinking()
         if self._thinking_row is None:
-            # Create row only when first thinking content arrives
-            self._thinking_started_at = time.monotonic()
-            self._thinking_detail = ""
-            ts = datetime.now().strftime("%H:%M")
-            agent_name = self._title_label.text() or "Agent"
-            self._thinking_row = self._messages_area.add_message_row(
-                role="agent",
-                content="",
-                timestamp=ts,
-                agent_name=agent_name,
-                summary="Thought for 1s",
-                detail=thinking,
-                expandable=True,
-            )
-            self._thinking_row._complete = False
-            self._thinking_row.set_thinking_row_style(True)
-            self._thinking_timer.start()
-            self._update_composer_alignment()
-        else:
-            # Update existing row with merged content
+            return
+        if thinking:
             self._thinking_detail = self._merge_thinking_chunk(self._thinking_detail, thinking)
-            self._thinking_row.set_detail_text(self._thinking_detail)
-            self._messages_area.follow_streaming_if_enabled()
+        self._thinking_row.set_detail_text(self._thinking_detail)
+        self._messages_area.follow_streaming_if_enabled()
 
     @staticmethod
     def _merge_thinking_chunk(current: str, chunk: str) -> str:
@@ -1007,8 +989,7 @@ class AgentPanel(QWidget):
         self._status_label.setStyleSheet(f"color: {colors.get(color_key, colors['status_idle'])};")
 
         if status == "thinking":
-            # Don't create thinking row here - wait for actual thinking content
-            pass
+            self.start_thinking()
         else:
             self.finish_thinking()
 
@@ -1070,10 +1051,10 @@ class AgentPanel(QWidget):
 
         ui_logger.debug("AgentPanel[{}]: sending message ({} chars)", self.panel_id, len(content))
         self._set_working(True)
-        # 先发射文件上下文信号，再发射用户消息信号（确保上下文先被缓存）
+        # 发射两个信号：用户消息和文件上下文
+        self.message_sent.emit(content)
         if file_context:
             self.file_context_attached.emit(file_context)
-        self.message_sent.emit(content)
 
         # 清理上下文状态
         self._preview_context = None
