@@ -237,10 +237,10 @@ def get_theme_colors() -> dict[str, str]:
         "link": "#0078d4" if dark else "#0090ff",
         "linkHover": "#026ec1" if dark else "#006cbe",
 
-        # === Warning ===
-        "warningBg": "#4c3c26" if dark else "#fff4e5",
-        "warningBorder": "#cca700" if dark else "#bf8900",
-        "warningFg": "#ffd866" if dark else "#7b5000",
+        # === Warning/Error ===
+        "warningBg": "#4a1d1d" if dark else "#ffe5e5",
+        "warningBorder": "#d94545" if dark else "#e55555",
+        "warningFg": "#ff6b6b" if dark else "#c53030",
         "successFg": "#4ec9b0" if dark else "#008000",
     }
 
