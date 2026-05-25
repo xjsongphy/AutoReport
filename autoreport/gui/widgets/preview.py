@@ -129,7 +129,8 @@ def _create_pdf_viewer(path: Path) -> tuple:
 
     c = get_theme_colors()
     doc = QPdfDocument(None)
-    doc.load(path)
+    # QPdfDocument.load expects str/QIODevice, not pathlib.Path.
+    doc.load(str(path))
 
     view = QPdfView(None)
     view.setObjectName("filePdfView")
