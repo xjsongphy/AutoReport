@@ -40,12 +40,12 @@ from ..theme import get_theme_colors
 from .ui_utils import UI_HOVER_DELAY_MS, IconActionButton, compact_tooltip_qss, render_svg_icon
 
 # Fixed directory structure
-FIXED_DIRECTORIES = ["data", "references", "theory", "code", "tex"]
+FIXED_DIRECTORIES = ["Data", "References", "Theory", "Code", "Tex"]
 _FILE_TEXT_ICON_GAP_ADJUST = 28
 _FILE_EDITOR_LEFT_ADJUST = -26
 _DIRECTORY_EDITOR_LEFT_ADJUST = 4
 _INDICATOR_PLACEHOLDER_ROLE = Qt.ItemDataRole.UserRole + 99
-_NON_DRAGGABLE_DIRS = {"data/processed"}
+_NON_DRAGGABLE_DIRS = {"Data/Processed"}
 
 
 # ================================================================== #
@@ -148,22 +148,22 @@ class _FileTreeDelegate(QStyledItemDelegate):
 
 # Directory display labels (VSCode style: concise, title case)
 DIR_LABELS = {
-    "data": "Data",
-    "references": "References",
-    "theory": "Theory",
-    "code": "Code",
-    "tex": "Tex",
-    "processed": "Processed",
+    "Data": "Data",
+    "References": "References",
+    "Theory": "Theory",
+    "Code": "Code",
+    "Tex": "Tex",
+    "Processed": "Processed",
 }
 
 # Directory descriptions (for tooltips)
 DIR_DESCRIPTIONS = {
-    "data": "实验数据",
-    "references": "参考资料",
-    "theory": "理论推导",
-    "code": "代码与图像",
-    "tex": "报告",
-    "processed": "分析结果",
+    "Data": "实验数据",
+    "References": "参考资料",
+    "Theory": "理论推导",
+    "Code": "代码与图像",
+    "Tex": "报告",
+    "Processed": "分析结果",
 }
 
 
@@ -674,13 +674,13 @@ class FileTreeWidget(QWidget):
             self._mark_fixed_directory_item(item)
             self._show_directory_indicator(item)
 
-            if dir_name == "data":
-                processed_path = dir_path / "processed"
+            if dir_name == "Data":
+                processed_path = dir_path / "Processed"
                 processed_path.mkdir(parents=True, exist_ok=True)
 
                 processed_item = QTreeWidgetItem(item)
-                processed_item.setText(0, DIR_LABELS.get("processed", "processed"))
-                processed_item.setData(0, Qt.ItemDataRole.UserRole, "data/processed")
+                processed_item.setText(0, DIR_LABELS.get("Processed", "Processed"))
+                processed_item.setData(0, Qt.ItemDataRole.UserRole, "Data/Processed")
                 self._mark_fixed_directory_item(processed_item)
                 self._show_directory_indicator(processed_item)
 
@@ -813,7 +813,7 @@ class FileTreeWidget(QWidget):
         for dir_name in FIXED_DIRECTORIES:
             dir_path = str(self.workspace / dir_name)
             self._file_watcher.addPath(dir_path)
-        self._file_watcher.addPath(str(self.workspace / "data" / "processed"))
+        self._file_watcher.addPath(str(self.workspace / "Data" / "Processed"))
         self._file_watcher.directoryChanged.connect(self._on_directory_changed)
 
     def _on_directory_changed(self, path: str) -> None:
@@ -1246,12 +1246,12 @@ class FileTreeWidget(QWidget):
         return None
 
     def _get_selected_dir(self) -> str:
-        """Get the selected directory path, falling back to 'references'."""
+        """Get the selected directory path, falling back to 'References'."""
         item = self.tree.currentItem()
         if not item:
             if self._root_selected:
                 return "."
-            return "references"
+            return "References"
 
         file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
         dir_name = item.data(0, Qt.ItemDataRole.UserRole)
@@ -1271,7 +1271,7 @@ class FileTreeWidget(QWidget):
             if parent_dir in FIXED_DIRECTORIES:
                 return parent_dir
             parent = parent.parent()
-        return "references"
+        return "References"
 
     def _handle_drop(self, event: QDropEvent) -> None:
         mime = event.mimeData()
@@ -1443,7 +1443,7 @@ class FileTreeWidget(QWidget):
 
     def _resolve_target_dir(self, target_item) -> str:
         if target_item is None:
-            return "references"
+            return "References"
 
         dir_name = target_item.data(0, Qt.ItemDataRole.UserRole)
         file_path_str = target_item.data(0, Qt.ItemDataRole.UserRole + 1)
@@ -1459,7 +1459,7 @@ class FileTreeWidget(QWidget):
                 return parent_dir
             parent = parent.parent()
 
-        return "references"
+        return "References"
 
     def _copy_files_with_progress(self, source_files: list[Path], target_dir: Path) -> None:
         progress = QProgressDialog("Copying files...", "Cancel", 0, len(source_files), self)
