@@ -8,7 +8,7 @@
 import re
 
 from PyQt6.QtCore import QEvent, Qt, pyqtSignal
-from PyQt6.QtGui import QClipboard, QColor, QIcon, QKeySequence, QPalette
+from PyQt6.QtGui import QClipboard, QColor, QIcon, QKeySequence, QPainter, QPalette, QPen
 
 from ..scale import scaled_size
 from PyQt6.QtWidgets import (
@@ -25,7 +25,48 @@ from PyQt6.QtWidgets import (
 
 from .markdown_renderer import render_markdown
 from ..theme import get_theme_colors
+from .timeline import TimelineRail
 from .ui_utils import install_compact_tooltip, render_svg_icon
+
+
+class _DisclosureArrow(QWidget):
+    def __init__(self, expanded: bool = False, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._expanded = expanded
+        self.setFixedSize(10, 10)
+
+    def set_expanded(self, expanded: bool) -> None:
+        if self._expanded == expanded:
+            return
+        self._expanded = expanded
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor(get_theme_colors()["muted"]), 1.4)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        cx = self.width() // 2
+        cy = self.height() // 2
+        if self._expanded:
+            painter.drawLine(cx - 3, cy - 1, cx, cy + 2)
+            painter.drawLine(cx, cy + 2, cx + 3, cy - 1)
+        else:
+            painter.drawLine(cx - 1, cy - 3, cx + 2, cy)
+            painter.drawLine(cx + 2, cy, cx - 1, cy + 3)
+        painter.end()
+
+
+class _SummaryHeader(QWidget):
+    clicked = pyqtSignal()
+
+    def mousePressEvent(self, event):  # noqa: N802
+        super().mousePressEvent(event)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
 
 
 def _parse_code_blocks(content: str) -> list[tuple[str, str | None]]:
@@ -161,9 +202,11 @@ class MessageRow(QWidget):
         self._raw_markdown_labels: dict[QLabel, str] = {}
         self._agent_chain_prev = agent_chain_prev
         self._agent_chain_next = agent_chain_next
-        self._chain_top: QWidget | None = None
-        self._chain_bottom: QWidget | None = None
+        self._timeline_rail: TimelineRail | None = None
         self._summary_btn: QPushButton | None = None
+        self._summary_header: QWidget | None = None
+        self._summary_arrow_widget: _DisclosureArrow | None = None
+        self._summary_text_label: QLabel | None = None
         self._detail_widget: QWidget | None = None
         self._user_actions_visible = False
         self._editing = False  # Track if in edit mode
@@ -191,7 +234,7 @@ class MessageRow(QWidget):
             QSizePolicy.Policy.Preferred,
         )
         self._outer_layout = QVBoxLayout(outer)
-        self._outer_layout.setContentsMargins(16, 6, 16, 6)
+        self._outer_layout.setContentsMargins(16, 0, 16, 0)
         self._outer_layout.setSpacing(0)
 
         if self._is_coordination:
@@ -200,6 +243,7 @@ class MessageRow(QWidget):
             self._outer_layout.addWidget(coord)
 
         if self._is_outbound_message():
+            self._outer_layout.setContentsMargins(16, 6, 16, 6)
             row = QWidget(outer)
             row.setObjectName("userMessageRow")
             row.setSizePolicy(
@@ -293,26 +337,8 @@ class MessageRow(QWidget):
             rl.setContentsMargins(0, 0, 0, 0)
             rl.setSpacing(8)
 
-            rail = QWidget(row)
-            rail.setFixedWidth(12)
-            rail_layout = QVBoxLayout(rail)
-            rail_layout.setContentsMargins(0, 0, 0, 0)
-            rail_layout.setSpacing(0)
-            self._chain_top = QWidget(rail)
-            self._chain_top.setFixedWidth(1)
-            self._chain_top.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-            self._chain_top.setStyleSheet("background:#6b7280;")
-            rail_layout.addWidget(self._chain_top, 1, Qt.AlignmentFlag.AlignHCenter)
-            dot = QLabel(rail)
-            dot.setFixedSize(7, 7)
-            dot.setStyleSheet("background:#9ca3af; border-radius:3px;")
-            rail_layout.addWidget(dot, 0, Qt.AlignmentFlag.AlignHCenter)
-            self._chain_bottom = QWidget(rail)
-            self._chain_bottom.setFixedWidth(1)
-            self._chain_bottom.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-            self._chain_bottom.setStyleSheet("background:#6b7280;")
-            rail_layout.addWidget(self._chain_bottom, 1, Qt.AlignmentFlag.AlignHCenter)
-            rl.addWidget(rail, 0, Qt.AlignmentFlag.AlignTop)
+            self._timeline_rail = TimelineRail(parent=row)
+            rl.addWidget(self._timeline_rail, 0, Qt.AlignmentFlag.AlignLeft)
 
             self._agent_content_layout = QVBoxLayout()
             self._agent_content_layout.setContentsMargins(0, 0, 0, 0)
@@ -359,13 +385,13 @@ class MessageRow(QWidget):
     def _build_agent_markdown_label(self, raw_markdown: str) -> QLabel:
         label = QLabel(render_markdown(raw_markdown))
         label.setObjectName("agentMessageText")
+        label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         label.setWordWrap(True)
         label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         label.setTextFormat(Qt.TextFormat.RichText)
-        label.setOpenExternalLinks(True)
+        label.setOpenExternalLinks(False)
         label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
-            | Qt.TextInteractionFlag.LinksAccessibleByMouse
         )
         label.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         label.setContentsMargins(0, 2, 0, 4)
@@ -387,32 +413,45 @@ class MessageRow(QWidget):
         self._update_agent_chain()
 
     def _update_agent_chain(self) -> None:
-        if self._chain_top is not None:
-            self._chain_top.setVisible(self._agent_chain_prev)
-        if self._chain_bottom is not None:
-            self._chain_bottom.setVisible(self._agent_chain_next)
+        if self._timeline_rail is not None:
+            self._timeline_rail.set_chain(self._agent_chain_prev, self._agent_chain_next)
 
     def _has_detail(self) -> bool:
         return bool(self._detail)
 
-    def _summary_arrow(self) -> str:
-        if not (self._expandable and self._has_detail()):
-            return ""
-        return "v" if self._expanded else ">"
-
     def _build_summary_widget(self, summary_type: str) -> QWidget:
-        widget = QWidget(self)
+        widget = _SummaryHeader(self)
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
+        self._summary_header = widget
 
-        self._summary_btn = QPushButton(self._summary_button_text())
-        self._summary_btn.setObjectName("toolCallHeader" if summary_type == "agent" else "userCopyBtn")
-        self._summary_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._summary_btn.clicked.connect(self._toggle_summary)
-        self._summary_btn.setEnabled(self._expandable and self._has_detail())
-        layout.addWidget(self._summary_btn)
-        layout.addStretch()
+        if summary_type == "agent":
+            widget.setObjectName("toolCallHeader")
+        else:
+            widget.setObjectName("msgSummaryHeader")
+
+        self._summary_arrow_widget = _DisclosureArrow(self._expanded, widget)
+        self._summary_arrow_widget.setVisible(self._expandable and self._has_detail())
+        left_margin = 4 if summary_type == "agent" else 0
+        layout.setContentsMargins(left_margin, 4, 0, 4)
+
+        self._summary_text_label = QLabel(self._summary or "", widget)
+        self._summary_text_label.setObjectName("toolCallHeaderText")
+        self._summary_text_label.setTextFormat(Qt.TextFormat.PlainText)
+        self._summary_text_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self._summary_text_label.setWordWrap(True)
+        self._summary_text_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._summary_text_label.setMinimumWidth(0)
+        layout.addWidget(self._summary_text_label, 1, Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(self._summary_arrow_widget, 0, Qt.AlignmentFlag.AlignTop)
+
+        widget.setCursor(
+            Qt.CursorShape.PointingHandCursor
+            if (self._expandable and self._has_detail())
+            else Qt.CursorShape.ArrowCursor
+        )
+        widget.clicked.connect(self._toggle_summary)
         return widget
 
     def _build_detail_widget(self, detail_type: str) -> QWidget:
@@ -444,31 +483,34 @@ class MessageRow(QWidget):
         self._expanded = not self._expanded
         if self._detail_widget:
             self._detail_widget.setVisible(self._expanded)
-        if self._summary_btn:
-            self._summary_btn.setText(self._summary_button_text())
-
-    def _summary_button_text(self) -> str:
-        arrow = self._summary_arrow()
-        if not arrow:
-            return self._summary or ""
-        return f"{self._summary or ''} {arrow}"
+        self._refresh_summary_header()
 
     def set_summary_text(self, summary: str) -> None:
         self._summary = summary
-        if self._summary_btn:
-            self._summary_btn.setText(self._summary_button_text())
+        self._refresh_summary_header()
 
     def set_detail_text(self, detail: str) -> None:
         self._detail = detail
-        if self._summary_btn:
-            self._summary_btn.setEnabled(self._expandable and self._has_detail())
-            self._summary_btn.setText(self._summary_button_text())
+        self._refresh_summary_header()
         if self._agent_content_layout is not None:
             expanded = self._expanded
             self._rebuild_agent_content()
             self._expanded = expanded
             if self._detail_widget:
                 self._detail_widget.setVisible(self._expanded and self._has_detail())
+            self._refresh_summary_header()
+
+    def _refresh_summary_header(self) -> None:
+        can_expand = self._expandable and self._has_detail()
+        if self._summary_text_label is not None:
+            self._summary_text_label.setText(self._summary or "")
+        if self._summary_arrow_widget is not None:
+            self._summary_arrow_widget.setVisible(can_expand)
+            self._summary_arrow_widget.set_expanded(self._expanded)
+        if self._summary_header is not None:
+            self._summary_header.setCursor(
+                Qt.CursorShape.PointingHandCursor if can_expand else Qt.CursorShape.ArrowCursor
+            )
 
     def mark_complete(self) -> None:
         """Mark streaming complete — enable hover-triggered actions."""
@@ -679,26 +721,6 @@ class MessageRow(QWidget):
     def contextMenuEvent(self, event) -> None:
         """Show VS Code-like context menu for message actions."""
         menu = QMenu(self)
-        c = get_theme_colors()
-        menu.setStyleSheet(
-            f"""
-            QMenu {{
-                background-color: {c["surface"]};
-                color: {c["fg"]};
-                border: 1px solid {c["border"]};
-                padding: 4px;
-            }}
-            QMenu::item {{
-                background-color: transparent;
-                padding: 6px 10px;
-                border-radius: {c["radius_sm"]};
-            }}
-            QMenu::item:selected {{
-                background-color: {c["hover"]};
-                color: {c["fg"]};
-            }}
-            """
-        )
 
         copy_action = menu.addAction("Copy")
         copy_action.triggered.connect(self._copy_content)
