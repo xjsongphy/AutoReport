@@ -138,14 +138,86 @@ class BashTool(Tool):
                     "timed_out": True,
                 }
 
+            stdout_str = stdout.decode("utf-8", errors="replace")
+            stderr_str = stderr.decode("utf-8", errors="replace")
+
+            # Post-process: filter internal metadata directories from output
+            if base_command == "ls":
+                stdout_str = self._filter_ls_output(stdout_str)
+            elif base_command == "find":
+                stdout_str = self._filter_find_output(stdout_str)
+
             return {
                 "command": command,
                 "command_description": command_description,
-                "stdout": stdout.decode("utf-8", errors="replace"),
-                "stderr": stderr.decode("utf-8", errors="replace"),
+                "stdout": stdout_str,
+                "stderr": stderr_str,
                 "returncode": process.returncode,
                 "timed_out": False,
             }
         except Exception as e:
             logger.error("Failed to execute bash command: {}", e)
             raise
+
+    def _filter_ls_output(self, output: str) -> str:
+        """Filter .autoreport and .checkpoints from ls command output.
+
+        This prevents agents from discovering internal metadata directories
+        through commands like 'ls -a' that list hidden files.
+        """
+        lines = output.splitlines()
+        filtered = []
+        for line in lines:
+            # Filter out lines that are exactly our protected directories
+            # or contain them as path components
+            should_filter = False
+            for protected in (".autoreport", ".checkpoints"):
+                # Check if line is exactly the directory name (ls -a format)
+                if line.strip() == protected:
+                    should_filter = True
+                    break
+                # Check if line contains protected/ (e.g., ".autoreport/file")
+                if f"{protected}/" in line.replace("\\", "/"):
+                    should_filter = True
+                    break
+                # Check if line ends with the protected directory name (ls -la format)
+                # The line format is: permissions links user group size date time name
+                # So we check if the last word is the protected directory name
+                parts = line.strip().split()
+                if parts and parts[-1] == protected:
+                    should_filter = True
+                    break
+                # Also check if last part is a symlink to protected directory
+                if parts and parts[-1].endswith(f" -> {protected}"):
+                    should_filter = True
+                    break
+            if not should_filter:
+                filtered.append(line)
+        return "\n".join(filtered)
+
+    def _filter_find_output(self, output: str) -> str:
+        """Filter .autoreport and .checkpoints from find command output.
+
+        The find command outputs paths like "./.autoreport" or "./.checkpoints/file".
+        We need to filter these out.
+        """
+        lines = output.splitlines()
+        filtered = []
+        for line in lines:
+            should_filter = False
+            normalized = line.strip().replace("\\", "/")
+            for protected in (".autoreport", ".checkpoints"):
+                # Check for patterns like:
+                # ./.autoreport
+                # ./.autoreport/
+                # ./.autoreport/file
+                if (normalized == f"./{protected}" or
+                    normalized == f"./{protected}/" or
+                    normalized.startswith(f"./{protected}/") or
+                    normalized == protected or
+                    normalized.startswith(f"{protected}/")):
+                    should_filter = True
+                    break
+            if not should_filter:
+                filtered.append(line)
+        return "\n".join(filtered)
