@@ -178,7 +178,6 @@ class TaskItem(BaseModel):
     source_agent: AgentType
     target_agent: AgentType
     status: TaskStatus = TaskStatus.PENDING
-    priority: str = "normal"
     created_at: datetime = Field(default_factory=datetime.now)
     completed_at: datetime | None = None
     blocking: bool = False

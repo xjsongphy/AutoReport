@@ -43,6 +43,19 @@ class BackendAPI(ABC):
         """
 
     @abstractmethod
+    async def send_file_context(
+        self,
+        file_context: dict,
+        agent_type: str,
+    ) -> None:
+        """Send file context to an agent (added as system message, not visible to user).
+
+        Args:
+            file_context: Dict with keys: type ("selection" or "file"), file, start_line, end_line, content.
+            agent_type: Target agent type.
+        """
+
+    @abstractmethod
     async def interrupt_current_message(self, agent_type: str) -> None:
         """Interrupt the currently processing message for an agent."""
 
