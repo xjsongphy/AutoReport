@@ -12,6 +12,8 @@ from markdown.extensions import Extension
 from markdown.treeprocessors import Treeprocessor
 from xml.etree import ElementTree as etree
 
+from ..theme import get_theme_colors
+
 
 def _is_dark_mode() -> bool:
     from PyQt6.QtCore import Qt
@@ -36,26 +38,15 @@ class _QtCompatTreeprocessor(Treeprocessor):
     """Adjust HTML tree for Qt rich text compatibility."""
 
     def run(self, root: etree.Element) -> Any:
-        dark = _is_dark_mode()
-
-        if dark:
-            code_bg = "#252526"
-            code_border = "#2b2b2b"
-            code_fg = "#cccccc"
-            inline_code_bg = "#2a2a2a"
-            inline_code_fg = "#e6edf3"
-            accent = "#0078d4"
-            muted = "#8b949e"
-            th_bg = "#252526"
-        else:
-            code_bg = "#f6f8fa"
-            code_border = "#e0e0e0"
-            code_fg = "#333333"
-            inline_code_bg = "#eff1f3"
-            inline_code_fg = "#333333"
-            accent = "#0090ff"
-            muted = "#656d76"
-            th_bg = "#f6f8fa"
+        c = get_theme_colors()
+        code_bg = c["card"]
+        code_border = c["border"]
+        code_fg = c["editor_fg"]
+        inline_code_bg = c["bubble_bg"]
+        inline_code_fg = c["editor_fg"]
+        accent = c["accent"]
+        muted = c["muted"]
+        th_bg = c["card"] if _is_dark_mode() else "#ffffff"
 
         # Qt rich text doesn't support <pre>, convert to styled <div>
         for pre in root.iter("pre"):
@@ -131,7 +122,7 @@ def render_markdown(text: str) -> str:
     html = re.sub(r'(</div>)\s*</p>', r'\1', html)
 
     # Wrap in a div for proper rendering
-    root_fg = "#d4d4d4" if _is_dark_mode() else "#333333"
+    root_fg = get_theme_colors()["editor_fg"]
     return (
         "<div style=\"white-space: normal; overflow-wrap: anywhere; "
         f"word-wrap: break-word; word-break: break-word; color: {root_fg};\">{html}</div>"

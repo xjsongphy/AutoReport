@@ -11,7 +11,11 @@ external/skills/
 
 TODO.md
 bug.md
-ref/
+ref
+images
+image*.png
+docs
+.autoreport
 
 # User config (contains API keys)
 autoreport.config.yaml
@@ -22,3 +26,4 @@ autoreport.config.yaml
 pytest-of-*/
 */pytest-of-*/
 .ruff_cache/
+*.bak

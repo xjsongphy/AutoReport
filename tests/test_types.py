@@ -96,7 +96,7 @@ def test_tool_result_message():
 def test_tool_result_with_error():
     msg = ToolResult(
         agent_type=AgentType.REPORT,
-        tool_name="exec",
+        tool_name="bash",
         result=None,
         error="Command failed",
     )

@@ -5,17 +5,23 @@ from pathlib import Path
 from PyQt6.QtCore import QObject, QPoint, QRectF, QSize, Qt, QTimer
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
-from PyQt6.QtWidgets import QApplication, QComboBox, QLabel, QPushButton, QWidget
+from PyQt6.QtWidgets import QApplication, QComboBox, QFrame, QLabel, QListView, QMenu, QPushButton, QStyleFactory, QWidget
 
 from ..theme import get_theme_colors
 
 
 _SVG_ICONS = {
+    "file": "file.svg",
     "new-file": "new-file.svg",
     "new-folder": "new-folder.svg",
     "refresh": "refresh.svg",
     "copy": "copy.svg",
+    "settings": "settings.svg",
+    "run": "run.svg",
+    "preview": "preview.svg",
+    "eye-off": "eye-off.svg",
 }
+UI_HOVER_DELAY_MS = 2000
 
 
 def render_svg_icon(name: str, color: QColor, size: int = 16) -> QIcon:
@@ -49,33 +55,39 @@ def render_svg_icon(name: str, color: QColor, size: int = 16) -> QIcon:
 
 
 class CompactTooltipFilter(QObject):
-    """Small VS Code-like tooltip for icon buttons (3 s hover delay)."""
+    """Small VS Code-like tooltip for icon buttons (2 s hover delay)."""
 
     def __init__(self, text: str, parent: QWidget):
         super().__init__(parent)
         self._text = text
-        self._tip: QLabel | None = None
+        self._tip: QWidget | None = None
+        self._tip_label: QLabel | None = None
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
-        self._timer.setInterval(3000)
+        self._timer.setInterval(UI_HOVER_DELAY_MS)
         self._timer.timeout.connect(self._delayed_show)
         self._anchor: QWidget | None = None
 
     def eventFilter(self, obj, event):
-        if (
-            event.type() == event.Type.Enter
-            and isinstance(obj, QWidget)
-            and obj.isEnabled()
-        ):
-            self._anchor = obj
-            self._timer.start()
-        elif event.type() in (
+        if event.type() in (
             event.Type.Leave,
             event.Type.MouseButtonPress,
             event.Type.Hide,
         ):
             self._timer.stop()
+            self._anchor = None
             self._hide()
+            return False
+
+        if isinstance(obj, QWidget) and obj.isEnabled():
+            if event.type() == event.Type.Enter:
+                self._anchor = obj
+                self._timer.start()
+            elif event.type() == event.Type.MouseMove and self._anchor is None:
+                # When a button becomes visible/enabled under an already-stationary cursor,
+                # Enter may not fire; a subsequent move should still start tooltip delay.
+                self._anchor = obj
+                self._timer.start()
         return False
 
     def _delayed_show(self) -> None:
@@ -84,17 +96,29 @@ class CompactTooltipFilter(QObject):
 
     def _show(self, anchor: QWidget) -> None:
         self._hide()
-        tip = QLabel(self._text)
+        tip = QWidget()
         tip.setWindowFlags(
-            Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint
+            Qt.WindowType.ToolTip
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.NoDropShadowWindowHint
         )
+        tip.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        tip.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         tip.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        tip.setStyleSheet(compact_tooltip_qss())
-        tip.adjustSize()
+        tip.setStyleSheet("background: transparent; border: none;")
+
+        bubble = QLabel(self._text, tip)
+        bubble.setObjectName("compactTooltipBubble")
+        bubble.setStyleSheet(compact_tooltip_qss("QLabel#compactTooltipBubble"))
+        bubble.adjustSize()
+        tip.resize(bubble.size())
+        bubble.move(0, 0)
+
         x = (anchor.width() - tip.width()) // 2
         tip.move(anchor.mapToGlobal(QPoint(x, anchor.height() + 3)))
         tip.show()
         self._tip = tip
+        self._tip_label = bubble
 
     def _hide(self) -> None:
         if self._tip is None:
@@ -102,6 +126,7 @@ class CompactTooltipFilter(QObject):
         self._tip.hide()
         self._tip.deleteLater()
         self._tip = None
+        self._tip_label = None
 
 
 def compact_tooltip_qss(selector: str = "QLabel") -> str:
@@ -109,19 +134,29 @@ def compact_tooltip_qss(selector: str = "QLabel") -> str:
     c = get_theme_colors()
     return f"""
         {selector} {{
-            background-color: {c["surface"]};
-            color: {c["fg"]};
+            background-color: {c["bg"]};
+            color: {c["popup_fg"]};
             border: 1px solid {c["border"]};
-            border-radius: 2px;
+            border-radius: {c["radius_md"]};
             padding: 2px 6px;
             font-size: 11px;
         }}
     """
 
 
+def create_isolated_context_menu(anchor: QWidget | None = None) -> QMenu:
+    """Create a context menu isolated from parent-widget QSS inheritance."""
+    menu = QMenu()
+    menu.setStyleSheet("")
+    if anchor is not None:
+        menu.setFont(anchor.font())
+    return menu
+
+
 def install_compact_tooltip(button: QPushButton, text: str) -> None:
     """Attach the shared compact tooltip to a button."""
     button.setToolTip("")
+    button.setMouseTracking(True)
     tooltip_filter = CompactTooltipFilter(text, button)
     button.installEventFilter(tooltip_filter)
     button._compact_tooltip_filter = tooltip_filter  # keep QObject alive
@@ -129,6 +164,27 @@ def install_compact_tooltip(button: QPushButton, text: str) -> None:
 
 class NoWheelComboBox(QComboBox):
     """QComboBox that ignores wheel events and draws a clean chevron."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFrame(False)
+        # Force a cross-platform style path (avoid macOS native popup look).
+        fusion = QStyleFactory.create("Fusion")
+        if fusion is not None:
+            self.setStyle(fusion)
+
+        # Use a non-native popup view so QSS hover/font are applied consistently.
+        popup_view = QListView(self)
+        popup_view.setObjectName("comboPopupView")
+        popup_view.setFrameShape(QFrame.Shape.NoFrame)
+        popup_view.setUniformItemSizes(True)
+        popup_view.setSpacing(0)
+        popup_view.setMouseTracking(True)
+        popup_view.setEditTriggers(QListView.EditTrigger.NoEditTriggers)
+        popup_view.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
+        popup_view.viewport().setMouseTracking(True)
+        popup_view.viewport().installEventFilter(self)
+        self.setView(popup_view)
 
     def wheelEvent(self, event) -> None:  # noqa: N802
         event.ignore()
@@ -140,9 +196,8 @@ class NoWheelComboBox(QComboBox):
 
         x = self.width() - 16
         y = self.height() // 2 - 2
-        hints = QApplication.styleHints()
-        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
-        color = QColor("#999") if dark else QColor("#666")
+        c = get_theme_colors()
+        color = QColor(c["muted"])
 
         pen = QPen(color, 1.5)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
@@ -156,7 +211,76 @@ class NoWheelComboBox(QComboBox):
         if self.count() == 0:
             self.addItem("（无可用项）")
             self.model().item(0).setEnabled(False)
+        self._apply_popup_style()
         super().showPopup()
+        # Keep popup position consistent across platforms: directly below combo.
+        view = self.view()
+        if view and view.window():
+            view.setFont(self.font())
+            popup = view.window()
+            popup.setWindowFlags(
+                Qt.WindowType.Popup
+                | Qt.WindowType.FramelessWindowHint
+                | Qt.WindowType.NoDropShadowWindowHint
+            )
+            popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            popup.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+            popup.setContentsMargins(0, 0, 0, 0)
+            popup.setStyleSheet("background: transparent; border: none;")
+            # Stronger overlap to eliminate visual seam between combo and popup.
+            popup.move(self.mapToGlobal(QPoint(0, self.height() - 2)))
+            popup.show()
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        view = self.view()
+        if view and obj is view.viewport():
+            et = event.type()
+            if et in (event.Type.Leave, event.Type.Hide):
+                sel = view.selectionModel()
+                if sel:
+                    sel.clearSelection()
+        return super().eventFilter(obj, event)
+
+    def _apply_popup_style(self) -> None:
+        c = get_theme_colors()
+        radius = c.get("radius_md", "6px")
+        item_radius = c.get("radius_sm", "4px")
+        border_color = c.get("input_border", c["border"])
+        border_width = c.get("input_border_width", "1px")
+        row_height = 30
+        view = self.view()
+        if view is None:
+            return
+        view.setStyleSheet(
+            f"""
+            QListView#comboPopupView {{
+                border: {border_width} solid {border_color};
+                border-radius: {radius};
+                background-color: {c["bg"]};
+                color: {c["fg"]};
+                outline: none;
+                padding: 0;
+            }}
+            QListView#comboPopupView::item {{
+                border: none;
+                background: transparent;
+                color: {c["fg"]};
+                padding: 0 8px;
+                margin: 0;
+                min-height: {row_height}px;
+                max-height: {row_height}px;
+                border-radius: {item_radius};
+            }}
+            QListView#comboPopupView::item:selected {{
+                background: transparent;
+                color: {c["fg"]};
+            }}
+            QListView#comboPopupView::item:hover {{
+                background-color: {c["focus"]};
+                color: {c["fg"]};
+            }}
+            """
+        )
 
 
 class IconActionButton(QPushButton):
@@ -196,12 +320,16 @@ def combo_box_qss(
     selection_fg: str,
     font_size: int = 12,
     padding: str = "4px 24px 4px 8px",
+    radius: str = "4px",
+    popup_radius: str | None = None,
+    item_radius: str = "0px",
 ) -> str:
     """Build a reusable combo-box + popup list QSS fragment."""
+    effective_popup_radius = popup_radius if popup_radius is not None else radius
     return f"""
         QComboBox{selector} {{
             border: 1px solid {border_color};
-            border-radius: 4px;
+            border-radius: {radius};
             padding: {padding};
             font-size: {font_size}px;
             background-color: {background_color};
@@ -225,27 +353,68 @@ def combo_box_qss(
         }}
         QComboBox{selector} QAbstractItemView {{
             border: 1px solid {border_color};
-            border-radius: 4px;
-            background-color: {background_color};
+            border-radius: {effective_popup_radius};
+            background: transparent;
             color: {foreground_color};
-            selection-background-color: transparent;
+            selection-background-color: {selection_bg};
             selection-color: {selection_fg};
-            padding: 4px;
+            padding: 0;
             outline: none;
+        }}
+        QComboBox{selector} QAbstractItemView::viewport {{
+            border: none;
+            border-radius: {effective_popup_radius};
+            background-color: {background_color};
+            padding: 0;
         }}
         QComboBox{selector} QAbstractItemView::item {{
             min-height: 22px;
-            padding: 2px 8px;
+            padding: 0 8px;
             border: none;
-            border-radius: 4px;
+            border-radius: {item_radius};
+            color: {foreground_color};
+            background: transparent;
         }}
         QComboBox{selector} QAbstractItemView::item:selected {{
             background-color: transparent;
-            color: {selection_fg};
+            color: {foreground_color};
         }}
         QComboBox{selector} QAbstractItemView::item:hover {{
             background-color: {selection_bg};
             color: {selection_fg};
+        }}
+    """
+
+
+def line_edit_qss(
+    selector: str,
+    *,
+    border_color: str,
+    focus_border_color: str,
+    background_color: str,
+    foreground_color: str,
+    disabled_bg: str,
+    disabled_fg: str,
+    radius: str = "4px",
+    font_size: int = 13,
+    padding: str = "6px 10px",
+) -> str:
+    """Build a reusable QLineEdit style fragment."""
+    return f"""
+        QLineEdit{selector} {{
+            border: 1px solid {border_color};
+            border-radius: {radius};
+            padding: {padding};
+            font-size: {font_size}px;
+            background-color: {background_color};
+            color: {foreground_color};
+        }}
+        QLineEdit{selector}:focus {{
+            border-color: {focus_border_color};
+        }}
+        QLineEdit{selector}:disabled {{
+            background-color: {disabled_bg};
+            color: {disabled_fg};
         }}
     """
 
@@ -260,13 +429,14 @@ def filled_button_qss(
     disabled_fg: str,
 ) -> str:
     """Build a reusable filled button QSS fragment."""
+    c = get_theme_colors()
     return f"""
         QPushButton{selector} {{
             background-color: {bg};
             color: {fg};
             border: none;
             border-radius: 4px;
-            font-weight: 600;
+            font-weight: {c["fw_semibold"]};
             font-size: 12px;
             padding: 2px 12px;
         }}

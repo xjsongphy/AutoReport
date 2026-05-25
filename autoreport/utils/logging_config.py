@@ -35,9 +35,9 @@ def setup_logging(
 
         log_dir.mkdir(parents=True, exist_ok=True)
 
-        # Main log file — callable format appends traceback only when present
+        # Main log file — with timestamp for each run
         logger.add(
-            log_dir / "autoreport_{time:YYYY-MM-DD}.log",
+            log_dir / "autoreport_{time:YYYY-MM-DD_HH-mm-ss}.log",
             level="DEBUG",
             format=_file_format,
             rotation="100 MB",
@@ -46,9 +46,9 @@ def setup_logging(
             encoding="utf-8",
         )
 
-        # Error log file — same callable format with backtrace/diagnose
+        # Error log file — with timestamp for each run
         logger.add(
-            log_dir / "errors_{time:YYYY-MM-DD}.log",
+            log_dir / "errors_{time:YYYY-MM-DD_HH-mm-ss}.log",
             level="ERROR",
             format=_file_format,
             rotation="50 MB",
@@ -59,9 +59,9 @@ def setup_logging(
             diagnose=True,
         )
 
-        # UI actions log file — records user interactions for debugging
+        # UI actions log file — with timestamp for each run
         logger.add(
-            log_dir / "ui_actions_{time:YYYY-MM-DD}.log",
+            log_dir / "ui_actions_{time:YYYY-MM-DD_HH-mm-ss}.log",
             level="DEBUG",
             format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>UI_ACTION</level> | {message}",
             rotation="50 MB",

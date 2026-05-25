@@ -4,8 +4,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import override
 
-from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QKeyEvent, QTextDocument, QIcon
+from PyQt6.QtWidgets import QGraphicsOpacityEffect, QApplication
 from PyQt6.QtWidgets import (
     QLabel,
     QListWidget,
@@ -17,6 +18,7 @@ from PyQt6.QtWidgets import (
 
 from autoreport.utils.agent_labels import get_agent_title, get_agent_badge_with_icon
 from autoreport.gui.icons import get_agent_icon as get_agent_qicon
+from ..theme import get_theme_colors
 
 
 @dataclass
@@ -67,8 +69,6 @@ class FileSearchPopup(QWidget):
         self._setup_window_flags()
 
     def _setup_ui(self) -> None:
-        from PyQt6.QtWidgets import QApplication
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(2)
@@ -87,39 +87,31 @@ class FileSearchPopup(QWidget):
 
         self.setFixedWidth(400)
 
-        hints = QApplication.styleHints()
-        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
-
-        bg = "#1f1f1f" if dark else "#ffffff"
-        border = "#2b2b2b" if dark else "#e0e0e0"
-        fg = "#cccccc" if dark else "#333333"
-        muted = "#737373" if dark else "#999999"
-        sel_bg = "#094771" if dark else "#cce4f7"
-        hover = "#2a2d2e" if dark else "#e8e8e8"
+        c = get_theme_colors()
 
         self.setStyleSheet(f"""
             FileSearchPopup {{
-                background-color: {bg};
-                border: 1px solid {border};
-                border-radius: 6px;
+                background-color: {c["bg"]};
+                border: 1px solid {c["border"]};
+                border-radius: {c["radius_md"]};
             }}
             QListWidget {{
-                background-color: {bg};
+                background-color: {c["bg"]};
                 border: none;
                 outline: none;
                 padding: 2px;
             }}
             QListWidget::item {{
                 padding: 5px 8px;
-                border-radius: 3px;
-                color: {fg};
+                border-radius: {c["radius_sm"]};
+                color: {c["popup_fg"]};
             }}
             QListWidget::item:hover {{
-                background-color: {hover};
+                background-color: {c["popup_hover"]};
             }}
             QListWidget::item:selected {{
-                background-color: {sel_bg};
-                color: #ffffff;
+                background-color: {c["tree_sel_bg"]};
+                color: {c["tree_sel_fg"]};
             }}
         """)
 

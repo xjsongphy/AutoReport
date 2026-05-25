@@ -7,6 +7,8 @@ from PyQt6.QtCore import QPoint, Qt, pyqtSignal
 from PyQt6.QtGui import QKeyEvent, QTextCursor
 from PyQt6.QtWidgets import QPlainTextEdit
 
+from ..theme import get_theme_colors
+
 
 class ChatInput(QPlainTextEdit):
     """Enhanced input widget with @ file reference and / command support.
@@ -20,6 +22,8 @@ class ChatInput(QPlainTextEdit):
     command_palette_requested = pyqtSignal(str, QPoint)
     send_message = pyqtSignal()
     popup_navigate = pyqtSignal(str)  # "up" | "down" | "select" | "cancel"
+    _MIN_LINES = 1
+    _MAX_LINES = 10
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -29,37 +33,70 @@ class ChatInput(QPlainTextEdit):
 
     def _setup_ui(self) -> None:
         self.setPlaceholderText("Message…  (@ file, / command)")
-        self.setMinimumHeight(28)
-        self.setMaximumHeight(100)
+        self.setMinimumHeight(0)
+        self.setMaximumHeight(16777215)
         self.setSizePolicy(
             self.sizePolicy().horizontalPolicy(),
             self.sizePolicy().verticalPolicy(),
         )
         self.document().setDocumentMargin(0)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        from PyQt6.QtWidgets import QApplication
-        hints = QApplication.styleHints()
-        dark = hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark
-
-        input_bg = "#1f1f1f" if dark else "#ffffff"
-        input_fg = "#cccccc" if dark else "#616161"
-        input_border = "#3c3c3c" if dark else "#e0e0e0"
-        focus_border = "#0078d4" if dark else "#0090ff"
+        c = get_theme_colors()
 
         self.setStyleSheet(f"""
             QPlainTextEdit {{
-                border: 1px solid {input_border};
-                border-radius: 8px;
-                padding: 4px 6px;
-                background-color: {input_bg};
-                color: {input_fg};
+                border: none;
+                border-radius: 0;
+                padding: 6px 8px;
+                background-color: transparent;
+                color: {c["fg"]};
                 font-size: 13px;
                 font-family: "Segoe UI", "SF Pro", sans-serif;
             }}
             QPlainTextEdit:focus {{
-                border: 1px solid {focus_border};
+                border: none;
+            }}
+            QPlainTextEdit QScrollBar:vertical {{
+                background-color: transparent;
+                width: 8px;
+                border: none;
+            }}
+            QPlainTextEdit QScrollBar::handle:vertical {{
+                background-color: {c["scrollbar"]};
+                min-height: 20px;
+                border-radius: 4px;
+            }}
+            QPlainTextEdit QScrollBar::handle:vertical:hover {{
+                background-color: {c["scrollbar_hover"]};
+            }}
+            QPlainTextEdit QScrollBar::add-line:vertical,
+            QPlainTextEdit QScrollBar::sub-line:vertical {{
+                height: 0;
             }}
         """)
+        self.textChanged.connect(self._update_height)
+        self._update_height()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._update_height()
+
+    def _update_height(self) -> None:
+        metrics = self.fontMetrics()
+        line_h = metrics.lineSpacing()
+        doc_lines = max(self._MIN_LINES, self.document().blockCount())
+        visible_lines = min(self._MAX_LINES, doc_lines)
+        frame = self.frameWidth() * 2
+        doc_margin = int(self.document().documentMargin() * 2)
+        pad_v = 12  # matches vertical padding in stylesheet (6 top + 6 bottom)
+        target = (visible_lines * line_h) + frame + doc_margin + pad_v
+        self.setFixedHeight(target)
+        if doc_lines > self._MAX_LINES:
+            self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        else:
+            self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
     @override
     def keyPressEvent(self, event: QKeyEvent) -> None:

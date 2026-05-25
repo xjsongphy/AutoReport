@@ -3,6 +3,7 @@
 from PyQt6.QtCore import Qt
 
 from autoreport.gui.widgets.status_indicator import StatusIndicator, _SPINNER_FRAMES
+from autoreport.gui.theme import get_theme_colors
 
 
 def _make_indicator(qtbot):
@@ -99,7 +100,8 @@ class TestStatusIndicatorSetStatus:
         indicator = _make_indicator(qtbot)
         indicator.set_status("error", "Error")
         style = indicator.styleSheet()
-        assert "#5a1a1a" in style  # error bg color
+        colors = get_theme_colors()
+        assert colors["warningBg"] in style
 
     def test_set_status_debug_mode(self, qtbot):
         indicator = _make_indicator(qtbot)
@@ -111,7 +113,8 @@ class TestStatusIndicatorSetStatus:
         indicator = _make_indicator(qtbot)
         indicator.set_status("debug", "Debug")
         style = indicator.styleSheet()
-        assert "#3a1a5a" in style  # debug bg color
+        colors = get_theme_colors()
+        assert colors["status_debug"] in style
 
     def test_set_status_with_default_text(self, qtbot):
         indicator = _make_indicator(qtbot)

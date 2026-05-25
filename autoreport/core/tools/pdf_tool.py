@@ -16,7 +16,7 @@ from typing import Any
 from loguru import logger
 
 from ..tools.registry import Tool
-from .path_utils import resolve_and_validate_path
+from .path_utils import resolve_and_validate_path, is_internal_metadata_path
 
 
 class PDFParseTool(Tool):
@@ -93,6 +93,12 @@ class PDFParseTool(Tool):
         for raw_path in paths:
             try:
                 src = resolve_and_validate_path(raw_path, self.workspace)
+
+                # Block access to internal metadata directories
+                if is_internal_metadata_path(src, self.workspace):
+                    errors.append(f"{raw_path}: access to internal metadata directory not allowed")
+                    continue
+
                 if not src.exists():
                     errors.append(f"{raw_path}: file not found")
                     continue

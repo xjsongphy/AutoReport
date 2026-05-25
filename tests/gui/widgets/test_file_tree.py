@@ -14,8 +14,18 @@ verifying the API and methods exist and are callable, rather than full integrati
 from pathlib import Path
 
 import pytest
+from PyQt6.QtCore import QEvent, QPointF, Qt
+from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QAbstractItemDelegate, QTreeWidgetItem
 
-from autoreport.gui.widgets.file_tree import FileTreeWidget, FIXED_DIRECTORIES
+from autoreport.gui.theme import get_theme_colors
+from autoreport.gui.widgets.file_tree import (
+    FIXED_DIRECTORIES,
+    FileTreeWidget,
+    _DragDropTreeWidget,
+    _INDICATOR_PLACEHOLDER_ROLE,
+)
 
 
 def test_fixed_directories_constant() -> None:
@@ -63,6 +73,54 @@ def test_file_tree_has_drag_drop_handlers() -> None:
     assert hasattr(FileTreeWidget, "dropEvent")
 
 
+def test_file_tree_has_cross_platform_shortcut_handler() -> None:
+    import inspect
+
+    source = inspect.getsource(FileTreeWidget._handle_tree_key)
+    assert "Key_F2" in source
+    assert "Key_Delete" in source
+    assert "Key_Backspace" in source
+
+
+def test_blank_click_selects_project_root(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    selected = []
+    widget.directory_selected.connect(selected.append)
+    QApplication.sendEvent(
+        widget.tree.viewport(),
+        QMouseEvent(
+            QEvent.Type.MouseButtonPress,
+            QPointF(10, widget.tree.viewport().height() + 20),
+            QPointF(widget.tree.viewport().mapToGlobal(widget.tree.viewport().rect().bottomLeft())),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        ),
+    )
+
+    assert widget.tree.currentItem() is None
+    assert widget._get_selected_dir() == "."
+    assert selected[-1] == "."
+
+
+def test_file_tree_enables_extended_selection() -> None:
+    import inspect
+
+    setup_source = inspect.getsource(FileTreeWidget._setup_ui)
+    assert "SelectionMode.ExtendedSelection" in setup_source
+
+
+def test_drag_guard_does_not_reference_class_constant() -> None:
+    import inspect
+    import autoreport.gui.widgets.file_tree as file_tree_module
+
+    # Ensure drag guard uses module-level FIXED_DIRECTORIES, not class attr.
+    file_source = inspect.getsource(file_tree_module)
+    assert "FileTreeWidget.FIXED_DIRECTORIES" not in file_source
+
+
 def test_file_tree_has_toolbar_buttons() -> None:
     """Test that FileTreeWidget setup creates toolbar buttons."""
     import inspect
@@ -104,9 +162,9 @@ def test_delete_operations_use_confirmation() -> None:
     delete_file_source = inspect.getsource(FileTreeWidget._delete_file)
     delete_dir_source = inspect.getsource(FileTreeWidget._delete_directory)
 
-    # Both should use QMessageBox for confirmation
-    assert "QMessageBox.question" in delete_file_source
-    assert "QMessageBox.question" in delete_dir_source
+    # Both should use confirmation dialogs (direct QMessageBox or wrapped helper)
+    assert ("QMessageBox.question" in delete_file_source) or ("_ask_confirmation" in delete_file_source)
+    assert ("QMessageBox.question" in delete_dir_source) or ("_ask_confirmation" in delete_dir_source)
 
 
 def test_file_operations_use_correct_paths() -> None:
@@ -156,3 +214,498 @@ def test_refresh_method_updates_tree() -> None:
 
     # Should update expanded items
     assert "setExpanded" in refresh_source
+
+
+def test_selected_nested_dir_is_used_for_new_file(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    data_item = widget.tree.topLevelItem(0)
+    data_item.setExpanded(True)
+    processed_item = data_item.child(0)
+    widget.tree.setCurrentItem(processed_item)
+
+    widget._new_file()
+    pending = widget._pending_new_item
+    assert pending is not None
+    widget.tree.blockSignals(True)
+    pending.setText(0, "a.txt")
+    widget.tree.blockSignals(False)
+    widget._finalize_pending_new_item()
+
+    assert (tmp_path / "data" / "processed" / "a.txt").exists()
+    assert not (tmp_path / "data" / "a.txt").exists()
+
+
+def test_hover_text_uses_tilde_prefixed_system_path(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    item = QTreeWidgetItem()
+    file_path = tmp_path / "code" / "plot.py"
+    item.setData(0, 257, str(file_path))
+
+    assert widget._hover_text_for_item(item) == FileTreeWidget._tilde_path(file_path)
+
+
+def test_directory_items_do_not_use_native_tooltip(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    top = widget.tree.topLevelItem(0)
+    assert top.toolTip(0) == ""
+
+
+def test_file_tree_hover_uses_two_second_delay(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    assert widget._hover_timer.interval() == 2000
+
+
+def test_repeat_new_click_cancels_empty_pending_and_restarts(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    widget._new_file_in_dir("references")
+    first_pending = widget._pending_new_item
+    assert first_pending is not None
+
+    widget._new_file_in_dir("references")
+    second_pending = widget._pending_new_item
+
+    assert second_pending is not None
+    assert first_pending is not second_pending
+
+
+def test_repeat_new_click_keeps_typed_pending_and_starts_another(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    widget._new_file_in_dir("references")
+    first_pending = widget._pending_new_item
+    assert first_pending is not None
+    widget.tree.blockSignals(True)
+    first_pending.setText(0, "first.txt")
+    widget.tree.blockSignals(False)
+
+    widget._new_file_in_dir("references")
+    second_pending = widget._pending_new_item
+
+    assert (tmp_path / "references" / "first.txt").exists()
+    assert second_pending is not None
+    assert first_pending is not second_pending
+
+
+def test_repeat_new_click_uses_live_editor_text(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    widget._new_file_in_dir("references")
+    qtbot.wait(20)
+    assert widget._pending_editor is not None
+    widget._pending_editor.setText("typed.txt")
+
+    widget._new_file_in_dir("references")
+
+    assert (tmp_path / "references" / "typed.txt").exists()
+    assert widget._pending_new_item is not None
+
+
+def test_close_editor_uses_live_editor_text(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    widget._new_file_in_dir("references")
+    qtbot.wait(20)
+    assert widget._pending_editor is not None
+    editor = widget._pending_editor
+    editor.setText("closed.txt")
+
+    widget._on_close_editor(editor, QAbstractItemDelegate.EndEditHint.NoHint)
+
+    assert (tmp_path / "references" / "closed.txt").exists()
+    assert widget._pending_new_item is None
+
+
+def test_new_file_in_collapsed_nested_dir_keeps_pending_item(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    data_item = widget.tree.topLevelItem(0)
+    processed_item = data_item.child(0)
+    assert not processed_item.isExpanded()
+
+    widget._new_file_in_dir("data/processed")
+
+    pending = widget._pending_new_item
+    assert pending is not None
+    assert pending.parent() is processed_item
+    assert processed_item.isExpanded()
+
+
+def test_drop_target_resolves_nested_directories(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    data_item = widget.tree.topLevelItem(0)
+    processed_item = data_item.child(0)
+
+    assert widget._resolve_target_dir(processed_item) == "data/processed"
+
+
+def test_drag_hover_highlights_resolved_directory(qtbot, tmp_path: Path) -> None:
+    target_file = tmp_path / "references" / "note.txt"
+    nested_file = tmp_path / "references" / "nested" / "deep.txt"
+    target_file.parent.mkdir(parents=True, exist_ok=True)
+    nested_file.parent.mkdir(parents=True, exist_ok=True)
+    target_file.write_text("x", encoding="utf-8")
+    nested_file.write_text("deep", encoding="utf-8")
+
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    refs_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("references"))
+    refs_item.setExpanded(True)
+    widget._on_item_expanded(refs_item)
+    file_item = None
+    nested_item = None
+    nested_child = None
+    for i in range(refs_item.childCount()):
+        child = refs_item.child(i)
+        if child.data(0, Qt.ItemDataRole.UserRole + 1) == str(target_file):
+            file_item = child
+        if child.data(0, Qt.ItemDataRole.UserRole) == "references/nested":
+            nested_item = child
+            child.setExpanded(True)
+            widget._on_item_expanded(child)
+            nested_child = child.child(0)
+    assert file_item is not None
+    assert nested_item is not None
+    assert nested_child is not None
+
+    widget._set_drop_target_from_item(file_item)
+    assert widget._drop_target_item is refs_item
+    assert widget.tree._row_background_color(refs_item).name() == get_theme_colors()["tree_hover"]
+    assert widget.tree._row_background_color(file_item).name() == get_theme_colors()["tree_hover"]
+    assert widget.tree._row_background_color(nested_item).name() == get_theme_colors()["tree_hover"]
+    assert widget.tree._row_background_color(nested_child).name() == get_theme_colors()["tree_hover"]
+
+    widget._clear_drop_target()
+    assert widget._drop_target_item is None
+    assert not widget._is_drop_highlight_item(refs_item)
+
+
+def test_tree_row_states_paint_row_and_branch_with_same_color(qtbot, tmp_path: Path) -> None:
+    import inspect
+
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    colors = get_theme_colors()
+    refs_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("references"))
+    assert refs_item is not None
+
+    widget.tree.setCurrentItem(refs_item)
+    refs_item.setSelected(True)
+    assert widget.tree._row_background_color(refs_item).name() == colors["tree_sel_bg"]
+
+    widget.tree.clearSelection()
+    refs_item.setSelected(False)
+    widget._set_drop_target_from_item(refs_item)
+    assert widget.tree._row_background_color(refs_item).name() == colors["tree_hover"]
+
+    widget._clear_drop_target()
+    widget._editing_item = refs_item
+    assert widget.tree._row_background_color(refs_item).name() == colors["tree_sel_bg"]
+    widget._set_editing_item(None)
+
+    widget._new_file_in_dir("references")
+    pending = widget._pending_new_item
+    assert pending is not None
+    assert widget._editing_item is pending
+    assert widget.tree._row_background_color(pending).name() == colors["tree_sel_bg"]
+    widget._cancel_pending_new_item()
+
+    refs_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("references"))
+    assert refs_item is not None
+    widget._rename_directory(tmp_path / "references", refs_item)
+    assert widget._editing_item is refs_item
+    assert widget.tree._row_background_color(refs_item).name() == colors["tree_sel_bg"]
+    widget._set_editing_item(None)
+
+    row_color_source = inspect.getsource(_DragDropTreeWidget._row_background_color)
+    draw_row_source = inspect.getsource(_DragDropTreeWidget.drawRow)
+    draw_branch_source = inspect.getsource(_DragDropTreeWidget.drawBranches)
+    stylesheet = widget.styleSheet()
+
+    assert "tree_sel_bg" in row_color_source
+    assert "tree_hover" in row_color_source
+    assert "fillRect(rect, color)" in draw_row_source
+    assert "fillRect(rect, color)" in draw_branch_source
+    assert "super().drawBranches" not in draw_branch_source
+    assert "drawLine" in draw_branch_source
+    assert "#fileTree::item:hover" in stylesheet
+    assert "show-decoration-selected: 0;" in stylesheet
+    assert f'background-color: {colors["bg"]};' in stylesheet
+
+
+def test_processed_directory_is_not_draggable_but_files_inside_are(qtbot, tmp_path: Path) -> None:
+    processed_file = tmp_path / "data" / "processed" / "result.txt"
+    processed_file.parent.mkdir(parents=True, exist_ok=True)
+    processed_file.write_text("ok", encoding="utf-8")
+
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    data_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("data"))
+    processed_item = data_item.child(0)
+    processed_item.setExpanded(True)
+    widget._on_item_expanded(processed_item)
+    file_item = processed_item.child(0)
+
+    assert not (data_item.flags() & Qt.ItemFlag.ItemIsDragEnabled)
+    assert not (processed_item.flags() & Qt.ItemFlag.ItemIsDragEnabled)
+    assert file_item.flags() & Qt.ItemFlag.ItemIsDragEnabled
+
+
+def test_directories_do_not_show_folder_icons(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    for i in range(widget.tree.topLevelItemCount()):
+        item = widget.tree.topLevelItem(i)
+        assert item is not None
+        assert item.icon(0).isNull()
+
+
+def test_empty_directory_keeps_expand_indicator_after_reload(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    references_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("references"))
+    assert references_item is not None
+
+    references_item.setExpanded(True)
+    widget._on_item_expanded(references_item)
+
+    real_children = [
+        references_item.child(i)
+        for i in range(references_item.childCount())
+        if not references_item.child(i).data(0, _INDICATOR_PLACEHOLDER_ROLE)
+    ]
+    assert len(real_children) == 0
+    assert any(
+        references_item.child(i).data(0, _INDICATOR_PLACEHOLDER_ROLE)
+        for i in range(references_item.childCount())
+    )
+    assert (
+        references_item.childIndicatorPolicy()
+        == QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
+    )
+    assert widget.tree.updatesEnabled()
+
+
+def test_refresh_recovers_directory_indicator_policy(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    references_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("references"))
+    assert references_item is not None
+
+    references_item.setChildIndicatorPolicy(
+        QTreeWidgetItem.ChildIndicatorPolicy.DontShowIndicatorWhenChildless
+    )
+    widget.refresh()
+
+    assert (
+        references_item.childIndicatorPolicy()
+        == QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
+    )
+
+
+def test_expand_top_level_collapses_other_top_level(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    data_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("data"))
+    refs_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("references"))
+    assert data_item is not None
+    assert refs_item is not None
+
+    data_item.setExpanded(True)
+    assert data_item.isExpanded()
+
+    widget._collapse_other_top_level_dirs("references")
+    refs_item.setExpanded(True)
+
+    assert not data_item.isExpanded()
+    assert refs_item.isExpanded()
+    assert (
+        data_item.childIndicatorPolicy()
+        == QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
+    )
+    assert (
+        refs_item.childIndicatorPolicy()
+        == QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
+    )
+
+
+def test_new_file_editor_is_bound_after_start_create(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    widget._new_file_in_dir("references")
+    qtbot.wait(20)
+    assert widget._pending_new_item is not None
+    assert widget._pending_editor is not None
+
+
+def test_directory_changed_restores_selected_file(qtbot, tmp_path: Path) -> None:
+    target_file = tmp_path / "references" / "keep.txt"
+    target_file.parent.mkdir(parents=True, exist_ok=True)
+    target_file.write_text("x", encoding="utf-8")
+
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    refs_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("references"))
+    assert refs_item is not None
+    refs_item.setExpanded(True)
+    widget._on_item_expanded(refs_item)
+    assert refs_item.childCount() > 0
+
+    selected = None
+    for i in range(refs_item.childCount()):
+        child = refs_item.child(i)
+        if child.data(0, 257) == str(target_file):
+            selected = child
+            break
+    assert selected is not None
+
+    widget.tree.setCurrentItem(selected)
+    widget._on_directory_changed(str((tmp_path / "references").resolve()))
+
+    current = widget.tree.currentItem()
+    assert current is not None
+    assert current.data(0, 257) == str(target_file)
+
+
+def test_select_moved_path_keeps_selection_on_new_file(qtbot, tmp_path: Path) -> None:
+    moved = tmp_path / "references" / "moved.txt"
+    moved.parent.mkdir(parents=True, exist_ok=True)
+    moved.write_text("x", encoding="utf-8")
+
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    widget._select_moved_path(moved)
+
+    current = widget.tree.currentItem()
+    assert current is not None
+    assert current.data(0, Qt.ItemDataRole.UserRole + 1) == str(moved)
+
+
+def test_internal_move_keeps_references_expand_indicator(qtbot, tmp_path: Path) -> None:
+    source = tmp_path / "data" / "raw.txt"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("x", encoding="utf-8")
+
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    data_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("data"))
+    refs_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("references"))
+    assert data_item is not None
+    assert refs_item is not None
+
+    data_item.setExpanded(True)
+    widget._on_item_expanded(data_item)
+    processed_item = None
+    file_item = None
+    for i in range(data_item.childCount()):
+        child = data_item.child(i)
+        rel = child.data(0, Qt.ItemDataRole.UserRole)
+        if rel == "data/processed":
+            processed_item = child
+        if child.data(0, Qt.ItemDataRole.UserRole + 1) == str(source):
+            file_item = child
+    assert processed_item is not None
+    assert file_item is not None
+
+    widget.tree.clearSelection()
+    file_item.setSelected(True)
+    widget._handle_internal_move(None, processed_item)
+
+    assert (
+        refs_item.childIndicatorPolicy()
+        == QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
+    )
+
+
+def test_internal_move_keeps_indicator_when_references_is_expanded(qtbot, tmp_path: Path) -> None:
+    source = tmp_path / "data" / "raw.txt"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("x", encoding="utf-8")
+
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    data_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("data"))
+    refs_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("references"))
+    assert data_item is not None
+    assert refs_item is not None
+
+    refs_item.setExpanded(True)
+    widget._on_item_expanded(refs_item)
+
+    data_item.setExpanded(True)
+    widget._on_item_expanded(data_item)
+    processed_item = None
+    file_item = None
+    for i in range(data_item.childCount()):
+        child = data_item.child(i)
+        rel = child.data(0, Qt.ItemDataRole.UserRole)
+        if rel == "data/processed":
+            processed_item = child
+        if child.data(0, Qt.ItemDataRole.UserRole + 1) == str(source):
+            file_item = child
+    assert processed_item is not None
+    assert file_item is not None
+
+    widget.tree.clearSelection()
+    file_item.setSelected(True)
+    widget._handle_internal_move(None, processed_item)
+
+    assert (
+        refs_item.childIndicatorPolicy()
+        == QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
+    )
+
+
+def test_clicking_blank_area_selects_root_directory(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.resize(320, 420)
+    widget.show()
+    qtbot.wait(20)
+
+    captured: list[str] = []
+    widget.directory_selected.connect(captured.append)
+
+    viewport = widget.tree.viewport()
+    pos = QPointF(float(viewport.width() - 2), float(viewport.height() - 2))
+    event = QMouseEvent(
+        QEvent.Type.MouseButtonPress,
+        pos,
+        pos,
+        pos,
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(viewport, event)
+
+    assert widget.tree.currentItem() is None
+    assert captured
+    assert captured[-1] == "."

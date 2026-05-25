@@ -2,7 +2,7 @@
 
 These tests do NOT require API keys. They test:
 - Tool registration and schema generation
-- Tool execution (read_file, write_file, python_exec, etc.)
+- Tool execution (read_file, write_file, bash, etc.)
 """
 
 import asyncio
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from autoreport.core.tools.exec_tools import ExecTool, PythonExecTool
+from autoreport.core.tools.exec_tools import BashTool
 from autoreport.core.tools.file_tools import ListDirTool, ReadFileTool, WriteFileTool
 from autoreport.core.tools.registry import ToolRegistry
 
@@ -124,43 +124,35 @@ class TestWriteFile:
         assert (ws / "code" / "new_file.py").read_text() == "print('hello')"
 
 
-class TestPythonExec:
-    """python_exec tool tests."""
+class TestBashTool:
+    """bash tool tests."""
 
     @pytest.mark.asyncio
     async def test_simple_calculation(self):
         ws = _workspace()
-        tool = PythonExecTool(working_dir=ws)
-        result = await tool(code="print(2 + 2)")
-        output = result.get("output", str(result)) if isinstance(result, dict) else str(result)
+        tool = BashTool(working_dir=ws)
+        result = await tool(command="python -c \"print(2+2)\"", command_description="Show simple calculation")
+        output = result.get("stdout", str(result)) if isinstance(result, dict) else str(result)
         assert "4" in output
 
     @pytest.mark.asyncio
-    async def test_pandas_import(self):
+    async def test_git_command_runs(self):
         ws = _workspace()
-        tool = PythonExecTool(working_dir=ws)
-        result = await tool(code="import pandas as pd; print(pd.__version__)")
-        # Result contains output or combined stdout+stderr
-        text = ""
-        if isinstance(result, dict):
-            text = result.get("output", "") or result.get("error", "")
-        else:
-            text = str(result)
-        # pandas version should appear somewhere in the result
-        assert "pandas" in text.lower() or "." in text or result is not None
+        tool = BashTool(working_dir=ws)
+        result = await tool(command="pwd", command_description="Show current directory")
+        text = result.get("stdout", "") if isinstance(result, dict) else str(result)
+        assert str(ws) in text
 
     @pytest.mark.asyncio
-    async def test_syntax_error(self):
+    async def test_nonzero_exit(self):
         ws = _workspace()
-        tool = PythonExecTool(working_dir=ws)
-        result = await tool(code="print(")
-        error = result.get("error", str(result)) if isinstance(result, dict) else str(result)
-        assert "SyntaxError" in error or "Error" in error
+        tool = BashTool(working_dir=ws)
+        result = await tool(command="python -c \"exit(2)\"", command_description="Exit with nonzero code")
+        assert result.get("returncode") == 2
 
     @pytest.mark.asyncio
-    async def test_runtime_error(self):
+    async def test_missing_description(self):
         ws = _workspace()
-        tool = PythonExecTool(working_dir=ws)
-        result = await tool(code="x = 1/0")
-        error = result.get("error", str(result)) if isinstance(result, dict) else str(result)
-        assert "ZeroDivision" in error or "Error" in error
+        tool = BashTool(working_dir=ws)
+        with pytest.raises(ValueError):
+            await tool(command="echo hi", command_description="")

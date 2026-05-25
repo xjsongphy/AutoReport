@@ -11,7 +11,7 @@ from loguru import logger
 from ..tools.registry import Tool
 from .file_state import FileStateManager
 from .manifest_tool import ManifestManager
-from .path_utils import resolve_and_validate_path
+from .path_utils import resolve_and_validate_path, suggest_canonical_path, is_internal_metadata_path, is_internal_metadata_rel
 
 
 class FileSafetyMixin:
@@ -57,6 +57,11 @@ class WriteEnabledTool(Tool, FileSafetyMixin):
         self._file_state_manager = file_state_manager
 
     def _check_write_permission(self, file_path: Path, action: str = "Write") -> None:
+        if is_internal_metadata_path(file_path, self.workspace):
+            raise PermissionError(
+                f"{action} not allowed in internal metadata directories (.autoreport, .checkpoints). Attempted: {file_path}"
+            )
+
         if not self.write_allowed_dir:
             return
         try:
@@ -108,6 +113,23 @@ class ReadFileTool(Tool):
         """
         file_path = resolve_and_validate_path(path, self.workspace)
         logger.debug("Reading file: {}", file_path)
+
+        if is_internal_metadata_path(file_path, self.workspace):
+            raise PermissionError("Access to internal metadata under .autoreport is not allowed.")
+
+        if not file_path.exists():
+            suggestion = suggest_canonical_path(path)
+            hint = f" Did you mean '{suggestion}'?" if suggestion and suggestion != path else ""
+            raise FileNotFoundError(f"File not found: {file_path}.{hint}")
+
+        if file_path.is_dir():
+            raise ValueError(f"Path is a directory, not a file: {file_path}. Use list_dir to explore directories.")
+
+        if file_path.suffix.lower() == ".pdf":
+            raise ValueError(
+                f"read_file does not support PDF files: {file_path.name}. "
+                "Use parse_pdf to extract content first."
+            )
 
         try:
             with open(file_path, "r", encoding="utf-8") as f:
@@ -170,7 +192,7 @@ class ReadFileTool(Tool):
             return {
                 "error": f"Cannot read '{file_path.name}' as text: it appears to be a {detected_type} file (not UTF-8 encoded text). "
                          f"The read_file tool only supports UTF-8 text files. If you need to work with this file type, "
-                         f"please use a different approach (e.g., exec or python_exec for file analysis).",
+                         f"please use a different approach (e.g., bash for file analysis).",
                 "path": str(file_path),
                 "is_binary": True,
                 "detected_type": detected_type,
@@ -586,7 +608,9 @@ class ListDirTool(Tool):
         logger.debug("Listing directory: {}", dir_path)
 
         if not dir_path.exists():
-            raise FileNotFoundError(f"Directory not found: {dir_path}")
+            suggestion = suggest_canonical_path(path)
+            hint = f" Did you mean '{suggestion}'?" if suggestion and suggestion != path else ""
+            raise FileNotFoundError(f"Directory not found: {dir_path}.{hint}")
 
         if not dir_path.is_dir():
             raise NotADirectoryError(f"Not a directory: {dir_path}")
@@ -597,12 +621,17 @@ class ListDirTool(Tool):
 
             if recursive:
                 for item in sorted(dir_path.rglob("*")):
+                    rel = item.relative_to(dir_path).as_posix()
+                    if is_internal_metadata_rel(rel):
+                        continue
                     if item.is_dir():
-                        directories.append(item.relative_to(dir_path).as_posix())
+                        directories.append(rel)
                     else:
-                        files.append(item.relative_to(dir_path).as_posix())
+                        files.append(rel)
             else:
                 for item in sorted(dir_path.iterdir()):
+                    if item.name in {".autoreport", ".checkpoints"}:
+                        continue
                     if item.is_dir():
                         directories.append(item.name)
                     else:

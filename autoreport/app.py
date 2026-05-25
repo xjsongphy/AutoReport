@@ -6,6 +6,16 @@ import sys
 from pathlib import Path
 from typing import Annotated, Any, Dict
 
+# Force UTF-8 encoding for all I/O operations
+# This fixes Chinese character display issues on Windows systems
+if sys.platform == "win32":
+    import os
+    os.environ["PYTHONIOENCODING"] = "utf-8"
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
+
 import typer
 from loguru import logger
 from PyQt6.QtWidgets import QApplication, QDialog
@@ -24,6 +34,48 @@ app = typer.Typer(
     rich_markup_mode="rich",
     no_args_is_help=True,
 )
+
+
+class _FilteredStderr:
+    """Filter known noisy platform stderr lines while preserving real errors."""
+
+    _BLOCK_PATTERNS = (
+        "IMKCFRunLoopWakeUpReliable",
+    )
+
+    def __init__(self, wrapped):
+        self._wrapped = wrapped
+        self._buf = ""
+
+    def write(self, data):
+        if not isinstance(data, str):
+            data = str(data)
+        self._buf += data
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            if any(pat in line for pat in self._BLOCK_PATTERNS):
+                continue
+            self._wrapped.write(line + "\n")
+        return len(data)
+
+    def flush(self):
+        if self._buf:
+            line = self._buf
+            self._buf = ""
+            if not any(pat in line for pat in self._BLOCK_PATTERNS):
+                self._wrapped.write(line)
+        self._wrapped.flush()
+
+    def isatty(self):
+        return self._wrapped.isatty() if hasattr(self._wrapped, "isatty") else False
+
+
+def _install_stderr_filter() -> None:
+    if sys.platform != "darwin":
+        return
+    if isinstance(sys.stderr, _FilteredStderr):
+        return
+    sys.stderr = _FilteredStderr(sys.stderr)
 
 
 class AutoReportApp:
@@ -215,6 +267,7 @@ class AutoReportApp:
             debug_agents=list(getattr(self, "_debug_agents_on_start", [])),
         )
         self.main_window.set_async_loop(self._async_loop)
+        self.main_window.prepare_initial_render()
         self.main_window.show()
 
         exit_code = app.exec()
@@ -295,6 +348,55 @@ class BackendAPIImpl(BackendAPI):
         )
         await self.bus.publish(message)
 
+    async def send_file_context(
+        self,
+        file_context: dict,
+        agent_type: str,
+    ) -> None:
+        """Send file context to an agent as system message (invisible to user)."""
+        from .interfaces.types import AgentType
+
+        # Map string to AgentType enum
+        agent_type_map = {
+            "main": AgentType.MAIN,
+            "data_analysis": AgentType.DATA_ANALYSIS,
+            "plotting": AgentType.PLOTTING,
+            "theory": AgentType.THEORY,
+            "report": AgentType.REPORT,
+            "sub": AgentType.MAIN,  # Default to main for "sub"
+        }
+        agent_type_enum = agent_type_map.get(agent_type, AgentType.MAIN)
+
+        # Format file context as system message.
+        # Keep context strictly scoped to the attachment shown in agent composer.
+        if file_context.get("type") == "selection":
+            fp = file_context.get("file", "")
+            s = file_context.get("start_line", "")
+            e = file_context.get("end_line", "")
+            context_msg = (
+                "Editor context: selection\n"
+                f"File: {fp}\n"
+                f"Selected lines: {s}-{e}\n"
+                "Constraint: selected text is not attached; do not infer or list other open tabs.\n"
+            )
+        elif file_context.get("type") == "file":
+            fp = file_context.get("file", "")
+            context_msg = (
+                "Editor context: file\n"
+                f"Current file: {fp}\n"
+                "Constraint: do not infer or list other open tabs.\n"
+            )
+        else:
+            return
+
+        # Send as system message (source="system")
+        message = UserMessage(
+            content=context_msg,
+            agent_type=agent_type_enum,
+            source="system",
+        )
+        await self.bus.publish(message)
+
     async def interrupt_current_message(self, agent_type: str) -> None:
         """Interrupt the currently processing message for an agent."""
         if self.loop_manager is None:
@@ -320,6 +422,42 @@ class BackendAPIImpl(BackendAPI):
         # Update config
         self.config_manager.config.agents.defaults.model = model
         # No restart needed for model change
+
+    async def sync_agent_conversation(
+        self,
+        agent_type: str,
+        messages: list[dict[str, str]] | None = None,
+    ) -> None:
+        """Replace in-memory conversation history for an agent loop."""
+        if self.loop_manager is None:
+            return
+
+        from .core.providers.base import Message as LLMMessage
+        from .interfaces.types import AgentType
+
+        agent_type_map = {
+            "main": AgentType.MAIN,
+            "data_analysis": AgentType.DATA_ANALYSIS,
+            "plotting": AgentType.PLOTTING,
+            "theory": AgentType.THEORY,
+            "report": AgentType.REPORT,
+        }
+        agent_enum = agent_type_map.get(agent_type)
+        if agent_enum is None:
+            return
+
+        loop = self.loop_manager._loops.get(agent_enum)  # noqa: SLF001
+        if loop is None:
+            return
+
+        loop._conversation_history.clear()  # noqa: SLF001
+        for msg in messages or []:
+            role = str(msg.get("role", "")).strip()
+            content = str(msg.get("content", ""))
+            is_tool_result = bool(msg.get("is_tool_result", False))
+            if role not in {"user", "assistant", "system"}:
+                continue
+            loop._conversation_history.append(LLMMessage(role=role, content=content, is_tool_result=is_tool_result))  # noqa: SLF101
 
     async def rollback_to_checkpoint(self, agent_type: str, checkpoint_id: str) -> Dict[str, Any]:
         """Rollback an agent to a specific checkpoint.
@@ -419,6 +557,8 @@ def main(
     ] = False,
 ) -> None:
     """AutoReport - 基于 Agent 的自动化物理实验报告撰写系统"""
+    _install_stderr_filter()
+
     # Handle --sync-presets (CLI mode, no GUI needed)
     if sync_presets:
         setup_logging(log_level="INFO", log_to_file=True)

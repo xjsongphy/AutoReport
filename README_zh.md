@@ -14,10 +14,24 @@
 - **流式传输** — 实时显示 Agent 输出，逐字流式呈现
 - **并排 Agent 面板** — 子 Agent 和主 Agent 面板水平排列，主 Agent 位于最右侧
 - **最近项目缓存** — VSCode 风格的最近项目列表，缓存于 `~/.autoreport/recent_projects.json`
-- **资源管理器** — VSCode 风格文件树，22px 行高、16px 图标，简洁标签（Data、References、Theory、Code、Tex）
+- **文件树** — VSCode 风格原生 Qt 实现，22px 行高、16px 图标，简洁标签（Data、References、Theory、Code、Tex）
+  - 原生 Qt 样式渲染选择、悬停、分支指示器
+  - 支持内联重命名文件/文件夹
+  - 拖放导入外部文件
+  - 单击文字区域展开/折叠，箭头区域由 Qt 处理
+  - 所有目录始终显示展开箭头（VSCode 风格）
+- **统一主题系统** — 支持暗色/亮色模式自动检测，基于 VSCode Dark Modern / Light Modern 配色
+- **SVG 图标系统** — 使用 VSCode Codicons，高 DPI 显示支持
 - **上下文引用栏** — 文件/行选择的可视化指示器，可切换是否包含在消息中
 - **对话界面** — Copilot 风格的对话显示，正确的 Markdown 渲染，工具调用按名称分组显示
 - **`/clear` 命令** — 在对话中输入 `/clear` 清除历史记录，开始新会话
+
+### UI 特性详情
+- **高 DPI 支持** — SVG 图标使用设备像素比渲染，在视网膜显示器上清晰显示
+- **智能宽度计算** — Agent 面板和文件树根据内容动态计算最小宽度
+- **拖放优化** — 文件拖动预览使用固定大小图标，不会随文件名拉伸
+- **编辑体验** — 内联编辑输入框采用灰色背景和蓝色聚焦边框
+- **主题适配** — 所有 UI 组件统一使用主题系统，支持暗色/亮色模式自动切换
 
 ### 开发工具
 - **@ 文件引用** — 在聊天输入中输入 `@` 触发模糊文件搜索，选择文件后插入 Markdown 引用链接
@@ -106,7 +120,15 @@ autoreport/
 │   ├── skills.py         # Skill 加载（external/skills/ → Agent 系统提示词）
 │   └── tools/            # 工具系统（注册表、文件工具、执行工具、PDF 工具）
 ├── gui/                  # PyQt6 界面（主窗口、对话框、小部件）
-│   └── widgets/          # 可复用组件（文件树、预览、Agent 面板）
+│   ├── theme.py          # 统一主题管理（暗色/亮色模式自动检测）
+│   └── widgets/          # 可复用组件
+│       ├── file_tree.py      # VSCode 风格文件树（原生 Qt 样式）
+│       ├── preview.py        # 预览面板（编辑器/PDF 查看器）
+│       ├── agent_panel.py    # Agent 面板（对话、时间线、状态栏）
+│       ├── chat_input.py     # 聊天输入框（支持 @ 文件引用）
+│       ├── message_row.py    # 消息行渲染（Markdown、工具调用）
+│       ├── ui_utils.py       # UI 工具函数（图标、样式助手）
+│       └── *.svg             # VSCode Codicons 图标文件
 ├── interfaces/           # GUI-后台协议（Protocol 定义、消息类型）
 ├── templates/            # 内置模板（Agent 提示词、报告模板）
 │   ├── agents/           # Agent 提示词文件（Markdown）
@@ -130,6 +152,14 @@ autoreport/
 **技能系统**：外部 Markdown 技能（如 `latex-compile`）从 `external/skills/` 加载，根据每个 Agent 的配置注入到系统提示词中。`--sync-presets` 命令也会同步技能仓库中的技能文件。
 
 **报告模板**：报告 Agent 按优先级使用模板：用户 `references/` 目录中的自定义模板 > 内置 `templates/reports/template.tex` > 标准 LaTeX 回退。内置模板支持北大近代物理实验 PKUMpLtX 文档类。
+
+### UI 架构
+
+**主题系统**：`gui/theme.py` 提供统一的颜色管理。自动检测系统暗色/亮色模式（通过 `Qt.ColorScheme` 或调色板亮度回退），提供 VSCode Dark Modern / Light Modern 配色方案。
+
+**文件树组件**：`gui/widgets/file_tree.py` 使用原生 Qt QTreeWidget，通过自定义 delegate 实现全行选择背景和 VSCode 风格的缩进线。支持内联编辑（按 F2 重命名）、拖放导入外部文件。
+
+**Agent 面板**：`gui/widgets/agent_panel.py` 包含对话历史、状态指示器、输入框和调试模式切换。使用流式传输实时显示 Agent 响应。
 
 ## 开发
 

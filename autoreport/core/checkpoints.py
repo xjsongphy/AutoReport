@@ -87,11 +87,11 @@ class CheckpointData:
 
 # Write directories per agent type (relative to workspace root)
 _AGENT_WRITE_DIRS: dict[str, list[str]] = {
-    "main": ["data", "data/processed", "references", "theory", "code", "tex"],
-    "data_analysis": ["data/processed"],
-    "plotting": ["code"],
-    "theory": ["theory"],
-    "report": ["tex"],
+    "main": ["Data", "Data/Processed", "References", "Theory", "Code", "Tex"],
+    "data_analysis": ["Data/Processed"],
+    "plotting": ["Code"],
+    "theory": ["Theory"],
+    "report": ["Tex"],
 }
 
 

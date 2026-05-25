@@ -1,10 +1,21 @@
-"""Collapsible tool call group matching the chat timeline tool-call style."""
+"""Tool call group matching the chat timeline tool-call style."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PyQt6.QtCore import QTimer, Qt, pyqtSignal
+from PyQt6.QtGui import QColor
+from PyQt6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+from ..theme import get_theme_colors
+from .timeline import TimelineRail
+from .ui_utils import install_compact_tooltip, render_svg_icon
+
+TIMELINE_EVENT_ROW_HEIGHT = 34
+
+def _copy_icon_dark():
+    # Keep copy icon visually consistent with user bubble actions.
+    return render_svg_icon("copy", QColor(get_theme_colors()["muted"]), size=16)
 
 
 @dataclass
@@ -16,11 +27,11 @@ class ToolCall:
     result: Any | None = None
     error: str | None = None
     summary: str | None = None
-    detail: str | None = None
-    expandable: bool = True
+    elapsed_seconds: int = 0
+    file_names: list[str] = field(default_factory=list)
 
 
-class _ClickableHeaderLabel(QLabel):
+class _ClickableHeaderWidget(QWidget):
     clicked = pyqtSignal()
 
     def mousePressEvent(self, event):  # noqa: N802
@@ -33,9 +44,7 @@ class _ClickableHeaderLabel(QLabel):
 
 
 class ToolCallGroup(QWidget):
-    """Collapsible group of tool calls."""
-
-    expanded_changed = pyqtSignal(bool)
+    """Tool calls in a compact summary row."""
 
     @staticmethod
     def _display_name(name: str) -> str:
@@ -44,31 +53,61 @@ class ToolCallGroup(QWidget):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._calls: list[ToolCall] = []
-        self._expanded = False
+        self._timeline_prev = False
+        self._timeline_next = False
+        self._timeline_rail: TimelineRail | None = None
+        self._tick_timer = QTimer(self)
+        self._tick_timer.setInterval(1000)
+        self._tick_timer.timeout.connect(self._tick_running)
         self._setup_ui()
 
     def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(32, 4, 16, 4)
-        layout.setSpacing(0)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 0, 16, 0)
+        layout.setSpacing(8)
 
-        self._header_btn = _ClickableHeaderLabel()
+        self._timeline_rail = TimelineRail(parent=self)
+        layout.addWidget(self._timeline_rail, 0, Qt.AlignmentFlag.AlignLeft)
+
+        content = QWidget(self)
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(4, 0, 0, 0)
+        content_layout.setSpacing(0)
+        layout.addWidget(content, 1)
+
+        self._header_btn = _ClickableHeaderWidget()
         self._header_btn.setObjectName("toolCallHeader")
-        self._header_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._header_btn.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        self._header_btn.setWordWrap(True)
-        self._header_btn.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self._header_btn.setMinimumWidth(0)
-        self._header_btn.clicked.connect(self._on_toggle)
-        layout.addWidget(self._header_btn)
+        self._header_btn.setMinimumHeight(TIMELINE_EVENT_ROW_HEIGHT)
+        self._header_btn.clicked.connect(lambda: None)
+        header_layout = QHBoxLayout(self._header_btn)
+        header_layout.setContentsMargins(0, 4, 0, 6)
+        header_layout.setSpacing(0)
 
-        self._details = QWidget()
-        self._details.setObjectName("toolCallDetails")
-        self._details_layout = QVBoxLayout(self._details)
-        self._details_layout.setContentsMargins(0, 2, 0, 0)
-        self._details_layout.setSpacing(1)
-        self._details.setVisible(False)
-        layout.addWidget(self._details)
+        self._header_text = QLabel()
+        self._header_text.setObjectName("toolCallHeaderText")
+        self._header_text.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self._header_text.setWordWrap(True)
+        self._header_text.setTextFormat(Qt.TextFormat.RichText)
+        self._header_text.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._header_text.setMinimumWidth(0)
+        header_layout.addWidget(self._header_text, 1, Qt.AlignmentFlag.AlignTop)
+        content_layout.addWidget(self._header_btn)
+
+        self._detail_host = QWidget(self)
+        self._detail_layout = QVBoxLayout(self._detail_host)
+        self._detail_layout.setContentsMargins(0, 2, 0, 0)
+        self._detail_layout.setSpacing(0)
+        content_layout.addWidget(self._detail_host)
+        self._update_timeline_chain()
+
+    def set_timeline_chain(self, prev_link: bool, next_link: bool) -> None:
+        self._timeline_prev = prev_link
+        self._timeline_next = next_link
+        self._update_timeline_chain()
+
+    def _update_timeline_chain(self) -> None:
+        if self._timeline_rail is not None:
+            self._timeline_rail.set_chain(self._timeline_prev, self._timeline_next)
 
     def add_tool_call(
         self,
@@ -79,8 +118,6 @@ class ToolCallGroup(QWidget):
         result: Any = None,
         error: str | None = None,
         summary: str | None = None,
-        detail: str | None = None,
-        expandable: bool = True,
     ) -> None:
         self._calls.append(ToolCall(
             name=name,
@@ -90,8 +127,8 @@ class ToolCallGroup(QWidget):
             result=result,
             error=error,
             summary=summary,
-            detail=detail,
-            expandable=expandable,
+            elapsed_seconds=0,
+            file_names=self._extract_file_names(arguments),
         ))
         self._update_display()
 
@@ -102,8 +139,6 @@ class ToolCallGroup(QWidget):
         error: str | None = None,
         duration_ms: int = 100,
         summary: str | None = None,
-        detail: str | None = None,
-        expandable: bool | None = None,
     ) -> None:
         for call in reversed(self._calls):
             if call.name == name and call.success is None:
@@ -113,10 +148,6 @@ class ToolCallGroup(QWidget):
                 call.error = error
                 if summary is not None:
                     call.summary = summary
-                if detail is not None:
-                    call.detail = detail
-                if expandable is not None:
-                    call.expandable = expandable
                 self._update_display()
                 return
 
@@ -128,121 +159,204 @@ class ToolCallGroup(QWidget):
             result=result if error is None else None,
             error=error,
             summary=summary,
-            detail=detail,
-            expandable=True if expandable is None else expandable,
         )
 
-    def _on_toggle(self) -> None:
-        if not self._any_expandable():
-            return
-        self._expanded = not self._expanded
-        self._details.setVisible(self._expanded)
-        self.expanded_changed.emit(self._expanded)
-        self._update_display()
+    def can_merge_with_last(self, name: str) -> bool:
+        if not self._calls:
+            return False
+        return self._calls[-1].name == name
 
-    def _call_detail_text(self, call: ToolCall) -> str | None:
-        if call.detail is not None:
-            return call.detail
-        if call.error:
-            return f"error: {call.error}"
-        if call.result is not None:
-            return str(call.result)[:200]
-        if call.success is not None:
-            return self._header_text_for_call(call)
-        return None
+    def _tick_running(self) -> None:
+        dirty = False
+        for call in self._calls:
+            if call.success is None:
+                call.elapsed_seconds += 1
+                dirty = True
+        if dirty:
+            self._update_display()
+        else:
+            self._tick_timer.stop()
 
-    def _is_expandable(self, call: ToolCall) -> bool:
-        return call.expandable and bool(self._call_detail_text(call))
+    def _status_dot_color(self, success: bool | None) -> str:
+        if success is None:
+            return "#3B82F6"
+        return "#22C55E" if success else "#EF4444"
 
-    def _any_expandable(self) -> bool:
-        return any(self._is_expandable(call) for call in self._calls)
+    def _timer_text(self, call: ToolCall) -> str:
+        return ""
 
-    def _header_arrow(self) -> str:
-        if not self._any_expandable():
-            return "-"
-        return "▾" if self._expanded else "▸"
-
-    def _duration_text(self, duration_ms: int) -> str:
-        if duration_ms <= 0:
-            return ""
-        return f"{duration_ms / 1000:.1f}s"
-
-    def _status_text_for_call(self, call: ToolCall) -> str:
-        if call.success is None:
-            return "running"
-        return "ok" if call.success else "error"
+    def _extract_file_names(self, arguments: dict[str, Any]) -> list[str]:
+        names: list[str] = []
+        for key in ("path", "file_path", "output_path"):
+            val = arguments.get(key)
+            if isinstance(val, str) and val.strip():
+                names.append(Path(val).name)
+        multi = arguments.get("file_paths")
+        if isinstance(multi, list):
+            for p in multi:
+                if isinstance(p, str) and p.strip():
+                    names.append(Path(p).name)
+        return names
 
     def _header_text_for_call(self, call: ToolCall) -> str:
-        return call.summary or self._display_name(call.name)
+        if call.summary:
+            return call.summary
+        sep = "&nbsp;&nbsp;"
+        if call.name == "read_file":
+            files = " ".join(call.file_names) if call.file_names else ""
+            return f"<b>Read</b>{sep}{files}".strip()
+        if call.name == "list_dir":
+            files = " ".join(call.file_names) if call.file_names else "."
+            return f"<b>List</b>{sep}{files}".strip()
+        if call.name == "parse_pdf":
+            files = " ".join(call.file_names) if call.file_names else ""
+            return f"<b>Parse</b>{sep}{files}".strip()
+        if call.name == "write_file":
+            files = " ".join(call.file_names) if call.file_names else ""
+            return f"<b>Write</b>{sep}{files}".strip()
+        if call.name == "edit_file":
+            files = " ".join(call.file_names) if call.file_names else ""
+            return f"<b>Edit</b>{sep}{files}".strip()
+        if call.name == "delete_file":
+            files = " ".join(call.file_names) if call.file_names else ""
+            return f"<b>Delete</b>{sep}{files}".strip()
+        if call.name == "bash":
+            desc = str(call.arguments.get("command_description") or "").strip()
+            if desc:
+                desc = desc[0].upper() + desc[1:]
+            return f"<b>Bash</b>{sep}{desc}".strip()
+        return f"<b>{self._display_name(call.name)}</b>"
 
-    def _status_counts_text(self) -> str:
-        ok = sum(1 for c in self._calls if c.success is True)
-        fail = sum(1 for c in self._calls if c.success is False)
-        running = sum(1 for c in self._calls if c.success is None)
-        parts: list[str] = []
-        if running:
-            parts.append(f"{running} running")
-        if ok:
-            parts.append(f"{ok} ok")
-        if fail:
-            parts.append(f"{fail} error")
-        return ", ".join(parts)
+    def _clear_detail(self) -> None:
+        while self._detail_layout.count():
+            item = self._detail_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
 
-    def _clear_details(self) -> None:
-        for i in reversed(range(self._details_layout.count())):
-            widget = self._details_layout.itemAt(i).widget()
-            if widget:
-                widget.setParent(None)
+    def _bash_card(self, call: ToolCall) -> QWidget:
+        card = QFrame(self)
+        card.setObjectName("bashDetailCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(8, 6, 8, 10)
+        card_layout.setSpacing(4)
 
-    def _render_details(self) -> None:
-        self._clear_details()
-        for call in self._calls:
-            detail_text = self._call_detail_text(call)
-            if not detail_text:
-                continue
-            detail = QLabel(detail_text)
-            detail.setObjectName("toolCallDetail")
-            detail.setWordWrap(True)
-            detail.setTextFormat(Qt.TextFormat.PlainText)
-            self._details_layout.addWidget(detail)
+        def _row(tag: str, text: str, display_text: str | None = None) -> QWidget:
+            shown = text if display_text is None else display_text
+            row = QFrame(card)
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(8)
+            label = QLabel(tag, row)
+            label.setObjectName("bashDetailTag")
+            label.setFixedWidth(24)
+            row_layout.addWidget(label)
+            value = QLabel(shown, row)
+            value.setObjectName("bashDetailText")
+            value.setTextFormat(Qt.TextFormat.PlainText)
+            value.setWordWrap(False)
+            # Allow long command/output text to shrink with panel width instead of
+            # forcing the whole row wider than the agent panel.
+            value.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+            value.setMinimumWidth(0)
+            value.setFixedHeight(18)
+            row_layout.addWidget(value, 1)
+            copy_btn = QPushButton(row)
+            copy_btn.setObjectName("userCopyBtn")
+            copy_btn.setIcon(_copy_icon_dark())
+            copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            copy_btn.setFixedSize(30, 24)
+            install_compact_tooltip(copy_btn, "Copy")
+            copy_btn.setVisible(False)
+            copy_btn.clicked.connect(lambda _=False, t=text: QApplication.clipboard().setText(t))
+            row_layout.addWidget(copy_btn, 0, Qt.AlignmentFlag.AlignRight)
+
+            def _enter(_):
+                copy_btn.setVisible(True)
+
+            def _leave(_):
+                copy_btn.setVisible(False)
+
+            row.enterEvent = _enter  # type: ignore[method-assign]
+            row.leaveEvent = _leave  # type: ignore[method-assign]
+            return row
+
+        cmd = str(call.arguments.get("command") or "").strip()
+        if not cmd and isinstance(call.result, dict):
+            cmd = str(call.result.get("command") or "").strip()
+        out = ""
+        if isinstance(call.result, dict):
+            stdout = str(call.result.get("stdout") or "").strip()
+            stderr = str(call.result.get("stderr") or "").strip()
+            out = stdout + (f"\n{stderr}" if stderr else "")
+        if call.error:
+            out = "Tool execution failed"
+
+        card_layout.addWidget(_row("IN", cmd))
+        divider = QFrame(card)
+        divider.setObjectName("bashDetailDivider")
+        divider.setFixedHeight(1)
+        card_layout.addWidget(divider)
+        out_preview = "\n".join(out.splitlines()[:3])
+        card_layout.addWidget(_row("OUT", out, out_preview))
+        card.setMaximumHeight(110)
+        return card
+
+    def _render_bash_detail(self) -> None:
+        self._clear_detail()
+        bash_calls = [c for c in self._calls if c.name == "bash"]
+        if not bash_calls:
+            self._detail_host.setVisible(False)
+            return
+        self._detail_layout.addWidget(self._bash_card(bash_calls[-1]))
+        self._detail_host.setVisible(True)
 
     def _update_display(self) -> None:
         if not self._calls:
             return
 
-        arrow = self._header_arrow()
-
         if len(self._calls) == 1:
             call = self._calls[0]
-            parts = [arrow, self._header_text_for_call(call)]
-            duration = self._duration_text(call.duration_ms)
-            if duration:
-                parts.append(duration)
-            parts.append(self._status_text_for_call(call))
-            self._header_btn.setText("  " + "  ".join(parts))
+            self._header_text.setText(self._header_text_for_call(call))
+            dot_color = self._status_dot_color(call.success)
         else:
-            from collections import Counter
+            running = any(c.success is None for c in self._calls)
+            failed = any(c.success is False for c in self._calls)
+            success = not running and not failed
+            same_name = len({c.name for c in self._calls}) == 1
+            if same_name and self._calls[0].name in {"read_file", "list_dir", "parse_pdf", "write_file", "edit_file", "delete_file"}:
+                tool = self._calls[0].name
+                files: list[str] = []
+                for c in self._calls:
+                    files.extend(c.file_names)
+                file_text = " ".join(files).strip()
+                label = {
+                    "read_file": "Read",
+                    "list_dir": "List",
+                    "parse_pdf": "Parse",
+                    "write_file": "Write",
+                    "edit_file": "Edit",
+                    "delete_file": "Delete",
+                }[tool]
+                joined = f"<b>{label}</b>&nbsp;&nbsp;{file_text}".strip()
+            elif same_name:
+                joined = self._header_text_for_call(self._calls[0])
+            else:
+                joined = " ".join(self._header_text_for_call(c) for c in self._calls)
+            self._header_text.setText(joined)
+            dot_color = self._status_dot_color(None if running else success)
 
-            counts = Counter(call.name for call in self._calls)
-            names = [
-                f"{self._display_name(name)} ({count})" if count > 1 else self._display_name(name)
-                for name, count in counts.items()
-            ]
-            parts = [arrow, ", ".join(names)]
-            total_ms = sum(call.duration_ms for call in self._calls)
-            if total_ms > 0:
-                parts.append(f"{total_ms / 1000:.1f}s")
-            status = self._status_counts_text()
-            if status:
-                parts.append(status)
-            self._header_btn.setText("  " + "  ".join(parts))
+        if self._timeline_rail is not None:
+            self._timeline_rail.set_dot_color(dot_color)
+        self._render_bash_detail()
 
-        self._header_btn.setEnabled(self._any_expandable())
-        self._render_details()
-        self._details.setVisible(self._expanded and self._any_expandable())
+        if any(c.success is None for c in self._calls):
+            if not self._tick_timer.isActive():
+                self._tick_timer.start()
+        else:
+            self._tick_timer.stop()
 
     def is_expanded(self) -> bool:
-        return self._expanded
+        return False
 
     def get_summary_text(self) -> str:
-        return self._header_btn.text()
+        return self._header_text.text()

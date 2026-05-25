@@ -10,23 +10,25 @@ from ...config import ConfigManager
 from ...core.providers import ProviderFactory, ProviderManager
 from ...interfaces.types import AgentType, Message, RestartRequest
 from ..checkpoints import CheckpointManager
-from ..skills import SkillLoader
+from ..tools import SkillLoader
 from ..tools import (
+    BashTool,
+    BuiltinTemplateTool,
     CreateCheckpointTool,
     DeleteFileTool,
     EditFileTool,
-    ExecTool,
     FileStateManager,
     ListCheckpointsTool,
     ListDirTool,
+    LoadSkillTool,
     ManageTasksTool,
     ManifestManager,
     PDFParseTool,
-    PythonExecTool,
     ReadFileTool,
     ReportIssueTool,
     RollbackCheckpointTool,
     SendToAgentTool,
+    SkillLoader,
     TaskBoard,
     WriteFileTool,
 )
@@ -237,10 +239,10 @@ class LoopManager:
 
         # Determine write allowed directory based on agent type
         write_dirs = {
-            AgentType.DATA_ANALYSIS: self.workspace / "data" / "processed",
-            AgentType.PLOTTING: self.workspace / "code",
-            AgentType.THEORY: self.workspace / "theory",
-            AgentType.REPORT: self.workspace / "tex",
+            AgentType.DATA_ANALYSIS: self.workspace / "Data" / "Processed",
+            AgentType.PLOTTING: self.workspace / "Code",
+            AgentType.THEORY: self.workspace / "Theory",
+            AgentType.REPORT: self.workspace / "Tex",
             AgentType.MAIN: self.workspace,  # Main agent has full access
         }
 
@@ -269,15 +271,11 @@ class LoopManager:
             file_state_manager=file_state_manager,
         ))
 
-        # Execution tools (for data analysis, plotting, and main agent)
+        # Execution tool (for data analysis, plotting, and main agent)
         if agent_type in (AgentType.DATA_ANALYSIS, AgentType.PLOTTING, AgentType.MAIN):
-            registry.register(ExecTool(
+            registry.register(BashTool(
                 working_dir=self.workspace,
                 timeout=120,
-            ))
-            registry.register(PythonExecTool(
-                working_dir=self.workspace,
-                timeout=60,
             ))
 
         # PDF parsing (all agents that may need to read reference materials)
@@ -296,6 +294,13 @@ class LoopManager:
                 workspace=self.workspace,
                 timeout=mineru_timeout,
             ))
+
+        # Built-in template access (Report Agent only)
+        if agent_type == AgentType.REPORT:
+            registry.register(BuiltinTemplateTool())
+
+        # Skill loading — all agents can load skills on demand
+        registry.register(LoadSkillTool(skill_loader=self.skill_loader))
 
         # Inter-agent communication tools
         if agent_type == AgentType.MAIN:

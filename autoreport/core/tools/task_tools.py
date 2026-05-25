@@ -39,7 +39,6 @@ class ManageTasksTool(Tool):
         # Single-item params (backward compatible)
         description: str | None = None,
         task_id: str | None = None,
-        priority: str = "normal",
         brief: str = "",
         completion_summary: str | None = None,
         reply_content: str | None = None,
@@ -54,12 +53,11 @@ class ManageTasksTool(Tool):
             action: One of: list, add, start, complete, cancel, fail.
             description: Task description (single add). Use 'items' for batch.
             task_id: Single task ID (for start/complete/cancel/fail). Use 'task_ids' for batch.
-            priority: Priority for single 'add'. One of: normal, high, low.
             brief: Short summary for single 'add'.
             completion_summary: Short summary for completion result.
             reply_content: Reply sent to waiting agent on complete.
             response: Backward-compatible alias for reply_content.
-            items: Batch add — list of {description, brief?, priority?} dicts.
+            items: Batch add — list of {description, brief?} dicts.
             task_ids: Batch status change — list of task ID strings.
 
         Returns:
@@ -76,7 +74,7 @@ class ManageTasksTool(Tool):
             return self._handle_list()
 
         if action == "add":
-            return await self._handle_add(description, priority, brief, items)
+            return await self._handle_add(description, brief, items)
 
         # Normalize single task_id → task_ids list
         ids = self._resolve_ids(task_id, task_ids)
@@ -148,7 +146,6 @@ class ManageTasksTool(Tool):
                     "brief": t.brief,
                     "status": t.status.value,
                     "source_agent": t.source_agent.value,
-                    "priority": t.priority,
                 }
                 for t in todolist
             ],
@@ -158,7 +155,6 @@ class ManageTasksTool(Tool):
                     "brief": t.brief,
                     "status": t.status.value,
                     "target_agent": t.target_agent.value,
-                    "priority": t.priority,
                 }
                 for t in waitlist
             ],
@@ -171,7 +167,6 @@ class ManageTasksTool(Tool):
     async def _handle_add(
         self,
         description: str | None,
-        priority: str = "normal",
         brief: str = "",
         items: list[dict] | None = None,
     ) -> dict[str, Any]:
@@ -189,7 +184,6 @@ class ManageTasksTool(Tool):
             source=self._agent_type,
             target=self._agent_type,
             brief=brief or description,
-            priority=priority,
         )
         await self._publish_task_update(task, "created")
         logger.info("{} added local task {}: {}", self._agent_type, task.task_id, description)
@@ -201,19 +195,24 @@ class ManageTasksTool(Tool):
 
     async def _handle_batch_add(self, items: list[dict]) -> dict[str, Any]:
         """Add multiple local tasks at once, publish one batch notification."""
+        if not isinstance(items, list):
+            return {
+                "status": "error",
+                "error": f"'items' must be a list of dicts, got {type(items).__name__}",
+            }
         created: list[dict] = []
         tasks: list = []
         for item in items:
+            if not isinstance(item, dict):
+                continue
             desc = str(item.get("description", ""))
             if not desc:
                 continue
             b = str(item.get("brief", "")) or desc[:80]
-            p = str(item.get("priority", "normal"))
             task = self._task_board.create_task(
                 source=self._agent_type,
                 target=self._agent_type,
                 brief=b,
-                priority=p,
             )
             tasks.append(task)
             created.append({"task_id": task.task_id, "brief": task.brief})

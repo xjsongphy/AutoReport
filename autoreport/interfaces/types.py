@@ -91,6 +91,7 @@ class AgentResponse(Message):
     content: str
     message_id: str | None = None
     streaming: bool = False  # True for stream chunks, False for final completion
+    thinking: str | None = None
 
 
 class AgentFeedback(Message):
@@ -177,7 +178,6 @@ class TaskItem(BaseModel):
     source_agent: AgentType
     target_agent: AgentType
     status: TaskStatus = TaskStatus.PENDING
-    priority: str = "normal"
     created_at: datetime = Field(default_factory=datetime.now)
     completed_at: datetime | None = None
     blocking: bool = False

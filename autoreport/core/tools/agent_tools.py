@@ -55,6 +55,29 @@ class SendToAgentTool(Tool):
         Returns:
             Dictionary with agent_type, status, response content, and any feedback.
         """
+        # Defensive validation: surface clear input errors instead of
+        # propagating obscure attribute/type exceptions from downstream logic.
+        if not isinstance(agent_type, str):
+            return {
+                "status": "error",
+                "error": (
+                    f"Invalid agent_type type: expected str, got {type(agent_type).__name__}. "
+                    "Use one of: theory, data_analysis, plotting, report."
+                ),
+            }
+        if not isinstance(content, str):
+            return {
+                "status": "error",
+                "error": f"Invalid content type: expected str, got {type(content).__name__}.",
+            }
+
+        agent_type = agent_type.strip()
+        content = content.strip()
+        if not agent_type:
+            return {"status": "error", "error": "agent_type cannot be empty."}
+        if not content:
+            return {"status": "error", "error": "content cannot be empty."}
+
         try:
             target = AgentType(agent_type)
         except ValueError:

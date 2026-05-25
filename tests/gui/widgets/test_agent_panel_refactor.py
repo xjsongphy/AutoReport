@@ -90,6 +90,40 @@ def test_set_queue_preview_empty_hides(agent_panel):
     assert not agent_panel._queue_preview.isVisible()
 
 
+def test_file_context_lives_in_dock_bar_and_toggles(agent_panel):
+    agent_panel.set_opened_file("sections/intro.tex")
+
+    assert not agent_panel._context_separator.isHidden()
+    assert not agent_panel._context_attachment_btn.isHidden()
+    assert agent_panel._context_attachment_btn.text() == "intro.tex"
+    assert agent_panel._context_enabled is True
+
+    file_icon_key = agent_panel._context_attachment_btn.icon().cacheKey()
+    agent_panel._context_attachment_btn.click()
+
+    assert agent_panel._context_enabled is False
+    assert agent_panel._context_attachment_btn.icon().cacheKey() != file_icon_key
+
+
+def test_selection_context_label_uses_line_count(agent_panel):
+    agent_panel.set_preview_context("sections/intro.tex", "a\nb", 3, 4)
+
+    assert agent_panel._context_attachment_btn.text() == "2 lines selected"
+    assert agent_panel._context_attachment_btn.toolTip() == "sections/intro.tex"
+
+
+def test_composer_side_gap_matches_bottom_mask_height(agent_panel, qtbot):
+    agent_panel.resize(420, 600)
+    agent_panel.show()
+    qtbot.wait(10)
+    agent_panel._sync_composer_gap()
+
+    side_gap = agent_panel._input_container.mapTo(agent_panel, agent_panel._input_container.rect().topLeft()).x()
+
+    assert side_gap >= agent_panel._composer_horizontal_margin
+    assert agent_panel._composer_bottom_gap.height() == side_gap
+
+
 def test_set_agent_type_uses_badged_title(agent_panel):
     agent_panel.set_agent_type("theory")
     # Title shows agent name, icon is shown separately in _icon_label
@@ -103,6 +137,8 @@ def test_add_tool_call_creates_group(agent_panel):
 
     groups = agent_panel._messages_area.get_tool_groups()
     assert len(groups) == 1
+    rows = agent_panel._messages_area.get_message_rows()
+    assert len(rows) == 0
 
 
 def test_add_tool_result_adds_to_group(agent_panel):
@@ -119,7 +155,7 @@ def test_add_tool_result_adds_to_group(agent_panel):
     # Check that the tool group has the tool call
     # The group should have 1 tool call — summary uses display names
     summary = groups[0].get_summary_text()
-    assert "Read File" in summary
+    assert "Read" in summary
 
 
 def test_add_tool_result_updates_pending_group_item(agent_panel):
@@ -141,6 +177,101 @@ def test_add_tool_result_updates_pending_group_item(agent_panel):
     groups = agent_panel._messages_area.get_tool_groups()
     assert len(groups) == 1
     assert "Theory replied: first line" in groups[0].get_summary_text()
+
+
+def test_tool_call_before_agent_text_keeps_event_order(agent_panel):
+    agent_panel.add_tool_call("list_dir", {"path": "."})
+    agent_panel.add_message(role="agent", content="Hello", streaming=True)
+
+    rows = agent_panel._messages_area.get_message_rows()
+    assert len(rows) == 1
+    assert rows[0]._role == "agent"
+    assert rows[0]._content == "Hello"
+    assert agent_panel._messages_area.message_count() == 2
+
+
+def test_agent_text_tool_text_keeps_separate_timeline_items(agent_panel):
+    agent_panel.add_message(role="agent", content="First", streaming=True)
+    agent_panel.add_tool_call("list_dir", {"path": "."})
+    agent_panel.add_message(role="agent", content="Second", streaming=True)
+
+    rows = agent_panel._messages_area.get_message_rows()
+    groups = agent_panel._messages_area.get_tool_groups()
+
+    assert [row._content for row in rows] == ["First", "Second"]
+    assert len(groups) == 1
+    assert agent_panel._messages_area.message_count() == 3
+
+
+def test_thinking_row_finishes_with_elapsed_summary(agent_panel):
+    agent_panel.set_status("thinking")
+    rows = agent_panel._messages_area.get_message_rows()
+    assert len(rows) == 1
+    assert rows[0]._summary.startswith("Thought for ")
+
+    agent_panel.append_thinking("raw **markdown** thought")
+    assert rows[0]._detail == "raw **markdown** thought"
+
+    agent_panel.set_status("idle")
+    assert rows[0]._summary.startswith("Thought for ")
+    assert rows[0]._complete is True
+
+
+def test_thinking_timer_updates_existing_row_in_place(agent_panel):
+    agent_panel.set_status("thinking")
+    row = agent_panel._messages_area.get_message_rows()[0]
+
+    agent_panel._thinking_started_at -= 2
+    agent_panel._update_thinking_timer()
+
+    rows = agent_panel._messages_area.get_message_rows()
+    assert rows == [row]
+    assert row._summary.startswith("Thought for ")
+    assert row._summary != "Thought for 1s"
+
+
+def test_thinking_detail_updates_existing_detail_label(agent_panel):
+    agent_panel.set_status("thinking")
+    row = agent_panel._messages_area.get_message_rows()[0]
+    agent_panel.append_thinking("first")
+    row._summary_header.clicked.emit()
+    assert row.is_expanded()
+    assert row._detail_label is not None
+    assert "first" in row._detail_label.text()
+
+    agent_panel.append_thinking(" second")
+    rows = agent_panel._messages_area.get_message_rows()
+    assert rows == [row]
+    assert row.is_expanded()
+    assert "first second" in row._detail_label.text()
+
+
+def test_thinking_stream_merge_handles_delta_snapshot_and_final(agent_panel):
+    assert agent_panel._merge_thinking_chunk("", "hello ") == "hello "
+    assert agent_panel._merge_thinking_chunk("hello ", "world") == "hello world"
+    assert agent_panel._merge_thinking_chunk("hello world", "hello world") == "hello world"
+    assert agent_panel._merge_thinking_chunk("hello wor", "world") == "hello world"
+
+    agent_panel.set_status("thinking")
+    agent_panel.append_thinking("hello ")
+    agent_panel.append_thinking("world")
+    agent_panel.append_thinking("hello world")
+    row = agent_panel._messages_area.get_message_rows()[0]
+    assert row._detail == "hello world"
+
+
+def test_summary_arrow_stays_next_to_text(qtbot):
+    from autoreport.gui.widgets.message_row import MessageRow
+
+    row = MessageRow(role="agent", content="", summary="Thought for 1s", detail="detail")
+    qtbot.addWidget(row)
+    row.resize(600, 80)
+    row.show()
+    qtbot.waitExposed(row)
+
+    text_right = row._summary_text_label.mapTo(row, row._summary_text_label.rect().topRight()).x()
+    arrow_left = row._summary_arrow_widget.mapTo(row, row._summary_arrow_widget.rect().topLeft()).x()
+    assert 0 <= arrow_left - text_right <= 10
 
 
 def test_set_debug_mode_shows_hides_panel(agent_panel):
@@ -212,6 +343,21 @@ def test_add_checkpoint_creates_message(agent_panel):
     assert "Before tool execution" in rows[0]._content
 
 
+def test_pre_checkpoint_is_hidden(agent_panel):
+    agent_panel.add_checkpoint("ckpt_pre", "pre:user")
+    assert agent_panel._messages_area.message_count() == 0
+
+
+def test_pre_checkpoint_attaches_to_latest_user_bubble(agent_panel):
+    agent_panel.add_message(role="user", content="before rollback")
+    row = agent_panel._messages_area.get_message_rows()[-1]
+
+    agent_panel.add_checkpoint("ckpt_pre", "pre:user")
+
+    assert row._checkpoint_id == "ckpt_pre"
+    assert agent_panel._messages_area.message_count() == 1
+
+
 def test_multiple_messages_and_tools(agent_panel):
     """Multiple messages and tool calls should be displayed correctly."""
     # Add user message
@@ -224,7 +370,7 @@ def test_multiple_messages_and_tools(agent_panel):
 
     # Add tool result
     agent_panel.add_tool_result("read_file", "content", None)
-    assert agent_panel._messages_area.message_count() == 2  # Still 2 (tool group is 1 item)
+    assert agent_panel._messages_area.message_count() == 2
 
     # Add agent response
     agent_panel.add_message(role="agent", content="I've read the file")
@@ -233,7 +379,7 @@ def test_multiple_messages_and_tools(agent_panel):
     rows = agent_panel._messages_area.get_message_rows()
     groups = agent_panel._messages_area.get_tool_groups()
 
-    assert len(rows) == 2  # user + agent messages
+    assert len(rows) == 2  # user + agent response
     assert len(groups) == 1  # 1 tool group
 
 
@@ -276,6 +422,21 @@ def test_new_conversation_requested_signal(qtbot, agent_panel):
     """Clicking new conversation button should emit new_conversation_requested."""
     with qtbot.waitSignal(agent_panel.new_conversation_requested, timeout=1000):
         agent_panel._on_new_conversation()
+
+
+def test_edit_saved_retracts_following_rows_and_sends_immediately(qtbot, agent_panel):
+    agent_panel.add_message(role="user", content="old user")
+    target_row = agent_panel._messages_area.get_message_rows()[-1]
+    agent_panel.add_message(role="agent", content="old reply")
+    agent_panel.add_tool_call("read_file", {"path": "a.txt"})
+
+    assert agent_panel._messages_area.message_count() == 3
+
+    with qtbot.waitSignal(agent_panel.message_sent, timeout=1000) as blocker:
+        agent_panel._on_message_edit_saved("new user", target_row)
+
+    assert blocker.args[0].startswith("new user")
+    assert agent_panel._messages_area.message_count() == 0
 
 
 def test_hide_conv_buttons(agent_panel):

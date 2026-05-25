@@ -81,9 +81,9 @@ class ToolRegistry:
             sig = inspect.signature(tool.__call__)
             type_hints = get_type_hints(tool.__call__)
 
-            # Get parameter descriptions from docstring
+            # Get parameter descriptions and enum constraints from docstring
             docstring = tool.__call__.__doc__ or ""
-            param_descriptions = self._parse_param_descriptions(docstring)
+            param_descriptions, param_enums = self._parse_param_descriptions(docstring)
 
             properties = {}
             required = []
@@ -101,6 +101,10 @@ class ToolRegistry:
                 # Add description if available
                 if param_name in param_descriptions:
                     param_schema["description"] = param_descriptions[param_name]
+
+                # Add enum constraint if available
+                if param_name in param_enums:
+                    param_schema["enum"] = param_enums[param_name]
 
                 # Check if parameter is required
                 if param.default == inspect.Parameter.empty:
@@ -160,16 +164,27 @@ class ToolRegistry:
         # Default to string
         return {"type": "string"}
 
-    def _parse_param_descriptions(self, docstring: str) -> dict[str, str]:
-        """Parse parameter descriptions from docstring.
+    def _parse_param_descriptions(self, docstring: str) -> tuple[dict[str, str], dict[str, list[str]]]:
+        """Parse parameter descriptions and enum constraints from docstring.
+
+        Supports @enum directive:
+            @enum param_name: value1, value2, value3
 
         Args:
             docstring: Method docstring.
 
         Returns:
-            Dictionary mapping parameter names to descriptions.
+            Tuple of (descriptions dict, enums dict).
         """
         descriptions = {}
+        enums = {}
+
+        # Extract @enum directives
+        enum_pattern = r"@enum\s+(\w+):\s*([^\n]+)"
+        for match in re.finditer(enum_pattern, docstring):
+            param_name = match.group(1)
+            enum_values = [v.strip() for v in match.group(2).split(",")]
+            enums[param_name] = enum_values
 
         # Match Google-style docstring Args section
         # Example:
@@ -188,4 +203,4 @@ class ToolRegistry:
                 description = match.group(2).strip()
                 descriptions[param_name] = description
 
-        return descriptions
+        return descriptions, enums

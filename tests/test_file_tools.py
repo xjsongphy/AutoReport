@@ -39,6 +39,15 @@ async def test_read_file(temp_workspace):
 
 
 @pytest.mark.asyncio
+async def test_read_file_pdf_rejected(temp_workspace):
+    test_file = temp_workspace / "paper.pdf"
+    test_file.write_bytes(b"%PDF-1.4")
+    tool = ReadFileTool(workspace=temp_workspace)
+    with pytest.raises(ValueError, match="Use parse_pdf"):
+        await tool(path="paper.pdf")
+
+
+@pytest.mark.asyncio
 async def test_write_file(temp_workspace):
     """Test writing a file."""
     write_dir = temp_workspace / "output"
