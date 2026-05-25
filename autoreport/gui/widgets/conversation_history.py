@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import QHBoxLayout, QLabel, QListWidget, QListWidgetItem, Q
 
 from ..theme import get_theme_colors
 from .base_popup_dropdown import BasePopupDropdown
+from .ui_utils import create_isolated_context_menu
 
 
 class SessionListItem(QWidget):
@@ -200,9 +201,9 @@ class ConversationHistoryDropdown(BasePopupDropdown):
         if not session_id:
             return
 
-        from PyQt6.QtWidgets import QInputDialog, QMenu
+        from PyQt6.QtWidgets import QInputDialog
 
-        menu = QMenu(self)
+        menu = create_isolated_context_menu(self)
 
         rename_action = menu.addAction("重命名")
         delete_action = menu.addAction("删除")

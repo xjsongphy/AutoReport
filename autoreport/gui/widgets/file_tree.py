@@ -23,7 +23,6 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMenu,
     QMessageBox,
     QProgressDialog,
     QFileIconProvider,
@@ -37,7 +36,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..theme import get_theme_colors
-from .ui_utils import UI_HOVER_DELAY_MS, IconActionButton, compact_tooltip_qss, render_svg_icon
+from .ui_utils import UI_HOVER_DELAY_MS, IconActionButton, compact_tooltip_qss, create_isolated_context_menu, render_svg_icon
 
 # Fixed directory structure
 FIXED_DIRECTORIES = ["Data", "References", "Theory", "Code", "Tex"]
@@ -1570,7 +1569,7 @@ class FileTreeWidget(QWidget):
         if not item:
             return
         if len(self.tree.selectedItems()) > 1 and self.tree.selectionModel().isSelected(self.tree.indexFromItem(item, 0)):
-            menu = QMenu(self)
+            menu = create_isolated_context_menu(self)
             delete_action = menu.addAction("删除选中项")
             action = menu.exec(self.tree.mapToGlobal(pos))
             if action == delete_action:
@@ -1580,7 +1579,7 @@ class FileTreeWidget(QWidget):
         dir_name = item.data(0, Qt.ItemDataRole.UserRole)
         file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
 
-        menu = QMenu(self)
+        menu = create_isolated_context_menu(self)
 
         if file_path_str:
             file_path = Path(file_path_str)

@@ -15,7 +15,6 @@ from PyQt6.QtWidgets import (
     QApplication,
     QHBoxLayout,
     QLabel,
-    QMenu,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -26,8 +25,9 @@ from PyQt6.QtWidgets import (
 from .markdown_renderer import render_markdown
 from ..theme import get_theme_colors
 from .timeline import TimelineRail
-from .ui_utils import install_compact_tooltip, render_svg_icon
+from .ui_utils import create_isolated_context_menu, install_compact_tooltip, render_svg_icon
 
+TIMELINE_EVENT_ROW_HEIGHT = 34
 
 class _DisclosureArrow(QWidget):
     def __init__(self, expanded: bool = False, parent: QWidget | None = None):
@@ -90,6 +90,98 @@ def _parse_code_blocks(content: str) -> list[tuple[str, str | None]]:
 
 def _copy_icon() -> QIcon:
     return render_svg_icon("copy", QColor(get_theme_colors()["muted"]), size=16)
+
+
+def _plain_markdown_with_raw_map(raw_markdown: str) -> tuple[str, list[int]]:
+    plain: list[str] = []
+    raw_positions: list[int] = []
+    i = 0
+    line_start = True
+    while i < len(raw_markdown):
+        ch = raw_markdown[i]
+
+        if raw_markdown.startswith("```", i):
+            i += 3
+            line_start = False
+            continue
+
+        if line_start:
+            j = i
+            while j < len(raw_markdown) and raw_markdown[j] in " \t":
+                j += 1
+            if j < len(raw_markdown) and raw_markdown[j] == "#":
+                while j < len(raw_markdown) and raw_markdown[j] == "#":
+                    j += 1
+                if j < len(raw_markdown) and raw_markdown[j] == " ":
+                    i = j + 1
+                    line_start = False
+                    continue
+            if raw_markdown.startswith(("- ", "* ", "+ "), j):
+                i = j + 2
+                line_start = False
+                continue
+
+        if ch == "\\" and i + 1 < len(raw_markdown):
+            i += 1
+            ch = raw_markdown[i]
+
+        matched_marker = False
+        for marker in ("**", "__", "~~", "`", "*", "_"):
+            if raw_markdown.startswith(marker, i):
+                i += len(marker)
+                matched_marker = True
+                line_start = False
+                break
+        if matched_marker:
+            continue
+
+        plain.append("\n" if ch == "\r" else ch)
+        raw_positions.append(i)
+        line_start = ch == "\n"
+        i += 1
+
+    return "".join(plain), raw_positions
+
+
+def _expand_inline_markdown_selection(raw_markdown: str, start: int, end: int) -> tuple[int, int]:
+    for marker in ("```", "**", "__", "~~", "`", "*", "_"):
+        changed = True
+        while changed:
+            changed = False
+            if (
+                start >= len(marker)
+                and raw_markdown[start - len(marker):start] == marker
+                and raw_markdown.find(marker, start, min(len(raw_markdown), end + len(marker))) >= 0
+            ):
+                start -= len(marker)
+                changed = True
+            if (
+                end + len(marker) <= len(raw_markdown)
+                and raw_markdown[end:end + len(marker)] == marker
+                and raw_markdown.rfind(marker, max(0, start - len(marker)), end) >= 0
+            ):
+                end += len(marker)
+                changed = True
+    return start, end
+
+
+def _raw_markdown_for_selected_text(raw_markdown: str, selected_text: str) -> str:
+    selected = selected_text.replace("\u2029", "\n").replace("\u2028", "\n")
+    if not selected:
+        return raw_markdown
+
+    plain, raw_positions = _plain_markdown_with_raw_map(raw_markdown)
+    start_plain = plain.find(selected)
+    if start_plain < 0:
+        return raw_markdown
+
+    end_plain = start_plain + len(selected)
+    if end_plain <= start_plain or end_plain > len(raw_positions):
+        return raw_markdown
+    start_raw = raw_positions[start_plain]
+    end_raw = raw_positions[end_plain - 1] + 1
+    start_raw, end_raw = _expand_inline_markdown_selection(raw_markdown, start_raw, end_raw)
+    return raw_markdown[start_raw:end_raw]
 
 
 class _CodeBlockWidget(QWidget):
@@ -207,7 +299,9 @@ class MessageRow(QWidget):
         self._summary_header: QWidget | None = None
         self._summary_arrow_widget: _DisclosureArrow | None = None
         self._summary_text_label: QLabel | None = None
+        self._detail_label: QLabel | None = None
         self._detail_widget: QWidget | None = None
+        self._is_thinking_row = False
         self._user_actions_visible = False
         self._editing = False  # Track if in edit mode
         self._original_text_widget: QWidget | None = None  # Store original widget when editing
@@ -394,7 +488,7 @@ class MessageRow(QWidget):
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         label.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
-        label.setContentsMargins(0, 2, 0, 4)
+        label.setContentsMargins(0, 2, 0, 6)
         label.setMinimumWidth(0)
         label.installEventFilter(self)
         self._wrapping_labels.append(label)
@@ -421,6 +515,9 @@ class MessageRow(QWidget):
 
     def _build_summary_widget(self, summary_type: str) -> QWidget:
         widget = _SummaryHeader(self)
+        if summary_type == "agent":
+            # Keep timeline events on a fixed vertical pitch.
+            widget.setMinimumHeight(TIMELINE_EVENT_ROW_HEIGHT)
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
@@ -434,17 +531,18 @@ class MessageRow(QWidget):
         self._summary_arrow_widget = _DisclosureArrow(self._expanded, widget)
         self._summary_arrow_widget.setVisible(self._expandable and self._has_detail())
         left_margin = 4 if summary_type == "agent" else 0
-        layout.setContentsMargins(left_margin, 4, 0, 4)
+        layout.setContentsMargins(left_margin, 4, 0, 6)
 
         self._summary_text_label = QLabel(self._summary or "", widget)
         self._summary_text_label.setObjectName("toolCallHeaderText")
         self._summary_text_label.setTextFormat(Qt.TextFormat.PlainText)
         self._summary_text_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self._summary_text_label.setWordWrap(True)
-        self._summary_text_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._summary_text_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
         self._summary_text_label.setMinimumWidth(0)
-        layout.addWidget(self._summary_text_label, 1, Qt.AlignmentFlag.AlignTop)
-        layout.addWidget(self._summary_arrow_widget, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(self._summary_text_label, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(self._summary_arrow_widget, 0, Qt.AlignmentFlag.AlignVCenter)
+        layout.addStretch(1)
 
         widget.setCursor(
             Qt.CursorShape.PointingHandCursor
@@ -457,11 +555,14 @@ class MessageRow(QWidget):
     def _build_detail_widget(self, detail_type: str) -> QWidget:
         widget = QWidget(self)
         layout = QVBoxLayout(widget)
-        layout.setContentsMargins(20, 2, 0, 0)
+        # Keep expanded content aligned with timeline content start.
+        left_margin = 4 if detail_type == "agent" else 20
+        layout.setContentsMargins(left_margin, 2, 0, 0)
         layout.setSpacing(0)
 
         if detail_type == "agent":
             label = self._build_agent_markdown_label(self._detail or "")
+            self._detail_label = label
         else:
             label = QLabel(self._detail or "")
             label.setObjectName("userMessageText")
@@ -491,14 +592,17 @@ class MessageRow(QWidget):
 
     def set_detail_text(self, detail: str) -> None:
         self._detail = detail
-        self._refresh_summary_header()
-        if self._agent_content_layout is not None:
+        if self._detail_label is not None:
+            self._detail_label.setText(render_markdown(detail or ""))
+            self._raw_markdown_labels[self._detail_label] = detail or ""
+            self._apply_text_width_constraints()
+        elif self._agent_content_layout is not None:
             expanded = self._expanded
             self._rebuild_agent_content()
             self._expanded = expanded
-            if self._detail_widget:
-                self._detail_widget.setVisible(self._expanded and self._has_detail())
-            self._refresh_summary_header()
+        if self._detail_widget:
+            self._detail_widget.setVisible(self._expanded and self._has_detail())
+        self._refresh_summary_header()
 
     def _refresh_summary_header(self) -> None:
         can_expand = self._expandable and self._has_detail()
@@ -511,6 +615,28 @@ class MessageRow(QWidget):
             self._summary_header.setCursor(
                 Qt.CursorShape.PointingHandCursor if can_expand else Qt.CursorShape.ArrowCursor
             )
+        self._apply_thinking_text_style()
+
+    def set_thinking_row_style(self, enabled: bool) -> None:
+        self._is_thinking_row = enabled
+        self._apply_thinking_text_style()
+
+    def _apply_thinking_text_style(self) -> None:
+        color = get_theme_colors()["muted"] if self._is_thinking_row else ""
+        if self._summary_text_label is not None:
+            if color:
+                self._summary_text_label.setStyleSheet(
+                    f"color: {color}; background-color: transparent;"
+                )
+            else:
+                self._summary_text_label.setStyleSheet("")
+        if self._detail_label is not None:
+            if color:
+                self._detail_label.setStyleSheet(
+                    f"color: {color}; background-color: transparent;"
+                )
+            else:
+                self._detail_label.setStyleSheet("")
 
     def mark_complete(self) -> None:
         """Mark streaming complete — enable hover-triggered actions."""
@@ -720,7 +846,7 @@ class MessageRow(QWidget):
 
     def contextMenuEvent(self, event) -> None:
         """Show VS Code-like context menu for message actions."""
-        menu = QMenu(self)
+        menu = create_isolated_context_menu(self)
 
         copy_action = menu.addAction("Copy")
         copy_action.triggered.connect(self._copy_content)
@@ -764,7 +890,10 @@ class MessageRow(QWidget):
             if clipboard:
                 raw = self._raw_markdown_labels[obj]
                 selected = obj.selectedText()
-                clipboard.setText(selected if selected and selected in raw else raw, QClipboard.Mode.Clipboard)
+                clipboard.setText(
+                    _raw_markdown_for_selected_text(raw, selected),
+                    QClipboard.Mode.Clipboard,
+                )
             return True
 
         if not self._is_outbound_message():

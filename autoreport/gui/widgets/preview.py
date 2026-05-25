@@ -16,7 +16,6 @@ from PyQt6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
     QLabel,
-    QMenu,
     QMessageBox,
     QFrame,
     QPushButton,
@@ -33,7 +32,7 @@ from PyQt6.QtWidgets import (
 from ..scale import scaled, scaled_size
 from ..scintilla_utils import apply_scintilla_style, configure_lexer_colors
 from ..theme import get_theme_colors
-from .ui_utils import IconActionButton, render_svg_icon
+from .ui_utils import IconActionButton, create_isolated_context_menu, render_svg_icon
 
 
 class _EmbeddedImageLabel(QLabel):
@@ -605,8 +604,7 @@ class EditorPanel(QWidget):
         key = self._tab_order[index]
         path = self._tabs[key].path
 
-        menu = QMenu(self)
-        menu.setObjectName("tabContextMenu")
+        menu = create_isolated_context_menu(self)
 
         close_act = menu.addAction("Close")
         close_others_act = menu.addAction("Close Others")
@@ -1270,8 +1268,7 @@ class PreviewWidget(QWidget):
 
         file_path = Path(file_path_str)
 
-        menu = QMenu(self)
-        menu.setObjectName("tabContextMenu")
+        menu = create_isolated_context_menu(self)
 
         close_act = menu.addAction("Close")
         close_others_act = menu.addAction("Close Others")
