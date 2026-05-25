@@ -202,27 +202,7 @@ class ConversationHistoryDropdown(BasePopupDropdown):
 
         from PyQt6.QtWidgets import QInputDialog, QMenu
 
-        c = get_theme_colors()
-
         menu = QMenu(self)
-        menu.setStyleSheet(f"""
-            QMenu {{
-                background-color: {c["context_bg"]};
-                border: 1px solid {c["context_border"]};
-                border-radius: {c["radius_sm"]};
-                padding: 4px;
-            }}
-            QMenu::item {{
-                background-color: transparent;
-                color: {c["popup_fg"]};
-                padding: 6px 12px;
-                font-size: 12px;
-                border-radius: {c["radius_sm"]};
-            }}
-            QMenu::item:hover {{
-                background-color: {c["popup_hover"]};
-            }}
-        """)
 
         rename_action = menu.addAction("重命名")
         delete_action = menu.addAction("删除")

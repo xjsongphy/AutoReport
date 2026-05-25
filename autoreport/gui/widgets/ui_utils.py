@@ -5,7 +5,7 @@ from pathlib import Path
 from PyQt6.QtCore import QObject, QPoint, QRectF, QSize, Qt, QTimer
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
-from PyQt6.QtWidgets import QApplication, QComboBox, QFrame, QLabel, QListView, QPushButton, QStyleFactory, QWidget
+from PyQt6.QtWidgets import QApplication, QComboBox, QFrame, QLabel, QListView, QMenu, QPushButton, QStyleFactory, QWidget
 
 from ..theme import get_theme_colors
 
@@ -142,6 +142,15 @@ def compact_tooltip_qss(selector: str = "QLabel") -> str:
             font-size: 11px;
         }}
     """
+
+
+def create_isolated_context_menu(anchor: QWidget | None = None) -> QMenu:
+    """Create a context menu isolated from parent-widget QSS inheritance."""
+    menu = QMenu()
+    menu.setStyleSheet("")
+    if anchor is not None:
+        menu.setFont(anchor.font())
+    return menu
 
 
 def install_compact_tooltip(button: QPushButton, text: str) -> None:
