@@ -347,6 +347,46 @@ class BackendAPIImpl(BackendAPI):
         )
         await self.bus.publish(message)
 
+    async def send_file_context(
+        self,
+        file_context: dict,
+        agent_type: str,
+    ) -> None:
+        """Send file context to an agent as system message (invisible to user)."""
+        from .interfaces.types import AgentType
+
+        # Map string to AgentType enum
+        agent_type_map = {
+            "main": AgentType.MAIN,
+            "data_analysis": AgentType.DATA_ANALYSIS,
+            "plotting": AgentType.PLOTTING,
+            "theory": AgentType.THEORY,
+            "report": AgentType.REPORT,
+            "sub": AgentType.MAIN,  # Default to main for "sub"
+        }
+        agent_type_enum = agent_type_map.get(agent_type, AgentType.MAIN)
+
+        # Format file context as system message
+        if file_context.get("type") == "selection":
+            fp = file_context.get("file", "")
+            s = file_context.get("start_line", "")
+            e = file_context.get("end_line", "")
+            text = file_context.get("content", "")
+            context_msg = f"选中文件: {fp}\n行号: {s}-{e}\n内容:\n```\n{text}\n```\n"
+        elif file_context.get("type") == "file":
+            fp = file_context.get("file", "")
+            context_msg = f"打开文件: {fp}\n"
+        else:
+            return
+
+        # Send as system message (source="system")
+        message = UserMessage(
+            content=context_msg,
+            agent_type=agent_type_enum,
+            source="system",
+        )
+        await self.bus.publish(message)
+
     async def interrupt_current_message(self, agent_type: str) -> None:
         """Interrupt the currently processing message for an agent."""
         if self.loop_manager is None:
@@ -372,6 +412,41 @@ class BackendAPIImpl(BackendAPI):
         # Update config
         self.config_manager.config.agents.defaults.model = model
         # No restart needed for model change
+
+    async def sync_agent_conversation(
+        self,
+        agent_type: str,
+        messages: list[dict[str, str]] | None = None,
+    ) -> None:
+        """Replace in-memory conversation history for an agent loop."""
+        if self.loop_manager is None:
+            return
+
+        from .core.providers.base import Message as LLMMessage
+        from .interfaces.types import AgentType
+
+        agent_type_map = {
+            "main": AgentType.MAIN,
+            "data_analysis": AgentType.DATA_ANALYSIS,
+            "plotting": AgentType.PLOTTING,
+            "theory": AgentType.THEORY,
+            "report": AgentType.REPORT,
+        }
+        agent_enum = agent_type_map.get(agent_type)
+        if agent_enum is None:
+            return
+
+        loop = self.loop_manager._loops.get(agent_enum)  # noqa: SLF001
+        if loop is None:
+            return
+
+        loop._conversation_history.clear()  # noqa: SLF001
+        for msg in messages or []:
+            role = str(msg.get("role", "")).strip()
+            content = str(msg.get("content", ""))
+            if role not in {"user", "assistant", "system", "tool"}:
+                continue
+            loop._conversation_history.append(LLMMessage(role=role, content=content))  # noqa: SLF001
 
     async def rollback_to_checkpoint(self, agent_type: str, checkpoint_id: str) -> Dict[str, Any]:
         """Rollback an agent to a specific checkpoint.
