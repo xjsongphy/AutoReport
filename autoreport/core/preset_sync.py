@@ -12,7 +12,7 @@ from loguru import logger
 CC_SWITCH_REPO = "https://github.com/farion1231/cc-switch"
 CC_SWITCH_RAW = "https://raw.githubusercontent.com/farion1231/cc-switch/main"
 
-SKILLS_REPO = "https://github.com/farion1231/cc-switch"
+SKILLS_REPO = "https://github.com/xjsongphy/skills"
 SKILLS_BRANCH = "main"
 
 PRESET_FILES = [
@@ -26,7 +26,7 @@ PRESET_FILES = [
 ]
 
 SKILL_FILES = [
-    "latex-compile.md",
+    ("latex-compile", "SKILL.md"),
 ]
 
 
@@ -98,12 +98,12 @@ def sync_presets(timeout: int = 15) -> int:
     skills_dir = _skills_dir()
     skills_dir.mkdir(parents=True, exist_ok=True)
 
-    for filename in SKILL_FILES:
-        url = f"{SKILLS_REPO}/raw/{SKILLS_BRANCH}/skills/{filename}"
-        dest = skills_dir / filename
+    for skill_name, filename in SKILL_FILES:
+        url = f"https://raw.githubusercontent.com/xjsongphy/skills/{SKILLS_BRANCH}/{skill_name}/{filename}"
+        dest = skills_dir / f"{skill_name}.md"
         if _download_file(url, dest, timeout, ctx):
             downloaded += 1
-            logger.debug("Synced skill: {}", filename)
+            logger.debug("Synced skill: {}/{}", skill_name, filename)
 
     if downloaded == 0:
         raise SyncError(
