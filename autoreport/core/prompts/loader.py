@@ -24,7 +24,6 @@ class PromptLoader:
     # Template directory paths
     _BASE_DIR: Final = Path(__file__).parent.parent.parent / "templates"
     _AGENTS_DIR: Final = _BASE_DIR / "agents"
-    _SHARED_DIR: Final = _BASE_DIR / "shared"
 
     def __init__(self, agents_dir: Path | None = None):
         """Initialize prompt loader.
