@@ -237,10 +237,10 @@ class LoopManager:
 
         # Determine write allowed directory based on agent type
         write_dirs = {
-            AgentType.DATA_ANALYSIS: self.workspace / "data" / "processed",
-            AgentType.PLOTTING: self.workspace / "code",
-            AgentType.THEORY: self.workspace / "theory",
-            AgentType.REPORT: self.workspace / "tex",
+            AgentType.DATA_ANALYSIS: self.workspace / "Data" / "Processed",
+            AgentType.PLOTTING: self.workspace / "Code",
+            AgentType.THEORY: self.workspace / "Theory",
+            AgentType.REPORT: self.workspace / "Tex",
             AgentType.MAIN: self.workspace,  # Main agent has full access
         }
 

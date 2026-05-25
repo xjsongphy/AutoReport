@@ -11,7 +11,7 @@ from loguru import logger
 from ..tools.registry import Tool
 from .file_state import FileStateManager
 from .manifest_tool import ManifestManager
-from .path_utils import resolve_and_validate_path
+from .path_utils import resolve_and_validate_path, suggest_canonical_path
 
 
 class FileSafetyMixin:
@@ -108,6 +108,11 @@ class ReadFileTool(Tool):
         """
         file_path = resolve_and_validate_path(path, self.workspace)
         logger.debug("Reading file: {}", file_path)
+
+        if not file_path.exists():
+            suggestion = suggest_canonical_path(path)
+            hint = f" Did you mean '{suggestion}'?" if suggestion and suggestion != path else ""
+            raise FileNotFoundError(f"File not found: {file_path}.{hint}")
 
         try:
             with open(file_path, "r", encoding="utf-8") as f:
@@ -586,7 +591,9 @@ class ListDirTool(Tool):
         logger.debug("Listing directory: {}", dir_path)
 
         if not dir_path.exists():
-            raise FileNotFoundError(f"Directory not found: {dir_path}")
+            suggestion = suggest_canonical_path(path)
+            hint = f" Did you mean '{suggestion}'?" if suggestion and suggestion != path else ""
+            raise FileNotFoundError(f"Directory not found: {dir_path}.{hint}")
 
         if not dir_path.is_dir():
             raise NotADirectoryError(f"Not a directory: {dir_path}")
