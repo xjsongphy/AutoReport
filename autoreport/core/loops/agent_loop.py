@@ -499,6 +499,13 @@ class AgentLoop:
 
                     if chunk.thinking:
                         accumulated_thinking = chunk.thinking
+                        await self.bus.publish(AgentResponse(
+                            agent_type=self.agent_type,
+                            content="",
+                            message_id=message.message_id,
+                            streaming=True,
+                            thinking=chunk.thinking,
+                        ))
 
                     if chunk.done:
                         # Stream complete — only save to history if no tool calls.

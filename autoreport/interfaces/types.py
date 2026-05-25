@@ -91,6 +91,7 @@ class AgentResponse(Message):
     content: str
     message_id: str | None = None
     streaming: bool = False  # True for stream chunks, False for final completion
+    thinking: str | None = None
 
 
 class AgentFeedback(Message):
