@@ -27,7 +27,6 @@ from autoreport.gui.widgets.ui_utils import IconActionButton, NoWheelComboBox, r
 from autoreport.utils.agent_labels import get_agent_badge, get_agent_title, get_agent_icon
 from autoreport.gui.widgets.messages_area import MessagesArea
 from autoreport.gui.widgets.status_indicator import StatusIndicator
-from autoreport.gui.widgets.working_border import WorkingBorder
 from autoreport.interfaces.types import ApiDebugMessage
 from autoreport.utils.logging_config import ui_logger
 from ..theme import get_theme_colors
@@ -266,10 +265,6 @@ class AgentPanel(QWidget):
         divider.setObjectName("composerDivider")
         divider.setFixedHeight(1)
         composer_layout.addWidget(divider)
-
-        # Working border overlays the container
-        self._working_border = WorkingBorder(self._input_container)
-        self._working_border.show()
 
         # ---- Dock bar ----
         secondary_bar = QWidget(self._input_container)
@@ -734,7 +729,11 @@ class AgentPanel(QWidget):
         self._ensure_agent_anchor_for_tools()
         # Merge adjacent identical tool calls to avoid long noisy rows.
         merge_target = None
-        if self._current_tool_group and self._current_tool_group.can_merge_with_last(tool_name):
+        if (
+            tool_name != "send_to_agent"
+            and self._current_tool_group
+            and self._current_tool_group.can_merge_with_last(tool_name)
+        ):
             merge_target = self._current_tool_group
         else:
             self._current_tool_group = self._messages_area.add_tool_group()
@@ -746,8 +745,6 @@ class AgentPanel(QWidget):
             success=None,
             duration_ms=0,
             summary=summary,
-            detail=detail,
-            expandable=expandable,
         )
 
     def add_tool_result(
@@ -772,8 +769,6 @@ class AgentPanel(QWidget):
                 error=error,
                 duration_ms=100,
                 summary=summary,
-                detail=detail,
-                expandable=expandable,
             )
 
     def add_error(self, source: str, message: str) -> None:
@@ -913,11 +908,9 @@ class AgentPanel(QWidget):
         if active:
             header = "Thinking" if status == "thinking" else "Running tool"
             self._status_indicator.start(header)
-            self._working_border.start()
             self._set_working(True)
         else:
             self._status_indicator.stop()
-            self._working_border.stop()
             self._set_working(False)
 
     def set_queue_preview(self, queued_messages: list[str]) -> None:

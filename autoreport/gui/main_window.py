@@ -63,6 +63,7 @@ class MainWindow(QMainWindow):
         self.workspace = Path(workspace).resolve()
         self._async_loop: asyncio.AbstractEventLoop | None = None
         self._debug_agents = {str(a) for a in (debug_agents or [])}
+        self._agent_status_cache: dict[str, tuple[str, dict]] = {}
         self._title_bar: TitleBar | None = None
         self._splitter_sizes_initialized = False
 
@@ -524,17 +525,16 @@ class MainWindow(QMainWindow):
             #toolCallHeader {{
                 background-color: transparent;
                 border: none;
-                color: {c["tool_fg"]};
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
-                font-size: {px(12)};
-                font-weight: {c["fw_medium"]};
-                text-align: left;
-                padding: {px(2)} 0;
                 border-radius: {px(4)};
             }}
             #toolCallHeader:hover {{
                 background-color: {c["hover"]};
-                color: {c["fg"]};
+            }}
+            #toolCallHeaderText {{
+                color: {c["tool_fg"]};
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
+                font-size: {px(12)};
+                font-weight: {c["fw_medium"]};
             }}
             #toolCallDetail {{
                 color: {c["tool_detail"]};
@@ -950,6 +950,12 @@ class MainWindow(QMainWindow):
         self.sub_agent_panel.set_agent_type(agent_type)
         self.sub_agent_panel.set_debug_mode(agent_type in self._debug_agents)
         self._load_conversations_for_agent(agent_type, self.sub_agent_panel)
+        cached = self._agent_status_cache.get(agent_type)
+        if cached:
+            status, extra = cached
+            self.sub_agent_panel.set_status(status, extra)
+        else:
+            self.sub_agent_panel.set_status("idle", {})
 
     def _on_interrupt(self, agent_type: str) -> None:
         """Handle interrupt request from GUI."""
@@ -1154,7 +1160,7 @@ class MainWindow(QMainWindow):
 
     def _format_send_to_agent_result(self, result, error: str | None) -> tuple[str, str | None, bool]:
         if error:
-            return ("Send To Agent failed", error, True)
+            return ("Send To Agent", error, True)
 
         if not isinstance(result, dict):
             text = str(result).strip() if result is not None else ""
@@ -1174,7 +1180,7 @@ class MainWindow(QMainWindow):
 
         if status == "error":
             detail = str(result.get("error", "") or "").strip() or None
-            return (f"Send To {target} failed", detail, bool(detail))
+            return (f"Send To {target}", detail, bool(detail))
 
         if not response:
             return (f"{target} replied", None, False)
@@ -1234,10 +1240,12 @@ class MainWindow(QMainWindow):
 
     def _handle_status_change(self, message: StatusChange) -> None:
         agent_str = str(message.agent_type)
-        if agent_str != "main" and agent_str != self.sub_agent_panel.agent_type:
+        self._agent_status_cache[agent_str] = (str(message.status), dict(message.extra or {}))
+        if agent_str == "main":
+            self.main_agent_panel.set_status(message.status, message.extra)
             return
-        panel = self._get_panel_for_agent(agent_str)
-        panel.set_status(message.status, message.extra)
+        if agent_str == self.sub_agent_panel.agent_type:
+            self.sub_agent_panel.set_status(message.status, message.extra)
 
     def _handle_error(self, message: Error) -> None:
         self.main_agent_panel.add_error(message.source, message.message)
