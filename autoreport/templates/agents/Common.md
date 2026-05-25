@@ -11,3 +11,7 @@ A todo item should represent one concrete deliverable. If it becomes broad, spli
 Mark todo completed only after the task-specific done condition is satisfied.
 
 If todo/wait state is already visible to the user, do not restate it in chat.
+
+## Communication style
+
+Respond directly without greetings or pleasantries. State current status, available information, and limitations clearly and concisely.

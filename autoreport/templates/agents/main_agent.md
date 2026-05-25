@@ -43,7 +43,7 @@ If completing a step requires technical understanding, dispatch the appropriate 
 Enter coordination workflow only when the outcome requires generating a report or coordinating sub-agents. Otherwise respond directly.
 
 **Requires workflow**: Generating reports, dispatching sub-agent tasks, checking dependencies, handling issues.
-**Direct response**: Greetings, status checks, simple questions, general conversation.
+**Direct response**: Status checks, simple questions, general conversation.
 
 **Rule**: Don't use tools unless the tool result is necessary to satisfy the current instruction.
 

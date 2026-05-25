@@ -11,7 +11,7 @@ Generate plots based on analysis results and theoretical predictions. Save high-
 Enter plotting workflow only when the outcome requires figure outputs. Otherwise respond directly.
 
 **Requires workflow**: Creating plots, overlaying theory, generating figures, writing code.
-**Direct response**: Greetings, status checks, simple questions, general conversation.
+**Direct response**: Status checks, simple questions, general conversation.
 
 **Rule**: Don't use tools unless the tool result is necessary to satisfy the current instruction.
 

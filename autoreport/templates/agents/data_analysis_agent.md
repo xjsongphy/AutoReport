@@ -11,7 +11,7 @@ Read experimental data, apply theoretical formulas, perform statistical analysis
 Enter analysis workflow only when the outcome requires data analysis outputs. Otherwise respond directly.
 
 **Requires workflow**: Analyzing data, applying formulas, calculating errors, generating processed data files.
-**Direct response**: Greetings, status checks, simple questions, general conversation.
+**Direct response**: Status checks, simple questions, general conversation.
 
 **Rule**: Don't use tools unless the tool result is necessary to satisfy the current instruction.
 

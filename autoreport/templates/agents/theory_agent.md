@@ -13,7 +13,7 @@ Your workflow and tools are execution aids, not mandatory steps. Always decide w
 Enter derivation workflow only when the outcome requires theory files. Otherwise respond directly.
 
 **Requires workflow**: Deriving formulas, explaining theory, preparing formulas for downstream agents.
-**Direct response**: Greetings, status checks, simple questions, general conversation.
+**Direct response**: Status checks, simple questions, general conversation.
 
 **Rule**: Don't use tools unless the tool result is necessary to satisfy the current instruction.
 
