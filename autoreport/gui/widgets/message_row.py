@@ -847,16 +847,17 @@ class MessageRow(QWidget):
     def contextMenuEvent(self, event) -> None:
         """Show VS Code-like context menu for message actions."""
         menu = create_isolated_context_menu(self)
+        menu.setIconVisibleInMenu(False)
 
-        copy_action = menu.addAction("Copy")
+        copy_action = menu.addAction("复制")
         copy_action.triggered.connect(self._copy_content)
 
         if self._role == "user" and self._editable:
-            edit_action = menu.addAction("Edit & Resend")
+            edit_action = menu.addAction("编辑并重发")
             edit_action.triggered.connect(self._request_edit)
 
         if self._is_outbound_message() and self._checkpoint_id:
-            rollback_action = menu.addAction("Rollback to Before This Message")
+            rollback_action = menu.addAction("回滚到此消息之前")
             rollback_action.triggered.connect(
                 lambda _=False, cp_id=self._checkpoint_id: self.rollback_requested.emit(cp_id, self)
             )
