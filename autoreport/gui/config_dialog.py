@@ -82,7 +82,7 @@ class ConfigCard(QFrame):
 
         layout.addLayout(row1)
 
-        # Row 2: Provider type + enabled
+        # Row 2: Provider type
         row2 = QHBoxLayout()
         row2.setSpacing(8)
 
@@ -98,11 +98,6 @@ class ConfigCard(QFrame):
             self.provider_combo.setCurrentIndex(idx)
         self.provider_combo.currentIndexChanged.connect(self._on_provider_changed)
         row2.addWidget(self.provider_combo, 1)
-
-        self.enabled_check = QCheckBox("启用")
-        self.enabled_check.setChecked(self.config.enabled)
-        self.enabled_check.toggled.connect(self._on_enabled_toggled)
-        row2.addWidget(self.enabled_check)
 
         layout.addLayout(row2)
 
@@ -255,12 +250,6 @@ class ConfigCard(QFrame):
         if default_model:
             self.model_input.setText(default_model)
 
-    def _on_enabled_toggled(self, enabled: bool) -> None:
-        for w in (self.name_input, self.key_input, self.base_url_input,
-                   self.model_input, self.provider_combo, self.test_btn,
-                   self.show_key_btn):
-            w.setEnabled(enabled)
-
     def _test_connection(self) -> None:
         api_key = self.key_input.text().strip()
         if not api_key:
@@ -278,7 +267,7 @@ class ConfigCard(QFrame):
             provider=self.provider_combo.currentData(),
             api_key=self.key_input.text().strip() or None,
             api_base=self.base_url_input.text().strip() or None,
-            enabled=self.enabled_check.isChecked(),
+            enabled=True,
             default_model=self.model_input.text().strip() or None,
         )
 
@@ -508,15 +497,15 @@ class ConfigDialog(QDialog):
 
         Auto-detection logic:
         1. Try to match the saved active_id
-        2. If no match, auto-select the first enabled config
-        3. If no enabled configs, select the first config
+        2. If no match, auto-select the first config with API key
+        3. Otherwise, select the first config
         """
         self.enabled_combo.clear()
         configs = [c.get_config() for c in self._cards] if self._cards else []
         active_id = self._config_manager.config.providers.active
 
         matched = False
-        first_enabled_idx = -1
+        first_with_key_idx = -1
 
         for i, cfg in enumerate(configs):
             label = f"{cfg.name} ({PROVIDER_LABELS.get(cfg.provider, cfg.provider)})"
@@ -524,17 +513,17 @@ class ConfigDialog(QDialog):
             if cfg.id == active_id:
                 self.enabled_combo.setCurrentIndex(self.enabled_combo.count() - 1)
                 matched = True
-            # Track first enabled config
-            if first_enabled_idx < 0 and cfg.enabled and cfg.api_key:
-                first_enabled_idx = self.enabled_combo.count() - 1
+            # Track first config with API key
+            if first_with_key_idx < 0 and cfg.api_key:
+                first_with_key_idx = self.enabled_combo.count() - 1
 
-        # Auto-detect: if no match, select first enabled config
+        # Auto-detect: if no match, select first config with API key
         if not matched and configs:
-            if first_enabled_idx >= 0:
-                self.enabled_combo.setCurrentIndex(first_enabled_idx)
-                self._config_manager.config.providers.active = configs[first_enabled_idx].id
+            if first_with_key_idx >= 0:
+                self.enabled_combo.setCurrentIndex(first_with_key_idx)
+                self._config_manager.config.providers.active = configs[first_with_key_idx].id
             else:
-                # No enabled configs, select first one
+                # No configs with API key, select first one
                 self._config_manager.config.providers.active = configs[0].id
                 self.enabled_combo.setCurrentIndex(0)
         elif not configs:
