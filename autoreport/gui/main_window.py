@@ -556,7 +556,8 @@ class MainWindow(QMainWindow):
             #toolCallHeaderText {{
                 color: {c["tool_fg"]};
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
-                font-size: {px(12)};
+                font-size: {px(13)};
+                line-height: 1.5;
                 font-weight: {c["fw_medium"]};
             }}
             #toolCallDetail {{
@@ -852,8 +853,8 @@ class MainWindow(QMainWindow):
 
     def _on_preview_selection_changed(self, file_path: str, selected_text: str, start_line: int, end_line: int) -> None:
         if not selected_text:
-            self.main_agent_panel.set_opened_file(file_path)
-            self.sub_agent_panel.set_opened_file(file_path)
+            # Keep existing selection context instead of replacing it with
+            # an "opened file" context on transient empty-selection events.
             return
         self.main_agent_panel.set_preview_context(file_path, selected_text, start_line, end_line)
         self.sub_agent_panel.set_preview_context(file_path, selected_text, start_line, end_line)
@@ -984,6 +985,8 @@ class MainWindow(QMainWindow):
         logger.info("Loaded {} messages for agent {}", len(records), agent_type)
 
     def _on_thinking_finished(self, agent_type: str, summary: str, detail: str, expandable: bool) -> None:
+        if not (detail or "").strip():
+            return
         self._conv_store.append_message(
             agent_type,
             "thinking",
