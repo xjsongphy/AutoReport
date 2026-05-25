@@ -831,11 +831,11 @@ class AgentPanel(QWidget):
         elapsed = self._thinking_elapsed_seconds()
         summary = f"Thought for {elapsed}s"
         detail = (self._thinking_detail or "").strip()
-        if not detail:
-            self._messages_area.remove_message_row(row)
-        else:
-            row.set_summary_text(summary)
-            row.mark_complete()
+        # Always complete the thinking row, even if empty
+        # This preserves timeline order and prevents spacing issues
+        row.set_summary_text(summary)
+        row.mark_complete()
+        if detail:
             self.thinking_finished.emit(summary, detail, True)
         self._thinking_row = None
         self._thinking_started_at = None
