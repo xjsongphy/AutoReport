@@ -53,28 +53,6 @@ Workflow is conditional on the requested outcome, not automatic for every messag
 - Color: viridis/plasma/cividis (colorblind-friendly)
 - Math: Use LaTeX rendering for all formulas and symbols
 
-**Python matplotlib configuration**:
-```python
-import matplotlib.pyplot as plt
-import matplotlib as mpl
-
-# Enable LaTeX rendering
-mpl.rcParams['text.usetex'] = True
-mpl.rcParams['font.family'] = 'serif'
-mpl.rcParams['font.serif'] = ['Times New Roman']
-
-# Chinese fallback (only when user requires)
-# mpl.rcParams['font.sans-serif'] = ['SimHei', 'STSong']
-# mpl.rcParams['axes.unicode_minus'] = False
-
-# Set up plotting
-plt.rcParams.update({
-    'font.size': 12,
-    'axes.labelsize': 14,
-    'figure.dpi': 300,
-})
-```
-
 **Self-verification**: Before saving, verify:
 - Theory curve overlaid on data (not separate panel)
 - Error bars visible
