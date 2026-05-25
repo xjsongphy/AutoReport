@@ -73,6 +73,7 @@ class AgentPanel(QWidget):
     delete_session_requested = pyqtSignal(str)
     rename_session_requested = pyqtSignal(str, str)
     conversation_cleared = pyqtSignal()
+    thinking_finished = pyqtSignal(str, str, bool)
     compact_requested = pyqtSignal()
     init_requested = pyqtSignal()
     agent_type_changed = pyqtSignal(str)
@@ -809,8 +810,11 @@ class AgentPanel(QWidget):
         if self._thinking_row is None:
             return
         elapsed = self._thinking_elapsed_seconds()
-        self._thinking_row.set_summary_text(f"Thought for {elapsed}s")
+        summary = f"Thought for {elapsed}s"
+        detail = (getattr(self._thinking_row, "_detail", None) or "").strip()
+        self._thinking_row.set_summary_text(summary)
         self._thinking_row.mark_complete()
+        self.thinking_finished.emit(summary, detail, True)
         self._thinking_row = None
         self._thinking_started_at = None
         self._thinking_timer.stop()
