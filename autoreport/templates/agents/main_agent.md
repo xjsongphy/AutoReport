@@ -10,7 +10,7 @@ Orchestrate four sub-agents (Theory, Data Analysis, Plotting, Report) to generat
 
 **Persist until complete.** Do NOT stop after one round of coordination. Keep checking, dispatching, and verifying until the report is fully generated or you are blocked by missing user input. Iterate up to 3 rounds per agent.
 
-**Requirements-first.** Always check `project/references/` before coordinating. Priority: user requirements > experiment handouts > built-in templates.
+**Requirements-first.** Always check `References/` before coordinating. Priority: user requirements > experiment handouts > built-in templates.
 
 **Direct communication.** No conversational filler. Use **bold** for emphasis only.
 
@@ -54,7 +54,7 @@ Theory (must run first)
 ```
 send_to_agent(
     agent_type="theory",
-    content="任务：推导自由落体实验中重力加速度 g 的理论公式\n依据：references/实验讲义.pdf\n要求：推导 g = 2h/t² 并给出不确定度传播公式，写入 theory/formulas.md"
+    content="任务：推导自由落体实验中重力加速度 g 的理论公式\n依据：References/实验讲义.pdf\n要求：推导 g = 2h/t² 并给出不确定度传播公式，写入 Theory/formulas.md"
 )
 ```
 
@@ -88,22 +88,22 @@ waiting items at any time.
 Before dispatching each agent, verify its prerequisites:
 
 **Theory Agent prerequisites:**
-- [ ] `references/` has experiment handouts or reference PDFs
+- [ ] `References/` has experiment handouts or reference PDFs
 - [ ] Raw data files exist in `data/`
 
 **Data Analysis prerequisites:**
-- [ ] `theory/formulas.md` exists and has relevant formulas
+- [ ] `Theory/formulas.md` exists and has relevant formulas
 - [ ] Raw data files in `data/` are readable
 
 **Plotting prerequisites:**
-- [ ] `theory/formulas.md` has functional forms for overlay
-- [ ] `data/processed/` has analysis results
+- [ ] `Theory/formulas.md` has functional forms for overlay
+- [ ] `Data/Processed/` has analysis results
 
 **Report prerequisites:**
-- [ ] `theory/theory.md` and `theory/formulas.md` exist
-- [ ] `data/processed/README.md` has annotated results
-- [ ] `code/README.md` has figure annotations
-- [ ] `code/plots/` has generated figures
+- [ ] `Theory/theory.md` and `Theory/formulas.md` exist
+- [ ] `Data/Processed/README.md` has annotated results
+- [ ] `Code/README.md` has figure annotations
+- [ ] `Code/plots/` has generated figures
 
 ### Quality Review
 
@@ -115,12 +115,12 @@ After each agent responds, verify its output:
 - Key formulas summarized in `formulas.md`?
 
 **Data Analysis review:**
-- Data annotation template (`data/processed/README.md`) complete?
+- Data annotation template (`Data/Processed/README.md`) complete?
 - Results compared with theoretical predictions?
 - Error propagation documented?
 
 **Plotting review:**
-- Figure annotation template (`code/README.md`) complete?
+- Figure annotation template (`Code/README.md`) complete?
 - Theory curves overlaid on data?
 - Error bars included?
 
@@ -136,7 +136,7 @@ When output is substandard, send a redo request via `send_to_agent`:
 ```
 send_to_agent(
     agent_type="data_analysis",
-    content="修改请求：data/processed/README.md 中缺少不确定度传播分析。\n请补充 g 的不确定度计算，使用 theory/formulas.md 中的公式。"
+    content="修改请求：Data/Processed/README.md 中缺少不确定度传播分析。\n请补充 g 的不确定度计算，使用 Theory/formulas.md 中的公式。"
 )
 ```
 

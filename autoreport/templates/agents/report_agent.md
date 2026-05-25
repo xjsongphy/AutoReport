@@ -10,7 +10,7 @@ Gather theory, analysis, and plots from other agents. Write well-structured LaTe
 
 **Integration-first.** Gather ALL outputs before writing. Weave into coherent narrative.
 
-**Requirements-first.** Check for custom templates, structure requirements, formatting guidelines. Priority: user template in `references/` > built-in template.
+**Requirements-first.** Check for custom templates, structure requirements, formatting guidelines. Priority: user template in `References/` > built-in template.
 
 **Manifest-aware.** Use `manifest` to see which files sub-agents provide and which ones are worth reading in full. Keep descriptions concise.
 
@@ -22,24 +22,24 @@ Gather theory, analysis, and plots from other agents. Write well-structured LaTe
 
 ### Workflow
 
-1. **Check requirements** — Read `project/references/` for custom templates and formatting guidelines
+1. **Check requirements** — Read `References/` for custom templates and formatting guidelines
 2. **Select template** — Choose template per priority (see Template Priority below)
 3. **Check sub-agent outputs** — Verify all required files exist before writing (see completeness check below)
-4. **Gather content** — Theory from `theory/`, analysis from `data/processed/`, plots from `code/`
-5. **Write LaTeX** — Create source in `project/tex/`, follow narrative style
+4. **Gather content** — Theory from `Theory/`, analysis from `Data/Processed/`, plots from `Code/`
+5. **Write LaTeX** — Create source in `Tex/`, follow narrative style
 6. **Compile** — Use the `/latex-compile` skill to compile. Verify PDF output
 
 ### Completeness Check (before writing)
 
 Verify these files exist before starting. If any are missing, use `report_issue` immediately:
 
-- [ ] `theory/theory.md` — Theory derivations
-- [ ] `theory/formulas.md` — Formula summary
-- [ ] `data/processed/README.md` — Data annotations
-- [ ] `data/processed/analysis.md` — Analysis methods
-- [ ] `code/README.md` — Figure annotations
-- [ ] `code/plots/` — Generated figures
-- [ ] `references/` — Custom templates (if any)
+- [ ] `Theory/theory.md` — Theory derivations
+- [ ] `Theory/formulas.md` — Formula summary
+- [ ] `Data/Processed/README.md` — Data annotations
+- [ ] `Data/Processed/analysis.md` — Analysis methods
+- [ ] `Code/README.md` — Figure annotations
+- [ ] `Code/plots/` — Generated figures
+- [ ] `References/` — Custom templates (if any)
 
 If prerequisites are missing:
 ```
@@ -51,12 +51,12 @@ report_issue(
 
 ### Template Priority
 
-1. User template in `project/references/` (highest priority) — use whatever `.tex` or `.cls` files the user provides
+1. User template in `References/` (highest priority) — use whatever `.tex` or `.cls` files the user provides
 2. Built-in template `template.tex` in `autoreport/templates/reports/`
 3. Standard LaTeX article structure (fallback)
 
 **How to use templates:**
-- Copy the selected template to `project/tex/main.tex` as the starting point
+- Copy the selected template to `Tex/main.tex` as the starting point
 - Preserve all preamble settings, package imports, and document class from the template
 - Fill in content following the template's section structure
 - If the user template uses a custom document class (e.g., `mpltx`), do not override it
@@ -65,7 +65,7 @@ If the custom template conflicts with best practices, follow the template but no
 
 ### Output Files
 
-Write to `project/tex/`:
+Write to `Tex/`:
 - `main.tex` — Main LaTeX document (based on selected template)
 - `sections/` — Individual section files (if template supports `\input{}`)
 - `main.pdf` — Compiled output
@@ -187,7 +187,7 @@ Be specific: name the file, describe what's missing or problematic, state what y
 After compiling successfully, report completion:
 ```
 report_issue(
-    content="报告编译完成。PDF 已生成：tex/main.pdf。共 N 页。",
+    content="报告编译完成。PDF 已生成：Tex/main.pdf。共 N 页。",
     issue_type="query"
 )
 ```
