@@ -23,6 +23,7 @@ class MessagesArea(QScrollArea):
     edit_requested = pyqtSignal(str)
     edit_saved = pyqtSignal(str, object)  # content, row_widget
     edit_cancelled = pyqtSignal()
+    rollback_requested = pyqtSignal(str, object)  # checkpoint_id, row_widget
 
     def __init__(self, parent: QWidget | None = None):
         """Initialize messages area.
@@ -170,6 +171,8 @@ class MessagesArea(QScrollArea):
             summary=summary,
             detail=detail,
             expandable=expandable,
+            agent_chain_prev=False,
+            agent_chain_next=False,
             parent=self._container,
         )
 
@@ -178,6 +181,8 @@ class MessagesArea(QScrollArea):
             row.edit_requested.connect(self.edit_requested.emit)
             row.edit_saved.connect(self._on_edit_saved)
             row.edit_cancelled.connect(self._on_edit_cancelled)
+        if role == "user" or render_as_user_bubble:
+            row.rollback_requested.connect(self.rollback_requested.emit)
 
         # Handle editable state — only latest user message is editable
         if role == "user":
@@ -198,12 +203,23 @@ class MessagesArea(QScrollArea):
         # Find the stretch item and insert before it
         stretch_index = self._layout.count() - 1
         self._layout.insertWidget(stretch_index, row)
+        self._update_timeline_chains()
 
         # Auto-scroll if enabled
         if self._auto_scroll_enabled:
             self.scroll_to_bottom()
 
         return row
+
+    def attach_checkpoint_to_latest_outbound(self, checkpoint_id: str) -> bool:
+        for row in reversed(self.get_message_rows()):
+            if not (getattr(row, "_role", "") == "user" or getattr(row, "_render_as_user_bubble", False)):
+                continue
+            if getattr(row, "_checkpoint_id", None):
+                continue
+            row.set_checkpoint_id(checkpoint_id)
+            return True
+        return False
 
     def add_tool_group(self) -> ToolCallGroup:
         """Add a tool call group to the container.
@@ -217,12 +233,48 @@ class MessagesArea(QScrollArea):
         # Find the stretch item and insert before it
         stretch_index = self._layout.count() - 1
         self._layout.insertWidget(stretch_index, group)
+        self._update_timeline_chains()
 
         # Auto-scroll if enabled
         if self._auto_scroll_enabled:
             self.scroll_to_bottom()
 
         return group
+
+    def _timeline_widgets(self) -> list[QWidget]:
+        widgets: list[QWidget] = []
+        for i in range(self._layout.count() - 1):
+            item = self._layout.itemAt(i)
+            if item and item.widget():
+                widgets.append(item.widget())
+        return widgets
+
+    def last_timeline_widget(self) -> QWidget | None:
+        widgets = self._timeline_widgets()
+        return widgets[-1] if widgets else None
+
+    def _is_chainable_timeline_item(self, widget: QWidget) -> bool:
+        if isinstance(widget, ToolCallGroup):
+            return True
+        if isinstance(widget, MessageRow):
+            return getattr(widget, "_role", "") == "agent" and not getattr(widget, "_render_as_user_bubble", False)
+        return False
+
+    def _set_widget_chain(self, widget: QWidget, prev_link: bool, next_link: bool) -> None:
+        if isinstance(widget, MessageRow):
+            widget.set_agent_chain(prev_link, next_link)
+        elif isinstance(widget, ToolCallGroup):
+            widget.set_timeline_chain(prev_link, next_link)
+
+    def _update_timeline_chains(self) -> None:
+        widgets = self._timeline_widgets()
+        chainable = [self._is_chainable_timeline_item(widget) for widget in widgets]
+        for i, widget in enumerate(widgets):
+            if not chainable[i]:
+                continue
+            prev_link = i > 0 and chainable[i - 1]
+            next_link = i + 1 < len(widgets) and chainable[i + 1]
+            self._set_widget_chain(widget, prev_link, next_link)
 
     def add_task_row(self, text: str, row_type: str = "task_update") -> None:
         """Add a task-related message row (waitlist, todolist, notification).
@@ -242,6 +294,7 @@ class MessagesArea(QScrollArea):
         # Find the stretch item and insert before it
         stretch_index = self._layout.count() - 1
         self._layout.insertWidget(stretch_index, row)
+        self._update_timeline_chains()
 
         if self._auto_scroll_enabled:
             self.scroll_to_bottom()
@@ -298,6 +351,7 @@ class MessagesArea(QScrollArea):
                 # If this was the editing row, reset it
                 if row == self._editing_row:
                     self._editing_row = None
+                self._update_timeline_chains()
                 break
 
         # Auto-scroll if enabled
@@ -332,6 +386,7 @@ class MessagesArea(QScrollArea):
                 self._latest_user_row = msg_row
                 msg_row.set_editable(True)
                 break
+        self._update_timeline_chains()
 
         if self._auto_scroll_enabled:
             self.scroll_to_bottom()

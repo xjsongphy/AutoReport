@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import QTimer, Qt, pyqtSignal
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
 
 @dataclass
@@ -43,6 +43,10 @@ class ToolCallGroup(QWidget):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._calls: list[ToolCall] = []
+        self._timeline_prev = False
+        self._timeline_next = False
+        self._chain_top: QWidget | None = None
+        self._chain_bottom: QWidget | None = None
         self._tick_timer = QTimer(self)
         self._tick_timer.setInterval(1000)
         self._tick_timer.timeout.connect(self._tick_running)
@@ -50,22 +54,39 @@ class ToolCallGroup(QWidget):
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(32, 4, 16, 4)
+        layout.setContentsMargins(16, 4, 16, 4)
         layout.setSpacing(0)
 
         self._header_btn = _ClickableHeaderWidget()
         self._header_btn.setObjectName("toolCallHeader")
-        self._header_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._header_btn.clicked.connect(lambda: None)
         header_layout = QHBoxLayout(self._header_btn)
         header_layout.setContentsMargins(0, 2, 0, 2)
         header_layout.setSpacing(8)
 
-        self._dot = QLabel()
+        rail = QWidget(self._header_btn)
+        rail.setFixedWidth(12)
+        rail_layout = QVBoxLayout(rail)
+        rail_layout.setContentsMargins(0, 0, 0, 0)
+        rail_layout.setSpacing(0)
+        self._chain_top = QWidget(rail)
+        self._chain_top.setFixedWidth(1)
+        self._chain_top.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        self._chain_top.setStyleSheet("background:#6b7280;")
+        rail_layout.addWidget(self._chain_top, 1, Qt.AlignmentFlag.AlignHCenter)
+        self._dot = QLabel(rail)
         self._dot.setObjectName("toolCallDot")
         self._dot.setFixedSize(7, 7)
         self._dot.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        header_layout.addWidget(self._dot, 0, Qt.AlignmentFlag.AlignVCenter)
+        rail_layout.addWidget(self._dot, 0, Qt.AlignmentFlag.AlignHCenter)
+        self._chain_bottom = QWidget(rail)
+        self._chain_bottom.setFixedWidth(1)
+        self._chain_bottom.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        self._chain_bottom.setStyleSheet("background:#6b7280;")
+        rail_layout.addWidget(self._chain_bottom, 1, Qt.AlignmentFlag.AlignHCenter)
+        header_layout.addWidget(rail, 0, Qt.AlignmentFlag.AlignTop)
+        header_layout.setStretch(0, 0)
+        header_layout.setStretch(1, 1)
 
         self._header_text = QLabel()
         self._header_text.setObjectName("toolCallHeaderText")
@@ -76,6 +97,24 @@ class ToolCallGroup(QWidget):
         self._header_text.setMinimumWidth(0)
         header_layout.addWidget(self._header_text, 1)
         layout.addWidget(self._header_btn)
+
+        self._detail_host = QWidget(self)
+        self._detail_layout = QVBoxLayout(self._detail_host)
+        self._detail_layout.setContentsMargins(16, 2, 0, 0)
+        self._detail_layout.setSpacing(0)
+        layout.addWidget(self._detail_host)
+        self._update_timeline_chain()
+
+    def set_timeline_chain(self, prev_link: bool, next_link: bool) -> None:
+        self._timeline_prev = prev_link
+        self._timeline_next = next_link
+        self._update_timeline_chain()
+
+    def _update_timeline_chain(self) -> None:
+        if self._chain_top is not None:
+            self._chain_top.setVisible(self._timeline_prev)
+        if self._chain_bottom is not None:
+            self._chain_bottom.setVisible(self._timeline_next)
 
     def add_tool_call(
         self,
@@ -197,6 +236,80 @@ class ToolCallGroup(QWidget):
             return f"<b>Bash</b>{sep}{desc}".strip()
         return f"<b>{self._display_name(call.name)}</b>"
 
+    def _clear_detail(self) -> None:
+        while self._detail_layout.count():
+            item = self._detail_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+    def _bash_card(self, call: ToolCall) -> QWidget:
+        card = QFrame(self)
+        card.setObjectName("bashDetailCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(8, 6, 8, 6)
+        card_layout.setSpacing(4)
+
+        def _row(tag: str, text: str) -> QWidget:
+            row = QFrame(card)
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(8)
+            label = QLabel(tag, row)
+            label.setObjectName("bashDetailTag")
+            label.setFixedWidth(24)
+            row_layout.addWidget(label)
+            value = QLabel(text, row)
+            value.setObjectName("bashDetailText")
+            value.setTextFormat(Qt.TextFormat.PlainText)
+            value.setWordWrap(False)
+            value.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            value.setFixedHeight(18)
+            row_layout.addWidget(value, 1)
+            copy_btn = QPushButton("Copy", row)
+            copy_btn.setObjectName("bashCopyBtn")
+            copy_btn.setVisible(False)
+            copy_btn.clicked.connect(lambda _=False, t=text: QApplication.clipboard().setText(t))
+            row_layout.addWidget(copy_btn, 0, Qt.AlignmentFlag.AlignRight)
+
+            def _enter(_):
+                copy_btn.setVisible(True)
+
+            def _leave(_):
+                copy_btn.setVisible(False)
+
+            row.enterEvent = _enter  # type: ignore[method-assign]
+            row.leaveEvent = _leave  # type: ignore[method-assign]
+            return row
+
+        cmd = str(call.arguments.get("command") or "").strip()
+        if not cmd and isinstance(call.result, dict):
+            cmd = str(call.result.get("command") or "").strip()
+        out = ""
+        if isinstance(call.result, dict):
+            stdout = str(call.result.get("stdout") or "").strip()
+            stderr = str(call.result.get("stderr") or "").strip()
+            out = stdout + (f"\n{stderr}" if stderr else "")
+        if call.error:
+            out = "Tool execution failed"
+
+        card_layout.addWidget(_row("IN", cmd))
+        divider = QFrame(card)
+        divider.setObjectName("bashDetailDivider")
+        divider.setFixedHeight(1)
+        card_layout.addWidget(divider)
+        card_layout.addWidget(_row("OUT", out))
+        card.setMaximumHeight(110)
+        return card
+
+    def _render_bash_detail(self) -> None:
+        self._clear_detail()
+        bash_calls = [c for c in self._calls if c.name == "bash"]
+        if not bash_calls:
+            self._detail_host.setVisible(False)
+            return
+        self._detail_layout.addWidget(self._bash_card(bash_calls[-1]))
+        self._detail_host.setVisible(True)
+
     def _update_display(self) -> None:
         if not self._calls:
             return
@@ -229,6 +342,8 @@ class ToolCallGroup(QWidget):
                     "delete_file": "Delete",
                 }[tool]
                 joined = f"<b>{label}</b>&nbsp;&nbsp;{file_text}".strip()
+            elif same_name:
+                joined = self._header_text_for_call(self._calls[0])
             else:
                 joined = " ".join(self._header_text_for_call(c) for c in self._calls)
             timer = ""
@@ -238,6 +353,7 @@ class ToolCallGroup(QWidget):
             dot_color = self._status_dot_color(None if running else success)
 
         self._dot.setStyleSheet(f"background:{dot_color}; border-radius: 3px;")
+        self._render_bash_detail()
 
         if any(c.success is None for c in self._calls):
             if not self._tick_timer.isActive():

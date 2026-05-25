@@ -138,8 +138,7 @@ def test_add_tool_call_creates_group(agent_panel):
     groups = agent_panel._messages_area.get_tool_groups()
     assert len(groups) == 1
     rows = agent_panel._messages_area.get_message_rows()
-    assert len(rows) == 1
-    assert rows[0]._role == "agent"
+    assert len(rows) == 0
 
 
 def test_add_tool_result_adds_to_group(agent_panel):
@@ -180,7 +179,7 @@ def test_add_tool_result_updates_pending_group_item(agent_panel):
     assert "Theory replied: first line" in groups[0].get_summary_text()
 
 
-def test_tool_call_before_agent_text_reuses_agent_anchor(agent_panel):
+def test_tool_call_before_agent_text_keeps_event_order(agent_panel):
     agent_panel.add_tool_call("list_dir", {"path": "."})
     agent_panel.add_message(role="agent", content="Hello", streaming=True)
 
@@ -188,6 +187,34 @@ def test_tool_call_before_agent_text_reuses_agent_anchor(agent_panel):
     assert len(rows) == 1
     assert rows[0]._role == "agent"
     assert rows[0]._content == "Hello"
+    assert agent_panel._messages_area.message_count() == 2
+
+
+def test_agent_text_tool_text_keeps_separate_timeline_items(agent_panel):
+    agent_panel.add_message(role="agent", content="First", streaming=True)
+    agent_panel.add_tool_call("list_dir", {"path": "."})
+    agent_panel.add_message(role="agent", content="Second", streaming=True)
+
+    rows = agent_panel._messages_area.get_message_rows()
+    groups = agent_panel._messages_area.get_tool_groups()
+
+    assert [row._content for row in rows] == ["First", "Second"]
+    assert len(groups) == 1
+    assert agent_panel._messages_area.message_count() == 3
+
+
+def test_thinking_row_finishes_with_elapsed_summary(agent_panel):
+    agent_panel.set_status("thinking")
+    rows = agent_panel._messages_area.get_message_rows()
+    assert len(rows) == 1
+    assert rows[0]._summary == "thinking"
+
+    agent_panel.append_thinking("raw **markdown** thought")
+    assert rows[0]._detail == "raw **markdown** thought"
+
+    agent_panel.set_status("idle")
+    assert rows[0]._summary.startswith("Thought for ")
+    assert rows[0]._complete is True
 
 
 def test_set_debug_mode_shows_hides_panel(agent_panel):
@@ -264,6 +291,16 @@ def test_pre_checkpoint_is_hidden(agent_panel):
     assert agent_panel._messages_area.message_count() == 0
 
 
+def test_pre_checkpoint_attaches_to_latest_user_bubble(agent_panel):
+    agent_panel.add_message(role="user", content="before rollback")
+    row = agent_panel._messages_area.get_message_rows()[-1]
+
+    agent_panel.add_checkpoint("ckpt_pre", "pre:user")
+
+    assert row._checkpoint_id == "ckpt_pre"
+    assert agent_panel._messages_area.message_count() == 1
+
+
 def test_multiple_messages_and_tools(agent_panel):
     """Multiple messages and tool calls should be displayed correctly."""
     # Add user message
@@ -272,11 +309,11 @@ def test_multiple_messages_and_tools(agent_panel):
 
     # Add tool call
     agent_panel.add_tool_call("read_file", {"path": "test.py"})
-    assert agent_panel._messages_area.message_count() == 3
+    assert agent_panel._messages_area.message_count() == 2
 
     # Add tool result
     agent_panel.add_tool_result("read_file", "content", None)
-    assert agent_panel._messages_area.message_count() == 3  # Still 3 (anchor + tool group + user)
+    assert agent_panel._messages_area.message_count() == 2
 
     # Add agent response
     agent_panel.add_message(role="agent", content="I've read the file")
@@ -285,7 +322,7 @@ def test_multiple_messages_and_tools(agent_panel):
     rows = agent_panel._messages_area.get_message_rows()
     groups = agent_panel._messages_area.get_tool_groups()
 
-    assert len(rows) == 2  # user + anchored agent message
+    assert len(rows) == 2  # user + agent response
     assert len(groups) == 1  # 1 tool group
 
 
@@ -294,7 +331,7 @@ def test_clear_messages(agent_panel):
     agent_panel.add_message(role="user", content="Test")
     agent_panel.add_tool_call("test_tool", {})
 
-    assert agent_panel._messages_area.message_count() == 3
+    assert agent_panel._messages_area.message_count() == 2
 
     agent_panel._messages_area.clear()
 

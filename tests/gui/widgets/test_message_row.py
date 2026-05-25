@@ -2,6 +2,7 @@
 
 import pytest
 from PyQt6.QtCore import QEvent, Qt
+from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import QApplication
 from autoreport.gui.widgets.message_row import MessageRow
 from autoreport.gui.widgets.ui_utils import compact_tooltip_qss
@@ -34,6 +35,39 @@ def test_agent_message_renders_inline(qtbot):
     display_text = widget.get_display_text()
     assert "Agent" in display_text
     assert "I will help you." in display_text
+
+
+def test_agent_message_renders_markdown_but_copies_raw_source(qtbot):
+    widget = MessageRow(
+        role="agent",
+        content="**Bold** and `code`",
+        timestamp="14:33",
+    )
+    qtbot.addWidget(widget)
+
+    label = widget._wrapping_labels[0]
+    assert label.textFormat() == Qt.TextFormat.RichText
+    assert "<strong>" in label.text() or "font-weight" in label.text()
+
+    event = QKeyEvent(
+        QEvent.Type.KeyPress,
+        Qt.Key.Key_C,
+        Qt.KeyboardModifier.ControlModifier,
+    )
+    assert widget.eventFilter(label, event) is True
+    assert QApplication.clipboard().text() == "**Bold** and `code`"
+
+
+def test_message_row_emits_rollback_checkpoint(qtbot):
+    widget = MessageRow(role="user", content="rollback me")
+    qtbot.addWidget(widget)
+    widget.set_checkpoint_id("cp_123")
+
+    seen = []
+    widget.rollback_requested.connect(lambda checkpoint_id, row: seen.append((checkpoint_id, row)))
+    widget.rollback_requested.emit(widget._checkpoint_id, widget)
+
+    assert seen == [("cp_123", widget)]
 
 
 def test_coordination_message_shows_prefix(qtbot):
@@ -126,19 +160,19 @@ def test_user_bubble_width_stable_when_actions_toggle(qtbot):
 
 
 def test_tooltip_delay_is_2s_for_action_buttons(qtbot):
-    widget = MessageRow(role="agent", content="tooltip check")
+    widget = MessageRow(role="user", content="tooltip check")
     qtbot.addWidget(widget)
-    timer = widget._copy_btn._compact_tooltip_filter._timer
+    timer = widget._user_copy_btn._compact_tooltip_filter._timer
     assert timer.interval() == 2000
 
 
 def test_tooltip_hides_on_leave(qtbot):
-    widget = MessageRow(role="agent", content="tooltip check")
+    widget = MessageRow(role="user", content="tooltip check")
     qtbot.addWidget(widget)
-    filt = widget._copy_btn._compact_tooltip_filter
-    filt._show(widget._copy_btn)
+    filt = widget._user_copy_btn._compact_tooltip_filter
+    filt._show(widget._user_copy_btn)
     assert filt._tip is not None
-    QApplication.sendEvent(widget._copy_btn, QEvent(QEvent.Type.Leave))
+    QApplication.sendEvent(widget._user_copy_btn, QEvent(QEvent.Type.Leave))
     assert filt._tip is None
 
 

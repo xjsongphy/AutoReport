@@ -8,7 +8,7 @@
 import re
 
 from PyQt6.QtCore import QEvent, Qt, pyqtSignal
-from PyQt6.QtGui import QClipboard, QColor, QIcon, QPalette
+from PyQt6.QtGui import QClipboard, QColor, QIcon, QKeySequence, QPalette
 
 from ..scale import scaled_size
 from PyQt6.QtWidgets import (
@@ -119,6 +119,9 @@ class MessageRow(QWidget):
     # Signal emitted when user cancels an edit
     edit_cancelled = pyqtSignal()
 
+    # Signal emitted when user requests rollback to the checkpoint before this row.
+    rollback_requested = pyqtSignal(str, object)
+
     def __init__(
         self,
         role: str,
@@ -130,6 +133,8 @@ class MessageRow(QWidget):
         summary: str | None = None,
         detail: str | None = None,
         expandable: bool = True,
+        agent_chain_prev: bool = False,
+        agent_chain_next: bool = False,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
@@ -153,6 +158,11 @@ class MessageRow(QWidget):
         self._expandable = expandable
         self._expanded = False
         self._wrapping_labels: list[QLabel] = []
+        self._raw_markdown_labels: dict[QLabel, str] = {}
+        self._agent_chain_prev = agent_chain_prev
+        self._agent_chain_next = agent_chain_next
+        self._chain_top: QWidget | None = None
+        self._chain_bottom: QWidget | None = None
         self._summary_btn: QPushButton | None = None
         self._detail_widget: QWidget | None = None
         self._user_actions_visible = False
@@ -165,6 +175,7 @@ class MessageRow(QWidget):
         self._edit_bubble_widget: QWidget | None = None
         self._user_bubble_widget: QWidget | None = None
         self._user_bubble_layout: QVBoxLayout | None = None
+        self._checkpoint_id: str | None = None
         self._setup_ui()
         self._setup_hover_handler()
 
@@ -277,56 +288,45 @@ class MessageRow(QWidget):
             rl.setAlignment(self._user_bubble_container, Qt.AlignmentFlag.AlignRight)
             self._outer_layout.addWidget(row)
         else:
-            # Agent header
-            header = QWidget(outer)
-            header.setObjectName("agentHeader")
-            hl = QHBoxLayout(header)
-            hl.setContentsMargins(0, 0, 0, 8)
-            hl.setSpacing(8)
+            row = QWidget(outer)
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(0, 0, 0, 0)
+            rl.setSpacing(8)
 
-            avatar = QLabel("✦")
-            avatar.setObjectName("agentAvatar")
-            avatar.setFixedSize(24, 24)
-            avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            hl.addWidget(avatar)
+            rail = QWidget(row)
+            rail.setFixedWidth(12)
+            rail_layout = QVBoxLayout(rail)
+            rail_layout.setContentsMargins(0, 0, 0, 0)
+            rail_layout.setSpacing(0)
+            self._chain_top = QWidget(rail)
+            self._chain_top.setFixedWidth(1)
+            self._chain_top.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+            self._chain_top.setStyleSheet("background:#6b7280;")
+            rail_layout.addWidget(self._chain_top, 1, Qt.AlignmentFlag.AlignHCenter)
+            dot = QLabel(rail)
+            dot.setFixedSize(7, 7)
+            dot.setStyleSheet("background:#9ca3af; border-radius:3px;")
+            rail_layout.addWidget(dot, 0, Qt.AlignmentFlag.AlignHCenter)
+            self._chain_bottom = QWidget(rail)
+            self._chain_bottom.setFixedWidth(1)
+            self._chain_bottom.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+            self._chain_bottom.setStyleSheet("background:#6b7280;")
+            rail_layout.addWidget(self._chain_bottom, 1, Qt.AlignmentFlag.AlignHCenter)
+            rl.addWidget(rail, 0, Qt.AlignmentFlag.AlignTop)
 
-            username = QLabel(self._agent_name)
-            username.setObjectName("agentUsername")
-            hl.addWidget(username)
-            hl.addStretch()
-            self._outer_layout.addWidget(header)
-
-            # Content area — rebuilt via _rebuild_agent_content
             self._agent_content_layout = QVBoxLayout()
-            self._agent_content_layout.setContentsMargins(32, 0, 0, 0)
+            self._agent_content_layout.setContentsMargins(0, 0, 0, 0)
             self._agent_content_layout.setSpacing(0)
-            self._outer_layout.addLayout(self._agent_content_layout)
+            rl.addLayout(self._agent_content_layout, 1)
+            self._outer_layout.addWidget(row)
             self._rebuild_agent_content()
-
-            # Copy button at bottom — shown on hover, right-aligned
-            self._footer = QWidget(outer)
-            self._footer.setObjectName("msgFooter")
-            fl = QHBoxLayout(self._footer)
-            fl.setContentsMargins(32, 4, 4, 0)
-            fl.setSpacing(4)
-
-            w, h = scaled_size(30, 24)
-            self._copy_btn = QPushButton()
-            self._copy_btn.setObjectName("copyBtn")
-            self._copy_btn.setIcon(_copy_icon())
-            self._copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            install_compact_tooltip(self._copy_btn, "Copy")
-            self._copy_btn.clicked.connect(self._copy_content)
-            self._copy_btn.setFixedSize(w, h)
-            fl.addWidget(self._copy_btn)
-            fl.addStretch()
-            self._set_agent_actions_visible(False)
-            self._outer_layout.addWidget(self._footer)
+            self._update_agent_chain()
 
         layout.addWidget(outer)
 
     def _clear_agent_content(self) -> None:
         self._wrapping_labels = []
+        self._raw_markdown_labels = {}
         if self._agent_content_layout is None:
             return
         while self._agent_content_layout.count():
@@ -352,28 +352,28 @@ class MessageRow(QWidget):
             self._detail_widget.setVisible(self._expanded and self._has_detail())
             return
 
-        segments = _parse_code_blocks(self._content)
-        for seg_text, seg_lang in segments:
-            if seg_lang is not None:
-                code_widget = _CodeBlockWidget(seg_text, seg_lang, self)
-                self._agent_content_layout.addWidget(code_widget)
-            else:
-                # Render markdown text
-                html = render_markdown(seg_text)
-                text_label = QLabel(html)
-                text_label.setObjectName("agentMessageText")
-                text_label.setWordWrap(True)
-                text_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-                text_label.setTextFormat(Qt.TextFormat.RichText)
-                text_label.setOpenExternalLinks(True)
-                text_label.setTextInteractionFlags(
-                    Qt.TextInteractionFlag.TextSelectableByMouse
-                )
-                text_label.setContentsMargins(0, 2, 0, 4)
-                text_label.setMinimumWidth(0)
-                self._wrapping_labels.append(text_label)
-                self._agent_content_layout.addWidget(text_label)
+        text_label = self._build_agent_markdown_label(self._content)
+        self._agent_content_layout.addWidget(text_label)
         self._apply_text_width_constraints()
+
+    def _build_agent_markdown_label(self, raw_markdown: str) -> QLabel:
+        label = QLabel(render_markdown(raw_markdown))
+        label.setObjectName("agentMessageText")
+        label.setWordWrap(True)
+        label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        label.setTextFormat(Qt.TextFormat.RichText)
+        label.setOpenExternalLinks(True)
+        label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+            | Qt.TextInteractionFlag.LinksAccessibleByMouse
+        )
+        label.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        label.setContentsMargins(0, 2, 0, 4)
+        label.setMinimumWidth(0)
+        label.installEventFilter(self)
+        self._wrapping_labels.append(label)
+        self._raw_markdown_labels[label] = raw_markdown
+        return label
 
     def append_content(self, delta: str) -> None:
         """Append streaming text delta and rebuild content area."""
@@ -381,12 +381,23 @@ class MessageRow(QWidget):
         self._rebuild_agent_content()
         self._apply_text_width_constraints()
 
+    def set_agent_chain(self, prev_link: bool, next_link: bool) -> None:
+        self._agent_chain_prev = prev_link
+        self._agent_chain_next = next_link
+        self._update_agent_chain()
+
+    def _update_agent_chain(self) -> None:
+        if self._chain_top is not None:
+            self._chain_top.setVisible(self._agent_chain_prev)
+        if self._chain_bottom is not None:
+            self._chain_bottom.setVisible(self._agent_chain_next)
+
     def _has_detail(self) -> bool:
         return bool(self._detail)
 
     def _summary_arrow(self) -> str:
         if not (self._expandable and self._has_detail()):
-            return "-"
+            return ""
         return "v" if self._expanded else ">"
 
     def _build_summary_widget(self, summary_type: str) -> QWidget:
@@ -395,7 +406,7 @@ class MessageRow(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
-        self._summary_btn = QPushButton(f"{self._summary_arrow()} {self._summary or ''}")
+        self._summary_btn = QPushButton(self._summary_button_text())
         self._summary_btn.setObjectName("toolCallHeader" if summary_type == "agent" else "userCopyBtn")
         self._summary_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._summary_btn.clicked.connect(self._toggle_summary)
@@ -411,19 +422,7 @@ class MessageRow(QWidget):
         layout.setSpacing(0)
 
         if detail_type == "agent":
-            html = render_markdown(self._detail or "")
-            label = QLabel(html)
-            label.setObjectName("agentMessageText")
-            label.setWordWrap(True)
-            label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-            label.setTextFormat(Qt.TextFormat.RichText)
-            label.setOpenExternalLinks(True)
-            label.setTextInteractionFlags(
-                Qt.TextInteractionFlag.TextSelectableByMouse
-            )
-            label.setContentsMargins(0, 2, 0, 4)
-            label.setMinimumWidth(0)
-            self._wrapping_labels.append(label)
+            label = self._build_agent_markdown_label(self._detail or "")
         else:
             label = QLabel(self._detail or "")
             label.setObjectName("userMessageText")
@@ -446,7 +445,30 @@ class MessageRow(QWidget):
         if self._detail_widget:
             self._detail_widget.setVisible(self._expanded)
         if self._summary_btn:
-            self._summary_btn.setText(f"{self._summary_arrow()} {self._summary or ''}")
+            self._summary_btn.setText(self._summary_button_text())
+
+    def _summary_button_text(self) -> str:
+        arrow = self._summary_arrow()
+        if not arrow:
+            return self._summary or ""
+        return f"{self._summary or ''} {arrow}"
+
+    def set_summary_text(self, summary: str) -> None:
+        self._summary = summary
+        if self._summary_btn:
+            self._summary_btn.setText(self._summary_button_text())
+
+    def set_detail_text(self, detail: str) -> None:
+        self._detail = detail
+        if self._summary_btn:
+            self._summary_btn.setEnabled(self._expandable and self._has_detail())
+            self._summary_btn.setText(self._summary_button_text())
+        if self._agent_content_layout is not None:
+            expanded = self._expanded
+            self._rebuild_agent_content()
+            self._expanded = expanded
+            if self._detail_widget:
+                self._detail_widget.setVisible(self._expanded and self._has_detail())
 
     def mark_complete(self) -> None:
         """Mark streaming complete — enable hover-triggered actions."""
@@ -651,6 +673,9 @@ class MessageRow(QWidget):
         if clipboard:
             clipboard.setText(self._content, QClipboard.Mode.Clipboard)
 
+    def set_checkpoint_id(self, checkpoint_id: str | None) -> None:
+        self._checkpoint_id = checkpoint_id
+
     def contextMenuEvent(self, event) -> None:
         """Show VS Code-like context menu for message actions."""
         menu = QMenu(self)
@@ -682,6 +707,12 @@ class MessageRow(QWidget):
             edit_action = menu.addAction("Edit & Resend")
             edit_action.triggered.connect(self._request_edit)
 
+        if self._is_outbound_message() and self._checkpoint_id:
+            rollback_action = menu.addAction("Rollback to Before This Message")
+            rollback_action.triggered.connect(
+                lambda _=False, cp_id=self._checkpoint_id: self.rollback_requested.emit(cp_id, self)
+            )
+
         menu.exec(event.globalPos())
         event.accept()
 
@@ -701,6 +732,19 @@ class MessageRow(QWidget):
                 self._save_edit()
                 return True
 
+        if (
+            isinstance(obj, QLabel)
+            and obj in self._raw_markdown_labels
+            and event.type() == QEvent.Type.KeyPress
+            and event.matches(QKeySequence.StandardKey.Copy)
+        ):
+            clipboard = QApplication.clipboard()
+            if clipboard:
+                raw = self._raw_markdown_labels[obj]
+                selected = obj.selectedText()
+                clipboard.setText(selected if selected and selected in raw else raw, QClipboard.Mode.Clipboard)
+            return True
+
         if not self._is_outbound_message():
             return super().eventFilter(obj, event)
 
@@ -719,17 +763,12 @@ class MessageRow(QWidget):
         if self._is_outbound_message():
             if self._complete and self._user_footer:
                 self._set_user_actions_visible(True)
-        else:
-            if self._complete:
-                self._set_agent_actions_visible(True)
 
     def leaveEvent(self, event) -> None:
         super().leaveEvent(event)
         if self._is_outbound_message():
             if self._user_footer:
                 self._set_user_actions_visible(False)
-        else:
-            self._set_agent_actions_visible(False)
 
     def _set_user_actions_visible(self, visible: bool) -> None:
         if not self._user_footer:

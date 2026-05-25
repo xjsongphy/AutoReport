@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from pathlib import Path
+import time
 from typing import Any
 
 from PyQt6.QtCore import QPoint, QSize, Qt, QTimer, pyqtSignal
@@ -74,6 +75,7 @@ class AgentPanel(QWidget):
     compact_requested = pyqtSignal()
     init_requested = pyqtSignal()
     agent_type_changed = pyqtSignal(str)
+    rollback_requested = pyqtSignal(str, object)
 
     def __init__(self, panel_id: str, title: str, workspace: Path | None = None):
         super().__init__()
@@ -86,6 +88,11 @@ class AgentPanel(QWidget):
         self._context_enabled: bool = True
         self._current_tool_group = None
         self._pending_tool_groups: list = []
+        self._thinking_row = None
+        self._thinking_started_at: float | None = None
+        self._thinking_timer = QTimer(self)
+        self._thinking_timer.setInterval(1000)
+        self._thinking_timer.timeout.connect(self._update_thinking_timer)
         self._agent_selector: NoWheelComboBox | None = None
         self._composer_horizontal_margin = scaled(16)
 
@@ -198,6 +205,7 @@ class AgentPanel(QWidget):
         self._messages_area.edit_requested.connect(self._on_message_edit_requested)
         self._messages_area.edit_saved.connect(self._on_message_edit_saved)
         self._messages_area.edit_cancelled.connect(self._on_message_edit_cancelled)
+        self._messages_area.rollback_requested.connect(self.rollback_requested.emit)
         layout.addWidget(self._messages_area, 1)
 
         # ---- Debug panel (hidden) ----
@@ -678,19 +686,22 @@ class AgentPanel(QWidget):
             return
 
         if role == "agent":
-            rows = self._messages_area.get_message_rows()
-            if rows and rows[-1]._role == "agent":
-                # If we inserted an empty anchor row for pre-text tool calls,
-                # reuse it when the first agent text arrives.
-                if rows[-1]._content == "" or streaming:
-                    rows[-1].append_content(content)
+            last = self._messages_area.last_timeline_widget()
+            if (
+                getattr(last, "_role", "") == "agent"
+                and getattr(last, "_summary", None) is None
+                and not getattr(last, "_complete", True)
+            ):
+                if streaming:
+                    last.append_content(content)
+                    self._current_tool_group = None
                     if streaming:
                         self._messages_area.follow_streaming_if_enabled()
                     return
 
         ts = datetime.now().strftime("%H:%M")
         agent_name = self._title_label.text() or "Agent"
-        self._messages_area.add_message_row(
+        row = self._messages_area.add_message_row(
             role=role,
             content=content,
             timestamp=ts,
@@ -701,20 +712,10 @@ class AgentPanel(QWidget):
             detail=detail,
             expandable=expandable,
         )
-        self._update_composer_alignment()
-
-    def _ensure_agent_anchor_for_tools(self) -> None:
-        rows = self._messages_area.get_message_rows()
-        if rows and rows[-1]._role == "agent":
-            return
-        ts = datetime.now().strftime("%H:%M")
-        agent_name = self._title_label.text() or "Agent"
-        self._messages_area.add_message_row(
-            role="agent",
-            content="",
-            timestamp=ts,
-            agent_name=agent_name,
-        )
+        if streaming and role == "agent":
+            row._complete = False
+        if role == "agent":
+            self._current_tool_group = None
         self._update_composer_alignment()
 
     def add_tool_call(
@@ -725,8 +726,13 @@ class AgentPanel(QWidget):
         detail: str | None = None,
         expandable: bool = True,
     ) -> None:
-        # Ensure tool calls are visually grouped under an agent turn header.
-        self._ensure_agent_anchor_for_tools()
+        last = self._messages_area.last_timeline_widget()
+        if (
+            getattr(last, "_role", "") == "agent"
+            and getattr(last, "_summary", None) is None
+            and not getattr(last, "_complete", True)
+        ):
+            last.mark_complete()
         # Merge adjacent identical tool calls to avoid long noisy rows.
         merge_target = None
         if (
@@ -771,6 +777,53 @@ class AgentPanel(QWidget):
                 summary=summary,
             )
 
+    def start_thinking(self) -> None:
+        if self._thinking_row is not None:
+            return
+        self._thinking_started_at = time.monotonic()
+        ts = datetime.now().strftime("%H:%M")
+        agent_name = self._title_label.text() or "Agent"
+        self._thinking_row = self._messages_area.add_message_row(
+            role="agent",
+            content="",
+            timestamp=ts,
+            agent_name=agent_name,
+            summary="thinking",
+            detail=" ",
+            expandable=True,
+        )
+        self._thinking_row._complete = False
+        self._thinking_row._is_thinking_row = True
+        self._thinking_timer.start()
+        self._update_composer_alignment()
+
+    def append_thinking(self, thinking: str) -> None:
+        self.start_thinking()
+        if self._thinking_row is None:
+            return
+        self._thinking_row.set_detail_text(thinking or " ")
+        self._messages_area.follow_streaming_if_enabled()
+
+    def finish_thinking(self) -> None:
+        if self._thinking_row is None:
+            return
+        elapsed = self._thinking_elapsed_seconds()
+        self._thinking_row.set_summary_text(f"Thought for {elapsed}s")
+        self._thinking_row.mark_complete()
+        self._thinking_row = None
+        self._thinking_started_at = None
+        self._thinking_timer.stop()
+
+    def _thinking_elapsed_seconds(self) -> int:
+        if self._thinking_started_at is None:
+            return 0
+        return max(1, int(time.monotonic() - self._thinking_started_at))
+
+    def _update_thinking_timer(self) -> None:
+        if self._thinking_row is None:
+            self._thinking_timer.stop()
+        return
+
     def add_error(self, source: str, message: str) -> None:
         ts = datetime.now().strftime("%H:%M")
         self._messages_area.add_message_row(
@@ -782,6 +835,7 @@ class AgentPanel(QWidget):
     def add_checkpoint(self, checkpoint_id: str, description: str) -> None:
         # Hide internal pre-message sentinel checkpoints from UI.
         if (description or "").strip().lower().startswith("pre:"):
+            self._messages_area.attach_checkpoint_to_latest_outbound(checkpoint_id)
             return
         ts = datetime.now().strftime("%H:%M")
         short_id = checkpoint_id[-12:] if len(checkpoint_id) > 12 else checkpoint_id
@@ -904,6 +958,11 @@ class AgentPanel(QWidget):
         self._status_label.setText(label)
         colors = get_theme_colors()
         self._status_label.setStyleSheet(f"color: {colors.get(color_key, colors['status_idle'])};")
+
+        if status == "thinking":
+            self.start_thinking()
+        else:
+            self.finish_thinking()
 
         if active:
             header = "Thinking" if status == "thinking" else "Running tool"
