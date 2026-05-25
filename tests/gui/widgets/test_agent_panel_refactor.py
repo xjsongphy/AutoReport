@@ -156,7 +156,7 @@ def test_add_tool_result_adds_to_group(agent_panel):
     # Check that the tool group has the tool call
     # The group should have 1 tool call — summary uses display names
     summary = groups[0].get_summary_text()
-    assert "Read File" in summary
+    assert "Read" in summary
 
 
 def test_add_tool_result_updates_pending_group_item(agent_panel):

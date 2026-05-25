@@ -8,16 +8,15 @@ def test_collapsed_shows_summary(qtbot):
     widget = ToolCallGroup()
     qtbot.addWidget(widget)
 
-    widget.add_tool_call("python_exec", {"file": "analysis.py"}, success=True, duration_ms=1200)
+    widget.add_tool_call("bash", {"command": "echo ok", "command_description": "show output"}, success=True, duration_ms=1200)
     widget.add_tool_call("read_file", {"path": "data.csv"}, success=True, duration_ms=100)
 
     # Initially collapsed
     assert not widget.is_expanded()
     summary = widget.get_summary_text()
     # Copilot-style: shows tool names grouped (display names)
-    assert "Python Exec" in summary
-    assert "Read File" in summary
-    assert "1.3s" in summary
+    assert "Bash" in summary
+    assert "Read" in summary
 
 
 def test_expand_collapse_works(qtbot):

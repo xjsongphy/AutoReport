@@ -677,6 +677,8 @@ class AgentPanel(QWidget):
         detail: str | None = None,
         expandable: bool = True,
     ) -> None:
+        render_as_user_bubble = source == "main_agent"
+
         if streaming and role == "agent" and not content:
             return
 
@@ -698,6 +700,7 @@ class AgentPanel(QWidget):
             content=content,
             timestamp=ts,
             is_coordination=coordination or source == "main_agent",
+            render_as_user_bubble=render_as_user_bubble,
             agent_name=agent_name,
             summary=summary,
             detail=detail,
@@ -729,10 +732,15 @@ class AgentPanel(QWidget):
     ) -> None:
         # Ensure tool calls are visually grouped under an agent turn header.
         self._ensure_agent_anchor_for_tools()
-        # One tool call -> one tool group row.
-        self._current_tool_group = self._messages_area.add_tool_group()
-        self._pending_tool_groups.append(self._current_tool_group)
-        self._current_tool_group.add_tool_call(
+        # Merge adjacent identical tool calls to avoid long noisy rows.
+        merge_target = None
+        if self._current_tool_group and self._current_tool_group.can_merge_with_last(tool_name):
+            merge_target = self._current_tool_group
+        else:
+            self._current_tool_group = self._messages_area.add_tool_group()
+            merge_target = self._current_tool_group
+        self._pending_tool_groups.append(merge_target)
+        merge_target.add_tool_call(
             name=tool_name,
             arguments=arguments,
             success=None,

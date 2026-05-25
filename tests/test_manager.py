@@ -69,15 +69,13 @@ def test_create_tools_for_main(manager):
     tool_names = {t.name for t in tools.get_all().values()}
     assert "read_file" in tool_names
     assert "write_file" in tool_names
-    assert "exec" in tool_names
-    assert "python_exec" in tool_names
+    assert "bash" in tool_names
 
 
 def test_create_tools_for_data_analysis(manager):
     tools = manager._create_tools_for_agent(AgentType.DATA_ANALYSIS)
     tool_names = {t.name for t in tools.get_all().values()}
-    assert "exec" in tool_names
-    assert "python_exec" in tool_names
+    assert "bash" in tool_names
     assert "parse_pdf" in tool_names
 
 
@@ -86,15 +84,14 @@ def test_create_tools_for_theory(manager):
     tool_names = {t.name for t in tools.get_all().values()}
     assert "read_file" in tool_names
     assert "write_file" in tool_names
-    assert "exec" not in tool_names
+    assert "bash" not in tool_names
     assert "parse_pdf" in tool_names
 
 
 def test_create_tools_for_plotting(manager):
     tools = manager._create_tools_for_agent(AgentType.PLOTTING)
     tool_names = {t.name for t in tools.get_all().values()}
-    assert "exec" in tool_names
-    assert "python_exec" in tool_names
+    assert "bash" in tool_names
     assert "parse_pdf" not in tool_names
 
 

@@ -12,17 +12,16 @@ from ...interfaces.types import AgentType, Message, RestartRequest
 from ..checkpoints import CheckpointManager
 from ..skills import SkillLoader
 from ..tools import (
+    BashTool,
     CreateCheckpointTool,
     DeleteFileTool,
     EditFileTool,
-    ExecTool,
     FileStateManager,
     ListCheckpointsTool,
     ListDirTool,
     ManageTasksTool,
     ManifestManager,
     PDFParseTool,
-    PythonExecTool,
     ReadFileTool,
     ReportIssueTool,
     RollbackCheckpointTool,
@@ -269,15 +268,11 @@ class LoopManager:
             file_state_manager=file_state_manager,
         ))
 
-        # Execution tools (for data analysis, plotting, and main agent)
+        # Execution tool (for data analysis, plotting, and main agent)
         if agent_type in (AgentType.DATA_ANALYSIS, AgentType.PLOTTING, AgentType.MAIN):
-            registry.register(ExecTool(
+            registry.register(BashTool(
                 working_dir=self.workspace,
                 timeout=120,
-            ))
-            registry.register(PythonExecTool(
-                working_dir=self.workspace,
-                timeout=60,
             ))
 
         # PDF parsing (all agents that may need to read reference materials)

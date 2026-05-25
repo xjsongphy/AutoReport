@@ -114,6 +114,12 @@ class ReadFileTool(Tool):
             hint = f" Did you mean '{suggestion}'?" if suggestion and suggestion != path else ""
             raise FileNotFoundError(f"File not found: {file_path}.{hint}")
 
+        if file_path.suffix.lower() == ".pdf":
+            raise ValueError(
+                f"read_file does not support PDF files: {file_path.name}. "
+                "Use parse_pdf to extract content first."
+            )
+
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
@@ -175,7 +181,7 @@ class ReadFileTool(Tool):
             return {
                 "error": f"Cannot read '{file_path.name}' as text: it appears to be a {detected_type} file (not UTF-8 encoded text). "
                          f"The read_file tool only supports UTF-8 text files. If you need to work with this file type, "
-                         f"please use a different approach (e.g., exec or python_exec for file analysis).",
+                         f"please use a different approach (e.g., bash for file analysis).",
                 "path": str(file_path),
                 "is_binary": True,
                 "detected_type": detected_type,

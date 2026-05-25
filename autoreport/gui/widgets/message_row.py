@@ -125,6 +125,7 @@ class MessageRow(QWidget):
         content: str,
         timestamp: str = "",
         is_coordination: bool = False,
+        render_as_user_bubble: bool = False,
         agent_name: str = "Agent",
         summary: str | None = None,
         detail: str | None = None,
@@ -140,6 +141,7 @@ class MessageRow(QWidget):
         self._content = content
         self._timestamp = timestamp
         self._is_coordination = is_coordination
+        self._render_as_user_bubble = render_as_user_bubble
         self._agent_name = agent_name
         self._complete = False
         self._agent_content_layout: QVBoxLayout | None = None
@@ -794,7 +796,7 @@ class MessageRow(QWidget):
 
     def _is_outbound_message(self) -> bool:
         """Right-side messages sent to an agent share the user bubble layout."""
-        return self._role == "user"
+        return self._role == "user" or self._render_as_user_bubble
 
     def _apply_text_width_constraints(self) -> None:
         max_w = max(40, self._content_width_limit())

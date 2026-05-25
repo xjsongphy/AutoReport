@@ -542,6 +542,40 @@ class MainWindow(QMainWindow):
                 font-size: {px(11)};
                 padding: {px(1)} 0 {px(2)} {px(12)};
             }}
+            #bashDetailCard {{
+                background-color: #23272f;
+                border: 1px solid #353b46;
+                border-radius: {px(8)};
+                margin-left: {px(12)};
+            }}
+            #bashDetailRow {{
+                background-color: transparent;
+            }}
+            #bashDetailTag {{
+                color: #9aa3b2;
+                font-size: {px(10)};
+                font-weight: {c["fw_semibold"]};
+                min-width: {px(20)};
+            }}
+            #bashDetailText {{
+                color: #d5dbe5;
+                font-family: "Cascadia Code", "SF Mono", "Consolas", monospace;
+                font-size: {px(11)};
+            }}
+            #bashDetailDivider {{
+                background-color: #353b46;
+                border: none;
+            }}
+            #bashCopyBtn {{
+                background-color: transparent;
+                border: none;
+                color: #9aa3b2;
+                font-size: {px(10)};
+                padding: {px(2)} {px(4)};
+            }}
+            #bashCopyBtn:hover {{
+                color: #e2e8f0;
+            }}
 
             /* ---- Status Indicator ---- */
             #statusSpinner {{
@@ -1086,6 +1120,9 @@ class MainWindow(QMainWindow):
         summary = None
         detail = None
         expandable = None
+        safe_error = None
+        if message.error:
+            safe_error = "Tool execution failed"
 
         if agent_str == "main" and message.tool_name == "send_to_agent":
             summary, detail, expandable = self._format_send_to_agent_result(message.result, message.error)
@@ -1098,7 +1135,7 @@ class MainWindow(QMainWindow):
         panel.add_tool_result(
             message.tool_name,
             message.result,
-            message.error,
+            safe_error,
             summary=summary,
             detail=detail,
             expandable=expandable,
@@ -1154,15 +1191,36 @@ class MainWindow(QMainWindow):
         if str(result.get("status", "")) != "ok":
             return (None, None, None)
 
+        def _rows(items: list[dict], title: str) -> list[str]:
+            lines = [f"<b>{title}</b>"]
+            shown = 0
+            for item in items:
+                if shown >= 10:
+                    break
+                status = str(item.get("status", "pending")).lower()
+                brief = str(item.get("brief", "")).strip() or "task"
+                done = status == "completed"
+                box = "☑" if done else "☐"
+                if done:
+                    lines.append(f"<span style='color:#9098a3'>{box} <s>{brief}</s></span>")
+                else:
+                    lines.append(f"<span style='color:#9098a3'>{box} {brief}</span>")
+                shown += 1
+            if shown == 0:
+                lines.append("<span style='color:#9098a3'>—</span>")
+            return lines
+
+        todolist = result.get("todolist")
+        waitlist = result.get("waitlist")
+        if isinstance(todolist, list) and isinstance(waitlist, list):
+            detail = "\n".join(_rows(todolist, "Todo") + ["", *(_rows(waitlist, "Waiting"))])
+            return ("<b>Todo</b>", detail, True)
+
         ui_summary = str(result.get("_ui_summary", "") or "").strip()
         ui_detail = str(result.get("_ui_detail", "") or "").strip()
         if not ui_summary and not ui_detail:
             return (None, None, None)
-
-        summary = ui_summary or "Task completed"
-        detail = ui_detail or None
-        expandable = bool(detail)
-        return (summary, detail, expandable)
+        return (ui_summary or "Task completed", ui_detail or None, bool(ui_detail))
 
     def _build_inter_agent_summary(self, prefix: str, content: str) -> tuple[str, str | None, bool]:
         response = str(content or "").strip()
