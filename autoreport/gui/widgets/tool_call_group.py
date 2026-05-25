@@ -11,6 +11,7 @@ from ..theme import get_theme_colors
 from .timeline import TimelineRail
 from .ui_utils import install_compact_tooltip, render_svg_icon
 
+TIMELINE_EVENT_ROW_HEIGHT = 34
 
 def _copy_icon_dark():
     # Keep copy icon visually consistent with user bubble actions.
@@ -76,9 +77,10 @@ class ToolCallGroup(QWidget):
 
         self._header_btn = _ClickableHeaderWidget()
         self._header_btn.setObjectName("toolCallHeader")
+        self._header_btn.setMinimumHeight(TIMELINE_EVENT_ROW_HEIGHT)
         self._header_btn.clicked.connect(lambda: None)
         header_layout = QHBoxLayout(self._header_btn)
-        header_layout.setContentsMargins(0, 4, 0, 4)
+        header_layout.setContentsMargins(0, 4, 0, 6)
         header_layout.setSpacing(0)
 
         self._header_text = QLabel()
@@ -235,10 +237,11 @@ class ToolCallGroup(QWidget):
         card = QFrame(self)
         card.setObjectName("bashDetailCard")
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(8, 6, 8, 6)
+        card_layout.setContentsMargins(8, 6, 8, 10)
         card_layout.setSpacing(4)
 
-        def _row(tag: str, text: str) -> QWidget:
+        def _row(tag: str, text: str, display_text: str | None = None) -> QWidget:
+            shown = text if display_text is None else display_text
             row = QFrame(card)
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(0, 0, 0, 0)
@@ -247,7 +250,7 @@ class ToolCallGroup(QWidget):
             label.setObjectName("bashDetailTag")
             label.setFixedWidth(24)
             row_layout.addWidget(label)
-            value = QLabel(text, row)
+            value = QLabel(shown, row)
             value.setObjectName("bashDetailText")
             value.setTextFormat(Qt.TextFormat.PlainText)
             value.setWordWrap(False)
@@ -293,7 +296,8 @@ class ToolCallGroup(QWidget):
         divider.setObjectName("bashDetailDivider")
         divider.setFixedHeight(1)
         card_layout.addWidget(divider)
-        card_layout.addWidget(_row("OUT", out))
+        out_preview = "\n".join(out.splitlines()[:3])
+        card_layout.addWidget(_row("OUT", out, out_preview))
         card.setMaximumHeight(110)
         return card
 
