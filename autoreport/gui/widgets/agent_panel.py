@@ -606,12 +606,9 @@ class AgentPanel(QWidget):
 
     def set_opened_file(self, file_path: str) -> None:
         self._opened_file = file_path
-        # Opening/switching files should not auto-attach context to agent.
-        # Only explicit text selection is attachable.
         self._preview_context = None
         self._context_enabled = True
-        self._context_separator.setVisible(False)
-        self._context_attachment_btn.setVisible(False)
+        self._set_context_attachment(Path(file_path).name, file_path)
 
     def set_preview_context(self, file_path: str, selected_text: str, start_line: int, end_line: int) -> None:
         self._preview_context = (file_path, selected_text, start_line, end_line)
@@ -1045,6 +1042,11 @@ class AgentPanel(QWidget):
                     "start_line": s,
                     "end_line": e,
                     "content": text
+                }
+            elif self._opened_file:
+                file_context = {
+                    "type": "file",
+                    "file": self._opened_file
                 }
 
         ui_logger.debug("AgentPanel[{}]: sending message ({} chars)", self.panel_id, len(content))
