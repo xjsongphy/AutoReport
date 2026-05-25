@@ -761,6 +761,9 @@ class ConfigDialog(QDialog):
             "syncBtnFg": c0["checkFg"],
             "syncBtnBorder": c0["checkFg"],
             "syncBtnHoverBg": c0["hover"],
+            "radius_sm": c0["radius_sm"],
+            "radius_md": c0["radius_md"],
+            "radius_lg": c0["radius_lg"],
             "fw_semibold": "600",
             "fw_bold": "700",
         }
