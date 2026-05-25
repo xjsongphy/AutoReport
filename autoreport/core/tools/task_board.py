@@ -35,7 +35,6 @@ class TaskBoard:
         target: AgentType,
         brief: str,
         blocking: bool = False,
-        priority: str = "normal",
         task_id: str | None = None,
     ) -> TaskItem:
         """Create a new task item. task_id may be reused across a routed chain."""
@@ -46,7 +45,6 @@ class TaskBoard:
             source_agent=source,
             target_agent=target,
             status=TaskStatus.PENDING,
-            priority=priority,
             created_at=datetime.now(timezone.utc),
             blocking=blocking,
         )

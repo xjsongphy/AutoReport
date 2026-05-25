@@ -239,7 +239,7 @@ class AgentLoop:
                 await self._process_message(message)
 
             except Exception as e:
-                logger.error("Error in agent loop for {}: {}", self.agent_type, e)
+                logger.error("Error in agent loop for {}: {}", self.agent_type, str(e))
                 await self.bus.publish(Error(
                     source=str(self.agent_type),
                     message=str(e),
@@ -727,8 +727,12 @@ class AgentLoop:
                     result_str = error_msg
 
                 # Add tool result as structured message
+                # Anthropic API doesn't support 'tool' role, use 'user' instead
+                provider_class_name = self.llm_provider.__class__.__name__
+                tool_result_role = "user" if provider_class_name == "AnthropicProvider" else "tool"
+
                 current_messages.append(LLMMessage(
-                    role="tool",
+                    role=tool_result_role,
                     content=result_str,
                     tool_call_id=tool_call.id,
                     is_tool_result=True,
@@ -984,7 +988,12 @@ class AgentLoop:
         return self._cached_full_prompt
 
     def _build_task_state_section(self) -> str:
-        """Build current task state section for the system prompt."""
+        """Build current task state section for the system prompt.
+
+        Rules:
+        - Incomplete tasks: show all
+        - Completed tasks: show only 10 most recently completed (by completed_at)
+        """
         if self._loop_manager is None:
             return ""
         task_board = getattr(self._loop_manager, '_task_board', None)
@@ -998,24 +1007,58 @@ class AgentLoop:
             return ""
 
         lines = ["\n[当前任务]"]
+
+        # Helper to format task list
+        def format_task_list(tasks, is_waitlist: bool = False) -> list[str]:
+            if not tasks:
+                return []
+
+            # Separate incomplete and completed
+            incomplete = [t for t in tasks if t.status != TaskStatus.COMPLETED]
+            completed = [t for t in tasks if t.status == TaskStatus.COMPLETED]
+
+            result = []
+
+            # Show all incomplete tasks first
+            for t in incomplete:
+                if is_waitlist:
+                    tgt = t.target_agent.value if hasattr(t.target_agent, 'value') else str(t.target_agent)
+                    result.append(f"  - 等待{tgt} {t.brief}")
+                else:
+                    status_map = {
+                        TaskStatus.PENDING: "待处理",
+                        TaskStatus.IN_PROGRESS: "进行中",
+                        TaskStatus.FAILED: "失败",
+                        TaskStatus.CANCELLED: "已取消",
+                    }
+                    s = status_map.get(t.status, t.status.value)
+                    result.append(f"  - {s} {t.brief}")
+
+            # Show 10 most recently completed tasks
+            if completed:
+                # Sort by completed_at descending (most recent first)
+                completed_sorted = sorted(
+                    completed,
+                    key=lambda t: t.completed_at or datetime.min,
+                    reverse=True
+                )[:10]
+
+                for t in completed_sorted:
+                    if is_waitlist:
+                        tgt = t.target_agent.value if hasattr(t.target_agent, 'value') else str(t.target_agent)
+                        result.append(f"  - 等待{tgt} {t.brief} (已完成)")
+                    else:
+                        result.append(f"  - 已完成 {t.brief}")
+
+            return result
+
         if todolist:
             lines.append("待办:")
-            for t in todolist[:10]:
-                status_map = {
-                    TaskStatus.PENDING: "待处理",
-                    TaskStatus.IN_PROGRESS: "进行中",
-                }
-                s = status_map.get(t.status, t.status.value)
-                lines.append(f"  - {s} {t.brief}")
+            lines.extend(format_task_list(todolist, is_waitlist=False))
+
         if waitlist:
             lines.append("等待:")
-            for t in waitlist[:10]:
-                tgt = t.target_agent.value
-                lines.append(f"  - 等待{tgt} {t.brief}")
-
-        total = len(todolist) + len(waitlist)
-        if total > 20:
-            lines.append(f"  ... 还有 {total - 20} 项")
+            lines.extend(format_task_list(waitlist, is_waitlist=True))
 
         return "\n".join(lines)
 
