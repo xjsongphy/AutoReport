@@ -4,7 +4,7 @@ import pytest
 from PyQt6.QtCore import QEvent, Qt
 from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import QApplication
-from autoreport.gui.widgets.message_row import MessageRow
+from autoreport.gui.widgets.message_row import MessageRow, _raw_markdown_for_selected_text
 from autoreport.gui.widgets.ui_utils import compact_tooltip_qss
 
 
@@ -56,6 +56,13 @@ def test_agent_message_renders_markdown_but_copies_raw_source(qtbot):
     )
     assert widget.eventFilter(label, event) is True
     assert QApplication.clipboard().text() == "**Bold** and `code`"
+
+
+def test_selected_agent_markdown_copy_preserves_inline_markup():
+    raw = "**Bold** and `code`"
+    assert _raw_markdown_for_selected_text(raw, "Bold") == "**Bold**"
+    assert _raw_markdown_for_selected_text(raw, "code") == "`code`"
+    assert _raw_markdown_for_selected_text(raw, "Bold and code") == raw
 
 
 def test_message_row_emits_rollback_checkpoint(qtbot):

@@ -76,3 +76,20 @@ def test_bash_detail_text_shrinks_in_narrow_panel(qtbot):
     for lab in bash_labels:
         assert lab.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Ignored
         assert lab.minimumWidth() == 0
+
+
+def test_bash_out_preview_is_limited_to_three_lines(qtbot):
+    widget = ToolCallGroup()
+    qtbot.addWidget(widget)
+    widget.add_tool_call(
+        "bash",
+        {"command": "printf many", "command_description": "many lines"},
+        success=True,
+        duration_ms=80,
+        result={"stdout": "one\ntwo\nthree\nfour\nfive", "stderr": ""},
+    )
+
+    labels = widget.findChildren(type(widget._header_text))
+    out_labels = [lab for lab in labels if lab.objectName() == "bashDetailText" and "one" in lab.text()]
+    assert out_labels
+    assert out_labels[0].text() == "one\ntwo\nthree"

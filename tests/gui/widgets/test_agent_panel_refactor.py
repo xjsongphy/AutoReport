@@ -207,7 +207,7 @@ def test_thinking_row_finishes_with_elapsed_summary(agent_panel):
     agent_panel.set_status("thinking")
     rows = agent_panel._messages_area.get_message_rows()
     assert len(rows) == 1
-    assert rows[0]._summary == "thinking"
+    assert rows[0]._summary.startswith("Thought for ")
 
     agent_panel.append_thinking("raw **markdown** thought")
     assert rows[0]._detail == "raw **markdown** thought"
@@ -215,6 +215,63 @@ def test_thinking_row_finishes_with_elapsed_summary(agent_panel):
     agent_panel.set_status("idle")
     assert rows[0]._summary.startswith("Thought for ")
     assert rows[0]._complete is True
+
+
+def test_thinking_timer_updates_existing_row_in_place(agent_panel):
+    agent_panel.set_status("thinking")
+    row = agent_panel._messages_area.get_message_rows()[0]
+
+    agent_panel._thinking_started_at -= 2
+    agent_panel._update_thinking_timer()
+
+    rows = agent_panel._messages_area.get_message_rows()
+    assert rows == [row]
+    assert row._summary.startswith("Thought for ")
+    assert row._summary != "Thought for 1s"
+
+
+def test_thinking_detail_updates_existing_detail_label(agent_panel):
+    agent_panel.set_status("thinking")
+    row = agent_panel._messages_area.get_message_rows()[0]
+    agent_panel.append_thinking("first")
+    row._summary_header.clicked.emit()
+    assert row.is_expanded()
+    assert row._detail_label is not None
+    assert "first" in row._detail_label.text()
+
+    agent_panel.append_thinking(" second")
+    rows = agent_panel._messages_area.get_message_rows()
+    assert rows == [row]
+    assert row.is_expanded()
+    assert "first second" in row._detail_label.text()
+
+
+def test_thinking_stream_merge_handles_delta_snapshot_and_final(agent_panel):
+    assert agent_panel._merge_thinking_chunk("", "hello ") == "hello "
+    assert agent_panel._merge_thinking_chunk("hello ", "world") == "hello world"
+    assert agent_panel._merge_thinking_chunk("hello world", "hello world") == "hello world"
+    assert agent_panel._merge_thinking_chunk("hello wor", "world") == "hello world"
+
+    agent_panel.set_status("thinking")
+    agent_panel.append_thinking("hello ")
+    agent_panel.append_thinking("world")
+    agent_panel.append_thinking("hello world")
+    row = agent_panel._messages_area.get_message_rows()[0]
+    assert row._detail == "hello world"
+
+
+def test_summary_arrow_stays_next_to_text(qtbot):
+    from autoreport.gui.widgets.message_row import MessageRow
+
+    row = MessageRow(role="agent", content="", summary="Thought for 1s", detail="detail")
+    qtbot.addWidget(row)
+    row.resize(600, 80)
+    row.show()
+    qtbot.waitExposed(row)
+
+    text_right = row._summary_text_label.mapTo(row, row._summary_text_label.rect().topRight()).x()
+    arrow_left = row._summary_arrow_widget.mapTo(row, row._summary_arrow_widget.rect().topLeft()).x()
+    assert 0 <= arrow_left - text_right <= 10
 
 
 def test_set_debug_mode_shows_hides_panel(agent_panel):
