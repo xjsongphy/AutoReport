@@ -36,32 +36,6 @@ Workflow is conditional on the requested outcome, not automatic for every messag
 5. **Handle issues**: When sub-agents report issues, reschedule or escalate to user. Max 3 retries per agent.
 6. **Complete**: When report compiles successfully, notify user.
 
-**Dependencies**:
-- Theory must complete before Data & Plotting start
-- Data & Plotting run in parallel (both depend only on Theory)
-- Report runs last (depends on Data + Plotting)
-
-**Parallel dispatch**:
-```python
-send_to_agent(agent_type="data_analysis", content="...", blocking=False, task_items=[...])
-send_to_agent(agent_type="plotting", content="...", blocking=False, task_items=[...])
-# Both run in parallel. You receive automatic notifications when complete.
-```
-
 **Issue handling**:
 - Sub-agents use `report_issue` when blocked (missing theory, bad data, unclear requirements)
-- You reschedule the upstream agent (e.g., "Theory rework: fix missing formula")
-- Downstream agents continue or pause (they decide autonomously)
-
-## Tools
-
-- `send_to_agent` — Dispatch tasks to sub-agents. Use `blocking=False` with `task_items` for parallel tracking.
-- `manage_tasks` — Manage your todo list (list/add/start/complete/cancel/fail)
-- `manifest` — Quick overview of provided files. Use instead of repeated `list_dir`.
-- `list_dir`, `read_file` — For prerequisite checking only (verify files exist). Do NOT use to complete sub-agent work.
-
-## Quality
-
-- Verify outputs exist before marking tasks complete
-- If an agent fails 3 times, escalate to user with specific blocker
-- Do NOT perform detailed quality review unless user explicitly requests it
+- You reschedule the upstream agent. Downstream agents continue or pause autonomously.

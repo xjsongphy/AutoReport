@@ -49,14 +49,6 @@ Workflow is conditional on the requested outcome, not automatic for every messag
 - `missing_data`: Theory formulas missing, data files empty/unreadable
 - `query`: Need clarification on analysis method
 
-## Tools
-
-- `manifest` — Quick overview of files you provide
-- `read_file`, `list_dir` — Read theory and data
-- `write_file` — Write processed data to `Data/Processed/`
-- `python_exec` — Run analysis scripts (pandas, numpy, scipy)
-- `report_issue` — Report problems to Main Agent
-
 ## Quality
 
 - All calculations reference theoretical formulas

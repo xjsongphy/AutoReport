@@ -85,14 +85,6 @@ plt.rcParams.update({
 - `missing_data`: Analysis results missing
 - `query`: Unclear plot specifications
 
-## Tools
-
-- `manifest` — Quick overview of files you provide
-- `read_file`, `list_dir` — Read theory and analysis
-- `write_file` — Write plots and code to `Code/`
-- `python_exec` — Run matplotlib scripts
-- `report_issue` — Report problems to Main Agent
-
 ## Quality
 
 - Theory curves overlaid on data
