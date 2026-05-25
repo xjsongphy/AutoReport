@@ -627,21 +627,6 @@ class FileTreeWidget(QWidget):
             /* Tooltips */
             {compact_tooltip_qss("QToolTip")}
 
-            /* Context Menu */
-            #explorerContextMenu {{
-                background-color: {c["bg"]};
-                border: 1px solid {c["border"]};
-                border-radius: {c["radius_md"]};
-                padding: 4px;
-            }}
-            #explorerContextMenu::item {{
-                padding: 6px 24px;
-                border-radius: {c["radius_sm"]};
-            }}
-            #explorerContextMenu::item:selected {{
-                background-color: {c["tree_sel_bg"]};
-                color: {c["tree_sel_fg"]};
-            }}
         """)
 
         self.tree.setIconSize(QSize(16, 16))
@@ -1586,7 +1571,6 @@ class FileTreeWidget(QWidget):
             return
         if len(self.tree.selectedItems()) > 1 and self.tree.selectionModel().isSelected(self.tree.indexFromItem(item, 0)):
             menu = QMenu(self)
-            menu.setObjectName("explorerContextMenu")
             delete_action = menu.addAction("删除选中项")
             action = menu.exec(self.tree.mapToGlobal(pos))
             if action == delete_action:
@@ -1597,7 +1581,6 @@ class FileTreeWidget(QWidget):
         file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
 
         menu = QMenu(self)
-        menu.setObjectName("explorerContextMenu")
 
         if file_path_str:
             file_path = Path(file_path_str)
