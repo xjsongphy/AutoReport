@@ -62,7 +62,7 @@ class LoopManager:
         self.skill_loader = SkillLoader()
         self._task_board = TaskBoard()
         self.manifest_manager = ManifestManager(self.workspace)
-        self.file_state_manager = FileStateManager()
+        self._file_state_managers: dict[AgentType, FileStateManager] = {}
 
         # Subscribe to restart requests
         self.bus.subscribe(RestartRequest, self._handle_restart_request)
@@ -226,11 +226,12 @@ class LoopManager:
             Tool registry with appropriate tools.
         """
         registry = ToolRegistry()
+        file_state_manager = self._get_file_state_manager(agent_type)
 
         # Common tools for all agents
         registry.register(ReadFileTool(
             workspace=self.workspace,
-            file_state_manager=self.file_state_manager,
+            file_state_manager=file_state_manager,
         ))
         registry.register(ListDirTool(workspace=self.workspace))
 
@@ -251,21 +252,21 @@ class LoopManager:
             write_allowed_dir=write_dir,
             manifest_manager=self.manifest_manager,
             agent_type=agent_type.value,
-            file_state_manager=self.file_state_manager,
+            file_state_manager=file_state_manager,
         ))
         registry.register(EditFileTool(
             workspace=self.workspace,
             write_allowed_dir=write_dir,
             manifest_manager=self.manifest_manager,
             agent_type=agent_type.value,
-            file_state_manager=self.file_state_manager,
+            file_state_manager=file_state_manager,
         ))
         registry.register(DeleteFileTool(
             workspace=self.workspace,
             write_allowed_dir=write_dir,
             manifest_manager=self.manifest_manager,
             agent_type=agent_type.value,
-            file_state_manager=self.file_state_manager,
+            file_state_manager=file_state_manager,
         ))
 
         # Execution tools (for data analysis, plotting, and main agent)
@@ -328,6 +329,13 @@ class LoopManager:
         ))
 
         return registry
+
+    def _get_file_state_manager(self, agent_type: AgentType) -> FileStateManager:
+        manager = self._file_state_managers.get(agent_type)
+        if manager is None:
+            manager = FileStateManager(workspace=self.workspace)
+            self._file_state_managers[agent_type] = manager
+        return manager
 
     async def create_checkpoint(
         self, agent_type: str, description: str = "", source: str = "pre_message",

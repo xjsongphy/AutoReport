@@ -6,12 +6,8 @@ Verifies the full lifecycle:
   write_file → warns if not read / if stale
   delete_file → (optional check)
 """
-import asyncio
 import hashlib
-import os
-import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -212,7 +208,7 @@ class TestReadFileIntegration:
         assert "binary" in result["error"].lower() or "utf-8" in result["error"].lower()
 
     async def test_read_then_edit_passes(self, workspace: Path, allowed_dir: Path,
-                                          read_tool: ReadFileTool, edit_tool: EditFileTool):
+                                         read_tool: ReadFileTool, edit_tool: EditFileTool):
         f = allowed_dir / "read_edit.txt"
         f.write_text("line1\nline2\nline3\n", encoding="utf-8")
         # Read first
@@ -237,7 +233,7 @@ class TestReadFileIntegration:
         assert "without having read it" in result["warning"]
 
     async def test_edit_stale_after_change(self, workspace: Path, allowed_dir: Path,
-                                             read_tool: ReadFileTool, edit_tool: EditFileTool):
+                                           read_tool: ReadFileTool, edit_tool: EditFileTool):
         f = allowed_dir / "stale_edit.txt"
         f.write_text("original\n", encoding="utf-8")
         # Read
@@ -261,6 +257,28 @@ class TestReadFileIntegration:
         result = await write_tool(path="output/brand_new.txt", content="fresh\n")
         assert "warning" not in result, f"Unexpected warning: {result.get('warning')}"
         assert result["success"] is True
+
+    async def test_read_state_isolated_between_agents(self, workspace: Path, allowed_dir: Path, manifest: ManifestManager):
+        """Read state should be isolated per agent (no cross-agent sharing)."""
+        fsm_a = FileStateManager()
+        fsm_b = FileStateManager()
+        read_a = ReadFileTool(workspace, file_state_manager=fsm_a)
+        edit_b = EditFileTool(
+            workspace,
+            write_allowed_dir=allowed_dir,
+            manifest_manager=manifest,
+            agent_type="agent_b",
+            file_state_manager=fsm_b,
+        )
+        file_path = allowed_dir / "isolated.txt"
+        file_path.write_text("hello\n", encoding="utf-8")
+
+        # Agent A reads file
+        await read_a(path="output/isolated.txt")
+        # Agent B should still be blocked by read-before-edit
+        result = await edit_b(path="output/isolated.txt", old_text="hello", new_text="world")
+        assert "warning" in result
+        assert result["has_read"] is False
 
 
 # ---------------------------------------------------------------------------
