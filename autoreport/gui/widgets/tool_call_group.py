@@ -5,7 +5,16 @@ from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import QTimer, Qt, pyqtSignal
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+from ..theme import get_theme_colors
+from .timeline import TimelineRail
+from .ui_utils import install_compact_tooltip, render_svg_icon
+
+
+def _copy_icon_dark():
+    # Keep copy icon visually consistent with user bubble actions.
+    return render_svg_icon("copy", QColor(get_theme_colors()["muted"]), size=16)
 
 
 @dataclass
@@ -45,64 +54,48 @@ class ToolCallGroup(QWidget):
         self._calls: list[ToolCall] = []
         self._timeline_prev = False
         self._timeline_next = False
-        self._chain_top: QWidget | None = None
-        self._chain_bottom: QWidget | None = None
+        self._timeline_rail: TimelineRail | None = None
         self._tick_timer = QTimer(self)
         self._tick_timer.setInterval(1000)
         self._tick_timer.timeout.connect(self._tick_running)
         self._setup_ui()
 
     def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 4, 16, 4)
-        layout.setSpacing(0)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 0, 16, 0)
+        layout.setSpacing(8)
+
+        self._timeline_rail = TimelineRail(parent=self)
+        layout.addWidget(self._timeline_rail, 0, Qt.AlignmentFlag.AlignLeft)
+
+        content = QWidget(self)
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(4, 0, 0, 0)
+        content_layout.setSpacing(0)
+        layout.addWidget(content, 1)
 
         self._header_btn = _ClickableHeaderWidget()
         self._header_btn.setObjectName("toolCallHeader")
         self._header_btn.clicked.connect(lambda: None)
         header_layout = QHBoxLayout(self._header_btn)
-        header_layout.setContentsMargins(0, 2, 0, 2)
-        header_layout.setSpacing(8)
-
-        rail = QWidget(self._header_btn)
-        rail.setFixedWidth(12)
-        rail_layout = QVBoxLayout(rail)
-        rail_layout.setContentsMargins(0, 0, 0, 0)
-        rail_layout.setSpacing(0)
-        self._chain_top = QWidget(rail)
-        self._chain_top.setFixedWidth(1)
-        self._chain_top.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-        self._chain_top.setStyleSheet("background:#6b7280;")
-        rail_layout.addWidget(self._chain_top, 1, Qt.AlignmentFlag.AlignHCenter)
-        self._dot = QLabel(rail)
-        self._dot.setObjectName("toolCallDot")
-        self._dot.setFixedSize(7, 7)
-        self._dot.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        rail_layout.addWidget(self._dot, 0, Qt.AlignmentFlag.AlignHCenter)
-        self._chain_bottom = QWidget(rail)
-        self._chain_bottom.setFixedWidth(1)
-        self._chain_bottom.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-        self._chain_bottom.setStyleSheet("background:#6b7280;")
-        rail_layout.addWidget(self._chain_bottom, 1, Qt.AlignmentFlag.AlignHCenter)
-        header_layout.addWidget(rail, 0, Qt.AlignmentFlag.AlignTop)
-        header_layout.setStretch(0, 0)
-        header_layout.setStretch(1, 1)
+        header_layout.setContentsMargins(0, 4, 0, 4)
+        header_layout.setSpacing(0)
 
         self._header_text = QLabel()
         self._header_text.setObjectName("toolCallHeaderText")
-        self._header_text.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self._header_text.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self._header_text.setWordWrap(True)
         self._header_text.setTextFormat(Qt.TextFormat.RichText)
         self._header_text.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self._header_text.setMinimumWidth(0)
-        header_layout.addWidget(self._header_text, 1)
-        layout.addWidget(self._header_btn)
+        header_layout.addWidget(self._header_text, 1, Qt.AlignmentFlag.AlignTop)
+        content_layout.addWidget(self._header_btn)
 
         self._detail_host = QWidget(self)
         self._detail_layout = QVBoxLayout(self._detail_host)
-        self._detail_layout.setContentsMargins(16, 2, 0, 0)
+        self._detail_layout.setContentsMargins(0, 2, 0, 0)
         self._detail_layout.setSpacing(0)
-        layout.addWidget(self._detail_host)
+        content_layout.addWidget(self._detail_host)
         self._update_timeline_chain()
 
     def set_timeline_chain(self, prev_link: bool, next_link: bool) -> None:
@@ -111,10 +104,8 @@ class ToolCallGroup(QWidget):
         self._update_timeline_chain()
 
     def _update_timeline_chain(self) -> None:
-        if self._chain_top is not None:
-            self._chain_top.setVisible(self._timeline_prev)
-        if self._chain_bottom is not None:
-            self._chain_bottom.setVisible(self._timeline_next)
+        if self._timeline_rail is not None:
+            self._timeline_rail.set_chain(self._timeline_prev, self._timeline_next)
 
     def add_tool_call(
         self,
@@ -190,8 +181,6 @@ class ToolCallGroup(QWidget):
         return "#22C55E" if success else "#EF4444"
 
     def _timer_text(self, call: ToolCall) -> str:
-        if call.success is None:
-            return f"{call.elapsed_seconds}s"
         return ""
 
     def _extract_file_names(self, arguments: dict[str, Any]) -> list[str]:
@@ -262,11 +251,18 @@ class ToolCallGroup(QWidget):
             value.setObjectName("bashDetailText")
             value.setTextFormat(Qt.TextFormat.PlainText)
             value.setWordWrap(False)
-            value.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            # Allow long command/output text to shrink with panel width instead of
+            # forcing the whole row wider than the agent panel.
+            value.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+            value.setMinimumWidth(0)
             value.setFixedHeight(18)
             row_layout.addWidget(value, 1)
-            copy_btn = QPushButton("Copy", row)
-            copy_btn.setObjectName("bashCopyBtn")
+            copy_btn = QPushButton(row)
+            copy_btn.setObjectName("userCopyBtn")
+            copy_btn.setIcon(_copy_icon_dark())
+            copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            copy_btn.setFixedSize(30, 24)
+            install_compact_tooltip(copy_btn, "Copy")
             copy_btn.setVisible(False)
             copy_btn.clicked.connect(lambda _=False, t=text: QApplication.clipboard().setText(t))
             row_layout.addWidget(copy_btn, 0, Qt.AlignmentFlag.AlignRight)
@@ -316,11 +312,7 @@ class ToolCallGroup(QWidget):
 
         if len(self._calls) == 1:
             call = self._calls[0]
-            timer = self._timer_text(call)
-            text = f"&nbsp;&nbsp;{self._header_text_for_call(call)}"
-            if timer:
-                text += f"&nbsp;&nbsp;{timer}"
-            self._header_text.setText(text)
+            self._header_text.setText(self._header_text_for_call(call))
             dot_color = self._status_dot_color(call.success)
         else:
             running = any(c.success is None for c in self._calls)
@@ -346,13 +338,11 @@ class ToolCallGroup(QWidget):
                 joined = self._header_text_for_call(self._calls[0])
             else:
                 joined = " ".join(self._header_text_for_call(c) for c in self._calls)
-            timer = ""
-            if running:
-                timer = f"&nbsp;&nbsp;{max((c.elapsed_seconds for c in self._calls if c.success is None), default=0)}s"
-            self._header_text.setText(f"&nbsp;&nbsp;{joined}{timer}")
+            self._header_text.setText(joined)
             dot_color = self._status_dot_color(None if running else success)
 
-        self._dot.setStyleSheet(f"background:{dot_color}; border-radius: 3px;")
+        if self._timeline_rail is not None:
+            self._timeline_rail.set_dot_color(dot_color)
         self._render_bash_detail()
 
         if any(c.success is None for c in self._calls):
