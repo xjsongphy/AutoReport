@@ -23,6 +23,7 @@ ALLOWED_COMMANDS = {
     "git",
     "echo", "printf",
     "wc", "sort", "uniq", "cut",
+    "fc-list",
     "mineru-open-api",
 }
 

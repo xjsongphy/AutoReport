@@ -715,7 +715,7 @@ class AgentLoop:
                     result_str = self._format_tool_result(result)
 
                 except Exception as e:
-                    logger.error("Tool execution error: {}", str(e))
+                    logger.error("Tool execution error for {}: {} | args={}", tool_call.name, str(e), tool_call.arguments)
                     error_msg = f"Error executing {tool_call.name}: {str(e)}"
 
                     await self.bus.publish(ToolResultMsg(

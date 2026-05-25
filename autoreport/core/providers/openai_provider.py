@@ -254,7 +254,11 @@ class OpenAICompatProvider(LLMProvider):
     def _parse_arguments(self, arguments: str) -> dict:
         """Parse JSON arguments string."""
         try:
-            return json.loads(arguments)
+            result = json.loads(arguments)
+            if isinstance(result, dict):
+                return result
+            logger.warning("Tool arguments parsed to non-dict type {}: {}", type(result).__name__, arguments)
+            return {}
         except json.JSONDecodeError:
             logger.warning("Failed to parse tool arguments: {}", arguments)
             return {}

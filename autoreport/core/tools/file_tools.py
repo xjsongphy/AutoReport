@@ -122,6 +122,9 @@ class ReadFileTool(Tool):
             hint = f" Did you mean '{suggestion}'?" if suggestion and suggestion != path else ""
             raise FileNotFoundError(f"File not found: {file_path}.{hint}")
 
+        if file_path.is_dir():
+            raise ValueError(f"Path is a directory, not a file: {file_path}. Use list_dir to explore directories.")
+
         if file_path.suffix.lower() == ".pdf":
             raise ValueError(
                 f"read_file does not support PDF files: {file_path.name}. "

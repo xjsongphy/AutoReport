@@ -847,7 +847,6 @@ class MessageRow(QWidget):
     def contextMenuEvent(self, event) -> None:
         """Show VS Code-like context menu for message actions."""
         menu = create_isolated_context_menu(self)
-        menu.setIconVisibleInMenu(False)
 
         copy_action = menu.addAction("复制")
         copy_action.triggered.connect(self._copy_content)

@@ -195,9 +195,16 @@ class ManageTasksTool(Tool):
 
     async def _handle_batch_add(self, items: list[dict]) -> dict[str, Any]:
         """Add multiple local tasks at once, publish one batch notification."""
+        if not isinstance(items, list):
+            return {
+                "status": "error",
+                "error": f"'items' must be a list of dicts, got {type(items).__name__}",
+            }
         created: list[dict] = []
         tasks: list = []
         for item in items:
+            if not isinstance(item, dict):
+                continue
             desc = str(item.get("description", ""))
             if not desc:
                 continue
