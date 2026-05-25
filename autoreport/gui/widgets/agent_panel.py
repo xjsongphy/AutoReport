@@ -608,7 +608,8 @@ class AgentPanel(QWidget):
         self._opened_file = file_path
         self._preview_context = None
         self._context_enabled = True
-        self._set_context_attachment(Path(file_path).name, file_path)
+        # Show file attachment indicator (visual only, no signal)
+        self._set_context_attachment(Path(file_path).name, file_path, emit_signal=False)
 
     def set_preview_context(self, file_path: str, selected_text: str, start_line: int, end_line: int) -> None:
         self._preview_context = (file_path, selected_text, start_line, end_line)
@@ -616,7 +617,8 @@ class AgentPanel(QWidget):
         self._context_enabled = True
         lines = end_line - start_line + 1
         label = f"{lines} line{'s' if lines > 1 else ''} selected"
-        self._set_context_attachment(label, file_path)
+        # Show selection attachment indicator (visual only, no signal)
+        self._set_context_attachment(label, file_path, emit_signal=False)
 
     def clear_file_context(self) -> None:
         """Clear attached file/selection context so next message won't include it."""
@@ -625,13 +627,24 @@ class AgentPanel(QWidget):
         self._context_separator.setVisible(False)
         self._context_attachment_btn.setVisible(False)
 
-    def _set_context_attachment(self, label: str, tooltip_path: str) -> None:
+    def _set_context_attachment(self, label: str, tooltip_path: str, emit_signal: bool = True) -> None:
         self._context_attachment_btn.setChecked(True)
         self._context_attachment_btn.setText(label)
         self._context_attachment_btn.setToolTip(tooltip_path)
         self._context_attachment_btn.setIcon(self._context_file_icon)
         self._context_separator.setVisible(True)
         self._context_attachment_btn.setVisible(True)
+        if emit_signal:
+            self.file_context_attached.emit({
+                "type": "file" if not self._preview_context else "selection",
+                "file": tooltip_path,
+                "start_line": self._preview_context[1] if self._preview_context else None,
+                "end_line": self._preview_context[2] if self._preview_context else None,
+                "content": self._preview_context[1] if self._preview_context else None,
+            }) if self._preview_context else {
+                "type": "file",
+                "file": tooltip_path,
+            }
 
     def _on_context_attachment_toggled(self) -> None:
         self._context_enabled = self._context_attachment_btn.isChecked()
