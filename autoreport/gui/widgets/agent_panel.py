@@ -92,6 +92,7 @@ class AgentPanel(QWidget):
         self._pending_tool_groups: list = []
         self._thinking_row = None
         self._thinking_started_at: float | None = None
+        self._thinking_detail = ""
         self._thinking_timer = QTimer(self)
         self._thinking_timer.setInterval(1000)
         self._thinking_timer.timeout.connect(self._update_thinking_timer)
@@ -605,9 +606,12 @@ class AgentPanel(QWidget):
 
     def set_opened_file(self, file_path: str) -> None:
         self._opened_file = file_path
+        # Opening/switching files should not auto-attach context to agent.
+        # Only explicit text selection is attachable.
         self._preview_context = None
         self._context_enabled = True
-        self._set_context_attachment(Path(file_path).name, file_path)
+        self._context_separator.setVisible(False)
+        self._context_attachment_btn.setVisible(False)
 
     def set_preview_context(self, file_path: str, selected_text: str, start_line: int, end_line: int) -> None:
         self._preview_context = (file_path, selected_text, start_line, end_line)
@@ -783,6 +787,7 @@ class AgentPanel(QWidget):
         if self._thinking_row is not None:
             return
         self._thinking_started_at = time.monotonic()
+        self._thinking_detail = ""
         ts = datetime.now().strftime("%H:%M")
         agent_name = self._title_label.text() or "Agent"
         self._thinking_row = self._messages_area.add_message_row(
@@ -790,12 +795,12 @@ class AgentPanel(QWidget):
             content="",
             timestamp=ts,
             agent_name=agent_name,
-            summary="thinking",
-            detail=" ",
+            summary="Thought for 1s",
+            detail="",
             expandable=True,
         )
         self._thinking_row._complete = False
-        self._thinking_row._is_thinking_row = True
+        self._thinking_row.set_thinking_row_style(True)
         self._thinking_timer.start()
         self._update_composer_alignment()
 
@@ -803,20 +808,41 @@ class AgentPanel(QWidget):
         self.start_thinking()
         if self._thinking_row is None:
             return
-        self._thinking_row.set_detail_text(thinking or " ")
+        if thinking:
+            self._thinking_detail = self._merge_thinking_chunk(self._thinking_detail, thinking)
+        self._thinking_row.set_detail_text(self._thinking_detail)
         self._messages_area.follow_streaming_if_enabled()
+
+    @staticmethod
+    def _merge_thinking_chunk(current: str, chunk: str) -> str:
+        if not current:
+            return chunk
+        if chunk.startswith(current):
+            return chunk
+        if current.endswith(chunk):
+            return current
+        max_overlap = min(len(current), len(chunk))
+        for size in range(max_overlap, 0, -1):
+            if current[-size:] == chunk[:size]:
+                return current + chunk[size:]
+        return current + chunk
 
     def finish_thinking(self) -> None:
         if self._thinking_row is None:
             return
+        row = self._thinking_row
         elapsed = self._thinking_elapsed_seconds()
         summary = f"Thought for {elapsed}s"
-        detail = (getattr(self._thinking_row, "_detail", None) or "").strip()
-        self._thinking_row.set_summary_text(summary)
-        self._thinking_row.mark_complete()
-        self.thinking_finished.emit(summary, detail, True)
+        detail = (self._thinking_detail or "").strip()
+        if not detail:
+            self._messages_area.remove_message_row(row)
+        else:
+            row.set_summary_text(summary)
+            row.mark_complete()
+            self.thinking_finished.emit(summary, detail, True)
         self._thinking_row = None
         self._thinking_started_at = None
+        self._thinking_detail = ""
         self._thinking_timer.stop()
 
     def _thinking_elapsed_seconds(self) -> int:
@@ -827,7 +853,8 @@ class AgentPanel(QWidget):
     def _update_thinking_timer(self) -> None:
         if self._thinking_row is None:
             self._thinking_timer.stop()
-        return
+            return
+        self._thinking_row.set_summary_text(f"Thought for {self._thinking_elapsed_seconds()}s")
 
     def add_error(self, source: str, message: str) -> None:
         ts = datetime.now().strftime("%H:%M")
@@ -1018,11 +1045,6 @@ class AgentPanel(QWidget):
                     "start_line": s,
                     "end_line": e,
                     "content": text
-                }
-            elif self._opened_file:
-                file_context = {
-                    "type": "file",
-                    "file": self._opened_file
                 }
 
         ui_logger.debug("AgentPanel[{}]: sending message ({} chars)", self.panel_id, len(content))
