@@ -245,3 +245,24 @@ def test_follow_streaming_respects_user_scroll_state(qtbot):
     widget.follow_streaming_if_enabled()
     qtbot.wait(20)
     assert sb.value() < sb.maximum()
+
+
+def test_timeline_chain_breaks_on_user_bubble_between_chainable_items(qtbot):
+    widget = MessagesArea()
+    qtbot.addWidget(widget)
+
+    first_agent = widget.add_message_row(role="agent", content="a1", timestamp="12:00")
+    tool = widget.add_tool_group()
+    # Simulate other-agent message rendered as user bubble in current panel.
+    widget.add_message_row(
+        role="user",
+        content="interruption",
+        timestamp="12:01",
+        render_as_user_bubble=True,
+    )
+    second_agent = widget.add_message_row(role="agent", content="a2", timestamp="12:02")
+
+    assert first_agent._agent_chain_next is True
+    assert tool._timeline_prev is True
+    assert tool._timeline_next is False
+    assert second_agent._agent_chain_prev is False

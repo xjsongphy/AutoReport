@@ -1,5 +1,7 @@
 """Tests for ToolCallGroup widget."""
 
+from PyQt6.QtWidgets import QSizePolicy
+
 from autoreport.gui.widgets.tool_call_group import ToolCallGroup
 
 
@@ -48,3 +50,29 @@ def test_pending_call_can_be_completed(qtbot):
     )
 
     assert "Theory replied: done" in widget.get_summary_text()
+
+
+def test_bash_detail_text_shrinks_in_narrow_panel(qtbot):
+    widget = ToolCallGroup()
+    qtbot.addWidget(widget)
+    widget.resize(260, 180)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    widget.add_tool_call(
+        "bash",
+        {
+            "command": "python -c \"print('x'*500)\" --very-long-arg --very-long-arg --very-long-arg",
+            "command_description": "long command",
+        },
+        success=True,
+        duration_ms=80,
+    )
+    qtbot.wait(20)
+
+    labels = widget.findChildren(type(widget._header_text))
+    bash_labels = [lab for lab in labels if lab.objectName() == "bashDetailText"]
+    assert bash_labels
+    for lab in bash_labels:
+        assert lab.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Ignored
+        assert lab.minimumWidth() == 0

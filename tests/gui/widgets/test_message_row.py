@@ -122,7 +122,7 @@ def test_user_message_can_render_collapsed_summary(qtbot):
     qtbot.addWidget(widget)
 
     assert not widget.is_expanded()
-    widget._summary_btn.click()
+    widget._summary_header.clicked.emit()
     assert widget.is_expanded()
 
 
@@ -136,7 +136,7 @@ def test_agent_message_can_render_collapsed_summary(qtbot):
     qtbot.addWidget(widget)
 
     assert not widget.is_expanded()
-    widget._summary_btn.click()
+    widget._summary_header.clicked.emit()
     assert widget.is_expanded()
 
 
