@@ -729,6 +729,11 @@ class AgentPanel(QWidget):
         detail: str | None = None,
         expandable: bool = True,
     ) -> None:
+        # Ensure thinking is complete before adding tool calls
+        if self._thinking_row is not None:
+            self.finish_thinking()
+
+        # Ensure previous agent streaming message is complete
         last = self._messages_area.last_timeline_widget()
         if (
             getattr(last, "_role", "") == "agent"
@@ -736,6 +741,7 @@ class AgentPanel(QWidget):
             and not getattr(last, "_complete", True)
         ):
             last.mark_complete()
+
         # Merge adjacent identical tool calls to avoid long noisy rows.
         merge_target = None
         if (
