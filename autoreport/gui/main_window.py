@@ -69,6 +69,8 @@ class MainWindow(QMainWindow):
         self._title_bar: TitleBar | None = None
         self._splitter_sizes_initialized = False
         self._initial_render_prepared = False
+        # Cache file context to attach to next user message
+        self._pending_file_context: dict[str, dict] = {"main": None, "sub": None}
 
         self.setWindowTitle("AutoReport")
         self.resize(1400, 900)
@@ -1052,22 +1054,67 @@ class MainWindow(QMainWindow):
         return asyncio.run_coroutine_threadsafe(coro, self._async_loop)
 
     def _on_main_agent_message(self, content: str) -> None:
+        # Save original content for display
         self._conv_store.append_message("main", "user", content)
-        self._submit_coroutine(self.backend.send_user_message(content, "main"))
+
+        # Attach file context if available
+        full_content = content
+        file_context = self._pending_file_context.get("main")
+        if file_context:
+            context_msg = self._format_file_context(file_context)
+            if context_msg:
+                full_content = f"{context_msg}\n\n{content}"
+            self._pending_file_context["main"] = None  # Clear after use
+
+        self._submit_coroutine(self.backend.send_user_message(full_content, "main"))
 
     def _on_sub_agent_message(self, content: str) -> None:
         agent_type = self.sub_agent_panel.agent_type
+        # Save original content for display
         self._conv_store.append_message(agent_type, "user", content)
-        self._submit_coroutine(self.backend.send_user_message(content, agent_type))
+
+        # Attach file context if available
+        full_content = content
+        file_context = self._pending_file_context.get("sub")
+        if file_context:
+            context_msg = self._format_file_context(file_context)
+            if context_msg:
+                full_content = f"{context_msg}\n\n{content}"
+            self._pending_file_context["sub"] = None  # Clear after use
+
+        self._submit_coroutine(self.backend.send_user_message(full_content, agent_type))
+
+    def _format_file_context(self, file_context: dict) -> str:
+        """Format file context for attachment to user message."""
+        if not file_context:
+            return ""
+
+        if file_context.get("type") == "selection":
+            fp = file_context.get("file", "")
+            s = file_context.get("start_line", "")
+            e = file_context.get("end_line", "")
+            return (
+                "Editor context: selection\n"
+                f"File: {fp}\n"
+                f"Selected lines: {s}-{e}\n"
+            )
+        elif file_context.get("type") == "file":
+            fp = file_context.get("file", "")
+            return (
+                "Editor context: file\n"
+                f"Current file: {fp}\n"
+            )
+        return ""
 
     def _on_main_agent_file_context(self, file_context: dict) -> None:
         """Handle file context attachment for main agent."""
-        self._submit_coroutine(self.backend.send_file_context(file_context, "main"))
+        # Cache for attachment to next user message
+        self._pending_file_context["main"] = file_context
 
     def _on_sub_agent_file_context(self, file_context: dict) -> None:
         """Handle file context attachment for sub agent."""
-        agent_type = self.sub_agent_panel.agent_type
-        self._submit_coroutine(self.backend.send_file_context(file_context, agent_type))
+        # Cache for attachment to next user message
+        self._pending_file_context["sub"] = file_context
 
     def _on_sub_agent_type_changed(self, agent_type: str) -> None:
         self.sub_agent_panel.set_agent_type(agent_type)
