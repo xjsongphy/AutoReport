@@ -68,6 +68,7 @@ class MainWindow(QMainWindow):
         self._agent_status_cache: dict[str, tuple[str, dict]] = {}
         self._title_bar: TitleBar | None = None
         self._splitter_sizes_initialized = False
+        self._initial_render_prepared = False
 
         self.setWindowTitle("AutoReport")
         self.resize(1400, 900)
@@ -94,17 +95,37 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         QTimer.singleShot(0, self._apply_splitter_sizes)
         QTimer.singleShot(100, self._apply_splitter_sizes)
-        # Load persisted histories for main and currently selected sub-agent.
-        # Do an immediate load plus a deferred reload after the first event-loop
-        # tick to avoid startup ordering glitches in the sub-agent selector.
-        self._load_conversations()
-        QTimer.singleShot(0, self._load_conversations)
 
         self._message_signal.connect(self._dispatch_backend_message)
         self.backend.subscribe_to_messages(self._on_bus_message)
         self._subscribe_to_debug_messages()
 
         logger.info("Main window initialized for workspace: {}", self.workspace)
+
+    def prepare_initial_render(self) -> None:
+        """Synchronously prepare splitter sizes and history before first paint."""
+        if self._initial_render_prepared:
+            return
+        self._initial_render_prepared = True
+        self.ensurePolished()
+        central = self.centralWidget()
+        if central is not None and central.layout() is not None:
+            central.layout().activate()
+        self._apply_splitter_sizes(force=True)
+        areas = [
+            self.main_agent_panel._messages_area,
+            self.sub_agent_panel._messages_area,
+        ]
+        for area in areas:
+            area.setUpdatesEnabled(False)
+        try:
+            self._load_conversations()
+            self.layout().activate()
+            for area in areas:
+                area.viewport().updateGeometry()
+        finally:
+            for area in areas:
+                area.setUpdatesEnabled(True)
 
     def _apply_window_shadow(self) -> None:
         """Apply window shadow effect for platform-appropriate appearance."""
@@ -548,7 +569,6 @@ class MainWindow(QMainWindow):
                 background-color: #23272f;
                 border: 1px solid #353b46;
                 border-radius: {px(8)};
-                margin-left: {px(12)};
             }}
             #bashDetailRow {{
                 background-color: transparent;
@@ -800,6 +820,14 @@ class MainWindow(QMainWindow):
         self.sub_agent_panel.rollback_requested.connect(
             lambda checkpoint_id, row: self._on_rollback_requested(self.sub_agent_panel.agent_type, checkpoint_id, row)
         )
+        self.main_agent_panel.thinking_finished.connect(
+            lambda summary, detail, expandable: self._on_thinking_finished("main", summary, detail, expandable)
+        )
+        self.sub_agent_panel.thinking_finished.connect(
+            lambda summary, detail, expandable: self._on_thinking_finished(
+                self.sub_agent_panel.agent_type, summary, detail, expandable
+            )
+        )
 
         self.preview.selection_changed.connect(self._on_preview_selection_changed)
         self.preview.restore_open_tabs()
@@ -926,6 +954,14 @@ class MainWindow(QMainWindow):
                     detail=rec.get("detail"),
                     expandable=rec.get("expandable", True),
                 )
+            elif role == "thinking":
+                panel.add_message(
+                    "agent",
+                    content,
+                    summary=rec.get("summary") or "Thought",
+                    detail=rec.get("detail") or content,
+                    expandable=rec.get("expandable", True),
+                )
             elif role == "tool_call":
                 panel.add_tool_call(
                     content,
@@ -946,6 +982,18 @@ class MainWindow(QMainWindow):
             elif role == "error":
                 panel.add_error(rec.get("source", ""), content)
         logger.info("Loaded {} messages for agent {}", len(records), agent_type)
+
+    def _on_thinking_finished(self, agent_type: str, summary: str, detail: str, expandable: bool) -> None:
+        self._conv_store.append_message(
+            agent_type,
+            "thinking",
+            detail or "",
+            extra={
+                "summary": summary,
+                "detail": detail or "",
+                "expandable": expandable,
+            },
+        )
 
     def _records_to_backend_messages(self, agent_type: str) -> list[dict[str, str]]:
         """Convert stored records to backend chat history messages."""
@@ -971,6 +1019,9 @@ class MainWindow(QMainWindow):
     def _submit_coroutine(self, coro):
         if self._async_loop is None:
             logger.warning("No async loop set, cannot dispatch coroutine")
+            close = getattr(coro, "close", None)
+            if callable(close):
+                close()
             return
         return asyncio.run_coroutine_threadsafe(coro, self._async_loop)
 
@@ -1470,9 +1521,8 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event) -> None:
         """Finalize splitter sizing after child widgets compute minimum widths."""
+        self.prepare_initial_render()
         super().showEvent(event)
-        QTimer.singleShot(0, lambda: self._apply_splitter_sizes(force=True))
-        QTimer.singleShot(120, lambda: self._apply_splitter_sizes(force=True))
 
     def changeEvent(self, event) -> None:
         """Handle window state changes (maximize/restore/fullscreen)."""

@@ -267,6 +267,7 @@ class AutoReportApp:
             debug_agents=list(getattr(self, "_debug_agents_on_start", [])),
         )
         self.main_window.set_async_loop(self._async_loop)
+        self.main_window.prepare_initial_render()
         self.main_window.show()
 
         exit_code = app.exec()
