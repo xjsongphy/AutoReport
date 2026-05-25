@@ -356,6 +356,9 @@ class BackendAPIImpl(BackendAPI):
         """Send file context to an agent as system message (invisible to user)."""
         from .interfaces.types import AgentType
 
+        # Debug log to see what we received
+        logger.debug("send_file_context called: agent_type={}, file_context={}", agent_type, file_context)
+
         # Map string to AgentType enum
         agent_type_map = {
             "main": AgentType.MAIN,
@@ -378,6 +381,13 @@ class BackendAPIImpl(BackendAPI):
                 f"File: {fp}\n"
                 f"Selected lines: {s}-{e}\n"
                 "Constraint: selected text is not attached; do not infer or list other open tabs.\n"
+            )
+        elif file_context.get("type") == "file":
+            fp = file_context.get("file", "")
+            context_msg = (
+                "Editor context: file\n"
+                f"Current file: {fp}\n"
+                "Constraint: do not infer or list other open tabs.\n"
             )
         else:
             return
