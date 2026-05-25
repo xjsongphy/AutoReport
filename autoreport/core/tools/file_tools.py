@@ -88,11 +88,12 @@ class ReadFileTool(Tool):
         self._file_state_manager = file_state_manager
 
     def _is_internal_metadata_path(self, file_path: Path) -> bool:
+        """Check if path is in internal metadata directories (.autoreport, .checkpoints)."""
         try:
             rel = file_path.relative_to(self.workspace)
         except ValueError:
             return False
-        return rel.parts[:1] == (".autoreport",)
+        return rel.parts[:1] in {".autoreport", ".checkpoints"}
 
     async def __call__(
         self,
@@ -587,7 +588,10 @@ class ListDirTool(Tool):
         self.workspace = Path(workspace).resolve()
 
     def _is_internal_metadata_rel(self, rel_posix: str) -> bool:
-        return rel_posix == ".autoreport" or rel_posix.startswith(".autoreport/")
+        """Check if relative path is in internal metadata directories."""
+        return (rel_posix in {".autoreport", ".checkpoints"} or
+                rel_posix.startswith(".autoreport/") or
+                rel_posix.startswith(".checkpoints/"))
 
     async def __call__(
         self,
@@ -632,7 +636,7 @@ class ListDirTool(Tool):
                         files.append(rel)
             else:
                 for item in sorted(dir_path.iterdir()):
-                    if item.name == ".autoreport":
+                    if item.name in {".autoreport", ".checkpoints"}:
                         continue
                     if item.is_dir():
                         directories.append(item.name)
