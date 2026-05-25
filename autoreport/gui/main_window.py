@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMenuBar,
+    QMessageBox,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -51,6 +52,7 @@ class MainWindow(QMainWindow):
     """
 
     _message_signal = pyqtSignal(object)
+    _rollback_finished_signal = pyqtSignal(str, object)
 
     def __init__(
         self,
@@ -773,6 +775,7 @@ class MainWindow(QMainWindow):
         self._setup_app_shortcuts()
 
         # Connect signals
+        self._rollback_finished_signal.connect(self._on_rollback_finished)
         self.main_agent_panel.message_sent.connect(self._on_main_agent_message)
         self.sub_agent_panel.message_sent.connect(self._on_sub_agent_message)
 
@@ -789,6 +792,12 @@ class MainWindow(QMainWindow):
         self.main_agent_panel.interrupt_requested.connect(lambda: self._on_interrupt("main"))
         self.sub_agent_panel.interrupt_requested.connect(lambda: self._on_interrupt(self.sub_agent_panel.agent_type))
         self.sub_agent_panel.agent_type_changed.connect(self._on_sub_agent_type_changed)
+        self.main_agent_panel.rollback_requested.connect(
+            lambda checkpoint_id, row: self._on_rollback_requested("main", checkpoint_id, row)
+        )
+        self.sub_agent_panel.rollback_requested.connect(
+            lambda checkpoint_id, row: self._on_rollback_requested(self.sub_agent_panel.agent_type, checkpoint_id, row)
+        )
 
         self.preview.selection_changed.connect(self._on_preview_selection_changed)
         self.preview.restore_open_tabs()
@@ -935,7 +944,7 @@ class MainWindow(QMainWindow):
         if self._async_loop is None:
             logger.warning("No async loop set, cannot dispatch coroutine")
             return
-        asyncio.run_coroutine_threadsafe(coro, self._async_loop)
+        return asyncio.run_coroutine_threadsafe(coro, self._async_loop)
 
     def _on_main_agent_message(self, content: str) -> None:
         self._conv_store.append_message("main", "user", content)
@@ -960,6 +969,36 @@ class MainWindow(QMainWindow):
     def _on_interrupt(self, agent_type: str) -> None:
         """Handle interrupt request from GUI."""
         self._submit_coroutine(self.backend.interrupt_current_message(agent_type))
+
+    def _on_rollback_requested(self, agent_type: str, checkpoint_id: str, row) -> None:
+        reply = QMessageBox.question(
+            self,
+            "Rollback",
+            "Rollback files and conversation to before this message?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        panel = self._get_panel_for_agent(agent_type)
+        panel._messages_area.retract_from_row(row)
+        future = self._submit_coroutine(self.backend.rollback_to_checkpoint(agent_type, checkpoint_id))
+        if future is not None:
+            future.add_done_callback(lambda done: self._rollback_finished_signal.emit(agent_type, done))
+
+    def _on_rollback_finished(self, agent_type: str, future) -> None:
+        try:
+            future.result()
+        except Exception as exc:
+            logger.warning("Rollback failed for {}: {}", agent_type, exc)
+            QMessageBox.warning(self, "Rollback Failed", str(exc))
+            return
+
+        self.file_tree.refresh()
+        current_file = self.preview.current_file
+        if current_file and current_file.exists():
+            self.preview.load_file(current_file)
 
     def _on_bus_message(self, message: Message) -> None:
         self._message_signal.emit(message)
@@ -1005,11 +1044,16 @@ class MainWindow(QMainWindow):
                 self._conv_store.append_message(agent_str, "agent", message.content)
             return
         panel = self._get_panel_for_agent(agent_str)
+        if getattr(message, "thinking", None):
+            panel.append_thinking(message.thinking or "")
+            return
         # Empty non-streaming message = completion signal for streaming
         if not message.streaming and not message.content:
             rows = panel._messages_area.get_message_rows()
-            if rows and rows[-1]._role == "agent":
-                rows[-1].mark_complete()
+            for row in reversed(rows):
+                if row._role == "agent" and getattr(row, "_content", ""):
+                    row.mark_complete()
+                    break
             return
         # Non-streaming with content — check if streaming already delivered it
         if not message.streaming and message.content:
