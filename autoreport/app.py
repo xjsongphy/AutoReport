@@ -356,9 +356,6 @@ class BackendAPIImpl(BackendAPI):
         """Send file context to an agent as system message (invisible to user)."""
         from .interfaces.types import AgentType
 
-        # Debug log to see what we received
-        logger.debug("send_file_context called: agent_type={}, file_context={}", agent_type, file_context)
-
         # Map string to AgentType enum
         agent_type_map = {
             "main": AgentType.MAIN,
@@ -457,9 +454,10 @@ class BackendAPIImpl(BackendAPI):
         for msg in messages or []:
             role = str(msg.get("role", "")).strip()
             content = str(msg.get("content", ""))
-            if role not in {"user", "assistant", "system", "tool"}:
+            is_tool_result = bool(msg.get("is_tool_result", False))
+            if role not in {"user", "assistant", "system"}:
                 continue
-            loop._conversation_history.append(LLMMessage(role=role, content=content))  # noqa: SLF001
+            loop._conversation_history.append(LLMMessage(role=role, content=content, is_tool_result=is_tool_result))  # noqa: SLF101
 
     async def rollback_to_checkpoint(self, agent_type: str, checkpoint_id: str) -> Dict[str, Any]:
         """Rollback an agent to a specific checkpoint.
