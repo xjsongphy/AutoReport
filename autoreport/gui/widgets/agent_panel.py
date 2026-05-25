@@ -786,35 +786,34 @@ class AgentPanel(QWidget):
                 summary=summary,
             )
 
-    def start_thinking(self) -> None:
-        if self._thinking_row is not None:
-            return
-        self._thinking_started_at = time.monotonic()
-        self._thinking_detail = ""
-        ts = datetime.now().strftime("%H:%M")
-        agent_name = self._title_label.text() or "Agent"
-        self._thinking_row = self._messages_area.add_message_row(
-            role="agent",
-            content="",
-            timestamp=ts,
-            agent_name=agent_name,
-            summary="Thought for 1s",
-            detail="",
-            expandable=True,
-        )
-        self._thinking_row._complete = False
-        self._thinking_row.set_thinking_row_style(True)
-        self._thinking_timer.start()
-        self._update_composer_alignment()
-
     def append_thinking(self, thinking: str) -> None:
-        self.start_thinking()
-        if self._thinking_row is None:
+        # Don't create row until we have actual content
+        if not thinking:
             return
-        if thinking:
+        if self._thinking_row is None:
+            # Create row only when first thinking content arrives
+            self._thinking_started_at = time.monotonic()
+            self._thinking_detail = ""
+            ts = datetime.now().strftime("%H:%M")
+            agent_name = self._title_label.text() or "Agent"
+            self._thinking_row = self._messages_area.add_message_row(
+                role="agent",
+                content="",
+                timestamp=ts,
+                agent_name=agent_name,
+                summary="Thought for 1s",
+                detail=thinking,
+                expandable=True,
+            )
+            self._thinking_row._complete = False
+            self._thinking_row.set_thinking_row_style(True)
+            self._thinking_timer.start()
+            self._update_composer_alignment()
+        else:
+            # Update existing row with merged content
             self._thinking_detail = self._merge_thinking_chunk(self._thinking_detail, thinking)
-        self._thinking_row.set_detail_text(self._thinking_detail)
-        self._messages_area.follow_streaming_if_enabled()
+            self._thinking_row.set_detail_text(self._thinking_detail)
+            self._messages_area.follow_streaming_if_enabled()
 
     @staticmethod
     def _merge_thinking_chunk(current: str, chunk: str) -> str:
@@ -995,7 +994,8 @@ class AgentPanel(QWidget):
         self._status_label.setStyleSheet(f"color: {colors.get(color_key, colors['status_idle'])};")
 
         if status == "thinking":
-            self.start_thinking()
+            # Don't create thinking row here - wait for actual thinking content
+            pass
         else:
             self.finish_thinking()
 
@@ -1057,10 +1057,10 @@ class AgentPanel(QWidget):
 
         ui_logger.debug("AgentPanel[{}]: sending message ({} chars)", self.panel_id, len(content))
         self._set_working(True)
-        # 发射两个信号：用户消息和文件上下文
-        self.message_sent.emit(content)
+        # 先发射文件上下文信号，再发射用户消息信号（确保上下文先被缓存）
         if file_context:
             self.file_context_attached.emit(file_context)
+        self.message_sent.emit(content)
 
         # 清理上下文状态
         self._preview_context = None
