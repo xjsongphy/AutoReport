@@ -1,6 +1,7 @@
 """Agent tools for AutoReport."""
 
 from .agent_tools import ReportIssueTool, SendToAgentTool
+from .builtin_template_tool import BuiltinTemplateTool
 from .checkpoint_tool import CreateCheckpointTool, ListCheckpointsTool, RollbackCheckpointTool
 from .exec_tools import BashTool
 from .file_state import FileStateManager
@@ -31,4 +32,5 @@ __all__ = [
     "ListCheckpointsTool",
     "RollbackCheckpointTool",
     "FileStateManager",
+    "BuiltinTemplateTool",
 ]

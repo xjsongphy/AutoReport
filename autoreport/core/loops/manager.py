@@ -13,6 +13,7 @@ from ..checkpoints import CheckpointManager
 from ..skills import SkillLoader
 from ..tools import (
     BashTool,
+    BuiltinTemplateTool,
     CreateCheckpointTool,
     DeleteFileTool,
     EditFileTool,
@@ -291,6 +292,10 @@ class LoopManager:
                 workspace=self.workspace,
                 timeout=mineru_timeout,
             ))
+
+        # Built-in template access (Report Agent only)
+        if agent_type == AgentType.REPORT:
+            registry.register(BuiltinTemplateTool())
 
         # Inter-agent communication tools
         if agent_type == AgentType.MAIN:
