@@ -84,7 +84,7 @@ class PromptLoader:
         return f"{identity}\n\n{full}"
 
     def load_shared_context(self) -> str | None:
-        """Load shared output descriptions for all agents.
+        """Load shared prompts for all agents.
 
         Returns:
             Shared context content, or None if file not found.
@@ -92,7 +92,7 @@ class PromptLoader:
         if self._shared_context is not None:
             return self._shared_context
 
-        path = self._SHARED_DIR / "output_descriptions.md"
+        path = self._AGENTS_DIR / "Common.md"
         if not path.exists():
             logger.debug("Shared context file not found: {}", path)
             return None
