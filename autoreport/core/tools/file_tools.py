@@ -87,6 +87,13 @@ class ReadFileTool(Tool):
         self.workspace = Path(workspace).resolve()
         self._file_state_manager = file_state_manager
 
+    def _is_internal_metadata_path(self, file_path: Path) -> bool:
+        try:
+            rel = file_path.relative_to(self.workspace)
+        except ValueError:
+            return False
+        return rel.parts[:1] == (".autoreport",)
+
     async def __call__(
         self,
         path: str,
@@ -108,6 +115,9 @@ class ReadFileTool(Tool):
         """
         file_path = resolve_and_validate_path(path, self.workspace)
         logger.debug("Reading file: {}", file_path)
+
+        if self._is_internal_metadata_path(file_path):
+            raise PermissionError("Access to internal metadata under .autoreport is not allowed.")
 
         if not file_path.exists():
             suggestion = suggest_canonical_path(path)
@@ -576,6 +586,9 @@ class ListDirTool(Tool):
     def __init__(self, workspace: Path):
         self.workspace = Path(workspace).resolve()
 
+    def _is_internal_metadata_rel(self, rel_posix: str) -> bool:
+        return rel_posix == ".autoreport" or rel_posix.startswith(".autoreport/")
+
     async def __call__(
         self,
         path: str = ".",
@@ -610,12 +623,17 @@ class ListDirTool(Tool):
 
             if recursive:
                 for item in sorted(dir_path.rglob("*")):
+                    rel = item.relative_to(dir_path).as_posix()
+                    if self._is_internal_metadata_rel(rel):
+                        continue
                     if item.is_dir():
-                        directories.append(item.relative_to(dir_path).as_posix())
+                        directories.append(rel)
                     else:
-                        files.append(item.relative_to(dir_path).as_posix())
+                        files.append(rel)
             else:
                 for item in sorted(dir_path.iterdir()):
+                    if item.name == ".autoreport":
+                        continue
                     if item.is_dir():
                         directories.append(item.name)
                     else:

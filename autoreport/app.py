@@ -367,16 +367,18 @@ class BackendAPIImpl(BackendAPI):
         }
         agent_type_enum = agent_type_map.get(agent_type, AgentType.MAIN)
 
-        # Format file context as system message
+        # Format file context as system message.
+        # Keep context strictly scoped to the attachment shown in agent composer.
         if file_context.get("type") == "selection":
             fp = file_context.get("file", "")
             s = file_context.get("start_line", "")
             e = file_context.get("end_line", "")
-            text = file_context.get("content", "")
-            context_msg = f"选中文件: {fp}\n行号: {s}-{e}\n内容:\n```\n{text}\n```\n"
-        elif file_context.get("type") == "file":
-            fp = file_context.get("file", "")
-            context_msg = f"打开文件: {fp}\n"
+            context_msg = (
+                "Editor context: selection\n"
+                f"File: {fp}\n"
+                f"Selected lines: {s}-{e}\n"
+                "Constraint: selected text is not attached; do not infer or list other open tabs.\n"
+            )
         else:
             return
 
