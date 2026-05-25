@@ -299,7 +299,7 @@ class AnthropicProvider(LLMProvider):
             logger.warning("Anthropic stream stalled for >{}s", idle_timeout)
             yield LLMStreamChunk(delta=None, done=True)
         except Exception as e:
-            logger.error("Anthropic streaming error: {}", e)
+            logger.error("Anthropic streaming error: {}", str(e))
             raise
 
     # ------------------------------------------------------------------

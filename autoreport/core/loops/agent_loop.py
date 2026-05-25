@@ -593,7 +593,7 @@ class AgentLoop:
             await self._set_status(AgentStatus.IDLE)
 
         except Exception as e:
-            logger.opt(exception=True).error("Error processing message in {}: {}", self.agent_type, e)
+            logger.error("Error processing message in {}: {}", self.agent_type, str(e))
             await self._flush_manifest_if_needed()
             await self._set_status(AgentStatus.ERROR)
             await self.bus.publish(Error(
@@ -715,7 +715,7 @@ class AgentLoop:
                     result_str = self._format_tool_result(result)
 
                 except Exception as e:
-                    logger.error("Tool execution error: {}", e)
+                    logger.error("Tool execution error: {}", str(e))
                     error_msg = f"Error executing {tool_call.name}: {str(e)}"
 
                     await self.bus.publish(ToolResultMsg(
