@@ -10,7 +10,7 @@ from ...config import ConfigManager
 from ...core.providers import ProviderFactory, ProviderManager
 from ...interfaces.types import AgentType, Message, RestartRequest
 from ..checkpoints import CheckpointManager
-from ..skills import SkillLoader
+from ..tools import SkillLoader
 from ..tools import (
     BashTool,
     BuiltinTemplateTool,
@@ -20,6 +20,7 @@ from ..tools import (
     FileStateManager,
     ListCheckpointsTool,
     ListDirTool,
+    LoadSkillTool,
     ManageTasksTool,
     ManifestManager,
     PDFParseTool,
@@ -27,6 +28,7 @@ from ..tools import (
     ReportIssueTool,
     RollbackCheckpointTool,
     SendToAgentTool,
+    SkillLoader,
     TaskBoard,
     WriteFileTool,
 )
@@ -296,6 +298,9 @@ class LoopManager:
         # Built-in template access (Report Agent only)
         if agent_type == AgentType.REPORT:
             registry.register(BuiltinTemplateTool())
+
+        # Skill loading — all agents can load skills on demand
+        registry.register(LoadSkillTool(skill_loader=self.skill_loader))
 
         # Inter-agent communication tools
         if agent_type == AgentType.MAIN:

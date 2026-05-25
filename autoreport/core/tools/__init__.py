@@ -9,6 +9,7 @@ from .file_tools import DeleteFileTool, EditFileTool, ListDirTool, ReadFileTool,
 from .manifest_tool import ManifestManager, ManifestTool
 from .pdf_tool import PDFParseTool
 from .registry import Tool, ToolRegistry
+from .skill_tool import LoadSkillTool, SkillLoader
 from .task_board import TaskBoard
 from .task_tools import ManageTasksTool
 
@@ -33,4 +34,6 @@ __all__ = [
     "RollbackCheckpointTool",
     "FileStateManager",
     "BuiltinTemplateTool",
+    "SkillLoader",
+    "LoadSkillTool",
 ]

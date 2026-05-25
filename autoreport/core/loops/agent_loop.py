@@ -39,7 +39,7 @@ from ...interfaces.types import (
 from ...interfaces.types import (
     ToolResult as ToolResultMsg,
 )
-from ..skills import SkillLoader
+from ..tools import SkillLoader
 from ..tools.manifest_tool import ManifestManager, ManifestTool
 from ..tools.registry import ToolRegistry
 from .bus import MessageBus
@@ -963,13 +963,14 @@ class AgentLoop:
             if shared and isinstance(shared, str):
                 parts.append(shared)
 
-            # Inject skills if available
+            # Inject skills summary if available (on-demand loading)
             if self._skill_loader:
-                skills_section = self._skill_loader.build_skills_section(agent_type_str)
-                if skills_section:
-                    parts.append(skills_section)
-                    logger.debug("Injected skills for agent {}: {}", self.agent_type,
-                                 self._skill_loader.get_skills_for_agent(agent_type_str))
+                skills_summary = self._skill_loader.build_skills_summary()
+                if skills_summary:
+                    parts.append("\n## Available Skills\n\n")
+                    parts.append("The following skills are available. Use `load_skill` tool to get full content when needed:\n\n")
+                    parts.append(skills_summary)
+                    logger.debug("Injected skills summary for agent: {}", self.agent_type)
 
             self._cached_full_prompt = "\n\n".join(parts)
             self._full_prompt_loaded = True
