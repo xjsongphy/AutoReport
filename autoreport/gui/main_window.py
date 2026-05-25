@@ -765,6 +765,7 @@ class MainWindow(QMainWindow):
         self.preview = PreviewWidget(self.workspace)
         self.preview.setMinimumWidth(300)
         self.preview.file_changed.connect(self._update_window_title)
+        self.preview.file_changed.connect(self._on_preview_file_changed)
         main_splitter.addWidget(self.preview)
 
         # Right: Agent panels side-by-side (Sub Agent | Main Agent)
@@ -853,11 +854,20 @@ class MainWindow(QMainWindow):
 
     def _on_preview_selection_changed(self, file_path: str, selected_text: str, start_line: int, end_line: int) -> None:
         if not selected_text:
-            # Keep existing selection context instead of replacing it with
-            # an "opened file" context on transient empty-selection events.
+            # Empty selection should not override selection context here.
+            # File-path attachment is synchronized via _on_preview_file_changed.
             return
         self.main_agent_panel.set_preview_context(file_path, selected_text, start_line, end_line)
         self.sub_agent_panel.set_preview_context(file_path, selected_text, start_line, end_line)
+
+    def _on_preview_file_changed(self, file_path: Path) -> None:
+        if not file_path:
+            self.main_agent_panel.clear_file_context()
+            self.sub_agent_panel.clear_file_context()
+            return
+        rel_path = self._relative_path(file_path)
+        self.main_agent_panel.set_opened_file(rel_path)
+        self.sub_agent_panel.set_opened_file(rel_path)
 
     def _on_file_selected(self, file_path: Path) -> None:
         ui_logger.debug("MainWindow: file selected {}", file_path.name)
@@ -917,6 +927,18 @@ class MainWindow(QMainWindow):
         method = getattr(widget, method_name, None)
         if callable(method):
             method()
+            return
+
+        # QLabel (used by message markdown/text rows) doesn't expose copy(),
+        # but still supports selectedText() when text is selectable.
+        if method_name == "copy":
+            selected_getter = getattr(widget, "selectedText", None)
+            if callable(selected_getter):
+                selected = str(selected_getter() or "")
+                if selected:
+                    clipboard = QApplication.clipboard()
+                    if clipboard:
+                        clipboard.setText(selected)
 
     def _load_conversations(self) -> None:
         # Restore main + currently selected sub-agent history on startup.
@@ -1013,7 +1035,8 @@ class MainWindow(QMainWindow):
                 result = rec.get("result")
                 err = rec.get("error")
                 payload = str(result) if result is not None else str(err or "")
-                converted.append({"role": "tool", "content": payload})
+                # Anthropic doesn't support role="tool", use role="user" with is_tool_result flag
+                converted.append({"role": "user", "content": payload, "is_tool_result": True})
         return converted
 
     def set_async_loop(self, loop: asyncio.AbstractEventLoop) -> None:
