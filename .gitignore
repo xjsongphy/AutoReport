@@ -16,3 +16,9 @@ ref/
 # User config (contains API keys)
 autoreport.config.yaml
 .DS_Store
+
+.pytest_cache/
+.tmp_pytest/
+pytest-of-*/
+*/pytest-of-*/
+.ruff_cache/

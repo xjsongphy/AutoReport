@@ -586,7 +586,7 @@ class AgentLoop:
             await self._set_status(AgentStatus.IDLE)
 
         except Exception as e:
-            logger.error("Error processing message in {}: {}", self.agent_type, e)
+            logger.opt(exception=True).error("Error processing message in {}: {}", self.agent_type, e)
             await self._flush_manifest_if_needed()
             await self._set_status(AgentStatus.ERROR)
             await self.bus.publish(Error(
