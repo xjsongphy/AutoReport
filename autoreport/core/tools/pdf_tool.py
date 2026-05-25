@@ -43,6 +43,14 @@ class PDFParseTool(Tool):
         self.timeout = timeout
         self._cli_name = "mineru-open-api"
 
+    def _is_internal_metadata_path(self, file_path: Path) -> bool:
+        """Check if path is in internal metadata directories (.autoreport, .checkpoints)."""
+        try:
+            rel = file_path.relative_to(self.workspace)
+        except ValueError:
+            return False
+        return rel.parts and rel.parts[0] in {".autoreport", ".checkpoints"}
+
     @staticmethod
     def is_available() -> bool:
         """Check whether mineru-open-api CLI is installed."""
@@ -93,6 +101,12 @@ class PDFParseTool(Tool):
         for raw_path in paths:
             try:
                 src = resolve_and_validate_path(raw_path, self.workspace)
+
+                # Block access to internal metadata directories
+                if self._is_internal_metadata_path(src):
+                    errors.append(f"{raw_path}: access to internal metadata directory not allowed")
+                    continue
+
                 if not src.exists():
                     errors.append(f"{raw_path}: file not found")
                     continue
