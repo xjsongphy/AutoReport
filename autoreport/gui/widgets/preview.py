@@ -36,6 +36,38 @@ from ..theme import get_theme_colors
 from .ui_utils import IconActionButton, render_svg_icon
 
 
+class _EmbeddedImageLabel(QLabel):
+    """Image label that always fits image into available viewport."""
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._source_pixmap: QPixmap | None = None
+        self.setMinimumSize(0, 0)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self.setScaledContents(False)
+
+    def set_source_pixmap(self, pixmap: QPixmap) -> None:
+        self._source_pixmap = pixmap
+        self._apply_scaled_pixmap()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._apply_scaled_pixmap()
+
+    def _apply_scaled_pixmap(self) -> None:
+        if self._source_pixmap is None or self._source_pixmap.isNull():
+            return
+        target = self.size()
+        if target.width() <= 1 or target.height() <= 1:
+            return
+        scaled = self._source_pixmap.scaled(
+            target,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self.setPixmap(scaled)
+
+
 class _TabAffordanceButton(QPushButton):
     """Dirty-dot affordance shown when a tab has unsaved changes."""
 
@@ -131,11 +163,19 @@ def _create_pdf_viewer(path: Path) -> tuple:
     doc = QPdfDocument(None)
     # QPdfDocument.load expects str/QIODevice, not pathlib.Path.
     doc.load(str(path))
+    if doc.status() != QPdfDocument.Status.Ready:
+        label = QLabel(f"PDF 预览失败：{path.name}")
+        label.setObjectName("editorPlaceholder")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        return label, "pdf"
 
     view = QPdfView(None)
     view.setObjectName("filePdfView")
     view.setDocument(doc)
+    # Keep a strong reference to avoid document being GC'd and rendering blank.
+    view._pdf_document = doc  # noqa: SLT001
     view.setPageMode(QPdfView.PageMode.MultiPage)
+    view.setZoomMode(QPdfView.ZoomMode.FitInView)
     view.setStyleSheet(f"""
         QPdfView#filePdfView {{
             background-color: {c["editor_bg"]};
@@ -149,7 +189,7 @@ def _create_pdf_viewer(path: Path) -> tuple:
 def _create_image_viewer(path: Path) -> tuple:
     """Create an image viewer with QPixmap."""
     c = get_theme_colors()
-    label = QLabel()
+    label = _EmbeddedImageLabel()
     label.setObjectName("fileImageViewer")
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
     label.setStyleSheet(f"""
@@ -163,8 +203,7 @@ def _create_image_viewer(path: Path) -> tuple:
     if pixmap.isNull():
         label.setText("无法加载图片")
     else:
-        label.setPixmap(pixmap)
-        label._source_pixmap = pixmap  # noqa: SLT001 鈥?store for resize scaling
+        label.set_source_pixmap(pixmap)
 
     return label, "image"
 

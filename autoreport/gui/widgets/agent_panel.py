@@ -64,6 +64,7 @@ class AgentPanel(QWidget):
     """Codex CLI-style agent panel with flat timeline, status bar, and composer."""
 
     message_sent = pyqtSignal(str)
+    file_context_attached = pyqtSignal(object)
     interrupt_requested = pyqtSignal()
     _debug_msg_signal = pyqtSignal(object)
     history_requested = pyqtSignal()
@@ -1002,19 +1003,36 @@ class AgentPanel(QWidget):
         self._send_content(content)
 
     def _send_content(self, content: str) -> None:
-        final_message = content
+        # 文件上下文作为单独参数传递，不附加到用户消息中
+        file_context = None
         if self._context_enabled:
             if self._preview_context:
                 fp, text, s, e = self._preview_context
-                ctx = f"\n\n<!-- context -->\n**File**: {fp} (lines {s}-{e})\n```\n{text}\n```\n"
-                final_message = content + ctx
+                file_context = {
+                    "type": "selection",
+                    "file": fp,
+                    "start_line": s,
+                    "end_line": e,
+                    "content": text
+                }
             elif self._opened_file:
-                ctx = f"\n\n<!-- context -->\n**File**: {self._opened_file}\n"
-                final_message = content + ctx
+                file_context = {
+                    "type": "file",
+                    "file": self._opened_file
+                }
 
-        ui_logger.debug("AgentPanel[{}]: sending message ({} chars)", self.panel_id, len(final_message))
+        ui_logger.debug("AgentPanel[{}]: sending message ({} chars)", self.panel_id, len(content))
         self._set_working(True)
-        self.message_sent.emit(final_message)
+        # 发射两个信号：用户消息和文件上下文
+        self.message_sent.emit(content)
+        if file_context:
+            self.file_context_attached.emit(file_context)
+
+        # 清理上下文状态
+        self._preview_context = None
+        self._opened_file = None
+        self._context_separator.setVisible(False)
+        self._context_attachment_btn.setVisible(False)
 
         self._preview_context = None
         self._opened_file = None

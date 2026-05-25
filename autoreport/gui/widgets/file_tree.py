@@ -1227,14 +1227,84 @@ class FileTreeWidget(QWidget):
             self.tree.viewport().update()
 
     def refresh(self) -> None:
-        root = self.tree.invisibleRootItem()
-        for i in range(root.childCount()):
-            item = root.child(i)
-            if item.isExpanded():
-                item.setExpanded(False)
-                item.setExpanded(True)
-        self._ensure_directory_indicators(root)
+        expanded_dirs = self._snapshot_expanded_directories()
+        selected_files, selected_dirs = self._snapshot_selected_items()
+
+        self.tree.clear()
+        self._init_directories()
+
+        for dir_name in sorted(expanded_dirs, key=lambda x: x.count("/")):
+            item = self._find_item_by_dir(dir_name)
+            if item is None:
+                continue
+            item.setExpanded(True)
+            self._on_item_expanded(item)
+
+        self._restore_multi_selection(selected_files, selected_dirs)
+        self._ensure_directory_indicators()
         self.tree.viewport().update()
+
+    def _snapshot_expanded_directories(self) -> set[str]:
+        expanded: set[str] = set()
+        root = self.tree.invisibleRootItem()
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            for i in range(node.childCount()):
+                child = node.child(i)
+                dir_name = child.data(0, Qt.ItemDataRole.UserRole)
+                file_path_str = child.data(0, Qt.ItemDataRole.UserRole + 1)
+                if dir_name and not file_path_str and child.isExpanded():
+                    expanded.add(dir_name)
+                stack.append(child)
+        return expanded
+
+    def _snapshot_selected_items(self) -> tuple[set[str], set[str]]:
+        selected_files: set[str] = set()
+        selected_dirs: set[str] = set()
+        for item in self.tree.selectedItems():
+            file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
+            dir_name = item.data(0, Qt.ItemDataRole.UserRole)
+            if file_path_str:
+                selected_files.add(str(file_path_str))
+            elif dir_name:
+                selected_dirs.add(str(dir_name))
+        return selected_files, selected_dirs
+
+    def _find_item_by_dir(self, dir_name: str) -> QTreeWidgetItem | None:
+        root = self.tree.invisibleRootItem()
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            for i in range(node.childCount()):
+                child = node.child(i)
+                if child.data(0, Qt.ItemDataRole.UserRole) == dir_name and not child.data(0, Qt.ItemDataRole.UserRole + 1):
+                    return child
+                stack.append(child)
+        return None
+
+    def _find_item_by_file(self, file_path: str) -> QTreeWidgetItem | None:
+        root = self.tree.invisibleRootItem()
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            for i in range(node.childCount()):
+                child = node.child(i)
+                if child.data(0, Qt.ItemDataRole.UserRole + 1) == file_path:
+                    return child
+                stack.append(child)
+        return None
+
+    def _restore_multi_selection(self, selected_files: set[str], selected_dirs: set[str]) -> None:
+        self.tree.clearSelection()
+        for file_path in selected_files:
+            item = self._find_item_by_file(file_path)
+            if item is not None:
+                item.setSelected(True)
+        for dir_name in selected_dirs:
+            item = self._find_item_by_dir(dir_name)
+            if item is not None:
+                item.setSelected(True)
 
     def get_selected_file(self) -> Path | None:
         item = self.tree.currentItem()
@@ -1513,6 +1583,14 @@ class FileTreeWidget(QWidget):
     def _show_context_menu(self, pos) -> None:
         item = self.tree.itemAt(pos)
         if not item:
+            return
+        if len(self.tree.selectedItems()) > 1 and self.tree.selectionModel().isSelected(self.tree.indexFromItem(item, 0)):
+            menu = QMenu(self)
+            menu.setObjectName("explorerContextMenu")
+            delete_action = menu.addAction("删除选中项")
+            action = menu.exec(self.tree.mapToGlobal(pos))
+            if action == delete_action:
+                self._delete_selected_items()
             return
 
         dir_name = item.data(0, Qt.ItemDataRole.UserRole)
@@ -1892,6 +1970,78 @@ class FileTreeWidget(QWidget):
             ok_button.setText("确定")
         box.exec()
 
+    def _collect_deletable_selected_items(self) -> list[tuple[str, Path, QTreeWidgetItem]]:
+        entries: list[tuple[str, Path, QTreeWidgetItem]] = []
+        seen: set[str] = set()
+        for item in self.tree.selectedItems():
+            file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
+            dir_name = item.data(0, Qt.ItemDataRole.UserRole)
+            if file_path_str:
+                key = f"f:{file_path_str}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                entries.append(("file", Path(file_path_str), item))
+                continue
+            if dir_name and dir_name not in FIXED_DIRECTORIES:
+                key = f"d:{dir_name}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                entries.append(("dir", self.workspace / dir_name, item))
+        return entries
+
+    def _delete_selected_items(self) -> bool:
+        entries = self._collect_deletable_selected_items()
+        if not entries:
+            return False
+
+        # Skip files that are inside selected directories to avoid duplicate delete.
+        selected_dirs = {path.resolve() for kind, path, _ in entries if kind == "dir"}
+        filtered: list[tuple[str, Path, QTreeWidgetItem]] = []
+        for kind, path, item in entries:
+            if kind == "file" and any(parent in path.resolve().parents for parent in selected_dirs):
+                continue
+            filtered.append((kind, path, item))
+        entries = filtered
+
+        lines = []
+        for kind, path, _ in entries:
+            tag = "文件" if kind == "file" else "文件夹"
+            try:
+                rel = path.resolve().relative_to(self.workspace)
+                lines.append(f"{tag}: {rel.as_posix()}")
+            except ValueError:
+                lines.append(f"{tag}: {path.name}")
+        text = "确定要删除以下项目吗？\n\n" + "\n".join(lines)
+
+        reply = self._ask_confirmation("批量删除", text)
+        if reply != QMessageBox.StandardButton.Yes:
+            return True
+
+        errors: list[str] = []
+        # Delete deeper paths first.
+        entries.sort(key=lambda x: len(x[1].as_posix()), reverse=True)
+        for kind, path, item in entries:
+            try:
+                if kind == "file":
+                    path.unlink()
+                else:
+                    shutil.rmtree(path)
+                parent = item.parent()
+                if parent:
+                    parent.removeChild(item)
+                else:
+                    root = self.tree.invisibleRootItem()
+                    root.removeChild(item)
+            except Exception as e:
+                errors.append(f"{path.name}: {e}")
+
+        if errors:
+            self._show_warning("删除失败", "\n".join(errors[:10]))
+        self.refresh()
+        return True
+
     def _delete_file(self, file_path: Path, item: QTreeWidgetItem) -> None:  # type: ignore[override]
         reply = self._ask_confirmation("删除文件", f"确定要删除 '{file_path.name}' 吗？")
         if reply == QMessageBox.StandardButton.Yes:
@@ -1921,3 +2071,14 @@ class FileTreeWidget(QWidget):
                 logger.info("Deleted directory: {}", dir_path)
             except Exception as e:
                 self._show_warning("删除失败", f"无法删除文件夹:\n{e}")
+
+    def _delete_item_from_shortcut(self, item: QTreeWidgetItem) -> None:  # type: ignore[override]
+        if len(self.tree.selectedItems()) > 1 and self._delete_selected_items():
+            return
+        dir_name = item.data(0, Qt.ItemDataRole.UserRole)
+        file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
+        if file_path_str:
+            self._delete_file(Path(file_path_str), item)
+            return
+        if dir_name and dir_name not in FIXED_DIRECTORIES:
+            self._delete_directory(self.workspace / dir_name, item)

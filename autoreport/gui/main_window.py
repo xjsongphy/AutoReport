@@ -777,7 +777,9 @@ class MainWindow(QMainWindow):
         # Connect signals
         self._rollback_finished_signal.connect(self._on_rollback_finished)
         self.main_agent_panel.message_sent.connect(self._on_main_agent_message)
+        self.main_agent_panel.file_context_attached.connect(self._on_main_agent_file_context)
         self.sub_agent_panel.message_sent.connect(self._on_sub_agent_message)
+        self.sub_agent_panel.file_context_attached.connect(self._on_sub_agent_file_context)
 
         self.main_agent_panel.history_requested.connect(lambda: self._on_history_requested("main"))
         self.main_agent_panel.new_conversation_requested.connect(lambda: self._on_new_conversation_requested("main"))
@@ -891,6 +893,14 @@ class MainWindow(QMainWindow):
         # Restore main + currently selected sub-agent history on startup.
         self._load_conversations_for_agent("main", self.main_agent_panel)
         self._load_conversations_for_agent(self.sub_agent_panel.agent_type, self.sub_agent_panel)
+        if hasattr(self.backend, "sync_agent_conversation"):
+            self._submit_coroutine(
+                self.backend.sync_agent_conversation("main", self._records_to_backend_messages("main"))
+            )
+            sub_agent = self.sub_agent_panel.agent_type
+            self._submit_coroutine(
+                self.backend.sync_agent_conversation(sub_agent, self._records_to_backend_messages(sub_agent))
+            )
 
     def _load_conversations_for_agent(self, agent_type: str, panel: AgentPanel) -> None:
         panel._messages_area.clear()
@@ -937,6 +947,24 @@ class MainWindow(QMainWindow):
                 panel.add_error(rec.get("source", ""), content)
         logger.info("Loaded {} messages for agent {}", len(records), agent_type)
 
+    def _records_to_backend_messages(self, agent_type: str) -> list[dict[str, str]]:
+        """Convert stored records to backend chat history messages."""
+        records = self._conv_store.load_messages(agent_type)
+        converted: list[dict[str, str]] = []
+        for rec in records:
+            role = str(rec.get("role", ""))
+            content = str(rec.get("content", ""))
+            if role == "user":
+                converted.append({"role": "user", "content": content})
+            elif role == "agent":
+                converted.append({"role": "assistant", "content": content})
+            elif role == "tool_result":
+                result = rec.get("result")
+                err = rec.get("error")
+                payload = str(result) if result is not None else str(err or "")
+                converted.append({"role": "tool", "content": payload})
+        return converted
+
     def set_async_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         self._async_loop = loop
 
@@ -955,10 +983,23 @@ class MainWindow(QMainWindow):
         self._conv_store.append_message(agent_type, "user", content)
         self._submit_coroutine(self.backend.send_user_message(content, agent_type))
 
+    def _on_main_agent_file_context(self, file_context: dict) -> None:
+        """Handle file context attachment for main agent."""
+        self._submit_coroutine(self.backend.send_file_context(file_context, "main"))
+
+    def _on_sub_agent_file_context(self, file_context: dict) -> None:
+        """Handle file context attachment for sub agent."""
+        agent_type = self.sub_agent_panel.agent_type
+        self._submit_coroutine(self.backend.send_file_context(file_context, agent_type))
+
     def _on_sub_agent_type_changed(self, agent_type: str) -> None:
         self.sub_agent_panel.set_agent_type(agent_type)
         self.sub_agent_panel.set_debug_mode(agent_type in self._debug_agents)
         self._load_conversations_for_agent(agent_type, self.sub_agent_panel)
+        if hasattr(self.backend, "sync_agent_conversation"):
+            self._submit_coroutine(
+                self.backend.sync_agent_conversation(agent_type, self._records_to_backend_messages(agent_type))
+            )
         cached = self._agent_status_cache.get(agent_type)
         if cached:
             status, extra = cached
@@ -1376,11 +1417,15 @@ class MainWindow(QMainWindow):
         self._conv_store.new_session(agent_type=agent_type)
         panel = self._get_panel_for_agent(agent_type)
         panel._messages_area.clear()
+        if hasattr(self.backend, "sync_agent_conversation"):
+            self._submit_coroutine(self.backend.sync_agent_conversation(agent_type, []))
         logger.info("New conversation session for {}: {}", agent_type,
                      self._conv_store.get_current_session_id(agent_type))
 
     def _on_conversation_cleared(self, agent_type: str) -> None:
         self._conv_store.new_session(agent_type=agent_type)
+        if hasattr(self.backend, "sync_agent_conversation"):
+            self._submit_coroutine(self.backend.sync_agent_conversation(agent_type, []))
         logger.info("/clear for {}: new session {}", agent_type,
                      self._conv_store.get_current_session_id(agent_type))
 
@@ -1389,6 +1434,9 @@ class MainWindow(QMainWindow):
             panel = self._get_panel_for_agent(agent_type)
             panel._messages_area.clear()
             self._load_conversations_for_agent(agent_type, panel)
+            if hasattr(self.backend, "sync_agent_conversation"):
+                msgs = self._records_to_backend_messages(agent_type)
+                self._submit_coroutine(self.backend.sync_agent_conversation(agent_type, msgs))
             logger.info("Switched {} to session: {}", agent_type, session_id)
 
     def _on_delete_session(self, session_id: str) -> None:
