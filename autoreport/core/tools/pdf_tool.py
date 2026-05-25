@@ -16,7 +16,7 @@ from typing import Any
 from loguru import logger
 
 from ..tools.registry import Tool
-from .path_utils import resolve_and_validate_path
+from .path_utils import resolve_and_validate_path, is_internal_metadata_path
 
 
 class PDFParseTool(Tool):
@@ -42,14 +42,6 @@ class PDFParseTool(Tool):
         self.workspace = Path(workspace).resolve()
         self.timeout = timeout
         self._cli_name = "mineru-open-api"
-
-    def _is_internal_metadata_path(self, file_path: Path) -> bool:
-        """Check if path is in internal metadata directories (.autoreport, .checkpoints)."""
-        try:
-            rel = file_path.relative_to(self.workspace)
-        except ValueError:
-            return False
-        return rel.parts and rel.parts[0] in {".autoreport", ".checkpoints"}
 
     @staticmethod
     def is_available() -> bool:
@@ -103,7 +95,7 @@ class PDFParseTool(Tool):
                 src = resolve_and_validate_path(raw_path, self.workspace)
 
                 # Block access to internal metadata directories
-                if self._is_internal_metadata_path(src):
+                if is_internal_metadata_path(src, self.workspace):
                     errors.append(f"{raw_path}: access to internal metadata directory not allowed")
                     continue
 

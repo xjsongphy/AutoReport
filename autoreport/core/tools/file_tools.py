@@ -11,7 +11,7 @@ from loguru import logger
 from ..tools.registry import Tool
 from .file_state import FileStateManager
 from .manifest_tool import ManifestManager
-from .path_utils import resolve_and_validate_path, suggest_canonical_path
+from .path_utils import resolve_and_validate_path, suggest_canonical_path, is_internal_metadata_path, is_internal_metadata_rel
 
 
 class FileSafetyMixin:
@@ -56,16 +56,8 @@ class WriteEnabledTool(Tool, FileSafetyMixin):
         self._agent_type = agent_type
         self._file_state_manager = file_state_manager
 
-    def _is_internal_metadata_path(self, file_path: Path) -> bool:
-        """Check if path is in internal metadata directories (.autoreport, .checkpoints)."""
-        try:
-            rel = file_path.relative_to(self.workspace)
-        except ValueError:
-            return False
-        return rel.parts and rel.parts[0] in {".autoreport", ".checkpoints"}
-
     def _check_write_permission(self, file_path: Path, action: str = "Write") -> None:
-        if self._is_internal_metadata_path(file_path):
+        if is_internal_metadata_path(file_path, self.workspace):
             raise PermissionError(
                 f"{action} not allowed in internal metadata directories (.autoreport, .checkpoints). Attempted: {file_path}"
             )
@@ -100,14 +92,6 @@ class ReadFileTool(Tool):
         self.workspace = Path(workspace).resolve()
         self._file_state_manager = file_state_manager
 
-    def _is_internal_metadata_path(self, file_path: Path) -> bool:
-        """Check if path is in internal metadata directories (.autoreport, .checkpoints)."""
-        try:
-            rel = file_path.relative_to(self.workspace)
-        except ValueError:
-            return False
-        return rel.parts and rel.parts[0] in {".autoreport", ".checkpoints"}
-
     async def __call__(
         self,
         path: str,
@@ -130,7 +114,7 @@ class ReadFileTool(Tool):
         file_path = resolve_and_validate_path(path, self.workspace)
         logger.debug("Reading file: {}", file_path)
 
-        if self._is_internal_metadata_path(file_path):
+        if is_internal_metadata_path(file_path, self.workspace):
             raise PermissionError("Access to internal metadata under .autoreport is not allowed.")
 
         if not file_path.exists():
@@ -600,12 +584,6 @@ class ListDirTool(Tool):
     def __init__(self, workspace: Path):
         self.workspace = Path(workspace).resolve()
 
-    def _is_internal_metadata_rel(self, rel_posix: str) -> bool:
-        """Check if relative path is in internal metadata directories."""
-        return (rel_posix in {".autoreport", ".checkpoints"} or
-                rel_posix.startswith(".autoreport/") or
-                rel_posix.startswith(".checkpoints/"))
-
     async def __call__(
         self,
         path: str = ".",
@@ -641,7 +619,7 @@ class ListDirTool(Tool):
             if recursive:
                 for item in sorted(dir_path.rglob("*")):
                     rel = item.relative_to(dir_path).as_posix()
-                    if self._is_internal_metadata_rel(rel):
+                    if is_internal_metadata_rel(rel):
                         continue
                     if item.is_dir():
                         directories.append(rel)

@@ -9,6 +9,7 @@ from typing import Any
 from loguru import logger
 
 from ..tools.registry import Tool
+from .path_utils import is_internal_metadata_rel
 
 # Allowed commands for BashTool (allowlist approach)
 ALLOWED_COMMANDS = {
@@ -44,39 +45,30 @@ class BashTool(Tool):
         self.working_dir = Path(working_dir).resolve()
         self.timeout = timeout
         self.allowed_env_keys = allowed_env_keys or []
-        self._blocked_prefixes = (".autoreport", ".checkpoints")
 
-    def _check_blocked_paths(self, command: str, tokens: list[str]) -> None:
+    def _check_blocked_paths_in_command(self, command: str, tokens: list[str]) -> None:
         """Check if command attempts to access internal metadata directories."""
-        # Check for direct access to blocked directories
+        # Check each token for blocked directory access
         for token in tokens:
-            # Check for .autoreport or .checkpoints in arguments
-            for prefix in self._blocked_prefixes:
-                if prefix in token:
-                    # Allow if it's just part of a longer filename (e.g., "my_autoreport_file.txt")
-                    # but block if it's a directory component
-                    parts = token.replace("\\", "/").split("/")
-                    if prefix in parts:
-                        raise ValueError(
-                            f"Access to '{prefix}' directory is not allowed."
-                        )
+            # Normalize path separators and check
+            normalized = token.replace("\\", "/")
+            if is_internal_metadata_rel(normalized):
+                raise ValueError(
+                    f"Access to internal metadata directories (.autoreport, .checkpoints) is not allowed."
+                )
 
-    def _check_blocked_paths_in_command(self, command: str) -> None:
-        """Check command string for blocked path access patterns."""
-        # Check for common patterns that might access blocked directories
-        for prefix in self._blocked_prefixes:
-            # Patterns like: ls .autoreport, cat .autoreport/file, etc.
+        # Also check the raw command string for patterns
+        for prefix in (".autoreport", ".checkpoints"):
             patterns = [
                 f" {prefix}",  # space before prefix
                 f"{prefix}/",  # prefix with slash
                 f'"{prefix}',  # quoted prefix
-                f"'{prefix}",  # quoted prefix with single quote
+                f"'{prefix}",  # quoted prefix
             ]
-            for pattern in patterns:
-                if pattern in command:
-                    raise ValueError(
-                        f"Access to '{prefix}' directory is not allowed."
-                    )
+            if any(pattern in command for pattern in patterns):
+                raise ValueError(
+                    f"Access to internal metadata directories (.autoreport, .checkpoints) is not allowed."
+                )
 
     async def __call__(self, command: str, command_description: str) -> dict[str, Any]:
         """Execute a shell command.
@@ -104,8 +96,7 @@ class BashTool(Tool):
             )
 
         # Block access to internal metadata directories
-        self._check_blocked_paths_in_command(command)
-        self._check_blocked_paths(command, tokens)
+        self._check_blocked_paths_in_command(command, tokens)
 
         if base_command in ("rm", "rmdir"):
             for arg in tokens[1:]:

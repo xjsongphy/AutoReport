@@ -1034,8 +1034,8 @@ class AgentPanel(QWidget):
         self._send_content(content)
 
     def _send_content(self, content: str) -> None:
-        """发送用户消息内容（含选区上下文）。"""
-        # 构建文件上下文信息
+        """Send user message content (with file context if available)."""
+        # Build file context info
         file_context = None
         if self._context_enabled:
             if self._preview_context:
@@ -1053,15 +1053,15 @@ class AgentPanel(QWidget):
                     "file": self._opened_file
                 }
 
-        ui_logger.debug("AgentPanel[{}]: 发送消息（{} 字符）", self.panel_id, len(content))
+        ui_logger.debug("AgentPanel[{}]: sending message ({} chars)", self.panel_id, len(content))
         self._set_working(True)
-        # 关键：先发射文件上下文信号，再发射用户消息信号
-        # 这样确保 MainWindow 在处理用户消息时，上下文已被缓存
+        # CRITICAL: Emit file context signal BEFORE user message signal
+        # This ensures MainWindow caches the context before processing the user message
         if file_context:
             self.file_context_attached.emit(file_context)
         self.message_sent.emit(content)
 
-        # 清理上下文状态（用完即清）
+        # Clear context state (after use)
         self._preview_context = None
         self._opened_file = None
         self._context_separator.setVisible(False)
