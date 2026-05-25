@@ -166,7 +166,7 @@ def get_theme_colors() -> dict[str, str]:
         "headerBorder": border,
         "footerBg": surface,
         "footerBorder": border,
-        "cardBg": "#252526" if dark else "#f5f5f5",
+        "cardBg": surface,
         "cardBorder": border,
         "titleFg": fg,
         "subtitleFg": muted,
