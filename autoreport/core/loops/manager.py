@@ -271,8 +271,8 @@ class LoopManager:
             file_state_manager=file_state_manager,
         ))
 
-        # Execution tool (for data analysis, plotting, and main agent)
-        if agent_type in (AgentType.DATA_ANALYSIS, AgentType.PLOTTING, AgentType.MAIN):
+        # Execution tool (for data analysis, plotting, report, and main agent)
+        if agent_type in (AgentType.DATA_ANALYSIS, AgentType.PLOTTING, AgentType.REPORT, AgentType.MAIN):
             registry.register(BashTool(
                 working_dir=self.workspace,
                 timeout=120,
