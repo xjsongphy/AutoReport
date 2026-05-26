@@ -7,19 +7,79 @@ Provides consistent styling for all QScintilla editors including:
 """
 
 from PyQt6.Qsci import QsciScintilla, QsciLexer
-from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtGui import QColor, QFont, QFontDatabase
 from loguru import logger
 
-from .theme import get_theme_colors
+from .theme import get_theme_colors, is_dark_mode
+
+LINE_NUMBER_LEFT_PADDING = 8
+LINE_NUMBER_RIGHT_PADDING = 20
+LINE_NUMBER_MARGIN_MIN_WIDTH = 44
 
 
 def _code_font(size: int = 13) -> QFont:
     """Shared code font for editors and lexer tokens."""
-    font = QFont("Cascadia Code", size)
+    # Prefer fixed-pitch fonts only; mixed/fallback proportional glyph metrics can
+    # cause horizontal overlap in Scintilla when lexer styles differ.
+    preferred = ["Cascadia Mono", "Cascadia Code", "SF Mono", "Consolas", "Menlo", "Monaco"]
+    available = set(QFontDatabase.families())
+    family = next((name for name in preferred if name in available), "")
+    font = QFont(family, size) if family else QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+    font.setPointSize(size)
     font.setStyleHint(QFont.StyleHint.Monospace)
-    # Keep fallback order aligned with the app-wide code font stack.
-    font.setFamilies(["Cascadia Code", "SF Mono", "Consolas", "Courier New", "monospace"])
+    font.setFixedPitch(True)
+    font.setKerning(False)
+    font.setItalic(False)
     return font
+
+
+def _set_style_if_present(lexer: QsciLexer, style_name: str, color: str) -> None:
+    style = getattr(lexer, style_name, None)
+    if style is None:
+        return
+    try:
+        lexer.setColor(QColor(color), style)
+    except Exception:
+        return
+
+
+def _apply_vscode_token_palette(lexer: QsciLexer) -> None:
+    """Apply VSCode-like token palette with separate dark/light variants."""
+    dark = is_dark_mode()
+    palette = {
+        "keyword": "#C586C0" if dark else "#AF00DB",
+        "string": "#CE9178" if dark else "#A31515",
+        "comment": "#6A9955" if dark else "#008000",
+        "number": "#B5CEA8" if dark else "#098658",
+        "operator": "#D4D4D4" if dark else "#000000",
+        "identifier": "#9CDCFE" if dark else "#001080",
+        "class_name": "#4EC9B0" if dark else "#267F99",
+        "function": "#DCDCAA" if dark else "#795E26",
+    }
+
+    # Python
+    _set_style_if_present(lexer, "Keyword", palette["keyword"])
+    _set_style_if_present(lexer, "DoubleQuotedString", palette["string"])
+    _set_style_if_present(lexer, "SingleQuotedString", palette["string"])
+    _set_style_if_present(lexer, "TripleDoubleQuotedString", palette["string"])
+    _set_style_if_present(lexer, "TripleSingleQuotedString", palette["string"])
+    _set_style_if_present(lexer, "Comment", palette["comment"])
+    _set_style_if_present(lexer, "CommentBlock", palette["comment"])
+    _set_style_if_present(lexer, "Number", palette["number"])
+    _set_style_if_present(lexer, "Operator", palette["operator"])
+    _set_style_if_present(lexer, "Identifier", palette["identifier"])
+    _set_style_if_present(lexer, "ClassName", palette["class_name"])
+    _set_style_if_present(lexer, "FunctionMethodName", palette["function"])
+    _set_style_if_present(lexer, "Decorator", palette["class_name"])
+
+    # JSON / YAML / Markdown / TeX lexers share some generic style names.
+    _set_style_if_present(lexer, "Default", palette["identifier"])
+    _set_style_if_present(lexer, "KeywordSet2", palette["keyword"])
+    _set_style_if_present(lexer, "CommentLine", palette["comment"])
+    _set_style_if_present(lexer, "Comment", palette["comment"])
+    _set_style_if_present(lexer, "String", palette["string"])
+    _set_style_if_present(lexer, "Number", palette["number"])
+    _set_style_if_present(lexer, "Operator", palette["operator"])
 
 
 def apply_scintilla_style(
@@ -55,10 +115,10 @@ def apply_scintilla_style(
             # Calculate width needed for max line number
             char_width = sci.SendScintilla(sci.SCI_TEXTWIDTH, sci.STYLE_DEFAULT, b"8")
             digits = len(str(line_count))
-            # Keep equal left/right padding for the widest line number while
-            # increasing the visual gap between gutter and code content.
-            side_padding = 14
-            margin_width = max(44, char_width * digits + side_padding * 2)
+            margin_width = max(
+                LINE_NUMBER_MARGIN_MIN_WIDTH,
+                char_width * digits + LINE_NUMBER_LEFT_PADDING + LINE_NUMBER_RIGHT_PADDING,
+            )
         sci.setMarginWidth(1, margin_width)
 
     # Keep gutter distinct and give the caret a deterministic theme color.
@@ -68,6 +128,10 @@ def apply_scintilla_style(
     sci.setColor(QColor(c["editor_fg"]))
     sci.setPaper(QColor(paper_color))
     sci.setFont(_code_font())
+    # Adaptive line width: wrap long lines to the editor viewport.
+    sci.setWrapMode(QsciScintilla.WrapMode.WrapWord)
+    sci.setWrapVisualFlags(QsciScintilla.WrapVisualFlag.WrapFlagNone)
+    sci.setWrapIndentMode(QsciScintilla.WrapIndentMode.WrapIndentSame)
 
     # Set read-only
     sci.setReadOnly(read_only)
@@ -78,8 +142,6 @@ def apply_scintilla_style(
             background-color: {paper_color};
             color: {c["editor_fg"]};
             border: none;
-            font-family: "Cascadia Code", "Consolas", "Courier New", monospace;
-            font-size: 13px;
         }}
         QsciScintilla#{object_name}::margin {{
             background-color: {c["editor_margin"]};
@@ -97,8 +159,10 @@ def update_margin_width(sci: QsciScintilla) -> None:
     line_count = sci.lines()
     char_width = sci.SendScintilla(sci.SCI_TEXTWIDTH, sci.STYLE_DEFAULT, b"8")
     digits = len(str(line_count))
-    side_padding = 14
-    margin_width = max(44, char_width * digits + side_padding * 2)
+    margin_width = max(
+        LINE_NUMBER_MARGIN_MIN_WIDTH,
+        char_width * digits + LINE_NUMBER_LEFT_PADDING + LINE_NUMBER_RIGHT_PADDING,
+    )
     sci.setMarginWidth(1, margin_width)
 
 
@@ -110,11 +174,17 @@ def configure_lexer_colors(lexer: QsciLexer, paper_color: str | None = None) -> 
         paper_color: Optional background color override for lexer styles
     """
     c = get_theme_colors()
+    paper = QColor(paper_color or c["editor_bg"])
+    font = _code_font()
     # Set paper + font without forcing a single foreground color, otherwise
     # lexer token colors are flattened and syntax highlighting disappears.
-    lexer.setDefaultPaper(QColor(paper_color or c["editor_bg"]))
-    lexer.setPaper(QColor(paper_color or c["editor_bg"]))
-    lexer.setDefaultFont(_code_font())
+    lexer.setDefaultPaper(paper)
+    lexer.setPaper(paper)
+    lexer.setDefaultFont(font)
+    # Apply to all styles via style=-1 to avoid per-style metric drift/overlap.
+    lexer.setFont(font, -1)
+    lexer.setPaper(paper, -1)
+    _apply_vscode_token_palette(lexer)
 
 
 def create_scintilla(

@@ -846,6 +846,7 @@ class MainWindow(QMainWindow):
 
         self.preview.selection_changed.connect(self._on_preview_selection_changed)
         self.preview.restore_open_tabs()
+        self.file_tree.restore_state()
         self.main_agent_panel.set_agent_type("main")
         self.sub_agent_panel.set_agent_type("data_analysis")
         self.main_agent_panel.set_debug_mode("main" in self._debug_agents)
@@ -878,6 +879,7 @@ class MainWindow(QMainWindow):
             self.main_agent_panel.clear_file_context()
             self.sub_agent_panel.clear_file_context()
             return
+        self.file_tree.select_file(file_path)
         rel_path = self._relative_path(file_path)
         self.main_agent_panel.set_opened_file(rel_path)
         self.sub_agent_panel.set_opened_file(rel_path)
@@ -1595,6 +1597,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:  # noqa: N802
         if hasattr(self, "preview"):
             self.preview.save_open_tabs()
+        if hasattr(self, "file_tree"):
+            self.file_tree.save_state()
         super().closeEvent(event)
 
     def resizeEvent(self, event):
