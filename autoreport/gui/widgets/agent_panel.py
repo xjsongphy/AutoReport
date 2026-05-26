@@ -137,10 +137,11 @@ class AgentPanel(QWidget):
         self._title_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         hl.addWidget(self._title_label)
 
-        if self.panel_id == "sub":
+        if self.panel_id != "main":
             self._title_label.setVisible(False)
             self._agent_selector = NoWheelComboBox()
             self._agent_selector.setObjectName("subAgentSelector")
+            self._agent_selector.addItem("Main", "main")
             self._agent_selector.addItem("Data Analysis", "data_analysis")
             self._agent_selector.addItem("Plotting", "plotting")
             self._agent_selector.addItem("Theory", "theory")
