@@ -12,9 +12,11 @@ from loguru import logger
 
 from .theme import get_theme_colors, is_dark_mode
 
-LINE_NUMBER_LEFT_PADDING = 8
-LINE_NUMBER_RIGHT_PADDING = 20
-LINE_NUMBER_MARGIN_MIN_WIDTH = 44
+LINE_NUMBER_LEFT_PADDING = 1
+LINE_NUMBER_RIGHT_PADDING = 8
+LINE_NUMBER_MARGIN_MIN_WIDTH = 26
+# Extra blank space between line-number gutter and code text start.
+CODE_TEXT_LEFT_MARGIN = 24
 
 
 def _code_font(size: int = 13) -> QFont:
@@ -108,6 +110,8 @@ def apply_scintilla_style(
 
     # Configure margin 1 (line numbers)
     if line_numbers:
+        # Keep symbol margin disabled so the left side can be truly compact.
+        sci.setMarginWidth(0, 0)
         sci.setMarginLineNumbers(1, True)
         # Calculate margin width based on line count
         if margin_width is None:
@@ -128,6 +132,9 @@ def apply_scintilla_style(
     sci.setColor(QColor(c["editor_fg"]))
     sci.setPaper(QColor(paper_color))
     sci.setFont(_code_font())
+    # Decouple gutter spacing from code start position so we can keep line
+    # numbers visually closer to the left border while giving code more room.
+    sci.SendScintilla(sci.SCI_SETMARGINLEFT, 0, CODE_TEXT_LEFT_MARGIN)
     # Adaptive line width: wrap long lines to the editor viewport.
     sci.setWrapMode(QsciScintilla.WrapMode.WrapWord)
     sci.setWrapVisualFlags(QsciScintilla.WrapVisualFlag.WrapFlagNone)

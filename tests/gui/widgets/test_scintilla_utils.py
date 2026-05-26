@@ -1,6 +1,11 @@
 from PyQt6.QtGui import QColor
 
-from autoreport.gui.scintilla_utils import apply_scintilla_style, configure_lexer_colors
+from autoreport.gui.scintilla_utils import (
+    CODE_TEXT_LEFT_MARGIN,
+    LINE_NUMBER_MARGIN_MIN_WIDTH,
+    apply_scintilla_style,
+    configure_lexer_colors,
+)
 from autoreport.gui.theme import get_theme_colors
 
 
@@ -20,7 +25,8 @@ def test_scintilla_uses_theme_caret_and_margin(qtbot):
     assert widget.SendScintilla(widget.SCI_GETCARETFORE) == _scintilla_color_value(
         QColor(colors["editor_caret_fg"])
     )
-    assert widget.marginWidth(1) >= 44
+    assert widget.marginWidth(1) >= LINE_NUMBER_MARGIN_MIN_WIDTH
+    assert widget.SendScintilla(widget.SCI_GETMARGINLEFT) == CODE_TEXT_LEFT_MARGIN
     assert widget.wrapMode() == QsciScintilla.WrapMode.WrapWord
 
 
