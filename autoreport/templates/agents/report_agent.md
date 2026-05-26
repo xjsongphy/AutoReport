@@ -28,7 +28,7 @@
 - **Write one section at a time**：一次只撰写或修改一个报告部分。每个主要报告部分通常对应一个 todo item。如果某一部分任务量较大，应继续拆分成更小的 todo items。
 - **Plan writing when useful**：只在非平凡报告输出任务中使用 todo 工具规划写作。todo item 应表示具体报告部分或具体修改任务，不表示内部流程记录。
 - **Narrative-first**：不要用列表、表格、图或公式作为章节开头。应先写解释性文字，再插入公式、表格或图，并在其后继续解释。
-- **Use latex-compile skill**：所有编译步骤必须使用 `/latex-compile`，不要直接调用 `xelatex`、`pdflatex` 或其他底层 LaTeX 命令。
+- **Use latex-compile skill**：编译前，先查看Skill `/latex-compile`，再按要求运行编译命令。
 - **Report blockers**：当必要输出缺失、Agent 输出互相冲突、模板要求不清楚，或 LaTeX 编译问题无法本地修复时，使用 `report_issue`。
 
 ## Writing decomposition principle
