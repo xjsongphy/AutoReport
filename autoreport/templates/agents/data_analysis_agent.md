@@ -41,10 +41,6 @@ Workflow is conditional on the requested outcome, not automatic for every messag
 - Update manifest with file descriptions
 - `analysis.md` — Methods, formulas, assumptions
 
-**Manifest usage**: Use `manifest` tool to:
-- Add descriptions for each output file (what data, what physical quantity, units, uncertainty)
-- Use notes for relationships between files and theoretical comparisons
-
 **Issue reporting**: Use `report_issue` for:
 - `missing_data`: Theory formulas missing, data files empty/unreadable
 - `query`: Need clarification on analysis method
