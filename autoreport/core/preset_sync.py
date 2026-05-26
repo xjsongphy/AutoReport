@@ -27,6 +27,7 @@ PRESET_FILES = [
 
 SKILL_FILES = [
     ("latex-compile", "SKILL.md"),
+    ("experiment-report-writer", "SKILL.md"),
 ]
 
 
