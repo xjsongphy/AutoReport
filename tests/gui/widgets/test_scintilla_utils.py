@@ -21,6 +21,7 @@ def test_scintilla_uses_theme_caret_and_margin(qtbot):
         QColor(colors["editor_caret_fg"])
     )
     assert widget.marginWidth(1) >= 44
+    assert widget.wrapMode() == QsciScintilla.WrapMode.WrapWord
 
 
 def test_scintilla_accepts_content_background_override(qtbot):
@@ -53,18 +54,25 @@ def test_lexer_keeps_syntax_token_colors():
         def setDefaultPaper(self, color):
             self.calls.append(("setDefaultPaper", color))
 
-        def setPaper(self, color):
-            self.calls.append(("setPaper", color))
+        def setPaper(self, color, style=None):
+            self.calls.append(("setPaper", color, style))
 
         def setDefaultFont(self, font):
             self.calls.append(("setDefaultFont", font))
 
-        def setColor(self, color):
-            self.calls.append(("setColor", color))
+        def setFont(self, font, style):
+            self.calls.append(("setFont", font, style))
+
+        def setColor(self, color, style=None):
+            self.calls.append(("setColor", color, style))
 
     lexer = FakeLexer()
     configure_lexer_colors(lexer, paper_color="#2d2d2d")
 
-    assert ("setColor", QColor(get_theme_colors()["editor_fg"])) not in lexer.calls
-    assert any(name == "setDefaultPaper" for name, _ in lexer.calls)
-    assert any(name == "setDefaultFont" for name, _ in lexer.calls)
+    # Global flattening call should not happen: setColor(color) with no style id.
+    set_color_calls = [call for call in lexer.calls if call[0] == "setColor"]
+    assert not any(len(call) < 3 or call[2] is None for call in set_color_calls)
+    assert any(call[0] == "setDefaultPaper" for call in lexer.calls)
+    assert any(call[0] == "setDefaultFont" for call in lexer.calls)
+    # Per-style font assignment should exist to avoid style-level fallback fonts.
+    assert any(call[0] == "setFont" for call in lexer.calls)

@@ -1,11 +1,12 @@
 ﻿from pathlib import Path
 
 from PyQt6.QtCore import QEvent, Qt
+from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtWidgets import QApplication, QLabel, QTabBar, QPushButton
 from PyQt6.QtWidgets import QMessageBox
 
 from autoreport.gui.theme import get_theme_colors
-from autoreport.gui.widgets.preview import PreviewWidget
+from autoreport.gui.widgets.preview import PreviewWidget, _EmbeddedImageLabel
 
 
 def test_clicking_unified_tab_switches_active_file(qtbot, tmp_path: Path) -> None:
@@ -314,3 +315,20 @@ def test_tab_scrollbar_shows_on_hover_and_hides_on_leave(qtbot, tmp_path: Path) 
         == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
     )
 
+
+
+def test_embedded_image_label_does_not_upscale_small_source(qtbot) -> None:
+    label = _EmbeddedImageLabel()
+    qtbot.addWidget(label)
+    label.resize(400, 400)
+    label.show()
+    qtbot.waitExposed(label)
+
+    source = QPixmap(64, 64)
+    source.fill(QColor("#ff0000"))
+    label.set_source_pixmap(source)
+    rendered = label.pixmap()
+
+    assert rendered is not None
+    assert rendered.width() <= 64
+    assert rendered.height() <= 64

@@ -709,3 +709,36 @@ def test_clicking_blank_area_selects_root_directory(qtbot, tmp_path: Path) -> No
     assert widget.tree.currentItem() is None
     assert captured
     assert captured[-1] == "."
+
+
+def test_select_file_updates_current_item(qtbot, tmp_path: Path) -> None:
+    target = tmp_path / "Tex" / "a.tex"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("x", encoding="utf-8")
+
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    assert widget.select_file(target)
+    selected = widget.get_selected_file()
+    assert selected is not None
+    assert selected.resolve() == target.resolve()
+
+
+def test_file_tree_state_is_persisted_and_restored(qtbot, tmp_path: Path) -> None:
+    target = tmp_path / "Tex" / "state.tex"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("x", encoding="utf-8")
+
+    first = FileTreeWidget(tmp_path)
+    qtbot.addWidget(first)
+    assert first.select_file(target)
+    first.save_state()
+
+    second = FileTreeWidget(tmp_path)
+    qtbot.addWidget(second)
+    second.restore_state()
+
+    selected = second.get_selected_file()
+    assert selected is not None
+    assert selected.resolve() == target.resolve()
