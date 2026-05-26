@@ -70,3 +70,8 @@ Workflow is conditional on the requested outcome, not automatic for every messag
 - Colorblind-friendly palettes
 - Resolution 300+ DPI
 - Manifest updated with figure descriptions
+
+**Output conciseness**:
+- Don't echo input data in chat responses
+- Image files contain full visualizations
+- Chat summary: brief description of what was plotted and key observations (1-2 sentences)

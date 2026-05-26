@@ -55,3 +55,9 @@ Workflow is conditional on the requested outcome, not automatic for every messag
 - Errors and uncertainties calculated
 - Each result compared with theoretical prediction
 - Manifest updated with file descriptions and relationships
+
+**Output conciseness**:
+- Don't echo input data in chat responses
+- Processed data files contain full details
+- Chat summary: key results and conclusions only (1-2 paragraphs max)
+- Reference input data by description: "Using the power curve data from ..."
