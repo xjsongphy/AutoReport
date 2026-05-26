@@ -133,8 +133,9 @@ class ToolRegistry:
         """
         origin = getattr(type_hint, "__origin__", None)
 
-        # Handle Optional types
-        if origin is Union or str(type_hint).startswith("typing.Union") or str(type_hint).startswith("typing.Optional"):
+        # Handle Optional types (including Python 3.10+ | syntax)
+        type_name = type(type_hint).__name__ if type(type_hint) != type else ""
+        if origin is Union or str(type_hint).startswith("typing.Union") or str(type_hint).startswith("typing.Optional") or type_name == "UnionType":
             args = getattr(type_hint, "__args__", [])
             if args:
                 # Get the non-None type
@@ -156,6 +157,22 @@ class ToolRegistry:
 
         if type_hint in type_map:
             return type_map[type_hint].copy()
+
+        # Handle list[T] and dict[K, V] generic types
+        if origin is list:
+            args = getattr(type_hint, "__args__", [Any])
+            item_type = args[0] if args else Any
+            return {
+                "type": "array",
+                "items": self._type_to_json_schema(item_type),
+            }
+
+        if origin is dict:
+            args = getattr(type_hint, "__args__", [Any, Any])
+            return {
+                "type": "object",
+                "additionalProperties": self._type_to_json_schema(args[1] if len(args) > 1 else Any),
+            }
 
         # Handle | syntax (Python 3.10+ union)
         if origin is Union:

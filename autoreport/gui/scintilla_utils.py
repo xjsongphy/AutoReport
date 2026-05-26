@@ -13,6 +13,15 @@ from loguru import logger
 from .theme import get_theme_colors
 
 
+def _code_font(size: int = 13) -> QFont:
+    """Shared code font for editors and lexer tokens."""
+    font = QFont("Cascadia Code", size)
+    font.setStyleHint(QFont.StyleHint.Monospace)
+    # Keep fallback order aligned with the app-wide code font stack.
+    font.setFamilies(["Cascadia Code", "SF Mono", "Consolas", "Courier New", "monospace"])
+    return font
+
+
 def apply_scintilla_style(
     sci: QsciScintilla,
     object_name: str = "scintillaEditor",
@@ -58,6 +67,7 @@ def apply_scintilla_style(
     sci.setCaretForegroundColor(QColor(c["editor_caret_fg"]))
     sci.setColor(QColor(c["editor_fg"]))
     sci.setPaper(QColor(paper_color))
+    sci.setFont(_code_font())
 
     # Set read-only
     sci.setReadOnly(read_only)
@@ -100,8 +110,11 @@ def configure_lexer_colors(lexer: QsciLexer, paper_color: str | None = None) -> 
         paper_color: Optional background color override for lexer styles
     """
     c = get_theme_colors()
-    lexer.setColor(QColor(c["editor_fg"]))
+    # Set paper + font without forcing a single foreground color, otherwise
+    # lexer token colors are flattened and syntax highlighting disappears.
+    lexer.setDefaultPaper(QColor(paper_color or c["editor_bg"]))
     lexer.setPaper(QColor(paper_color or c["editor_bg"]))
+    lexer.setDefaultFont(_code_font())
 
 
 def create_scintilla(

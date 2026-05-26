@@ -43,7 +43,7 @@ def get_theme_colors() -> dict[str, str]:
     bg = "#1e1e1e" if dark else "#ffffff"
     surface = "#181818" if dark else "#f0f0f0"
     panel_bg = "#141414" if dark else "#f0f0f0"
-    titlebar_bg = "#141414" if dark else "#e6e6e6"
+    titlebar_bg = "#141414" if dark else surface
     messages_bg = "#121212" if dark else "#f0f0f0"
     border = "#2b2b2b" if dark else "#e0e0e0"
     fg = "#cccccc" if dark else "#616161"

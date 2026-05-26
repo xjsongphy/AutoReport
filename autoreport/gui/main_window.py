@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QSplitter,
     QVBoxLayout,
     QWidget,
+    QFrame,
 )
 
 from ..core.conversations import ConversationStore
@@ -180,6 +181,12 @@ class MainWindow(QMainWindow):
             }}
             QSplitter::handle:vertical {{
                 height: {px(1)};
+            }}
+            #titleBarDivider {{
+                background-color: {c["border"]};
+                border: none;
+                margin: 0;
+                padding: 0;
             }}
             QScrollBar:vertical {{
                 background-color: transparent;
@@ -741,6 +748,10 @@ class MainWindow(QMainWindow):
             # Custom title bar
             self._title_bar = TitleBar(self)
             main_layout.addWidget(self._title_bar)
+            self._titlebar_divider = QFrame(self)
+            self._titlebar_divider.setObjectName("titleBarDivider")
+            self._titlebar_divider.setFixedHeight(1)
+            main_layout.addWidget(self._titlebar_divider)
 
             # Setup menu bar in custom title bar
             self._setup_menu_bar(self._title_bar.get_menu_bar())

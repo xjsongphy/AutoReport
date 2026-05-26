@@ -13,6 +13,20 @@ from loguru import logger
 from .registry import Tool
 
 
+def _parse_json_param(value: Any) -> Any:
+    """Parse JSON string parameters to Python objects.
+
+    LLMs often serialize complex types (lists, dicts) as JSON strings.
+    This helper detects and parses them when needed.
+    """
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return value
+    return value
+
+
 class ManifestManager:
     """Persist and update agent manifest files.
 
@@ -149,6 +163,11 @@ class ManifestTool(Tool):
         manifest = await self._manifest_manager.load(self._agent_type)
         now = self._manifest_manager.now()
         file_map = {item.get("path"): item for item in manifest.get("files", []) if item.get("path")}
+
+        # Parse JSON string parameters (LLMs may serialize complex types as strings)
+        files = _parse_json_param(files)
+        notes = _parse_json_param(notes)
+
         if files:
             for record in files:
                 path = str(record.get("path", "")).strip()

@@ -43,3 +43,28 @@ def test_lexer_uses_override_background():
     configure_lexer_colors(lexer, paper_color="#2d2d2d")
 
     assert lexer.paper(0) == QColor("#2d2d2d")
+
+
+def test_lexer_keeps_syntax_token_colors():
+    class FakeLexer:
+        def __init__(self):
+            self.calls = []
+
+        def setDefaultPaper(self, color):
+            self.calls.append(("setDefaultPaper", color))
+
+        def setPaper(self, color):
+            self.calls.append(("setPaper", color))
+
+        def setDefaultFont(self, font):
+            self.calls.append(("setDefaultFont", font))
+
+        def setColor(self, color):
+            self.calls.append(("setColor", color))
+
+    lexer = FakeLexer()
+    configure_lexer_colors(lexer, paper_color="#2d2d2d")
+
+    assert ("setColor", QColor(get_theme_colors()["editor_fg"])) not in lexer.calls
+    assert any(name == "setDefaultPaper" for name, _ in lexer.calls)
+    assert any(name == "setDefaultFont" for name, _ in lexer.calls)
