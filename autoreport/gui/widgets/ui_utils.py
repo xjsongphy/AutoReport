@@ -146,8 +146,36 @@ def compact_tooltip_qss(selector: str = "QLabel") -> str:
 
 def create_isolated_context_menu(anchor: QWidget | None = None) -> QMenu:
     """Create a context menu isolated from parent-widget QSS inheritance."""
+    c = get_theme_colors()
     menu = QMenu()
-    menu.setStyleSheet("")
+    menu.setStyleSheet(
+        f"""
+        QMenu {{
+            background-color: {c["context_bg"]};
+            border: 1px solid {c["context_border"]};
+            border-radius: {c["radius_md"]};
+            padding: 4px;
+        }}
+        QMenu::item {{
+            background-color: transparent;
+            color: {c["popup_fg"]};
+            padding: 4px 8px;
+            margin: 0;
+            font-size: 12px;
+            border-radius: {c["radius_md"]};
+        }}
+        QMenu::indicator {{
+            width: 0px;
+            height: 0px;
+        }}
+        QMenu::item:selected {{
+            background-color: {c["popup_hover"]};
+        }}
+        QMenu::item:hover {{
+            background-color: {c["popup_hover"]};
+        }}
+        """
+    )
     if anchor is not None:
         menu.setFont(anchor.font())
     return menu
