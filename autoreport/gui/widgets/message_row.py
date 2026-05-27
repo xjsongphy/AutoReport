@@ -6,6 +6,7 @@
 """
 
 import re
+from pathlib import PurePath
 
 from PyQt6.QtCore import QEvent, Qt, pyqtSignal
 from PyQt6.QtGui import QClipboard, QColor, QIcon, QKeySequence, QPainter, QPalette, QPen
@@ -90,6 +91,60 @@ def _parse_code_blocks(content: str) -> list[tuple[str, str | None]]:
 
 def _copy_icon() -> QIcon:
     return render_svg_icon("copy", QColor(get_theme_colors()["muted"]), size=16)
+
+
+def _display_filename(path_text: str) -> str:
+    normalized = str(path_text or "").strip().rstrip("/\\")
+    if not normalized:
+        return ""
+    try:
+        return PurePath(normalized).name or normalized
+    except Exception:
+        return normalized
+
+
+def _parse_editor_context_block(content: str) -> tuple[str | None, str | None, str]:
+    """Extract leading editor context metadata from bubble text.
+
+    Expected formats:
+    - Editor context: selection\nFile: path\nSelected lines: a-b\n\nmessage
+    - Editor context: file\nCurrent file: path\n\nmessage
+    """
+    if not content.startswith("Editor context: "):
+        return None, None, content
+
+    lines = content.splitlines()
+    if len(lines) < 2:
+        return None, None, content
+
+    context_type = lines[0].split(":", 1)[1].strip().lower()
+    body_start = None
+    chip_text = None
+    chip_tooltip = None
+
+    if context_type == "selection" and len(lines) >= 3:
+        file_match = re.match(r"^File:\s*(.+)$", lines[1])
+        line_match = re.match(r"^Selected lines:\s*(.+)$", lines[2])
+        if file_match and line_match:
+            file_path = file_match.group(1).strip()
+            chip_text = f"{_display_filename(file_path)}#{line_match.group(1).strip()}"
+            chip_tooltip = f"{file_path}#{line_match.group(1).strip()}"
+            body_start = 3
+    elif context_type == "file" and len(lines) >= 2:
+        file_match = re.match(r"^Current file:\s*(.+)$", lines[1])
+        if file_match:
+            file_path = file_match.group(1).strip()
+            chip_text = _display_filename(file_path)
+            chip_tooltip = file_path
+            body_start = 2
+
+    if chip_text is None or body_start is None:
+        return None, None, content
+
+    while body_start < len(lines) and not lines[body_start].strip():
+        body_start += 1
+    body = "\n".join(lines[body_start:]).strip()
+    return chip_text, chip_tooltip, body
 
 
 def _plain_markdown_with_raw_map(raw_markdown: str) -> tuple[str, list[int]]:
@@ -312,7 +367,10 @@ class MessageRow(QWidget):
         self._edit_bubble_widget: QWidget | None = None
         self._user_bubble_widget: QWidget | None = None
         self._user_bubble_layout: QVBoxLayout | None = None
+        self._context_chip_widget: QWidget | None = None
+        self._context_chip_label: QLabel | None = None
         self._checkpoint_id: str | None = None
+        self._context_chip_text, self._context_chip_tooltip, self._bubble_text = _parse_editor_context_block(content)
         self._setup_ui()
         self._setup_hover_handler()
 
@@ -377,18 +435,7 @@ class MessageRow(QWidget):
                 bl.addWidget(self._detail_widget)
                 self._detail_widget.setVisible(False)
             else:
-                text = QLabel(self._content)
-                text.setObjectName("userMessageText")
-                text.setWordWrap(True)
-                text.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-                text.setTextFormat(Qt.TextFormat.PlainText)
-                text.setTextInteractionFlags(
-                    Qt.TextInteractionFlag.TextSelectableByMouse
-                )
-                text.setMinimumWidth(0)
-                c = get_theme_colors()
-                text.setStyleSheet(f"color: {c['editor_fg']}; background-color: transparent;")
-                bl.addWidget(text)
+                self._populate_user_bubble_content(bl)
 
             bcl.addWidget(bubble)
 
@@ -443,6 +490,58 @@ class MessageRow(QWidget):
             self._update_agent_chain()
 
         layout.addWidget(outer)
+
+    def _populate_user_bubble_content(self, layout: QVBoxLayout) -> None:
+        if self._context_chip_text:
+            layout.addWidget(self._build_context_chip(self._context_chip_text))
+        text_content = self._content if self._context_chip_text is None else self._bubble_text
+        if not text_content:
+            return
+        text = QLabel(text_content)
+        text.setObjectName("userMessageText")
+        text.setWordWrap(True)
+        text.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        text.setTextFormat(Qt.TextFormat.PlainText)
+        text.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        text.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        text.setMinimumWidth(0)
+        text.installEventFilter(self)
+        c = get_theme_colors()
+        text.setStyleSheet(f"color: {c['editor_fg']}; background-color: transparent;")
+        layout.addWidget(text)
+
+    def _build_context_chip(self, chip_text: str) -> QWidget:
+        chip = QWidget(self)
+        chip.setObjectName("userContextChip")
+        chip.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        chip_layout = QHBoxLayout(chip)
+        chip_layout.setContentsMargins(10, 7, 10, 7)
+        chip_layout.setSpacing(6)
+
+        icon_label = QLabel(chip)
+        icon_label.setObjectName("userContextChipIcon")
+        icon = render_svg_icon("file", QColor(get_theme_colors()["muted"]), size=14)
+        icon_label.setPixmap(icon.pixmap(14, 14))
+        icon_label.setFixedSize(14, 14)
+        chip_layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        text_label = QLabel(chip_text, chip)
+        text_label.setObjectName("userContextChipText")
+        text_label.setTextFormat(Qt.TextFormat.PlainText)
+        text_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        text_label.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        text_label.installEventFilter(self)
+        text_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        text_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        if self._context_chip_tooltip:
+            text_label.setToolTip(self._context_chip_tooltip)
+            chip.setToolTip(self._context_chip_tooltip)
+        chip_layout.addWidget(text_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._context_chip_widget = chip
+        self._context_chip_label = text_label
+        return chip
 
     def _clear_agent_content(self) -> None:
         self._wrapping_labels = []
@@ -896,6 +995,46 @@ class MessageRow(QWidget):
                 )
             return True
 
+        if (
+            isinstance(obj, QLabel)
+            and event.type() == QEvent.Type.ContextMenu
+            and (
+                obj in self._raw_markdown_labels
+                or obj.objectName() in {"userMessageText", "userContextChipText"}
+            )
+        ):
+            menu = create_isolated_context_menu(self)
+            selected = obj.selectedText()
+
+            copy_selected_action = None
+            if selected:
+                copy_selected_action = menu.addAction("复制所选")
+            copy_all_action = menu.addAction("复制")
+            action = menu.exec(event.globalPos())
+            if not action:
+                return True
+
+            clipboard = QApplication.clipboard()
+            if clipboard is None:
+                return True
+            if action == copy_selected_action and selected:
+                if obj in self._raw_markdown_labels:
+                    raw = self._raw_markdown_labels[obj]
+                    clipboard.setText(
+                        _raw_markdown_for_selected_text(raw, selected),
+                        QClipboard.Mode.Clipboard,
+                    )
+                else:
+                    clipboard.setText(selected, QClipboard.Mode.Clipboard)
+                return True
+
+            if action == copy_all_action:
+                if obj in self._raw_markdown_labels:
+                    clipboard.setText(self._raw_markdown_labels[obj], QClipboard.Mode.Clipboard)
+                else:
+                    clipboard.setText(obj.text(), QClipboard.Mode.Clipboard)
+                return True
+
         if not self._is_outbound_message():
             return super().eventFilter(obj, event)
 
@@ -981,7 +1120,7 @@ class MessageRow(QWidget):
             if self._editing:
                 width = max(80, self.width() - 32)
             else:
-                width = max(80, int(self.width() * 0.45))
+                width = max(80, int(self.width() * 0.75))
             self._user_bubble_container.setFixedWidth(width)
 
     def _is_outbound_message(self) -> bool:
@@ -1002,3 +1141,11 @@ class MessageRow(QWidget):
 
     def is_expanded(self) -> bool:
         return self._expanded
+
+    def context_chip_panel_width_hint(self) -> int:
+        if self._context_chip_widget is None:
+            return 0
+        chip_width = self._context_chip_widget.sizeHint().width()
+        bubble_padding = 24
+        row_gutters = 40
+        return int((chip_width + bubble_padding) / 0.75) + row_gutters
