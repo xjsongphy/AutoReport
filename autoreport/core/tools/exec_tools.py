@@ -162,64 +162,38 @@ class BashTool(Tool):
             raise
 
     def _filter_ls_output(self, output: str) -> str:
-        """Filter .autoreport and .checkpoints from ls command output.
-
-        This prevents agents from discovering internal metadata directories
-        through commands like 'ls -a' that list hidden files.
-        """
+        """Filter .autoreport and .checkpoints from ls command output."""
         lines = output.splitlines()
         filtered = []
         for line in lines:
-            # Filter out lines that are exactly our protected directories
-            # or contain them as path components
-            should_filter = False
-            for protected in (".autoreport", ".checkpoints"):
-                # Check if line is exactly the directory name (ls -a format)
-                if line.strip() == protected:
-                    should_filter = True
-                    break
-                # Check if line contains protected/ (e.g., ".autoreport/file")
-                if f"{protected}/" in line.replace("\\", "/"):
-                    should_filter = True
-                    break
-                # Check if line ends with the protected directory name (ls -la format)
-                # The line format is: permissions links user group size date time name
-                # So we check if the last word is the protected directory name
-                parts = line.strip().split()
-                if parts and parts[-1] == protected:
-                    should_filter = True
-                    break
-                # Also check if last part is a symlink to protected directory
-                if parts and parts[-1].endswith(f" -> {protected}"):
-                    should_filter = True
-                    break
-            if not should_filter:
-                filtered.append(line)
+            stripped = line.strip()
+            parts = stripped.split()
+            last = parts[-1] if parts else ""
+            if any(
+                stripped == p
+                or f"{p}/" in line.replace("\\", "/")
+                or last == p
+                or last.endswith(f" -> {p}")
+                for p in (".autoreport", ".checkpoints")
+            ):
+                continue
+            filtered.append(line)
         return "\n".join(filtered)
 
     def _filter_find_output(self, output: str) -> str:
-        """Filter .autoreport and .checkpoints from find command output.
-
-        The find command outputs paths like "./.autoreport" or "./.checkpoints/file".
-        We need to filter these out.
-        """
+        """Filter .autoreport and .checkpoints from find command output."""
         lines = output.splitlines()
         filtered = []
         for line in lines:
-            should_filter = False
             normalized = line.strip().replace("\\", "/")
-            for protected in (".autoreport", ".checkpoints"):
-                # Check for patterns like:
-                # ./.autoreport
-                # ./.autoreport/
-                # ./.autoreport/file
-                if (normalized == f"./{protected}" or
-                    normalized == f"./{protected}/" or
-                    normalized.startswith(f"./{protected}/") or
-                    normalized == protected or
-                    normalized.startswith(f"{protected}/")):
-                    should_filter = True
-                    break
-            if not should_filter:
-                filtered.append(line)
+            if any(
+                normalized == f"./{p}"
+                or normalized == f"./{p}/"
+                or normalized.startswith(f"./{p}/")
+                or normalized == p
+                or normalized.startswith(f"{p}/")
+                for p in (".autoreport", ".checkpoints")
+            ):
+                continue
+            filtered.append(line)
         return "\n".join(filtered)

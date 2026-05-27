@@ -1074,16 +1074,12 @@ class MessageRow(QWidget):
         self._user_copy_btn.setVisible(True)
 
         # Keep layout width stable: buttons always occupy space, only visual state changes.
-        self._edit_btn.setFlat(not visible)
-        self._user_copy_btn.setFlat(not visible)
-        if visible:
-            self._user_copy_btn.setIcon(_copy_icon())
-            self._edit_btn.setStyleSheet("")
-            self._user_copy_btn.setStyleSheet("")
-        else:
-            self._user_copy_btn.setIcon(QIcon())
-            self._edit_btn.setStyleSheet("color: transparent;")
-            self._user_copy_btn.setStyleSheet("color: transparent;")
+        flat = not visible
+        style = "" if visible else "color: transparent;"
+        for btn in (self._edit_btn, self._user_copy_btn):
+            btn.setFlat(flat)
+            btn.setStyleSheet(style)
+        self._user_copy_btn.setIcon(_copy_icon() if visible else QIcon())
 
     def _set_agent_actions_visible(self, visible: bool) -> None:
         if not hasattr(self, "_copy_btn"):

@@ -2,7 +2,7 @@
 
 import sys
 from PyQt6.QtCore import Qt, QPoint
-from PyQt6.QtGui import QColor, QCursor, QPainter, QPaintEvent, QPalette
+from PyQt6.QtGui import QColor, QCursor, QPaintEvent, QPalette
 from PyQt6.QtWidgets import (
     QApplication,
     QWidget,
@@ -76,6 +76,9 @@ class TitleBar(QWidget):
         self._menu_bar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._menu_bar.installEventFilter(self)
         self._refresh_app_icon()
+        # Re-sync icon when window icon changes (e.g. after app setup).
+        if self.window():
+            self.window().windowIconChanged.connect(self._refresh_app_icon)
 
         # On macOS, native menu bar is preferred, but for custom title bar
         # we need to embed it
@@ -146,6 +149,7 @@ class TitleBar(QWidget):
         """Apply VSCode-style theme to title bar."""
         c = get_theme_colors()
         s = dpi_scale()
+        self._refresh_app_icon()
         # Some Windows styles may still paint menubar base from palette.
         pal = self._menu_bar.palette()
         pal.setColor(QPalette.ColorRole.Window, QColor(c["titlebar_bg"]))
@@ -304,16 +308,15 @@ class TitleBar(QWidget):
         if self._is_windows:
             self._drag_position = global_pos - self.window().frameGeometry().topLeft()
             return True
-        if not self._is_windows:
-            window = self.window()
-            handle = window.windowHandle() if window else None
-            if handle is not None and hasattr(handle, "startSystemMove"):
-                try:
-                    if handle.startSystemMove():
-                        self._using_system_move = True
-                        return True
-                except Exception:
-                    pass
+        window = self.window()
+        handle = window.windowHandle() if window else None
+        if handle is not None and hasattr(handle, "startSystemMove"):
+            try:
+                if handle.startSystemMove():
+                    self._using_system_move = True
+                    return True
+            except Exception:
+                pass
         self._drag_position = global_pos - self.window().frameGeometry().topLeft()
         return True
 
@@ -397,14 +400,7 @@ class TitleBar(QWidget):
         return super().eventFilter(obj, event)
 
     def paintEvent(self, event: QPaintEvent) -> None:
-        """Custom paint event for platform-specific rendering."""
-        self._refresh_app_icon()
         super().paintEvent(event)
-
-        # On macOS, draw the title bar background to ensure consistency
-        if self._is_macos:
-            painter = QPainter(self)
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
     def get_menu_bar(self) -> QMenuBar:
         """Get the embedded menu bar."""

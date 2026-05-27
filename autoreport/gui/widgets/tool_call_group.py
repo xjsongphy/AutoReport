@@ -198,28 +198,23 @@ class ToolCallGroup(QWidget):
                     names.append(Path(p).name)
         return names
 
+    _FILE_TOOL_LABELS = {
+        "read_file": "Read",
+        "list_dir": "List",
+        "parse_pdf": "Parse",
+        "write_file": "Write",
+        "edit_file": "Edit",
+        "delete_file": "Delete",
+    }
+
     def _header_text_for_call(self, call: ToolCall) -> str:
         if call.summary:
             return call.summary
         sep = "&nbsp;&nbsp;"
-        if call.name == "read_file":
-            files = " ".join(call.file_names) if call.file_names else ""
-            return f"<b>Read</b>{sep}{files}".strip()
-        if call.name == "list_dir":
-            files = " ".join(call.file_names) if call.file_names else "."
-            return f"<b>List</b>{sep}{files}".strip()
-        if call.name == "parse_pdf":
-            files = " ".join(call.file_names) if call.file_names else ""
-            return f"<b>Parse</b>{sep}{files}".strip()
-        if call.name == "write_file":
-            files = " ".join(call.file_names) if call.file_names else ""
-            return f"<b>Write</b>{sep}{files}".strip()
-        if call.name == "edit_file":
-            files = " ".join(call.file_names) if call.file_names else ""
-            return f"<b>Edit</b>{sep}{files}".strip()
-        if call.name == "delete_file":
-            files = " ".join(call.file_names) if call.file_names else ""
-            return f"<b>Delete</b>{sep}{files}".strip()
+        label = self._FILE_TOOL_LABELS.get(call.name)
+        if label:
+            files = " ".join(call.file_names) or ("." if call.name == "list_dir" else "")
+            return f"<b>{label}</b>{sep}{files}".strip()
         if call.name == "bash":
             desc = str(call.arguments.get("command_description") or "").strip()
             if desc:
@@ -330,20 +325,13 @@ class ToolCallGroup(QWidget):
             failed = any(c.success is False for c in self._calls)
             success = not running and not failed
             same_name = len({c.name for c in self._calls}) == 1
-            if same_name and self._calls[0].name in {"read_file", "list_dir", "parse_pdf", "write_file", "edit_file", "delete_file"}:
+            if same_name and self._calls[0].name in self._FILE_TOOL_LABELS:
                 tool = self._calls[0].name
                 files: list[str] = []
                 for c in self._calls:
                     files.extend(c.file_names)
                 file_text = " ".join(files).strip()
-                label = {
-                    "read_file": "Read",
-                    "list_dir": "List",
-                    "parse_pdf": "Parse",
-                    "write_file": "Write",
-                    "edit_file": "Edit",
-                    "delete_file": "Delete",
-                }[tool]
+                label = self._FILE_TOOL_LABELS[tool]
                 joined = f"<b>{label}</b>&nbsp;&nbsp;{file_text}".strip()
             elif same_name:
                 joined = self._header_text_for_call(self._calls[0])

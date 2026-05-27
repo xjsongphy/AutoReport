@@ -30,6 +30,7 @@ from ..interfaces.types import (
     Message,
     QueueUpdateMessage,
     StatusChange,
+    TaskUpdateMessage,
     ToolCall,
     ToolResult,
     UserMessage,
@@ -90,9 +91,6 @@ class MainWindow(QMainWindow):
             flags = self.windowFlags() | Qt.WindowType.FramelessWindowHint
             self.setWindowFlags(flags)
 
-        # Add window shadow for depth (platform-specific)
-        self._apply_window_shadow()
-
         self._conv_store = ConversationStore(workspace)
 
         self._apply_theme()
@@ -116,38 +114,14 @@ class MainWindow(QMainWindow):
         if central is not None and central.layout() is not None:
             central.layout().activate()
         self._apply_splitter_sizes(force=True)
-        areas = [self.agent_panel._messages_area]
-        for area in areas:
-            area.setUpdatesEnabled(False)
+        area = self.agent_panel._messages_area
+        area.setUpdatesEnabled(False)
         try:
             self._load_conversations()
             self.layout().activate()
-            for area in areas:
-                area.viewport().updateGeometry()
+            area.viewport().updateGeometry()
         finally:
-            for area in areas:
-                area.setUpdatesEnabled(True)
-
-    def _apply_window_shadow(self) -> None:
-        """Apply window shadow effect for platform-appropriate appearance."""
-        if sys.platform == "win32":
-            # Windows: Use native DWM shadow
-            import ctypes
-            from ctypes import wintypes
-
-            # Enable DWM blur behind window
-            try:
-                hwnd = int(self.winId())
-                attribute = ctypes.c_int(2)  # DWMWA_EXTENDED_FRAME_BOUNDS
-                if hasattr(ctypes, "windll"):
-                    # This is a simplified version - full implementation would
-                    # use DwmExtendFrameIntoClientArea for proper Aero glass effect
-                    pass
-            except Exception:
-                pass
-        elif sys.platform == "darwin":
-            # macOS: Shadow is automatic for windows
-            pass
+            area.setUpdatesEnabled(True)
 
     def _apply_theme(self) -> None:
         """Apply theme matching VS Code Copilot Chat color variables."""
@@ -896,31 +870,17 @@ class MainWindow(QMainWindow):
         self._save_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self._save_shortcut.activated.connect(self._on_save_file)
 
-        self._copy_shortcut = QShortcut(QKeySequence.StandardKey.Copy, self)
-        self._copy_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
-        self._copy_shortcut.activated.connect(lambda: self._dispatch_standard_edit("copy"))
-
-        self._paste_shortcut = QShortcut(QKeySequence.StandardKey.Paste, self)
-        self._paste_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
-        self._paste_shortcut.activated.connect(lambda: self._dispatch_standard_edit("paste"))
-
-        self._cut_shortcut = QShortcut(QKeySequence.StandardKey.Cut, self)
-        self._cut_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
-        self._cut_shortcut.activated.connect(lambda: self._dispatch_standard_edit("cut"))
-
-        self._undo_shortcut = QShortcut(QKeySequence.StandardKey.Undo, self)
-        self._undo_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
-        self._undo_shortcut.activated.connect(lambda: self._dispatch_standard_edit("undo"))
-
-        self._redo_shortcut = QShortcut(QKeySequence.StandardKey.Redo, self)
-        self._redo_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
-        self._redo_shortcut.activated.connect(lambda: self._dispatch_standard_edit("redo"))
-
-        self._select_all_shortcut = QShortcut(QKeySequence.StandardKey.SelectAll, self)
-        self._select_all_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
-        self._select_all_shortcut.activated.connect(
-            lambda: self._dispatch_standard_edit("selectAll")
-        )
+        for std_key, method in [
+            (QKeySequence.StandardKey.Copy, "copy"),
+            (QKeySequence.StandardKey.Paste, "paste"),
+            (QKeySequence.StandardKey.Cut, "cut"),
+            (QKeySequence.StandardKey.Undo, "undo"),
+            (QKeySequence.StandardKey.Redo, "redo"),
+            (QKeySequence.StandardKey.SelectAll, "selectAll"),
+        ]:
+            sc = QShortcut(std_key, self)
+            sc.setContext(Qt.ShortcutContext.ApplicationShortcut)
+            sc.activated.connect(lambda m=method: self._dispatch_standard_edit(m))
 
     def _dispatch_standard_edit(self, method_name: str) -> None:
         """Dispatch standard edit command to focused widget when available."""
@@ -1160,18 +1120,6 @@ class MainWindow(QMainWindow):
         self._message_signal.emit(message)
 
     def _dispatch_backend_message(self, message: Message) -> None:
-        from ..interfaces.types import (
-            AgentResponse,
-            Checkpoint,
-            Error,
-            QueueUpdateMessage,
-            StatusChange,
-            TaskUpdateMessage,
-            ToolCall,
-            ToolResult,
-            UserMessage,
-        )
-
         if isinstance(message, AgentResponse):
             self._handle_agent_response(message)
         elif isinstance(message, UserMessage):

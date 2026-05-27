@@ -40,7 +40,7 @@ Workflow is conditional on the requested outcome, not automatic for every messag
 - `plots/` — Generated PNG images (300+ DPI)
 - `scripts/` — Python scripts
 - Update manifest with figure descriptions
-- 
+
 **Technical standards**:
 - Resolution: 600-1000 DPI for graphs, 300-600 DPI for photos
 - Fonts: Times New Roman, 8-12 point
