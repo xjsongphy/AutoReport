@@ -156,6 +156,11 @@ class SessionListItem(QWidget):
             ))
 
     def _set_hovered(self, hovered: bool) -> None:
+        # Only update if hover state actually changed
+        if hasattr(self, '_last_hovered') and self._last_hovered == hovered:
+            return
+        self._last_hovered = hovered
+
         c = get_theme_colors()
         if self._is_current:
             bg = c["selection"]
@@ -563,10 +568,7 @@ class ConversationHistoryDropdown(QFrame):
         if hasattr(anchor, "setDown"):
             anchor.setDown(False)
         anchor.setAttribute(Qt.WidgetAttribute.WA_UnderMouse, False)
-        anchor.clearFocus()
-        QApplication.sendEvent(anchor, QEvent(QEvent.Type.Leave))
-        anchor.update()
-        anchor.repaint()
+        # Use deferred calls to ensure clean state after all event processing
         QTimer.singleShot(0, anchor.clearFocus)
         QTimer.singleShot(0, lambda: QApplication.sendEvent(anchor, QEvent(QEvent.Type.Leave)))
         QTimer.singleShot(0, anchor.update)

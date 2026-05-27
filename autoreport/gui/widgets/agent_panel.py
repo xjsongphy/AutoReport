@@ -393,9 +393,7 @@ class AgentPanel(QWidget):
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
-        self._update_composer_fade_geometry()
-        self._update_composer_alignment()
-        self._sync_composer_gap()
+        # Update geometry after layout system processes the resize
         QTimer.singleShot(0, self._update_composer_fade_geometry)
         QTimer.singleShot(0, self._update_composer_alignment)
         QTimer.singleShot(0, self._sync_composer_gap)
@@ -404,9 +402,6 @@ class AgentPanel(QWidget):
         super().showEvent(event)
         # Initial splitter/layout negotiation can leave an outdated minimum width
         # until first maximize/restore; refresh once when panel is shown.
-        self._update_width()
-        self._update_composer_fade_geometry()
-        self._update_composer_alignment()
         QTimer.singleShot(0, self._update_width)
         QTimer.singleShot(0, self._update_composer_fade_geometry)
         QTimer.singleShot(0, self._update_composer_alignment)

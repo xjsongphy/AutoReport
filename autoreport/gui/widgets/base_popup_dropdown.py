@@ -262,10 +262,7 @@ class BasePopupDropdown(QListWidget):
         # Ensure first-open geometry uses final styled metrics.
         self.ensurePolished()
         self.updateGeometry()
-        self.updateGeometries()
-        self.doItemsLayout()
         self._apply_popup_height(max_visible_items)
-        self.doItemsLayout()
         self.updateGeometries()
         self.viewport().updateGeometry()
 
@@ -275,8 +272,6 @@ class BasePopupDropdown(QListWidget):
             # stale size/position and cause the popup to overlap its trigger.
             parent_widget.ensurePolished()
             parent_widget.updateGeometry()
-            parent_widget.repaint()
-            QApplication.processEvents()
 
             top_left = parent_widget.mapToGlobal(QPoint(0, 0))
             anchor_bottom = top_left.y() + parent_widget.height()
