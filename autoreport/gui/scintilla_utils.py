@@ -12,11 +12,12 @@ from loguru import logger
 
 from .theme import get_theme_colors, is_dark_mode
 
-LINE_NUMBER_LEFT_PADDING = 1
-LINE_NUMBER_RIGHT_PADDING = 8
+LINE_NUMBER_RIGHT_PADDING = 6
 LINE_NUMBER_MARGIN_MIN_WIDTH = 26
 # Extra blank space between line-number gutter and code text start.
-CODE_TEXT_LEFT_MARGIN = 24
+CODE_TEXT_LEFT_MARGIN = 8
+# Keep widest line number visually centered between editor edge and code start.
+LINE_NUMBER_LEFT_PADDING = LINE_NUMBER_RIGHT_PADDING + CODE_TEXT_LEFT_MARGIN
 
 
 def _code_font(size: int = 13) -> QFont:
