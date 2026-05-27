@@ -27,7 +27,6 @@ from autoreport.gui.widgets.file_search_popup import FileSearchPopup
 from autoreport.gui.widgets.ui_utils import IconActionButton, NoWheelComboBox, render_svg_icon
 from autoreport.utils.agent_labels import get_agent_badge, get_agent_title, get_agent_icon
 from autoreport.gui.widgets.messages_area import MessagesArea
-from autoreport.gui.widgets.status_indicator import StatusIndicator
 from autoreport.interfaces.types import ApiDebugMessage
 from autoreport.utils.logging_config import ui_logger
 from ..theme import get_theme_colors
@@ -40,6 +39,7 @@ class _ComposerTopFade(QWidget):
         super().__init__(parent)
         self._base_color = QColor(base_color)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAutoFillBackground(False)
 
     def set_base_color(self, base_color: QColor) -> None:
@@ -161,24 +161,27 @@ class AgentPanel(QWidget):
             text="+",
             tooltip="New conversation",
             object_name="headerAction",
-            button_size=(28, 28),
+            button_size=(22, 22),
+            icon_size=(16, 16),
             on_click=self._on_new_conversation,
         )
         hl.addWidget(self._new_conv_btn)
 
         self._history_btn = IconActionButton(
-            text="☰",
             tooltip="History",
             object_name="headerAction",
-            button_size=(28, 28),
+            button_size=(22, 22),
+            icon_size=(16, 16),
             on_click=self._on_history,
         )
         hl.addWidget(self._history_btn)
+        self._setup_header_icons()
 
         layout.addWidget(header)
 
         # ---- Floating history dropdown (popup, not in layout) ----
-        self._history_dropdown = ConversationHistoryDropdown()
+        self._history_show_pending = False
+        self._history_dropdown = ConversationHistoryDropdown(self)
         self._history_dropdown.session_selected.connect(self._on_history_session_selected)
         self._history_dropdown.delete_session_requested.connect(self._on_history_delete)
         self._history_dropdown.rename_session_requested.connect(self._on_history_rename)
@@ -217,17 +220,12 @@ class AgentPanel(QWidget):
         self._debug_panel.setVisible(False)
         layout.addWidget(self._debug_panel)
 
-        # ---- Status indicator (Codex-style, animated) ----
-        self._status_indicator = StatusIndicator()
-        layout.addWidget(self._status_indicator)
-
         # ---- Composer (floating input + dock bar) ----
         c = get_theme_colors()
         self._composer_top_fade = _ComposerTopFade(QColor(c["messages_bg"]), self)
         self._composer_top_fade.setObjectName("composerTopFade")
         self._composer_top_fade.setFixedHeight(scaled(18))
         self._composer_top_fade.setStyleSheet("QWidget#composerTopFade { border: none; background: transparent; }")
-        layout.addWidget(self._composer_top_fade)
 
         self._composer_host = QWidget(self)
         self._composer_host.setObjectName("composerHost")
@@ -335,6 +333,12 @@ class AgentPanel(QWidget):
         self._composer_bottom_gap.setFixedHeight(0)
         layout.addWidget(self._composer_bottom_gap)
         self._layout = layout
+        self._update_composer_fade_geometry()
+
+    def _setup_header_icons(self) -> None:
+        c = get_theme_colors()
+        icon_color = QColor(c["fg"])
+        self._history_btn.setIcon(render_svg_icon("history", icon_color, size=16))
 
     def _setup_file_search(self) -> None:
         self._file_search_popup = FileSearchPopup(self)
@@ -389,8 +393,10 @@ class AgentPanel(QWidget):
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
+        self._update_composer_fade_geometry()
         self._update_composer_alignment()
         self._sync_composer_gap()
+        QTimer.singleShot(0, self._update_composer_fade_geometry)
         QTimer.singleShot(0, self._update_composer_alignment)
         QTimer.singleShot(0, self._sync_composer_gap)
 
@@ -399,8 +405,10 @@ class AgentPanel(QWidget):
         # Initial splitter/layout negotiation can leave an outdated minimum width
         # until first maximize/restore; refresh once when panel is shown.
         self._update_width()
+        self._update_composer_fade_geometry()
         self._update_composer_alignment()
         QTimer.singleShot(0, self._update_width)
+        QTimer.singleShot(0, self._update_composer_fade_geometry)
         QTimer.singleShot(0, self._update_composer_alignment)
 
     def _sync_composer_gap(self) -> None:
@@ -410,8 +418,17 @@ class AgentPanel(QWidget):
         side_gap = max(0, self._input_container.mapTo(self, QPoint(0, 0)).x())
         if self._composer_bottom_gap.height() != side_gap:
             self._composer_bottom_gap.setFixedHeight(side_gap)
+        self._update_composer_fade_geometry()
+        self._composer_top_fade.raise_()
         self._composer_host.raise_()
         self._composer_bottom_gap.raise_()
+
+    def _update_composer_fade_geometry(self) -> None:
+        if not hasattr(self, "_composer_top_fade") or not hasattr(self, "_composer_host"):
+            return
+        fade_h = self._composer_top_fade.height()
+        composer_top = self._composer_host.y()
+        self._composer_top_fade.setGeometry(0, max(0, composer_top - fade_h), self.width(), fade_h)
 
     def _composer_anchor_bounds(self) -> tuple[int, int]:
         """Return (left, right) anchor x positions for composer in panel coordinates."""
@@ -994,17 +1011,15 @@ class AgentPanel(QWidget):
         colors = get_theme_colors()
         self._status_label.setStyleSheet(f"color: {colors.get(color_key, colors['status_idle'])};")
 
-        if status == "thinking":
-            self.start_thinking()
-        else:
+        # Thinking rows should be driven by real thinking chunks from model
+        # responses. Status events may arrive out-of-order and create phantom
+        # thought rows if they start thinking UI directly.
+        if status != "thinking":
             self.finish_thinking()
 
         if active:
-            header = "Thinking" if status == "thinking" else "Running tool"
-            self._status_indicator.start(header)
             self._set_working(True)
         else:
-            self._status_indicator.stop()
             self._set_working(False)
 
     def set_queue_preview(self, queued_messages: list[str]) -> None:
@@ -1079,7 +1094,8 @@ class AgentPanel(QWidget):
 
     def _on_history(self) -> None:
         ui_logger.debug("AgentPanel[{}]: history button clicked", self.panel_id)
-        if self._history_dropdown.isVisible():
+        if self._history_dropdown.isVisible() or self._history_show_pending:
+            self._history_show_pending = False
             self._history_dropdown.hide()
         else:
             # Request session data and show dropdown
@@ -1092,6 +1108,13 @@ class AgentPanel(QWidget):
 
     def show_history_dropdown(self, sessions: list[dict], current_id: str | None = None) -> None:
         self._history_dropdown.populate(sessions, current_id)
+        self._history_show_pending = True
+        QTimer.singleShot(0, self._show_history_dropdown_now)
+
+    def _show_history_dropdown_now(self) -> None:
+        if not self._history_show_pending:
+            return
+        self._history_show_pending = False
         self._history_dropdown.show_dropdown(self._history_btn)
 
     def _on_history_session_selected(self, session_id: str) -> None:
