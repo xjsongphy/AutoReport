@@ -273,10 +273,10 @@ class MainWindow(QMainWindow):
             }}
             /* ---- Input Container (with working border space) ---- */
             #composerHost {{
-                background-color: {c["panel_bg"]};
+                background-color: {c["messages_bg"]};
             }}
             #inputContainer {{
-                background-color: {c["panel_bg"]};
+                background-color: {c["messages_bg"]};
                 border: 1px solid {c["border"]};
                 border-radius: {px(10)};
                 margin: {px(8)} 0 0 0;
@@ -303,7 +303,7 @@ class MainWindow(QMainWindow):
                 border-bottom-right-radius: {px(8)};
             }}
             #composerBottomGap {{
-                background-color: {c["panel_bg"]};
+                background-color: {c["messages_bg"]};
             }}
             #secondaryBtn {{
                 background-color: transparent;
@@ -386,6 +386,19 @@ class MainWindow(QMainWindow):
             }}
             #userMessageBubble:hover {{
                 background-color: {c["bubble_hover"]};
+            }}
+            #userContextChip {{
+                background-color: {c["card"]};
+                border: 1px solid {c["border"]};
+                border-radius: {px(8)};
+                margin-bottom: {px(8)};
+            }}
+            #userContextChipText {{
+                color: {c["fg"]};
+                font-size: {px(12)};
+                font-weight: {c["fw_semibold"]};
+                font-family: "Cascadia Code", "SF Mono", "Consolas", monospace;
+                background-color: transparent;
             }}
             #userEditBubble {{
                 background-color: {c["edit_bubble_bg"]};
@@ -944,6 +957,7 @@ class MainWindow(QMainWindow):
         panel._messages_area.clear()
         records = self._conv_store.load_messages(agent_type)
         if not records:
+            panel._update_width()
             return
         for rec in records:
             role = rec.get("role", "")
@@ -991,6 +1005,7 @@ class MainWindow(QMainWindow):
                 )
             elif role == "error":
                 panel.add_error(rec.get("source", ""), content)
+        panel._update_width()
         logger.info("Loaded {} messages for agent {}", len(records), agent_type)
 
     def _on_thinking_finished(self, agent_type: str, summary: str, detail: str, expandable: bool) -> None:
