@@ -223,7 +223,7 @@ class AgentPanel(QWidget):
 
         # ---- Composer (floating input + dock bar) ----
         c = get_theme_colors()
-        self._composer_top_fade = _ComposerTopFade(QColor(c["panel_bg"]), self)
+        self._composer_top_fade = _ComposerTopFade(QColor(c["messages_bg"]), self)
         self._composer_top_fade.setObjectName("composerTopFade")
         self._composer_top_fade.setFixedHeight(scaled(18))
         self._composer_top_fade.setStyleSheet("QWidget#composerTopFade { border: none; background: transparent; }")
@@ -374,9 +374,18 @@ class AgentPanel(QWidget):
         margin_total = (margins.left() + margins.right()) if margins else 32
         content_width = sum(w.sizeHint().width() for w in widgets)
         gap_count = max(0, len(widgets) - 1)
-        min_width = margin_total + content_width + (gap_count * spacing) + 24
+        header_min_width = margin_total + content_width + (gap_count * spacing) + 24
+        min_width = max(header_min_width, self._content_minimum_width())
         self.setMinimumWidth(min_width)
         self._sync_composer_gap()
+
+    def _content_minimum_width(self) -> int:
+        width = 0
+        for row in self._messages_area.get_message_rows():
+            hint_fn = getattr(row, "context_chip_panel_width_hint", None)
+            if callable(hint_fn):
+                width = max(width, int(hint_fn()))
+        return width
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
@@ -411,23 +420,15 @@ class AgentPanel(QWidget):
         if hasattr(self, "_icon_label") and self._icon_label is not None:
             left = self._icon_label.mapTo(self, QPoint(0, 0)).x()
 
-        right = panel_w - left
-        rows = self._messages_area.get_message_rows()
-        for row in reversed(rows):
-            bubble = getattr(row, "_user_bubble_container", None)
-            if bubble is None:
-                continue
-            right = bubble.mapTo(self, bubble.rect().topRight()).x()
-            break
-
         min_width = 220
         max_right = panel_w - self._composer_horizontal_margin
+        right = max_right
         right = min(max_right, max(right, left + min_width))
         left = max(0, left)
         return left, right
 
     def _update_composer_alignment(self) -> None:
-        """Align composer to avatar-left and latest user-bubble right edge."""
+        """Align composer to avatar-left and current panel width."""
         if not hasattr(self, "_composer_host_layout"):
             return
         left, right = self._composer_anchor_bounds()
@@ -716,6 +717,7 @@ class AgentPanel(QWidget):
             detail=detail,
             expandable=expandable,
         )
+        self._update_width()
         if streaming and role == "agent":
             row._complete = False
         if role == "agent":
@@ -1132,6 +1134,7 @@ class AgentPanel(QWidget):
     def clear_conversation(self) -> None:
         """Clear messages and notify backend."""
         self._messages_area.clear()
+        self._update_width()
         self._update_composer_alignment()
         self._pending_tool_groups.clear()
         self._current_tool_group = None
