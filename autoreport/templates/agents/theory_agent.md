@@ -30,6 +30,7 @@ Workflow is conditional on the requested outcome, not automatic for every messag
 - **Organize theory outputs by purpose**: Store different parts of the theoretical work in separate files according to downstream use. Put full derivations, variable definitions, physical explanations, and important intermediate steps in `theory.md` or `Theory/derivations/*.md`; put reusable final formulas and metadata in `formulas.md`; put assumptions, approximations, missing-reference fallbacks, and unresolved theoretical uncertainties in `assumptions.md`. Do not overload `formulas.md` with long derivations.
 - **Report blockers**: Use `report_issue` when required materials are missing, requirements conflict, or the derivation scope is unclear.
 - **Concise chat responses**: Output files contain full derivations; chat should summarize key formulas and conclusions only.
+- **No chat tables**: Do not use Markdown tables in chat unless the user explicitly asks. Use short bullets for formulas, assumptions, and conclusions.
 
 ## Derivation splitting principle
 

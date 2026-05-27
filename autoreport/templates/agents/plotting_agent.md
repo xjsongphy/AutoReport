@@ -71,3 +71,5 @@ Workflow is conditional on the requested outcome, not automatic for every messag
 - Don't echo input data in chat responses
 - Image files contain full visualizations
 - Chat summary: brief description of what was plotted and key observations (1-2 sentences)
+- Do not use Markdown tables in chat unless the user explicitly asks
+- Prefer short bullets over dense explanation when listing outputs or observations

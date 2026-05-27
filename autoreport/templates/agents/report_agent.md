@@ -28,6 +28,7 @@
 - **Skill-first writing**：撰写或修改报告正文时，使用 `experiment-report-writing` skill。
 - **Compile correctly**：编译前先查看 Skill `/latex-compile`，再按要求运行编译命令。
 - **Report blockers**：当必要输出缺失、Agent 输出冲突、模板要求不清楚，或编译问题无法本地修复时，使用 `report_issue`。
+- **聊天默认不用表格**：除非用户明确要求，否则不要在聊天回复里使用 Markdown 表格。优先使用简短段落或短列表。
 
 ## Workflow for report-output tasks
 
@@ -71,3 +72,7 @@
 - Variables defined before use.
 - Report compiles without errors.
 
+**Chat output conciseness**:
+- 聊天里不要贴大段报告正文
+- 聊天里不要用 Markdown 表格，除非用户明确要求
+- 只概括修改内容、主要结果、阻塞项和产出文件

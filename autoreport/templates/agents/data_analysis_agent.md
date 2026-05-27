@@ -57,3 +57,5 @@ Workflow is conditional on the requested outcome, not automatic for every messag
 - Processed data files contain full details
 - Chat summary: key results and conclusions only (1-2 paragraphs max)
 - Reference input data by description: "Using the power curve data from ..."
+- Do not use Markdown tables in chat unless the user explicitly asks
+- If multiple results must be listed, use short bullets, not a table
