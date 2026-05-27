@@ -2,6 +2,7 @@
 
 import asyncio
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from loguru import logger
@@ -45,6 +46,13 @@ from .widgets.preview import PreviewWidget
 from .widgets.ui_utils import combo_box_qss, compact_tooltip_qss
 
 
+@dataclass
+class _TurnState:
+    message_id: str | None = None
+    answer_started: bool = False
+    phase: str = "idle"
+
+
 class MainWindow(QMainWindow):
     """Main application window.
 
@@ -73,6 +81,7 @@ class MainWindow(QMainWindow):
         self._initial_render_prepared = False
         # Cache file context to attach to next user message
         self._pending_file_context: dict[str, dict | None] = {}
+        self._turn_state: dict[str, _TurnState] = {}
 
         self.setWindowTitle("AutoReport")
         self.resize(1400, 900)
@@ -262,14 +271,14 @@ class MainWindow(QMainWindow):
             )}
             #headerAction {{
                 background-color: transparent;
-                color: {c["header_action"]};
                 border: none;
-                border-radius: {px(4)};
-                font-size: {px(13)};
+                border-radius: {c["radius_sm"]};
+                font-size: {px(14)};
+                padding: 0;
+                color: {c["fg"]};
             }}
             #headerAction:hover {{
-                background-color: {c["hover"]};
-                color: {c["header_action_hover"]};
+                background-color: {c["tree_hover"]};
             }}
             /* ---- Input Container (with working border space) ---- */
             #composerHost {{
@@ -1077,8 +1086,6 @@ class MainWindow(QMainWindow):
 
     def _on_agent_message(self, content: str) -> None:
         agent_type = self.current_agent_type
-        self._conv_store.append_message(agent_type, "user", content)
-
         full_content = content
         file_context = self._pending_file_context.get(agent_type)
         if file_context:
@@ -1200,34 +1207,65 @@ class MainWindow(QMainWindow):
                 self._conv_store.append_message(agent_str, "agent", message.content)
             return
         panel = self._get_panel_for_agent(agent_str)
-        if getattr(message, "thinking", None):
-            panel.append_thinking(message.thinking or "")
-            return
-        # Empty non-streaming message = completion signal for streaming
-        if not message.streaming and not message.content:
+        state = self._state_for_agent(agent_str)
+
+        def _latest_incomplete_agent_row():
             rows = panel._messages_area.get_message_rows()
             for row in reversed(rows):
-                if row._role == "agent" and getattr(row, "_content", ""):
-                    row.mark_complete()
-                    break
-            return
-        # Non-streaming with content — check if streaming already delivered it
-        if not message.streaming and message.content:
-            rows = panel._messages_area.get_message_rows()
-            if (rows
-                    and rows[-1]._role == "agent"
-                    and rows[-1]._content
-                    and not rows[-1]._complete):
-                rows[-1].mark_complete()
-                self._conv_store.append_message(agent_str, "agent", rows[-1]._content)
+                if getattr(row, "_role", "") != "agent":
+                    continue
+                if getattr(row, "_summary", None) is not None:
+                    continue
+                if not getattr(row, "_content", ""):
+                    continue
+                if getattr(row, "_complete", True):
+                    continue
+                return row
+            return None
+
+        msg_id = str(getattr(message, "message_id", "") or "")
+        if msg_id and state.message_id != msg_id:
+            state.message_id = msg_id
+            state.answer_started = False
+            state.phase = "idle"
+
+        if getattr(message, "thinking", None):
+            if state.answer_started:
                 return
+            panel.append_thinking(message.thinking or "")
+            state.phase = "thinking"
+            return
+
+        if not message.streaming and not message.content:
+            panel.finish_thinking()
+            row = _latest_incomplete_agent_row()
+            if row is not None:
+                row.mark_complete()
+            state.answer_started = False
+            state.phase = "idle"
+            return
+
+        if not message.streaming and message.content:
+            panel.finish_thinking()
+            row = _latest_incomplete_agent_row()
+            if row is not None:
+                row.mark_complete()
+                self._conv_store.append_message(agent_str, "agent", row._content)
+                state.answer_started = False
+                state.phase = "idle"
+                return
+
+        panel.finish_thinking()
+        state.answer_started = True
+        state.phase = "answer"
         panel.add_message("agent", message.content, streaming=message.streaming)
         if not message.streaming:
             self._conv_store.append_message(agent_str, "agent", message.content)
-            # Mark newly added message as complete (copy button visible)
             rows = panel._messages_area.get_message_rows()
             if rows and rows[-1]._role == "agent":
                 rows[-1].mark_complete()
+            state.answer_started = False
+            state.phase = "idle"
 
     def _handle_user_message(self, message: UserMessage) -> None:
         agent_str = str(message.agent_type)
@@ -1280,10 +1318,13 @@ class MainWindow(QMainWindow):
 
     def _handle_tool_call(self, message: ToolCall) -> None:
         agent_str = str(message.agent_type)
+        state = self._state_for_agent(agent_str)
         if not self._is_visible_agent(agent_str):
             self._conv_store.append_tool_call(agent_str, message.tool_name, message.arguments)
             return
         panel = self._get_panel_for_agent(agent_str)
+        panel.finish_thinking()
+        state.phase = "tool"
         summary = None
         detail = None
         expandable = True
@@ -1312,6 +1353,7 @@ class MainWindow(QMainWindow):
 
     def _handle_tool_result(self, message: ToolResult) -> None:
         agent_str = str(message.agent_type)
+        state = self._state_for_agent(agent_str)
         if not self._is_visible_agent(agent_str):
             result_str = str(message.result) if message.result else None
             self._conv_store.append_tool_result(
@@ -1346,6 +1388,7 @@ class MainWindow(QMainWindow):
             detail=detail,
             expandable=expandable,
         )
+        state.phase = "tool"
         self._conv_store.append_tool_result(
             agent_str,
             message.tool_name,
@@ -1513,6 +1556,13 @@ class MainWindow(QMainWindow):
 
     def _get_panel_for_agent(self, agent_type: str) -> AgentPanel:
         return self.agent_panel
+
+    def _state_for_agent(self, agent_type: str) -> _TurnState:
+        state = self._turn_state.get(agent_type)
+        if state is None:
+            state = _TurnState()
+            self._turn_state[agent_type] = state
+        return state
 
     # ---- Conversation History ----
 
