@@ -353,6 +353,7 @@ class MessageRow(QWidget):
         self._summary_btn: QPushButton | None = None
         self._summary_header: QWidget | None = None
         self._summary_arrow_widget: _DisclosureArrow | None = None
+        self._summary_arrow_host: QWidget | None = None
         self._summary_text_label: QLabel | None = None
         self._detail_label: QLabel | None = None
         self._detail_widget: QWidget | None = None
@@ -569,11 +570,13 @@ class MessageRow(QWidget):
             self._detail_widget = self._build_detail_widget("agent")
             self._agent_content_layout.addWidget(self._detail_widget)
             self._detail_widget.setVisible(self._expanded and self._has_detail())
+            self._sync_timeline_dot_alignment()
             return
 
         text_label = self._build_agent_markdown_label(self._content)
         self._agent_content_layout.addWidget(text_label)
         self._apply_text_width_constraints()
+        self._sync_timeline_dot_alignment()
 
     def _build_agent_markdown_label(self, raw_markdown: str) -> QLabel:
         label = QLabel(render_markdown(raw_markdown))
@@ -629,6 +632,12 @@ class MessageRow(QWidget):
 
         self._summary_arrow_widget = _DisclosureArrow(self._expanded, widget)
         self._summary_arrow_widget.setVisible(self._expandable and self._has_detail())
+        self._summary_arrow_host = QWidget(widget)
+        self._summary_arrow_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+        ahl = QVBoxLayout(self._summary_arrow_host)
+        ahl.setContentsMargins(0, 0, 0, 0)
+        ahl.setSpacing(0)
+        ahl.addWidget(self._summary_arrow_widget, 0, Qt.AlignmentFlag.AlignTop)
         left_margin = 4 if summary_type == "agent" else 0
         layout.setContentsMargins(left_margin, 4, 0, 6)
 
@@ -640,8 +649,10 @@ class MessageRow(QWidget):
         self._summary_text_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
         self._summary_text_label.setMinimumWidth(0)
         layout.addWidget(self._summary_text_label, 0, Qt.AlignmentFlag.AlignTop)
-        layout.addWidget(self._summary_arrow_widget, 0, Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(self._summary_arrow_host, 0, Qt.AlignmentFlag.AlignTop)
         layout.addStretch(1)
+        self._sync_summary_arrow_alignment()
+        self._sync_timeline_dot_alignment()
 
         widget.setCursor(
             Qt.CursorShape.PointingHandCursor
@@ -710,11 +721,55 @@ class MessageRow(QWidget):
         if self._summary_arrow_widget is not None:
             self._summary_arrow_widget.setVisible(can_expand)
             self._summary_arrow_widget.set_expanded(self._expanded)
+        self._sync_summary_arrow_alignment()
+        self._sync_timeline_dot_alignment()
         if self._summary_header is not None:
             self._summary_header.setCursor(
                 Qt.CursorShape.PointingHandCursor if can_expand else Qt.CursorShape.ArrowCursor
             )
         self._apply_thinking_text_style()
+
+    def _sync_summary_arrow_alignment(self) -> None:
+        """Align disclosure arrow center to the first summary text line center."""
+        if (
+            self._summary_arrow_host is None
+            or self._summary_text_label is None
+            or self._summary_arrow_widget is None
+        ):
+            return
+        metrics = self._summary_text_label.fontMetrics()
+        line_height = max(1, metrics.height())
+        arrow_height = max(1, self._summary_arrow_widget.height())
+        top_offset = max(0, (line_height - arrow_height) // 2)
+        host_layout = self._summary_arrow_host.layout()
+        if isinstance(host_layout, QVBoxLayout):
+            host_layout.setContentsMargins(0, top_offset, 0, 0)
+
+    @staticmethod
+    def _first_line_center_y(top_offset: int, line_height: int) -> float:
+        return float(top_offset + (max(1, line_height) / 2.0))
+
+    def _sync_timeline_dot_alignment(self) -> None:
+        """Align timeline dot center to the first visible text line center."""
+        if self._timeline_rail is None:
+            return
+        # Summary rows (e.g. Thought): align to summary first line.
+        if self._summary_text_label is not None and self._summary_header is not None:
+            metrics = self._summary_text_label.fontMetrics()
+            line_height = metrics.height()
+            margins = self._summary_header.layout().contentsMargins() if self._summary_header.layout() else None
+            top = margins.top() if margins is not None else 0
+            self._timeline_rail.set_dot_center_y(self._first_line_center_y(top, line_height))
+            return
+        # Plain agent messages: align to first markdown label first line.
+        if self._wrapping_labels:
+            label = self._wrapping_labels[0]
+            metrics = label.fontMetrics()
+            line_height = metrics.height()
+            top = label.contentsMargins().top()
+            self._timeline_rail.set_dot_center_y(self._first_line_center_y(top, line_height))
+            return
+        self._timeline_rail.set_dot_center_y(None)
 
     def set_thinking_row_style(self, enabled: bool) -> None:
         self._is_thinking_row = enabled
@@ -1116,6 +1171,8 @@ class MessageRow(QWidget):
         """Keep message content constrained to current panel width."""
         super().resizeEvent(event)
         self._apply_text_width_constraints()
+        self._sync_summary_arrow_alignment()
+        self._sync_timeline_dot_alignment()
         if self._is_outbound_message() and self._user_bubble_container is not None:
             if self._editing:
                 width = max(80, self.width() - 32)
