@@ -33,6 +33,14 @@ class AnthropicProvider(LLMProvider):
     # ------------------------------------------------------------------
     # Message conversion
     # ------------------------------------------------------------------
+    @staticmethod
+    def _safe_text(value: Any) -> str:
+        """Normalize nullable/mixed values to Anthropic-safe text."""
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        return str(value)
 
     def _convert_messages(
         self, messages: list[Message],
@@ -57,7 +65,7 @@ class AnthropicProvider(LLMProvider):
 
         for msg in messages:
             if msg.role == "system":
-                system_message = msg.content
+                system_message = self._safe_text(msg.content)
                 continue
 
             # Flush pending tool results before adding a new non-tool message
@@ -93,14 +101,14 @@ class AnthropicProvider(LLMProvider):
                 pending_tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": msg.tool_call_id,
-                    "content": msg.content,
+                    "content": self._safe_text(msg.content),
                 })
                 continue
 
             # Regular text message
             anthropic_messages.append({
                 "role": msg.role,
-                "content": msg.content,
+                "content": self._safe_text(msg.content),
             })
 
         # Flush any remaining tool results
@@ -138,6 +146,10 @@ class AnthropicProvider(LLMProvider):
             ):
                 prev_c = merged[-1]["content"]
                 cur_c = msg["content"]
+                if prev_c is None:
+                    prev_c = ""
+                if cur_c is None:
+                    cur_c = ""
                 # Normalize both to lists for concatenation
                 if isinstance(prev_c, str):
                     prev_c = [{"type": "text", "text": prev_c}]

@@ -313,8 +313,7 @@ def test_task_update_shows_summary_only(agent_panel):
     assert len(rows) == 1
     assert "plot summary" in rows[0]._content
     assert "tk001" not in rows[0]._content
-    assert "TODO" in rows[0]._content
-    assert "Main" in rows[0]._content
+    assert "📋 ○ 完成任务：" in rows[0]._content
 
 
 def test_task_update_waitlist_format(agent_panel):
@@ -329,7 +328,7 @@ def test_task_update_waitlist_format(agent_panel):
 
     rows = agent_panel._messages_area.get_message_rows()
     assert len(rows) == 1
-    assert "WAIT" in rows[0]._content
+    assert "⏳ 等待Theory:" in rows[0]._content
     assert "Theory" in rows[0]._content
     assert "derive formulas" in rows[0]._content
 

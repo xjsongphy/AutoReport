@@ -33,7 +33,7 @@ from ..theme import get_theme_colors
 
 
 class _ComposerTopFade(QWidget):
-    """Top fade mask above composer: alpha from 100% to 50%."""
+    """Top fade mask above composer: alpha from 0% (top) to 100% (bottom)."""
 
     def __init__(self, base_color: QColor, parent: QWidget | None = None):
         super().__init__(parent)
@@ -53,8 +53,8 @@ class _ComposerTopFade(QWidget):
         grad = QLinearGradient(0, 0, 0, max(1, self.height()))
         top = QColor(self._base_color)
         bottom = QColor(self._base_color)
-        top.setAlpha(255)
-        bottom.setAlpha(127)
+        top.setAlpha(0)
+        bottom.setAlpha(255)
         grad.setColorAt(0.0, top)
         grad.setColorAt(1.0, bottom)
         p.fillRect(self.rect(), grad)
@@ -901,76 +901,87 @@ class AgentPanel(QWidget):
         brief: str,
     ) -> None:
         """Render task/list updates in a compact, stable format."""
-        is_main = self._agent_type in ("main",)
         am_source = self._agent_type == source
         am_target = self._agent_type == target
-        is_local = source == target
 
         summary = str(brief or "").strip() or "task"
-        source_badge = get_agent_badge(source)
         target_badge = get_agent_badge(target)
+        source_badge = get_agent_badge(source)
 
-        if action == "created":
-            if is_local:
-                text = f"TODO ? Local ? {summary}"
-            elif am_source:
-                text = f"WAIT ? {target_badge} ? {summary}"
+        status_text = {
+            "created": "○ 完成任务",
+            "started": "● 进行中",
+            "completed": "✓ 已完成",
+            "cancelled": "✗ 已取消",
+            "failed": "⚠ 失败",
+        }
+
+        if action in ("created", "started"):
+            if am_source:
+                text = f"⏳ 等待{target_badge}: {summary}"
             elif am_target:
-                text = f"TODO ? From {source_badge} ? {summary}"
-            elif is_main:
-                text = f"TASK ? {source_badge} -> {target_badge} ? {summary}"
+                text = f"📋 {status_text[action]}：{summary}"
             else:
-                text = f"TASK ? {summary}"
+                text = f"📋 {status_text[action]}：{summary}"
 
         elif action == "completed":
-            if am_source:
-                text = f"DONE ? {target_badge} ? {summary}"
-            elif am_target:
-                text = f"DONE ? From {source_badge} ? {summary}"
-            elif is_main:
-                text = f"DONE ? {source_badge} -> {target_badge} ? {summary}"
+            if am_target:
+                text = f"📋 {status_text[action]}：{summary}"
             else:
-                text = f"DONE ? {summary}"
+                text = f"✅ {source_badge} 完成了任务：{summary}"
 
         elif action == "failed":
-            if am_source:
-                text = f"FAIL ? {target_badge} ? {summary}"
-            elif am_target:
-                text = f"FAIL ? From {source_badge} ? {summary}"
-            elif is_main:
-                text = f"FAIL ? {source_badge} -> {target_badge} ? {summary}"
+            if am_target:
+                text = f"📋 {status_text[action]}：{summary}"
             else:
-                text = f"FAIL ? {summary}"
+                text = f"⚠ {source_badge} 任务失败：{summary}"
 
         elif action == "cancelled":
-            if am_source:
-                text = f"CANCEL ? {target_badge} ? {summary}"
-            elif am_target:
-                text = f"CANCEL ? From {source_badge} ? {summary}"
-            elif is_main:
-                text = f"CANCEL ? {source_badge} -> {target_badge} ? {summary}"
+            if am_target:
+                text = f"📋 {status_text[action]}：{summary}"
             else:
-                text = f"CANCEL ? {summary}"
-
-        elif action == "started":
-            if is_local:
-                text = f"RUNNING ? Local ? {summary}"
-            elif am_source:
-                text = f"RUNNING ? {target_badge} ? {summary}"
-            elif am_target:
-                text = f"RUNNING ? From {source_badge} ? {summary}"
-            elif is_main:
-                text = f"RUNNING ? {source_badge} -> {target_badge} ? {summary}"
-            else:
-                text = f"RUNNING ? {summary}"
+                text = f"✗ {source_badge} 任务已取消：{summary}"
 
         else:
-            text = f"TASK UPDATE ? {summary}"
+            text = f"任务更新 {action}: {summary}"
 
         ts = datetime.now().strftime("%H:%M")
         self._messages_area.add_message_row(
             role="agent",
             content=text,
+            timestamp=ts,
+            is_coordination=True,
+        )
+
+    def add_task_block(self, todolist: list[dict], waitlist: list[dict]) -> None:
+        """Render full Task block with Todo/Wait sections."""
+        lines = ["Task", "", "Todo"]
+        if todolist:
+            for item in todolist[:10]:
+                brief = str(item.get("brief", "")).strip() or "task"
+                status = str(item.get("status", "pending")).lower()
+                done = status in {"completed", "cancelled", "failed"}
+                marker = "☑" if done else "☐"
+                lines.append(f"- {marker} {brief}")
+        else:
+            lines.append("- —")
+
+        lines.append("")
+        lines.append("Wait")
+        if waitlist:
+            for item in waitlist[:10]:
+                brief = str(item.get("brief", "")).strip() or "task"
+                status = str(item.get("status", "pending")).lower()
+                done = status in {"completed", "cancelled", "failed"}
+                marker = "☑" if done else "☐"
+                lines.append(f"- {marker} {brief}")
+        else:
+            lines.append("- —")
+
+        ts = datetime.now().strftime("%H:%M")
+        self._messages_area.add_message_row(
+            role="agent",
+            content="\n".join(lines),
             timestamp=ts,
             is_coordination=True,
         )
