@@ -28,10 +28,19 @@ class ManageTasksTool(Tool):
         "- 'fail': Mark failed. Use 'task_ids' for batch."
     )
 
-    def __init__(self, task_board, agent_type: AgentType, bus):
+    def __init__(self, task_board, agent_type: AgentType, bus, session_id_resolver=None):
         self._task_board = task_board
         self._agent_type = agent_type
         self._bus = bus
+        self._session_id_resolver = session_id_resolver
+
+    def _session_id(self) -> str | None:
+        if callable(self._session_id_resolver):
+            try:
+                return self._session_id_resolver()
+            except Exception:
+                return None
+        return None
 
     async def __call__(
         self,
@@ -122,10 +131,13 @@ class ManageTasksTool(Tool):
 
         Returns (error_dict, task) — if error_dict is not None, auth failed.
         """
-        any_task = self._task_board.get_task(tid, active_only=False)
+        sid = self._session_id()
+        any_task = self._task_board.get_task(tid, active_only=False, session_id=sid)
         if any_task is None:
             return {"status": "error", "error": f"Task {tid} not found"}, None
-        task = self._task_board.get_task(tid, target_agent=self._agent_type, active_only=False)
+        task = self._task_board.get_task(
+            tid, target_agent=self._agent_type, active_only=False, session_id=sid
+        )
         if task is None:
             return {"status": "error", "error": f"Task {tid} is not assigned to you"}, None
         return None, task
@@ -135,8 +147,9 @@ class ManageTasksTool(Tool):
     # ------------------------------------------------------------------ #
 
     def _handle_list(self) -> dict[str, Any]:
-        todolist = self._task_board.get_todolist(self._agent_type)
-        waitlist = self._task_board.get_waitlist(self._agent_type)
+        sid = self._session_id()
+        todolist = self._task_board.get_todolist(self._agent_type, session_id=sid)
+        waitlist = self._task_board.get_waitlist(self._agent_type, session_id=sid)
         return {
             "status": "ok",
             "agent_type": self._agent_type.value,
@@ -184,6 +197,7 @@ class ManageTasksTool(Tool):
             source=self._agent_type,
             target=self._agent_type,
             brief=brief or description,
+            session_id=self._session_id(),
         )
         await self._publish_task_update(task, "created")
         logger.info("{} added local task {}: {}", self._agent_type, task.task_id, description)
@@ -213,6 +227,7 @@ class ManageTasksTool(Tool):
                 source=self._agent_type,
                 target=self._agent_type,
                 brief=b,
+                session_id=self._session_id(),
             )
             tasks.append(task)
             created.append({"task_id": task.task_id, "brief": task.brief})
@@ -251,7 +266,7 @@ class ManageTasksTool(Tool):
                 continue
             try:
                 previous_status = task.status.value
-                result = board_fn(tid, target_agent=self._agent_type)
+                result = board_fn(tid, target_agent=self._agent_type, session_id=self._session_id())
                 # start_task returns a single TaskItem; others return a list
                 affected = result if isinstance(result, list) else [result]
                 all_affected.extend(affected)
@@ -321,7 +336,11 @@ class ManageTasksTool(Tool):
 
             try:
                 previous_status = task.status.value
-                affected = self._task_board.complete_task(tid, target_agent=self._agent_type)
+                affected = self._task_board.complete_task(
+                    tid,
+                    target_agent=self._agent_type,
+                    session_id=self._session_id(),
+                )
                 all_affected.extend(affected)
                 prev_statuses.append(previous_status)
                 results.append(
@@ -417,9 +436,11 @@ class ManageTasksTool(Tool):
             return 0
 
         source = "main_agent" if leaf.target_agent == AgentType.MAIN else leaf.target_agent.value
+        completion_notice = f"✅ {leaf.target_agent.value} 完成了任务：{leaf.brief}"
+        content = completion_notice if not response else f"{completion_notice}\n\n{response}"
         await self._bus.publish(
             UserMessage(
-                content=response,
+                content=content,
                 agent_type=terminal.source_agent,
                 source=source,
             )

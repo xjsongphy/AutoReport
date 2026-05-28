@@ -218,6 +218,12 @@ class LoopManager:
         """
         return self._loops.get(agent_type)
 
+    def get_agent_session_id(self, agent_type: AgentType) -> str | None:
+        loop = self._loops.get(agent_type)
+        if loop is None:
+            return None
+        return getattr(loop, "_current_session_id", None)
+
     def _create_tools_for_agent(self, agent_type: AgentType) -> ToolRegistry:
         """Create tool registry for an agent type.
 
@@ -304,15 +310,29 @@ class LoopManager:
 
         # Inter-agent communication tools
         if agent_type == AgentType.MAIN:
-            registry.register(SendToAgentTool(bus=self.bus, task_board=self._task_board))
+            registry.register(
+                SendToAgentTool(
+                    bus=self.bus,
+                    task_board=self._task_board,
+                    session_id_resolver=lambda a=agent_type: self.get_agent_session_id(a),
+                )
+            )
         else:
-            registry.register(ReportIssueTool(bus=self.bus, agent_type=agent_type, task_board=self._task_board))
+            registry.register(
+                ReportIssueTool(
+                    bus=self.bus,
+                    agent_type=agent_type,
+                    task_board=self._task_board,
+                    session_id_resolver=lambda a=agent_type: self.get_agent_session_id(a),
+                )
+            )
 
         # Task management — all agents can manage their own tasks
         registry.register(ManageTasksTool(
             task_board=self._task_board,
             agent_type=agent_type,
             bus=self.bus,
+            session_id_resolver=lambda a=agent_type: self.get_agent_session_id(a),
         ))
 
         # Per-agent checkpoint tools

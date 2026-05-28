@@ -144,6 +144,20 @@ class TestManageTasksToolComplete:
         assert notifications[0].action == "completed"
 
     @pytest.mark.asyncio
+    async def test_complete_moves_main_wait_to_todo_list_view(self, board, bus):
+        task = board.create_task(AgentType.MAIN, AgentType.PLOTTING, "draw")
+        plotting_tool = ManageTasksTool(task_board=board, agent_type=AgentType.PLOTTING, bus=bus)
+        await plotting_tool(action="complete", task_id=task.task_id, reply_content="done")
+
+        main_tool = ManageTasksTool(task_board=board, agent_type=AgentType.MAIN, bus=bus)
+        listed = await main_tool(action="list")
+        assert any(
+            item["task_id"] == task.task_id and item["status"] == "completed"
+            for item in listed["todolist"]
+        )
+        assert all(item["task_id"] != task.task_id for item in listed["waitlist"])
+
+    @pytest.mark.asyncio
     async def test_complete_chain_notifies_all(self, board, bus):
         t1 = board.create_task(AgentType.DATA_ANALYSIS, AgentType.MAIN, "delegate", task_id="tk900")
         t2 = board.create_task(AgentType.MAIN, AgentType.PLOTTING, "draw", task_id="tk900")
@@ -184,7 +198,8 @@ class TestManageTasksToolComplete:
         messages = [await asyncio.wait_for(bus._queue.get(), timeout=1) for _ in range(2)]
         reply = next(msg for msg in messages if hasattr(msg, "source") and getattr(msg, "source", None) == "plotting")
         assert reply.agent_type == AgentType.MAIN
-        assert reply.content == "plot done"
+        assert reply.content.startswith("✅ plotting 完成了任务：draw")
+        assert "plot done" in reply.content
 
     @pytest.mark.asyncio
     async def test_complete_sub_main_sub_chain_auto_replies_to_main_and_origin(self, board, bus):
@@ -226,7 +241,8 @@ class TestManageTasksToolComplete:
         assert result["status"] == "ok"
         messages = [await asyncio.wait_for(bus._queue.get(), timeout=1) for _ in range(2)]
         reply = next(msg for msg in messages if hasattr(msg, "source") and getattr(msg, "source", None) == "plotting")
-        assert reply.content == "legacy alias"
+        assert reply.content.startswith("✅ plotting 完成了任务：draw")
+        assert "legacy alias" in reply.content
 
 
 class TestManageTasksToolCancel:

@@ -49,6 +49,19 @@ class TestTaskBoard:
         assert board.get_task(t2.task_id, target_agent=AgentType.PLOTTING).status == TaskStatus.COMPLETED
         assert board.get_task(t1.task_id, target_agent=AgentType.MAIN).status == TaskStatus.COMPLETED
 
+    def test_completed_waitlist_item_becomes_source_todo_view(self):
+        board = TaskBoard()
+        delegated = board.create_task(AgentType.MAIN, AgentType.PLOTTING, "create plot")
+        board.complete_task(delegated.task_id, target_agent=AgentType.PLOTTING)
+        main_todo = board.get_todolist(AgentType.MAIN)
+        assert any(
+            t.task_id == delegated.task_id
+            and t.source_agent == AgentType.MAIN
+            and t.target_agent == AgentType.PLOTTING
+            and t.status == TaskStatus.COMPLETED
+            for t in main_todo
+        )
+
     def test_fail_task_chain_with_shared_id(self):
         board = TaskBoard()
         board.create_task(AgentType.DATA_ANALYSIS, AgentType.MAIN, "delegate", task_id="tk999")

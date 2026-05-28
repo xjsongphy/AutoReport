@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
 from ..core.conversations import ConversationStore
 from ..interfaces.protocol import BackendAPI
 from ..interfaces.types import (
+    AgentType,
     AgentFeedback,
     AgentResponse,
     Checkpoint,
@@ -36,6 +37,7 @@ from ..interfaces.types import (
     UserMessage,
 )
 from ..utils.agent_labels import get_agent_badge, get_agent_title
+from ..utils.editor_context import build_editor_context_message
 from ..utils.logging_config import ui_logger
 from .scale import dpi_scale
 from .theme import get_theme_colors
@@ -959,6 +961,7 @@ class MainWindow(QMainWindow):
                 self.backend.sync_agent_conversation(
                     self.current_agent_type,
                     self._records_to_backend_messages(self.current_agent_type),
+                    session_id=self._conv_store.get_current_session_id(self.current_agent_type),
                 )
             )
 
@@ -972,6 +975,9 @@ class MainWindow(QMainWindow):
             role = rec.get("role", "")
             content = rec.get("content", "")
             if role == "user":
+                context = rec.get("editor_context")
+                if isinstance(context, dict):
+                    content = build_editor_context_message(context, str(content))
                 panel.add_message(
                     "user",
                     content,
@@ -1126,7 +1132,11 @@ class MainWindow(QMainWindow):
         self._show_current_agent_conversation()
         if hasattr(self.backend, "sync_agent_conversation"):
             self._submit_coroutine(
-                self.backend.sync_agent_conversation(agent_type, self._records_to_backend_messages(agent_type))
+                self.backend.sync_agent_conversation(
+                    agent_type,
+                    self._records_to_backend_messages(agent_type),
+                    session_id=self._conv_store.get_current_session_id(agent_type),
+                )
             )
 
     def _on_interrupt(self, agent_type: str) -> None:
@@ -1448,12 +1458,12 @@ class MainWindow(QMainWindow):
                     break
                 status = str(item.get("status", "pending")).lower()
                 brief = str(item.get("brief", "")).strip() or "task"
-                done = status == "completed"
-                box = "☑" if done else "☐"
+                done = status in {"completed", "cancelled", "failed"}
+                marker = "☑" if done else "☐"
                 if done:
-                    lines.append(f"<span style='color:#9098a3'>{box} <s>{brief}</s></span>")
+                    lines.append(f"<span style='color:#9098a3'>{marker} <s>{brief}</s></span>")
                 else:
-                    lines.append(f"<span style='color:#9098a3'>{box} {brief}</span>")
+                    lines.append(f"<span style='color:#9098a3'>{marker} {brief}</span>")
                 shown += 1
             if shown == 0:
                 lines.append("<span style='color:#9098a3'>—</span>")
@@ -1462,8 +1472,9 @@ class MainWindow(QMainWindow):
         todolist = result.get("todolist")
         waitlist = result.get("waitlist")
         if isinstance(todolist, list) and isinstance(waitlist, list):
-            detail = "\n".join(_rows(todolist, "Todo") + ["", *(_rows(waitlist, "Waiting"))])
-            return ("<b>Todo</b>", detail, True)
+            body = "\n".join(_rows(todolist, "Todo") + ["", *(_rows(waitlist, "Waiting"))])
+            summary = f"<b>Task</b><br/>{body}"
+            return (summary, None, False)
 
         ui_summary = str(result.get("_ui_summary", "") or "").strip()
         ui_detail = str(result.get("_ui_detail", "") or "").strip()
@@ -1546,13 +1557,23 @@ class MainWindow(QMainWindow):
         tgt_str = tgt.value if isinstance(tgt, Enum) else str(tgt)
 
         if self.current_agent_type == "main" or self.current_agent_type in {src_str, tgt_str}:
-            self.agent_panel.handle_task_update(
-                task_id=message.task_id,
-                action=message.action,
-                source=src_str,
-                target=tgt_str,
-                brief=getattr(message, "brief", "") or "",
-            )
+            self._render_task_block_for_current_agent()
+
+    def _render_task_block_for_current_agent(self) -> None:
+        loop_manager = getattr(self.backend, "loop_manager", None)
+        task_board = getattr(loop_manager, "_task_board", None) if loop_manager is not None else None
+        if task_board is None:
+            return
+        try:
+            agent_type = AgentType(self.current_agent_type)
+        except ValueError:
+            return
+        session_id = self._conv_store.get_current_session_id(self.current_agent_type)
+        todolist = task_board.get_todolist(agent_type, session_id=session_id)
+        waitlist = task_board.get_waitlist(agent_type, session_id=session_id)
+        todo_rows = [{"brief": t.brief, "status": t.status.value} for t in todolist]
+        wait_rows = [{"brief": t.brief, "status": t.status.value} for t in waitlist]
+        self.agent_panel.add_task_block(todo_rows, wait_rows)
 
     def _get_panel_for_agent(self, agent_type: str) -> AgentPanel:
         return self.agent_panel
@@ -1577,14 +1598,26 @@ class MainWindow(QMainWindow):
         panel = self._get_panel_for_agent(agent_type)
         panel._messages_area.clear()
         if hasattr(self.backend, "sync_agent_conversation"):
-            self._submit_coroutine(self.backend.sync_agent_conversation(agent_type, []))
+            self._submit_coroutine(
+                self.backend.sync_agent_conversation(
+                    agent_type,
+                    [],
+                    session_id=self._conv_store.get_current_session_id(agent_type),
+                )
+            )
         logger.info("New conversation session for {}: {}", agent_type,
                      self._conv_store.get_current_session_id(agent_type))
 
     def _on_conversation_cleared(self, agent_type: str) -> None:
         self._conv_store.new_session(agent_type=agent_type)
         if hasattr(self.backend, "sync_agent_conversation"):
-            self._submit_coroutine(self.backend.sync_agent_conversation(agent_type, []))
+            self._submit_coroutine(
+                self.backend.sync_agent_conversation(
+                    agent_type,
+                    [],
+                    session_id=self._conv_store.get_current_session_id(agent_type),
+                )
+            )
         logger.info("/clear for {}: new session {}", agent_type,
                      self._conv_store.get_current_session_id(agent_type))
 
@@ -1595,7 +1628,13 @@ class MainWindow(QMainWindow):
             self._load_conversations_for_agent(agent_type, panel)
             if hasattr(self.backend, "sync_agent_conversation"):
                 msgs = self._records_to_backend_messages(agent_type)
-                self._submit_coroutine(self.backend.sync_agent_conversation(agent_type, msgs))
+                self._submit_coroutine(
+                    self.backend.sync_agent_conversation(
+                        agent_type,
+                        msgs,
+                        session_id=self._conv_store.get_current_session_id(agent_type),
+                    )
+                )
             logger.info("Switched {} to session: {}", agent_type, session_id)
 
     def _on_delete_session(self, session_id: str) -> None:
