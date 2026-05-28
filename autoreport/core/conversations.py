@@ -14,37 +14,14 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
+from ..utils.editor_context import parse_editor_context, user_visible_content
 
 _AGENT_TYPES = ["main", "data_analysis", "plotting", "theory", "report"]
 
 
-def _user_visible_content(content: str) -> str:
-    """Return the chat text users see after editor-context chips are stripped."""
-    text = str(content or "")
-    if not text.startswith("Editor context: "):
-        return text
-
-    lines = text.splitlines()
-    if len(lines) < 2:
-        return text
-
-    context_type = lines[0].split(":", 1)[1].strip().lower()
-    if context_type == "selection" and len(lines) >= 3:
-        body_start = 3
-    elif context_type == "file" and len(lines) >= 2:
-        body_start = 2
-    else:
-        return text
-
-    while body_start < len(lines) and not lines[body_start].strip():
-        body_start += 1
-    body = "\n".join(lines[body_start:]).strip()
-    return body or text
-
-
 def _user_visible_content_or_empty(content: str) -> str:
     text = str(content or "")
-    visible = _user_visible_content(text).strip()
+    visible = user_visible_content(text).strip()
     if text.startswith("Editor context: ") and visible == text:
         return ""
     return visible
@@ -337,6 +314,13 @@ class ConversationStore:
             "role": role,
             "content": content,
         }
+        if role == "user":
+            parsed = parse_editor_context(content)
+            if parsed.get("has_context"):
+                record["content"] = str(parsed.get("bubble_text") or "")
+                context = parsed.get("context")
+                if isinstance(context, dict):
+                    record["editor_context"] = context
         if extra:
             record.update(extra)
 

@@ -18,17 +18,17 @@ from PyQt6.QtWidgets import (
 )
 
 from ..theme import get_theme_colors
-from .message_row import _parse_editor_context_block
+from ...utils.editor_context import user_visible_content
 from .ui_utils import create_isolated_context_menu
 
 
 def _bubble_visible_text(text: str) -> str:
     """Use the same editor-context stripping logic as user bubbles."""
     raw = str(text or "")
-    _, _, body = _parse_editor_context_block(raw)
-    if raw.startswith("Editor context: ") and body == raw:
+    body = user_visible_content(raw).strip()
+    if raw.startswith("Editor context: ") and body == raw.strip():
         return ""
-    return body.strip()
+    return body
 
 
 class SessionListItem(QWidget):
