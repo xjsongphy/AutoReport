@@ -6,6 +6,7 @@
 """
 
 import re
+from functools import lru_cache
 
 from PyQt6.QtCore import QEvent, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QClipboard, QColor, QIcon, QKeySequence, QPainter, QPalette, QPen
@@ -29,6 +30,7 @@ from .ui_utils import create_isolated_context_menu, install_compact_tooltip, ren
 from ...utils.editor_context import parse_editor_context
 
 TIMELINE_EVENT_ROW_HEIGHT = 34
+_CODE_BLOCK_PATTERN = re.compile(r"```(\w*)\n(.*?)```", re.DOTALL)
 
 class _DisclosureArrow(QWidget):
     def __init__(self, expanded: bool = False, parent: QWidget | None = None):
@@ -117,10 +119,9 @@ class _ElidedLabel(QLabel):
 
 def _parse_code_blocks(content: str) -> list[tuple[str, str | None]]:
     """Split content into segments: (text, None) for text, (code, language) for code."""
-    pattern = r"```(\w*)\n(.*?)```"
     parts: list[tuple[str, str | None]] = []
     last_end = 0
-    for m in re.finditer(pattern, content, re.DOTALL):
+    for m in _CODE_BLOCK_PATTERN.finditer(content):
         if m.start() > last_end:
             parts.append((content[last_end:m.start()], None))
         lang = m.group(1) or None
@@ -134,8 +135,18 @@ def _parse_code_blocks(content: str) -> list[tuple[str, str | None]]:
     return parts
 
 
-def _copy_icon() -> QIcon:
-    return render_svg_icon("copy", QColor(get_theme_colors()["muted"]), size=16)
+@lru_cache(maxsize=8)
+def _copy_icon(color: str = "") -> QIcon:
+    if not color:
+        color = get_theme_colors()["muted"]
+    return render_svg_icon("copy", QColor(color), size=16)
+
+
+@lru_cache(maxsize=8)
+def _file_chip_icon(color: str = "") -> QIcon:
+    if not color:
+        color = get_theme_colors()["muted"]
+    return render_svg_icon("file", QColor(color), size=14)
 
 
 def _parse_editor_context_block(content: str) -> tuple[str | None, str | None, str]:
@@ -413,7 +424,7 @@ class MessageRow(QWidget):
             self._user_bubble_container = QWidget(row)
             self._user_bubble_container.setObjectName("userMessageBubbleContainer")
             self._user_bubble_container.setSizePolicy(
-                QSizePolicy.Policy.Fixed,
+                QSizePolicy.Policy.Preferred,
                 QSizePolicy.Policy.Preferred,
             )
             bcl = QVBoxLayout(self._user_bubble_container)
@@ -530,7 +541,7 @@ class MessageRow(QWidget):
 
         icon_label = QLabel(chip)
         icon_label.setObjectName("userContextChipIcon")
-        icon = render_svg_icon("file", QColor(get_theme_colors()["muted"]), size=14)
+        icon = _file_chip_icon(get_theme_colors()["muted"])
         icon_label.setPixmap(icon.pixmap(14, 14))
         icon_label.setFixedSize(14, 14)
         chip_layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignVCenter)
@@ -608,6 +619,8 @@ class MessageRow(QWidget):
 
     def append_content(self, delta: str) -> None:
         """Append streaming text delta and rebuild content area."""
+        if not delta:
+            return
         self._content += delta
         self._rebuild_agent_content()
         self._apply_text_width_constraints()
@@ -913,12 +926,12 @@ class MessageRow(QWidget):
 
         if self._user_bubble_container is not None:
             self._user_bubble_container.setSizePolicy(
-                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Preferred,
                 QSizePolicy.Policy.Preferred,
             )
-            self._user_bubble_container.setMinimumWidth(0)
+            self._user_bubble_container.setMinimumWidth(max(80, self.width() - 32))
             self._user_bubble_container.setMaximumWidth(16777215)
-            self._user_bubble_container.setFixedWidth(max(80, self.width() - 32))
+            self._user_bubble_container.setMaximumWidth(max(80, self.width() - 32))
         self._update_edit_widget_height()
         self._edit_widget.setFocus()
         self._edit_widget.textChanged.connect(self._update_edit_widget_height)
@@ -1001,7 +1014,7 @@ class MessageRow(QWidget):
 
         if self._user_bubble_container is not None:
             self._user_bubble_container.setSizePolicy(
-                QSizePolicy.Policy.Fixed,
+                QSizePolicy.Policy.Preferred,
                 QSizePolicy.Policy.Preferred,
             )
 
@@ -1204,9 +1217,11 @@ class MessageRow(QWidget):
         if self._is_outbound_message() and self._user_bubble_container is not None:
             if self._editing:
                 width = max(80, self.width() - 32)
+                self._user_bubble_container.setMinimumWidth(width)
             else:
                 width = max(80, int(self.width() * 0.75))
-            self._user_bubble_container.setFixedWidth(width)
+                self._user_bubble_container.setMinimumWidth(0)
+            self._user_bubble_container.setMaximumWidth(width)
             self._sync_context_chip_width()
 
     def _is_outbound_message(self) -> bool:

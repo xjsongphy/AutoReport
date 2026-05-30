@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -63,17 +64,15 @@ class ConfigCard(QFrame):
         layout.setSpacing(10)
         layout.setContentsMargins(16, 14, 16, 14)
 
-        # Row 1: Name + Delete button
-        row1 = QHBoxLayout()
-        row1.setSpacing(8)
-
-        name_label = QLabel("名称")
-        name_label.setFixedWidth(60)
-        row1.addWidget(name_label)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(6)
+        grid.setColumnStretch(1, 1)
 
         self.name_input = QLineEdit()
         self.name_input.setText(self.config.name)
-        row1.addWidget(self.name_input, 1)
+        grid.addWidget(QLabel("名称"), 0, 0)
+        grid.addWidget(self.name_input, 0, 1)
 
         self.delete_btn = IconActionButton(
             text="×",
@@ -82,17 +81,7 @@ class ConfigCard(QFrame):
             button_size=(32, 28),
         )
         self.delete_btn.clicked.connect(self._on_delete_clicked)
-        row1.addWidget(self.delete_btn)
-
-        layout.addLayout(row1)
-
-        # Row 2: Provider type
-        row2 = QHBoxLayout()
-        row2.setSpacing(8)
-
-        type_label = QLabel("类型")
-        type_label.setFixedWidth(60)
-        row2.addWidget(type_label)
+        grid.addWidget(self.delete_btn, 0, 2)
 
         self.provider_combo = NoWheelComboBox()
         for pid, label in PROVIDER_LABELS.items():
@@ -101,23 +90,15 @@ class ConfigCard(QFrame):
         if idx >= 0:
             self.provider_combo.setCurrentIndex(idx)
         self.provider_combo.currentIndexChanged.connect(self._on_provider_changed)
-        row2.addWidget(self.provider_combo, 1)
-
-        layout.addLayout(row2)
-
-        # Row 3: API Key
-        row3 = QHBoxLayout()
-        row3.setSpacing(6)
-
-        key_label = QLabel("API Key")
-        key_label.setFixedWidth(60)
-        row3.addWidget(key_label)
+        grid.addWidget(QLabel("类型"), 1, 0)
+        grid.addWidget(self.provider_combo, 1, 1, 1, 2)
 
         self.key_input = QLineEdit()
         self.key_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.key_input.setText(self.config.api_key or "")
         self.key_input.setPlaceholderText("sk-...")
-        row3.addWidget(self.key_input, 1)
+        grid.addWidget(QLabel("API Key"), 2, 0)
+        grid.addWidget(self.key_input, 2, 1)
 
         self.show_key_btn = IconActionButton(
             tooltip="显示 API Key",
@@ -127,37 +108,19 @@ class ConfigCard(QFrame):
             on_click=self._toggle_key_visibility,
         )
         self._update_key_visibility_icon(False)
-        row3.addWidget(self.show_key_btn)
-
-        layout.addLayout(row3)
-
-        # Row 4: Base URL
-        row4 = QHBoxLayout()
-        row4.setSpacing(6)
-
-        url_label = QLabel("Base URL")
-        url_label.setFixedWidth(60)
-        row4.addWidget(url_label)
+        grid.addWidget(self.show_key_btn, 2, 2)
 
         self.base_url_input = QLineEdit()
         self.base_url_input.setText(self.config.api_base or "")
         self.base_url_input.setPlaceholderText("https://api.example.com")
-        row4.addWidget(self.base_url_input, 1)
-
-        layout.addLayout(row4)
-
-        # Row 5: Default Model + Test button
-        row5 = QHBoxLayout()
-        row5.setSpacing(6)
-
-        model_label = QLabel("默认模型")
-        model_label.setFixedWidth(60)
-        row5.addWidget(model_label)
+        grid.addWidget(QLabel("Base URL"), 3, 0)
+        grid.addWidget(self.base_url_input, 3, 1, 1, 2)
 
         self.model_input = QLineEdit()
         self.model_input.setText(self.config.default_model or "")
         self.model_input.setPlaceholderText("例如: claude-sonnet-4-20250514")
-        row5.addWidget(self.model_input, 1)
+        grid.addWidget(QLabel("默认模型"), 4, 0)
+        grid.addWidget(self.model_input, 4, 1)
 
         c = get_theme_colors()
         self.test_btn = TextButton(
@@ -167,9 +130,8 @@ class ConfigCard(QFrame):
             object_name="testBtn",
             on_click=self._test_connection,
         )
-        row5.addWidget(self.test_btn)
-
-        layout.addLayout(row5)
+        grid.addWidget(self.test_btn, 4, 2)
+        layout.addLayout(grid)
 
     def _toggle_key_visibility(self) -> None:
         is_visible = self.key_input.echoMode() == QLineEdit.EchoMode.Normal
