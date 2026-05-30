@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 import time
 from typing import Any
+from concurrent.futures import ThreadPoolExecutor
 
 from PyQt6.QtCore import QPoint, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QLinearGradient, QPainter
@@ -100,6 +101,8 @@ class AgentPanel(QWidget):
         self._composer_horizontal_margin = scaled(16)
 
         self._file_search_manager = FileSearchManager(self._workspace)
+        self._file_search_executor = ThreadPoolExecutor(max_workers=1)
+        self._file_search_ticket = 0
         self._file_search_popup: FileSearchPopup | None = None
 
         self._setup_ui(title)
@@ -466,21 +469,21 @@ class AgentPanel(QWidget):
         self._file_search_popup.show()
         self._file_search_popup.raise_()
 
-        # Run search synchronously via thread pool (fast: in-memory cache)
-        from concurrent.futures import ThreadPoolExecutor
-        executor = ThreadPoolExecutor(max_workers=1)
+        # Run search via persistent single-worker pool; discard stale completions.
+        self._file_search_ticket += 1
+        ticket = self._file_search_ticket
+        future = self._file_search_executor.submit(self._file_search_manager._do_search, query)
+        future.add_done_callback(lambda f: QTimer.singleShot(0, lambda: self._apply_file_search_result(ticket, f)))
 
-        def _do_search():
-            return self._file_search_manager._do_search(query)
-
-        def _on_done(future):
+    def _apply_file_search_result(self, ticket: int, future) -> None:
+        if ticket != self._file_search_ticket:
+            return
+        try:
             matches = future.result()
-            if self._file_search_popup and self._file_search_popup.isVisible():
-                self._file_search_popup.set_matches(matches)
-            executor.shutdown(wait=False)
-
-        future = executor.submit(_do_search)
-        future.add_done_callback(_on_done)
+        except Exception:
+            matches = []
+        if self._file_search_popup and self._file_search_popup.isVisible():
+            self._file_search_popup.set_matches(matches)
 
     def _on_file_selected(self, file_path: Path) -> None:
         self._file_search_popup.hide()
@@ -534,6 +537,11 @@ class AgentPanel(QWidget):
     def _on_message_edit_cancelled(self) -> None:
         """Handle edit cancelled - just reset state."""
         pass
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        self._file_search_manager.close()
+        self._file_search_executor.shutdown(wait=False, cancel_futures=True)
+        super().closeEvent(event)
 
     # ---- Command palette (/ commands) ----
 

@@ -12,6 +12,19 @@ from typing import Callable
 
 from loguru import logger
 
+_IGNORE_PATTERNS = (
+    "*.pyc",
+    ".DS_Store",
+    "*.tmp",
+    "*.swp",
+    "*.o",
+    "*.so",
+    "*.dylib",
+    "*.dll",
+    "*.exe",
+)
+_IGNORE_DIR_NAMES = {".git", "__pycache__", ".mypy_cache", ".pytest_cache", ".venv", "node_modules"}
+
 
 @dataclass
 class FileMatch:
@@ -214,22 +227,28 @@ class FileSearchManager:
         max_depth = 5  # Limit depth for performance
 
         try:
-            for item in self.workspace.rglob("*"):
-                if item.is_file():
-                    # Check depth
-                    try:
-                        rel_path = item.relative_to(self.workspace)
-                        depth = len(rel_path.parts)
-                        if depth <= max_depth:
-                            # Skip common ignore patterns
-                            if not self._should_ignore(item):
-                                files.append(item)
-                    except ValueError:
+            for root, dirs, filenames in self.workspace.walk(top_down=True):
+                rel_root = root.relative_to(self.workspace)
+                depth = len(rel_root.parts)
+                if depth >= max_depth:
+                    dirs[:] = []
+                else:
+                    dirs[:] = [d for d in dirs if d not in _IGNORE_DIR_NAMES]
+
+                for filename in filenames:
+                    if self._should_ignore_name(filename):
                         continue
+                    file_path = root / filename
+                    if not self._should_ignore(file_path):
+                        files.append(file_path)
         except PermissionError as e:
             logger.warning("Permission error scanning workspace: {}", e)
 
         return files
+
+    @staticmethod
+    def _should_ignore_name(name: str) -> bool:
+        return any(fnmatch(name, pattern) for pattern in _IGNORE_PATTERNS)
 
     def _should_ignore(self, path: Path) -> bool:
         """Check if file should be ignored.
@@ -240,25 +259,14 @@ class FileSearchManager:
         Returns:
             True if file should be ignored.
         """
-        # Common ignore patterns
-        ignore_patterns = [
-            "*.pyc",
-            "__pycache__",
-            ".git",
-            ".DS_Store",
-            "*.tmp",
-            "*.swp",
-            "*.o",
-            "*.so",
-            "*.dylib",
-            "*.dll",
-            "*.exe",
-        ]
-
         path_str = str(path)
-        for pattern in ignore_patterns:
-            if fnmatch(path.name, pattern) or pattern in path_str:
+        for segment in path.parts:
+            if segment in _IGNORE_DIR_NAMES:
                 return True
+        if self._should_ignore_name(path.name):
+            return True
+        if "/.git/" in path_str or "\\.git\\" in path_str:
+            return True
 
         return False
 
@@ -291,3 +299,8 @@ class FileSearchManager:
         """Cancel current search."""
         if self._current_task and not self._current_task.done():
             self._current_task.cancel()
+
+    def close(self) -> None:
+        """Release thread pool resources."""
+        self.cancel()
+        self._executor.shutdown(wait=False, cancel_futures=True)
