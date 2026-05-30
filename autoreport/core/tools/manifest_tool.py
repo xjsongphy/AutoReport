@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import datetime, timezone
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,7 @@ IGNORED_PATTERNS = [
     # Git metadata (shouldn't appear but just in case)
     ".git", ".gitignore",
 ]
+IGNORED_DIRS = {".git", "__pycache__", ".autoreport", ".checkpoints"}
 
 AGENT_DIRECTORIES = {
     "data_analysis": ["Data", "Data/Processed"],
@@ -41,13 +43,12 @@ AGENT_DIRECTORIES = {
 
 def should_ignore_file(file_name: str) -> bool:
     """Check if a file should be ignored based on patterns."""
-    from fnmatch import fnmatch
     return any(fnmatch(file_name, pattern) for pattern in IGNORED_PATTERNS)
 
 
 def should_ignore_dir(dir_name: str) -> bool:
     """Check if a directory should be ignored."""
-    return dir_name in {".git", "__pycache__", ".autoreport", ".checkpoints"}
+    return dir_name in IGNORED_DIRS
 
 
 def _parse_json_param(value: Any) -> Any:
@@ -110,23 +111,19 @@ class ManifestManager:
                 continue
 
             try:
-                for item in dir_path.rglob("*"):
-                    if item.is_file():
-                        rel_path = item.relative_to(self.workspace).as_posix()
-                        file_name = item.name
-
-                        # Skip ignored files
+                for root, dirs, filenames in dir_path.walk(top_down=True):
+                    dirs[:] = [d for d in dirs if not should_ignore_dir(d)]
+                    for file_name in filenames:
                         if should_ignore_file(file_name):
                             continue
+                        item = root / file_name
+                        rel_path = item.relative_to(self.workspace).as_posix()
 
-                        # Skip ignored parent directories
-                        if any(should_ignore_dir(part) for part in item.parts):
-                            continue
-
-                        # Get file mtime
                         try:
                             mtime_ns = item.stat().st_mtime_ns
-                            mtime_iso = datetime.fromtimestamp(mtime_ns / 1e9, tz=timezone.utc).isoformat(timespec="seconds")
+                            mtime_iso = datetime.fromtimestamp(
+                                mtime_ns / 1e9, tz=timezone.utc
+                            ).isoformat(timespec="seconds")
                             actual_files[rel_path] = {
                                 "path": rel_path,
                                 "file_updated_at": mtime_iso,
@@ -206,6 +203,35 @@ class ManifestManager:
             json.dumps(manifest, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+    async def clear(self, agent_type: str) -> None:
+        """Reset one agent manifest to default content."""
+        await self.save(agent_type, self._default_manifest(agent_type))
+
+    async def touch_files(self, agent_type: str, paths: list[str]) -> dict[str, Any]:
+        """Update file timestamps in manifest (testing/helper API)."""
+        manifest = await self.load(agent_type)
+        now = self.now()
+        file_map = {item.get("path"): item for item in manifest.get("files", []) if item.get("path")}
+        for raw_path in paths:
+            path = str(raw_path or "").strip()
+            if not path:
+                continue
+            item = file_map.get(path)
+            if item is None:
+                item = {
+                    "path": path,
+                    "description": "",
+                    "description_updated_at": None,
+                    "file_updated_at": now,
+                }
+                manifest.setdefault("files", []).append(item)
+                file_map[path] = item
+            else:
+                item["file_updated_at"] = now
+        manifest["files"].sort(key=lambda f: str(f.get("path", "")))
+        await self.save(agent_type, manifest)
+        return manifest
 
 
 class ManifestTool(Tool):

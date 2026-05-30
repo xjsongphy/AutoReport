@@ -1,5 +1,6 @@
 """Prompt loader with progressive loading support."""
 
+import re
 from pathlib import Path
 from typing import Final
 
@@ -24,6 +25,11 @@ class PromptLoader:
     # Template directory paths
     _BASE_DIR: Final = Path(__file__).parent.parent.parent / "templates"
     _AGENTS_DIR: Final = _BASE_DIR / "agents"
+    _SECTION_HEADERS: Final = {
+        "identity": ("## Identity", "## identity"),
+        "full": ("## Full Instructions", "## full instructions", "## Full"),
+    }
+    _NEXT_SECTION_PATTERN: Final = re.compile(r"^##\s[^#]", re.MULTILINE)
 
     def __init__(self, agents_dir: Path | None = None):
         """Initialize prompt loader.
@@ -115,8 +121,9 @@ class PromptLoader:
             ValueError: If section not found in file.
         """
         # Check cache first
-        if agent_type in self._cache and section in self._cache[agent_type]:
-            return self._cache[agent_type][section]
+        cached = self._cache.get(agent_type)
+        if cached and section in cached:
+            return cached[section]
 
         # Map agent_type to filename
         filename = self._get_filename(agent_type)
@@ -126,16 +133,12 @@ class PromptLoader:
             logger.warning("Prompt file not found: {}, using fallback", filepath)
             return self._get_fallback_prompt(agent_type)
 
-        # Read and parse file
+        # Read once and cache both sections to avoid duplicate disk reads/parsing.
         content = filepath.read_text(encoding="utf-8")
-        section_content = self._extract_section(content, section, filepath)
-
-        # Cache result
-        if agent_type not in self._cache:
-            self._cache[agent_type] = {}
-        self._cache[agent_type][section] = section_content
-
-        return section_content
+        identity = self._extract_section(content, "identity", filepath)
+        full = self._extract_section(content, "full", filepath)
+        self._cache[agent_type] = {"identity": identity, "full": full}
+        return self._cache[agent_type][section]
 
     def _get_filename(self, agent_type: str) -> str:
         """Map agent type to filename.
@@ -174,13 +177,7 @@ class PromptLoader:
         Raises:
             ValueError: If section not found.
         """
-        # Section headers in markdown
-        section_headers = {
-            "identity": ("## Identity", "## identity"),
-            "full": ("## Full Instructions", "## full instructions", "## Full"),
-        }
-
-        headers = section_headers.get(section, [])
+        headers = self._SECTION_HEADERS.get(section, ())
         if not headers:
             raise ValueError(f"Unknown section: {section}")
 
@@ -200,15 +197,11 @@ class PromptLoader:
             return content.strip()
 
         # Find next major section header (## level, not ###)
-        # Use regex to find "## " patterns (not "###")
-        import re
         search_start = start_idx
         next_header_idx = len(content)
 
-        # Find all "## " patterns after our section start
-        # Pattern: "## " followed by non-# character
-        for match in re.finditer(r'^##\s[^#]', content[search_start:], re.MULTILINE):
-            idx = search_start + match.start()
+        for match in self._NEXT_SECTION_PATTERN.finditer(content, search_start):
+            idx = match.start()
             # Make sure it's not our matched header
             header_at_idx = content[idx:idx + len(matched_header)] if idx + len(matched_header) <= len(content) else ""
             if header_at_idx != matched_header:
