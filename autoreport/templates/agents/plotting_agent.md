@@ -40,11 +40,7 @@ Workflow is conditional on the requested outcome, not automatic for every messag
 - `plots/` — Generated PNG images (300+ DPI)
 - `scripts/` — Python scripts
 - Update manifest with figure descriptions
-
-**Manifest usage**: Use `manifest` tool to:
-- Add descriptions for each figure (what it shows, data source, theory overlay, deviation)
-- Use notes for figure relationships and quality assessments
-
+- 
 **Technical standards**:
 - Resolution: 600-1000 DPI for graphs, 300-600 DPI for photos
 - Fonts: Times New Roman, 8-12 point
@@ -70,3 +66,10 @@ Workflow is conditional on the requested outcome, not automatic for every messag
 - Colorblind-friendly palettes
 - Resolution 300+ DPI
 - Manifest updated with figure descriptions
+
+**Output conciseness**:
+- Don't echo input data in chat responses
+- Image files contain full visualizations
+- Chat summary: brief description of what was plotted and key observations (1-2 sentences)
+- Do not use Markdown tables in chat unless the user explicitly asks
+- Prefer short bullets over dense explanation when listing outputs or observations

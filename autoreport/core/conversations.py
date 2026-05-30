@@ -14,8 +14,17 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
+from ..utils.editor_context import parse_editor_context, user_visible_content
 
 _AGENT_TYPES = ["main", "data_analysis", "plotting", "theory", "report"]
+
+
+def _user_visible_content_or_empty(content: str) -> str:
+    text = str(content or "")
+    visible = user_visible_content(text).strip()
+    if text.startswith("Editor context: ") and visible == text:
+        return ""
+    return visible
 
 
 class ConversationStore:
@@ -112,19 +121,13 @@ class ConversationStore:
             # If no files for this agent, leave unset (will be lazily created)
 
     def _ensure_session(self, agent_type: str) -> None:
-        """Lazily create a session id and metadata entry for the agent."""
+        """Lazily create an in-memory session id for the agent.
+
+        Metadata is persisted only on first actual write.
+        """
         if agent_type in self._current_session_ids and self._current_session_ids[agent_type]:
             return
-        session_id = str(uuid.uuid4())
-        self._current_session_ids[agent_type] = session_id
-        sessions = self._load_sessions_metadata()
-        sessions.insert(0, {
-            "id": session_id,
-            "name": "新对话",
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "preview": "",
-        })
-        self._save_sessions_metadata(sessions)
+        self._current_session_ids[agent_type] = str(uuid.uuid4())
 
     def _load_sessions_metadata(self) -> list[dict]:
         if not self._sessions_file.exists():
@@ -158,17 +161,34 @@ class ConversationStore:
         agent_dir.mkdir(parents=True, exist_ok=True)
         return agent_dir / f"{session_id}.jsonl"
 
+    def _session_user_texts(self, session_id: str) -> list[str]:
+        texts: list[str] = []
+        for agent_type in _AGENT_TYPES:
+            jsonl_path = self._dir / agent_type / f"{session_id}.jsonl"
+            if not jsonl_path.exists():
+                continue
+            try:
+                with open(jsonl_path, "r", encoding="utf-8", errors="replace") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            record = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if record.get("role") != "user":
+                            continue
+                        visible = _user_visible_content_or_empty(record.get("content", ""))
+                        if visible:
+                            texts.append(visible)
+            except (OSError, UnicodeDecodeError):
+                continue
+        return texts
+
     def get_sessions(self) -> list[dict]:
-        """Return session metadata ordered newest first, excluding stale empty sessions.
-
-        Stale empty sessions: created > 5 minutes ago with no messages.
-        Fresh empty sessions (just created) are shown to allow user to start typing.
-        """
-        from datetime import timedelta
-
+        """Return session metadata ordered newest first, excluding empty sessions."""
         sessions = self._load_sessions_metadata()
-        now = datetime.now()
-        stale_threshold = timedelta(minutes=5)
         non_empty = []
 
         for s in sessions:
@@ -181,20 +201,17 @@ class ConversationStore:
                     break
 
             if has_messages:
-                non_empty.append(s)
-            else:
-                # Check if this is a fresh empty session (created recently)
-                try:
-                    ts_str = s.get("timestamp", "")
-                    if ts_str:
-                        ts = datetime.fromisoformat(ts_str)
-                        if now - ts < stale_threshold:
-                            # Fresh empty session - keep it
-                            non_empty.append(s)
-                        # else: stale empty session - filter it out
-                except Exception:
-                    # If we can't parse timestamp, keep it to be safe
-                    non_empty.append(s)
+                item = dict(s)
+                user_texts = self._session_user_texts(str(session_id))
+                visible_name = _user_visible_content_or_empty(item.get("name", ""))
+                visible_preview = _user_visible_content_or_empty(item.get("preview", ""))
+                if not visible_name or visible_name in ("新对话", "未命名对话", "???"):
+                    visible_name = user_texts[0].splitlines()[0][:30] if user_texts else visible_name
+                if not visible_preview:
+                    visible_preview = user_texts[-1].splitlines()[0][:100] if user_texts else ""
+                item["name"] = visible_name or "新对话"
+                item["preview"] = visible_preview
+                non_empty.append(item)
 
         return non_empty
 
@@ -211,7 +228,7 @@ class ConversationStore:
         return False
 
     def new_session(self, name: str = "新对话", agent_type: str = "main") -> str:
-        session_id = self._create_new_session(name)
+        session_id = str(uuid.uuid4())
         self._current_session_ids[agent_type] = session_id
         return session_id
 
@@ -245,7 +262,7 @@ class ConversationStore:
                     self._current_session_ids[agent_type] = sessions[0]["id"]
                 else:
                     if new_sid is None:
-                        new_sid = self._create_new_session()
+                        new_sid = str(uuid.uuid4())
                     self._current_session_ids[agent_type] = new_sid
         return True
 
@@ -254,7 +271,8 @@ class ConversationStore:
         sessions = self._load_sessions_metadata()
         for s in sessions:
             if s["id"] == session_id:
-                preview = content.split("\n")[0][:100]
+                visible_content = _user_visible_content_or_empty(content)
+                preview = visible_content.split("\n")[0][:100]
                 s["preview"] = preview
                 self._save_sessions_metadata(sessions)
                 break
@@ -265,7 +283,7 @@ class ConversationStore:
         sessions = self._load_sessions_metadata()
         for s in sessions:
             if s["id"] == session_id and s["name"] in ("新对话", "未命名对话"):
-                name = content.strip()[:30]
+                name = _user_visible_content_or_empty(content).strip()[:30]
                 if name:
                     s["name"] = name
                     self._save_sessions_metadata(sessions)
@@ -288,7 +306,7 @@ class ConversationStore:
             sessions = self._load_sessions_metadata()
             if not any(s.get("id") == session_id for s in sessions):
                 timestamp = datetime.now().isoformat(timespec="seconds")
-                sessions.insert(0, {"id": session_id, "name": "???", "timestamp": timestamp, "preview": ""})
+                sessions.insert(0, {"id": session_id, "name": "新对话", "timestamp": timestamp, "preview": ""})
                 self._save_sessions_metadata(sessions)
 
         record: dict[str, Any] = {
@@ -296,6 +314,13 @@ class ConversationStore:
             "role": role,
             "content": content,
         }
+        if role == "user":
+            parsed = parse_editor_context(content)
+            if parsed.get("has_context"):
+                record["content"] = str(parsed.get("bubble_text") or "")
+                context = parsed.get("context")
+                if isinstance(context, dict):
+                    record["editor_context"] = context
         if extra:
             record.update(extra)
 

@@ -2,8 +2,9 @@
 
 import sys
 from PyQt6.QtCore import Qt, QPoint
-from PyQt6.QtGui import QColor, QCursor, QPainter, QPaintEvent
+from PyQt6.QtGui import QColor, QCursor, QPainter, QPaintEvent, QPalette
 from PyQt6.QtWidgets import (
+    QApplication,
     QWidget,
     QHBoxLayout,
     QLabel,
@@ -32,6 +33,9 @@ class TitleBar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._drag_position = QPoint()
+        self._press_global_pos = QPoint()
+        self._press_local_pos = QPoint()
+        self._left_pressed = False
         self._is_macos = sys.platform == "darwin"
         self._is_windows = sys.platform == "win32"
         self._using_system_move = False
@@ -47,21 +51,35 @@ class TitleBar(QWidget):
         self._title_height = int(34 * s)
         self.setFixedHeight(self._title_height)
         self.setObjectName("titleBar")
+        # Ensure stylesheet background is actually painted on this QWidget.
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        # App icon (left of menu items)
+        self._app_icon = QLabel(self)
+        self._app_icon.setObjectName("titleBarAppIcon")
+        icon_size = int(16 * s)
+        self._app_icon.setFixedSize(icon_size, icon_size)
+        layout.addSpacing(int(8 * s))
+        layout.addWidget(self._app_icon, 0, Qt.AlignmentFlag.AlignVCenter)
+        layout.addSpacing(int(6 * s))
+
         # Menu bar (left side)
         self._menu_bar = QMenuBar(self)
         self._menu_bar.setObjectName("titleBarMenuBar")
-        self._menu_bar.setFixedHeight(self._title_height)
+        self._menu_height = int(26 * s)
+        self._menu_bar.setFixedHeight(self._menu_height)
         self._menu_bar.setContentsMargins(0, 0, 0, 0)
+        self._menu_bar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._menu_bar.installEventFilter(self)
+        self._refresh_app_icon()
 
         # On macOS, native menu bar is preferred, but for custom title bar
         # we need to embed it
-        layout.addWidget(self._menu_bar)
+        layout.addWidget(self._menu_bar, 0, Qt.AlignmentFlag.AlignVCenter)
 
         layout.addStretch()
 
@@ -71,8 +89,9 @@ class TitleBar(QWidget):
         if not self._is_macos:
             self._controls_widget = QWidget(self)
             self._controls_widget.setObjectName("titleBarControls")
+            self._controls_widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
             controls_layout = QHBoxLayout(self._controls_widget)
-            controls_layout.setContentsMargins(0, 0, int(8 * s), 0)
+            controls_layout.setContentsMargins(0, 0, 0, 0)
             controls_layout.setSpacing(0)
             self._controls_widget.setFixedHeight(self._title_height)
 
@@ -127,6 +146,12 @@ class TitleBar(QWidget):
         """Apply VSCode-style theme to title bar."""
         c = get_theme_colors()
         s = dpi_scale()
+        # Some Windows styles may still paint menubar base from palette.
+        pal = self._menu_bar.palette()
+        pal.setColor(QPalette.ColorRole.Window, QColor(c["titlebar_bg"]))
+        pal.setColor(QPalette.ColorRole.Base, QColor(c["titlebar_bg"]))
+        self._menu_bar.setPalette(pal)
+        self._menu_bar.setAutoFillBackground(True)
 
         # Update icons based on window state
         self._update_button_icons()
@@ -134,21 +159,26 @@ class TitleBar(QWidget):
         self.setStyleSheet(f"""
             #titleBar {{
                 background-color: {c["titlebar_bg"]};
-                border-bottom: 1px solid {c["border"]};
+                border-bottom: none;
+            }}
+            #titleBarAppIcon {{
+                background: transparent;
             }}
             #titleBarMenuBar {{
-                background-color: transparent;
+                background-color: {c["titlebar_bg"]};
                 border: none;
                 padding: 0px;
                 margin: 0px;
+                spacing: 0px;
             }}
             #titleBarMenuBar::item {{
                 background-color: transparent;
                 color: {c["fg"]};
-                padding: 0px {int(5 * s)}px;
+                padding: 0px {int(2 * s)}px;
+                margin: 0px;
                 border-radius: {int(4 * s)}px;
                 font-size: {int(13 * s)}px;
-                min-height: {max(16, self._title_height - int(10 * s))}px;
+                min-height: {max(14, self._menu_height - int(10 * s))}px;
             }}
             #titleBarMenuBar::item:selected {{
                 background-color: {c["selection"]};
@@ -168,7 +198,7 @@ class TitleBar(QWidget):
                 background-color: {c["selection"]};
             }}
             #titleBarControls {{
-                background-color: transparent;
+                background-color: {c["titlebar_bg"]};
             }}
             #titleBarMinimizeBtn,
             #titleBarMaximizeBtn {{
@@ -202,6 +232,19 @@ class TitleBar(QWidget):
                 border-radius: {'4px' if self._is_macos else '0px'};
             }}
         """)
+
+    def _refresh_app_icon(self) -> None:
+        """Update title bar icon from window/app icon."""
+        icon = self.window().windowIcon() if self.window() else None
+        if icon is None or icon.isNull():
+            app = QApplication.instance()
+            if app is not None:
+                icon = app.windowIcon()
+        if icon is None or icon.isNull():
+            self._app_icon.clear()
+            return
+        pm = icon.pixmap(self._app_icon.size())
+        self._app_icon.setPixmap(pm)
 
     def _update_button_icons(self) -> None:
         """Update button icons based on window state."""
@@ -255,7 +298,13 @@ class TitleBar(QWidget):
     def _start_window_drag(self, global_pos: QPoint) -> bool:
         """Start moving window using system move when available."""
         self._using_system_move = False
+        # NOTE:
+        # Qt on Windows may lose child-widget hover state after startSystemMove()
+        # in frameless windows. Use manual dragging on Windows for stable button hover.
         if self._is_windows:
+            self._drag_position = global_pos - self.window().frameGeometry().topLeft()
+            return True
+        if not self._is_windows:
             window = self.window()
             handle = window.windowHandle() if window else None
             if handle is not None and hasattr(handle, "startSystemMove"):
@@ -272,18 +321,27 @@ class TitleBar(QWidget):
         """Handle mouse press for window dragging."""
         self._using_system_move = False
         if event.button() == Qt.MouseButton.LeftButton:
-            # Only allow dragging from the title bar area, not from menu items
-            pos = event.position().toPoint()
-            if self._can_start_drag_at(pos):
-                self._start_window_drag(event.globalPosition().toPoint())
-                event.accept()
+            self._left_pressed = True
+            self._press_local_pos = event.position().toPoint()
+            self._press_global_pos = event.globalPosition().toPoint()
+            self._drag_position = self._press_global_pos - self.window().frameGeometry().topLeft()
+            event.accept()
 
     def mouseMoveEvent(self, event) -> None:
         """Handle mouse move for window dragging."""
         if self._is_windows and self._using_system_move:
             return
-        if event.buttons() == Qt.MouseButton.LeftButton and self._drag_position:
-            new_pos = event.position().toPoint() - self._drag_position
+        if (
+            self._left_pressed
+            and event.buttons() == Qt.MouseButton.LeftButton
+            and self._can_start_drag_at(self._press_local_pos)
+        ):
+            if (event.globalPosition().toPoint() - self._press_global_pos).manhattanLength() < 4:
+                return
+            self._start_window_drag(event.globalPosition().toPoint())
+            if self._using_system_move:
+                return
+            new_pos = event.globalPosition().toPoint() - self._drag_position
             self.window().move(new_pos)
             event.accept()
 
@@ -298,6 +356,7 @@ class TitleBar(QWidget):
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         self._using_system_move = False
         self._dragging_from_menu_bar = False
+        self._left_pressed = False
         super().mouseReleaseEvent(event)
 
     def eventFilter(self, obj, event):  # noqa: N802
@@ -306,8 +365,10 @@ class TitleBar(QWidget):
             if et == event.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 local_pos = event.position().toPoint()
                 if self._menu_bar.actionAt(local_pos) is None:
-                    self._dragging_from_menu_bar = True
-                    self._start_window_drag(event.globalPosition().toPoint())
+                    self._dragging_from_menu_bar = False
+                    self._press_local_pos = self._menu_bar.mapTo(self, local_pos)
+                    self._press_global_pos = event.globalPosition().toPoint()
+                    self._drag_position = self._press_global_pos - self.window().frameGeometry().topLeft()
                     event.accept()
                     return True
             elif et == event.Type.MouseMove and self._dragging_from_menu_bar:
@@ -315,6 +376,16 @@ class TitleBar(QWidget):
                     self.window().move(event.globalPosition().toPoint() - self._drag_position)
                 event.accept()
                 return True
+            elif et == event.Type.MouseMove and event.buttons() == Qt.MouseButton.LeftButton:
+                if self._menu_bar.actionAt(event.position().toPoint()) is None:
+                    moved = (event.globalPosition().toPoint() - self._press_global_pos).manhattanLength()
+                    if moved >= 4:
+                        self._dragging_from_menu_bar = True
+                        self._start_window_drag(event.globalPosition().toPoint())
+                        if not self._using_system_move:
+                            self.window().move(event.globalPosition().toPoint() - self._drag_position)
+                        event.accept()
+                        return True
             elif et == event.Type.MouseButtonDblClick and event.button() == Qt.MouseButton.LeftButton:
                 local_pos = event.position().toPoint()
                 if self._menu_bar.actionAt(local_pos) is None:
@@ -327,6 +398,7 @@ class TitleBar(QWidget):
 
     def paintEvent(self, event: QPaintEvent) -> None:
         """Custom paint event for platform-specific rendering."""
+        self._refresh_app_icon()
         super().paintEvent(event)
 
         # On macOS, draw the title bar background to ensure consistency

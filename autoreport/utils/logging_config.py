@@ -115,11 +115,12 @@ def _add_console_handler(log_level: str) -> None:
 
 def _file_format(record):
     """Format for file output — appends traceback only when exception is present."""
+    message = str(record["message"]).replace("{", "{{").replace("}", "}}")
     base = (
         f"{record['time']:YYYY-MM-DD HH:mm:ss} | "
         f"{record['level'].name: <8} | "
         f"{record['name']}:{record['function']}:{record['line']} | "
-        f"{record['message']}"
+        f"{message}"
     )
     exc = record.get("exception")
     if exc and exc.value is not None:

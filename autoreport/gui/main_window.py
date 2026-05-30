@@ -2,6 +2,7 @@
 
 import asyncio
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from loguru import logger
@@ -17,11 +18,13 @@ from PyQt6.QtWidgets import (
     QSplitter,
     QVBoxLayout,
     QWidget,
+    QFrame,
 )
 
 from ..core.conversations import ConversationStore
 from ..interfaces.protocol import BackendAPI
 from ..interfaces.types import (
+    AgentType,
     AgentFeedback,
     AgentResponse,
     Checkpoint,
@@ -34,6 +37,7 @@ from ..interfaces.types import (
     UserMessage,
 )
 from ..utils.agent_labels import get_agent_badge, get_agent_title
+from ..utils.editor_context import build_editor_context_message
 from ..utils.logging_config import ui_logger
 from .scale import dpi_scale
 from .theme import get_theme_colors
@@ -42,6 +46,13 @@ from .widgets.agent_panel import AgentPanel
 from .widgets.file_tree import FileTreeWidget
 from .widgets.preview import PreviewWidget
 from .widgets.ui_utils import combo_box_qss, compact_tooltip_qss
+
+
+@dataclass
+class _TurnState:
+    message_id: str | None = None
+    answer_started: bool = False
+    phase: str = "idle"
 
 
 class MainWindow(QMainWindow):
@@ -66,11 +77,13 @@ class MainWindow(QMainWindow):
         self._async_loop: asyncio.AbstractEventLoop | None = None
         self._debug_agents = {str(a) for a in (debug_agents or [])}
         self._agent_status_cache: dict[str, tuple[str, dict]] = {}
+        self._agent_queue_cache: dict[str, list[str]] = {}
         self._title_bar: TitleBar | None = None
         self._splitter_sizes_initialized = False
         self._initial_render_prepared = False
         # Cache file context to attach to next user message
-        self._pending_file_context: dict[str, dict] = {"main": None, "sub": None}
+        self._pending_file_context: dict[str, dict | None] = {}
+        self._turn_state: dict[str, _TurnState] = {}
 
         self.setWindowTitle("AutoReport")
         self.resize(1400, 900)
@@ -114,10 +127,7 @@ class MainWindow(QMainWindow):
         if central is not None and central.layout() is not None:
             central.layout().activate()
         self._apply_splitter_sizes(force=True)
-        areas = [
-            self.main_agent_panel._messages_area,
-            self.sub_agent_panel._messages_area,
-        ]
+        areas = [self.agent_panel._messages_area]
         for area in areas:
             area.setUpdatesEnabled(False)
         try:
@@ -180,6 +190,12 @@ class MainWindow(QMainWindow):
             }}
             QSplitter::handle:vertical {{
                 height: {px(1)};
+            }}
+            #titleBarDivider {{
+                background-color: {c["border"]};
+                border: none;
+                margin: 0;
+                padding: 0;
             }}
             QScrollBar:vertical {{
                 background-color: transparent;
@@ -257,21 +273,21 @@ class MainWindow(QMainWindow):
             )}
             #headerAction {{
                 background-color: transparent;
-                color: {c["header_action"]};
                 border: none;
-                border-radius: {px(4)};
-                font-size: {px(13)};
+                border-radius: {c["radius_sm"]};
+                font-size: {px(14)};
+                padding: 0;
+                color: {c["fg"]};
             }}
             #headerAction:hover {{
-                background-color: {c["hover"]};
-                color: {c["header_action_hover"]};
+                background-color: {c["tree_hover"]};
             }}
             /* ---- Input Container (with working border space) ---- */
             #composerHost {{
-                background-color: {c["panel_bg"]};
+                background-color: {c["messages_bg"]};
             }}
             #inputContainer {{
-                background-color: {c["panel_bg"]};
+                background-color: {c["messages_bg"]};
                 border: 1px solid {c["border"]};
                 border-radius: {px(10)};
                 margin: {px(8)} 0 0 0;
@@ -298,7 +314,7 @@ class MainWindow(QMainWindow):
                 border-bottom-right-radius: {px(8)};
             }}
             #composerBottomGap {{
-                background-color: {c["panel_bg"]};
+                background-color: {c["messages_bg"]};
             }}
             #secondaryBtn {{
                 background-color: transparent;
@@ -381,6 +397,19 @@ class MainWindow(QMainWindow):
             }}
             #userMessageBubble:hover {{
                 background-color: {c["bubble_hover"]};
+            }}
+            #userContextChip {{
+                background-color: {c["card"]};
+                border: 1px solid {c["border"]};
+                border-radius: {px(8)};
+                margin-bottom: {px(8)};
+            }}
+            #userContextChipText {{
+                color: {c["fg"]};
+                font-size: {px(12)};
+                font-weight: {c["fw_semibold"]};
+                font-family: "Cascadia Code", "SF Mono", "Consolas", monospace;
+                background-color: transparent;
             }}
             #userEditBubble {{
                 background-color: {c["edit_bubble_bg"]};
@@ -741,6 +770,10 @@ class MainWindow(QMainWindow):
             # Custom title bar
             self._title_bar = TitleBar(self)
             main_layout.addWidget(self._title_bar)
+            self._titlebar_divider = QFrame(self)
+            self._titlebar_divider.setObjectName("titleBarDivider")
+            self._titlebar_divider.setFixedHeight(1)
+            main_layout.addWidget(self._titlebar_divider)
 
             # Setup menu bar in custom title bar
             self._setup_menu_bar(self._title_bar.get_menu_bar())
@@ -770,22 +803,18 @@ class MainWindow(QMainWindow):
         self.preview.file_changed.connect(self._on_preview_file_changed)
         main_splitter.addWidget(self.preview)
 
-        # Right: Agent panels side-by-side (Sub Agent | Main Agent)
-        self.sub_agent_panel = AgentPanel("sub", get_agent_title("sub"), self.workspace)
-        main_splitter.addWidget(self.sub_agent_panel)
-
-        self.main_agent_panel = AgentPanel("main", get_agent_title("main"), self.workspace)
-        main_splitter.addWidget(self.main_agent_panel)
+        # Right: Single agent panel with agent selector
+        self.agent_panel = AgentPanel("sub", get_agent_title("sub"), self.workspace)
+        main_splitter.addWidget(self.agent_panel)
 
         for index in range(main_splitter.count()):
             main_splitter.setCollapsible(index, False)
 
         # Set stretch factors for proportional sizing
-        # file_tree: 20%, preview: 40%, sub_agent: 20%, main_agent: 20%
+        # file_tree: 20%, preview: 45%, agent_panel: 35%
         main_splitter.setStretchFactor(0, 20)   # file_tree
-        main_splitter.setStretchFactor(1, 40)   # preview
-        main_splitter.setStretchFactor(2, 20)   # sub_agent_panel
-        main_splitter.setStretchFactor(3, 20)   # main_agent_panel
+        main_splitter.setStretchFactor(1, 45)   # preview
+        main_splitter.setStretchFactor(2, 35)   # agent_panel
 
         # Store main_splitter for resize handling
         self._main_splitter = main_splitter
@@ -800,58 +829,44 @@ class MainWindow(QMainWindow):
 
         # Connect signals
         self._rollback_finished_signal.connect(self._on_rollback_finished)
-        self.main_agent_panel.message_sent.connect(self._on_main_agent_message)
-        self.main_agent_panel.file_context_attached.connect(self._on_main_agent_file_context)
-        self.sub_agent_panel.message_sent.connect(self._on_sub_agent_message)
-        self.sub_agent_panel.file_context_attached.connect(self._on_sub_agent_file_context)
-
-        self.main_agent_panel.history_requested.connect(lambda: self._on_history_requested("main"))
-        self.main_agent_panel.new_conversation_requested.connect(lambda: self._on_new_conversation_requested("main"))
-        self.main_agent_panel.session_selected_from_dropdown.connect(lambda sid: self._on_session_selected(sid, "main"))
-        self.main_agent_panel.delete_session_requested.connect(self._on_delete_session)
-        self.main_agent_panel.rename_session_requested.connect(self._on_rename_session)
-        self.sub_agent_panel.history_requested.connect(lambda: self._on_history_requested(self.sub_agent_panel.agent_type))
-        self.sub_agent_panel.new_conversation_requested.connect(lambda: self._on_new_conversation_requested(self.sub_agent_panel.agent_type))
-        self.sub_agent_panel.session_selected_from_dropdown.connect(lambda sid: self._on_session_selected(sid, self.sub_agent_panel.agent_type))
-        self.sub_agent_panel.delete_session_requested.connect(self._on_delete_session)
-        self.sub_agent_panel.rename_session_requested.connect(self._on_rename_session)
-        self.main_agent_panel.interrupt_requested.connect(lambda: self._on_interrupt("main"))
-        self.sub_agent_panel.interrupt_requested.connect(lambda: self._on_interrupt(self.sub_agent_panel.agent_type))
-        self.sub_agent_panel.agent_type_changed.connect(self._on_sub_agent_type_changed)
-        self.main_agent_panel.rollback_requested.connect(
-            lambda checkpoint_id, row: self._on_rollback_requested("main", checkpoint_id, row)
+        self.agent_panel.message_sent.connect(self._on_agent_message)
+        self.agent_panel.file_context_attached.connect(self._on_agent_file_context)
+        self.agent_panel.history_requested.connect(
+            lambda: self._on_history_requested(self.current_agent_type)
         )
-        self.sub_agent_panel.rollback_requested.connect(
-            lambda checkpoint_id, row: self._on_rollback_requested(self.sub_agent_panel.agent_type, checkpoint_id, row)
+        self.agent_panel.new_conversation_requested.connect(
+            lambda: self._on_new_conversation_requested(self.current_agent_type)
         )
-        self.main_agent_panel.thinking_finished.connect(
-            lambda summary, detail, expandable: self._on_thinking_finished("main", summary, detail, expandable)
+        self.agent_panel.session_selected_from_dropdown.connect(
+            lambda sid: self._on_session_selected(sid, self.current_agent_type)
         )
-        self.sub_agent_panel.thinking_finished.connect(
+        self.agent_panel.delete_session_requested.connect(self._on_delete_session)
+        self.agent_panel.rename_session_requested.connect(self._on_rename_session)
+        self.agent_panel.interrupt_requested.connect(lambda: self._on_interrupt(self.current_agent_type))
+        self.agent_panel.agent_type_changed.connect(self._on_agent_type_changed)
+        self.agent_panel.rollback_requested.connect(
+            lambda checkpoint_id, row: self._on_rollback_requested(self.current_agent_type, checkpoint_id, row)
+        )
+        self.agent_panel.thinking_finished.connect(
             lambda summary, detail, expandable: self._on_thinking_finished(
-                self.sub_agent_panel.agent_type, summary, detail, expandable
+                self.current_agent_type, summary, detail, expandable
             )
         )
 
         self.preview.selection_changed.connect(self._on_preview_selection_changed)
         self.preview.restore_open_tabs()
-        self.main_agent_panel.set_agent_type("main")
-        self.sub_agent_panel.set_agent_type("data_analysis")
-        self.main_agent_panel.set_debug_mode("main" in self._debug_agents)
-        self.sub_agent_panel.set_debug_mode(self.sub_agent_panel.agent_type in self._debug_agents)
-
-        self.main_agent_panel.conversation_cleared.connect(
-            lambda: self._on_conversation_cleared("main"))
-        self.sub_agent_panel.conversation_cleared.connect(
-            lambda: self._on_conversation_cleared(self.sub_agent_panel.agent_type))
+        self.file_tree.restore_state()
+        self.agent_panel.set_agent_type("main")
+        self.agent_panel.set_debug_mode("main" in self._debug_agents)
+        self.agent_panel.conversation_cleared.connect(
+            lambda: self._on_conversation_cleared(self.current_agent_type))
 
     def _on_directory_selected(self, directory: str) -> None:
         ui_logger.debug("MainWindow: directory selected {}", directory)
         # Directory navigation is decoupled from sub-agent switching.
         # Keep current contexts when the event is triggered by file click.
         if not getattr(self, "_file_just_selected", False):
-            self.main_agent_panel.clear_file_context()
-            self.sub_agent_panel.clear_file_context()
+            self.agent_panel.clear_file_context()
         self._file_just_selected = False
 
     def _on_preview_selection_changed(self, file_path: str, selected_text: str, start_line: int, end_line: int) -> None:
@@ -859,25 +874,22 @@ class MainWindow(QMainWindow):
             # Empty selection should not override selection context here.
             # File-path attachment is synchronized via _on_preview_file_changed.
             return
-        self.main_agent_panel.set_preview_context(file_path, selected_text, start_line, end_line)
-        self.sub_agent_panel.set_preview_context(file_path, selected_text, start_line, end_line)
+        self.agent_panel.set_preview_context(file_path, selected_text, start_line, end_line)
 
     def _on_preview_file_changed(self, file_path: Path) -> None:
         if not file_path:
-            self.main_agent_panel.clear_file_context()
-            self.sub_agent_panel.clear_file_context()
+            self.agent_panel.clear_file_context()
             return
+        self.file_tree.select_file(file_path)
         rel_path = self._relative_path(file_path)
-        self.main_agent_panel.set_opened_file(rel_path)
-        self.sub_agent_panel.set_opened_file(rel_path)
+        self.agent_panel.set_opened_file(rel_path)
 
     def _on_file_selected(self, file_path: Path) -> None:
         ui_logger.debug("MainWindow: file selected {}", file_path.name)
         self._file_just_selected = True
         self.preview.load_file(file_path)
         rel_path = self._relative_path(file_path)
-        self.main_agent_panel.set_opened_file(rel_path)
-        self.sub_agent_panel.set_opened_file(rel_path)
+        self.agent_panel.set_opened_file(rel_path)
         logger.debug("File selected: {}", file_path)
 
     def _on_file_tree_path_changed(self, old_path: Path, new_path: Path) -> None:
@@ -943,27 +955,29 @@ class MainWindow(QMainWindow):
                         clipboard.setText(selected)
 
     def _load_conversations(self) -> None:
-        # Restore main + currently selected sub-agent history on startup.
-        self._load_conversations_for_agent("main", self.main_agent_panel)
-        self._load_conversations_for_agent(self.sub_agent_panel.agent_type, self.sub_agent_panel)
+        self._load_conversations_for_agent(self.current_agent_type, self.agent_panel)
         if hasattr(self.backend, "sync_agent_conversation"):
             self._submit_coroutine(
-                self.backend.sync_agent_conversation("main", self._records_to_backend_messages("main"))
-            )
-            sub_agent = self.sub_agent_panel.agent_type
-            self._submit_coroutine(
-                self.backend.sync_agent_conversation(sub_agent, self._records_to_backend_messages(sub_agent))
+                self.backend.sync_agent_conversation(
+                    self.current_agent_type,
+                    self._records_to_backend_messages(self.current_agent_type),
+                    session_id=self._conv_store.get_current_session_id(self.current_agent_type),
+                )
             )
 
     def _load_conversations_for_agent(self, agent_type: str, panel: AgentPanel) -> None:
         panel._messages_area.clear()
         records = self._conv_store.load_messages(agent_type)
         if not records:
+            panel._update_width()
             return
         for rec in records:
             role = rec.get("role", "")
             content = rec.get("content", "")
             if role == "user":
+                context = rec.get("editor_context")
+                if isinstance(context, dict):
+                    content = build_editor_context_message(context, str(content))
                 panel.add_message(
                     "user",
                     content,
@@ -1006,6 +1020,7 @@ class MainWindow(QMainWindow):
                 )
             elif role == "error":
                 panel.add_error(rec.get("source", ""), content)
+        panel._update_width()
         logger.info("Loaded {} messages for agent {}", len(records), agent_type)
 
     def _on_thinking_finished(self, agent_type: str, summary: str, detail: str, expandable: bool) -> None:
@@ -1053,34 +1068,37 @@ class MainWindow(QMainWindow):
             return
         return asyncio.run_coroutine_threadsafe(coro, self._async_loop)
 
-    def _on_main_agent_message(self, content: str) -> None:
-        # Save original content for display
-        self._conv_store.append_message("main", "user", content)
+    @property
+    def current_agent_type(self) -> str:
+        return self.agent_panel.agent_type
 
-        # Attach file context if available
+    def _is_visible_agent(self, agent_type: str) -> bool:
+        return agent_type == self.current_agent_type
+
+    def _show_current_agent_conversation(self) -> None:
+        self.agent_panel.finish_thinking()
+        self.agent_panel._pending_tool_groups.clear()
+        self.agent_panel._current_tool_group = None
+        self.agent_panel._messages_area.clear()
+        self._load_conversations_for_agent(self.current_agent_type, self.agent_panel)
+        self.agent_panel.set_queue_preview(self._agent_queue_cache.get(self.current_agent_type, []))
+        cached = self._agent_status_cache.get(self.current_agent_type)
+        if cached:
+            status, extra = cached
+            self.agent_panel.set_status(status, extra)
+        else:
+            self.agent_panel.set_status("idle", {})
+        self.agent_panel.set_debug_mode(self.current_agent_type in self._debug_agents)
+
+    def _on_agent_message(self, content: str) -> None:
+        agent_type = self.current_agent_type
         full_content = content
-        file_context = self._pending_file_context.get("main")
+        file_context = self._pending_file_context.get(agent_type)
         if file_context:
             context_msg = self._format_file_context(file_context)
             if context_msg:
                 full_content = f"{context_msg}\n\n{content}"
-            self._pending_file_context["main"] = None  # Clear after use
-
-        self._submit_coroutine(self.backend.send_user_message(full_content, "main"))
-
-    def _on_sub_agent_message(self, content: str) -> None:
-        agent_type = self.sub_agent_panel.agent_type
-        # Save original content for display
-        self._conv_store.append_message(agent_type, "user", content)
-
-        # Attach file context if available
-        full_content = content
-        file_context = self._pending_file_context.get("sub")
-        if file_context:
-            context_msg = self._format_file_context(file_context)
-            if context_msg:
-                full_content = f"{context_msg}\n\n{content}"
-            self._pending_file_context["sub"] = None  # Clear after use
+            self._pending_file_context[agent_type] = None
 
         self._submit_coroutine(self.backend.send_user_message(full_content, agent_type))
 
@@ -1106,30 +1124,20 @@ class MainWindow(QMainWindow):
             )
         return ""
 
-    def _on_main_agent_file_context(self, file_context: dict) -> None:
-        """Handle file context attachment for main agent."""
-        # Cache for attachment to next user message
-        self._pending_file_context["main"] = file_context
+    def _on_agent_file_context(self, file_context: dict) -> None:
+        self._pending_file_context[self.current_agent_type] = file_context
 
-    def _on_sub_agent_file_context(self, file_context: dict) -> None:
-        """Handle file context attachment for sub agent."""
-        # Cache for attachment to next user message
-        self._pending_file_context["sub"] = file_context
-
-    def _on_sub_agent_type_changed(self, agent_type: str) -> None:
-        self.sub_agent_panel.set_agent_type(agent_type)
-        self.sub_agent_panel.set_debug_mode(agent_type in self._debug_agents)
-        self._load_conversations_for_agent(agent_type, self.sub_agent_panel)
+    def _on_agent_type_changed(self, agent_type: str) -> None:
+        self.agent_panel.set_agent_type(agent_type)
+        self._show_current_agent_conversation()
         if hasattr(self.backend, "sync_agent_conversation"):
             self._submit_coroutine(
-                self.backend.sync_agent_conversation(agent_type, self._records_to_backend_messages(agent_type))
+                self.backend.sync_agent_conversation(
+                    agent_type,
+                    self._records_to_backend_messages(agent_type),
+                    session_id=self._conv_store.get_current_session_id(agent_type),
+                )
             )
-        cached = self._agent_status_cache.get(agent_type)
-        if cached:
-            status, extra = cached
-            self.sub_agent_panel.set_status(status, extra)
-        else:
-            self.sub_agent_panel.set_status("idle", {})
 
     def _on_interrupt(self, agent_type: str) -> None:
         """Handle interrupt request from GUI."""
@@ -1204,43 +1212,74 @@ class MainWindow(QMainWindow):
 
     def _handle_agent_response(self, message: AgentResponse) -> None:
         agent_str = str(message.agent_type)
-        if agent_str != "main" and agent_str != self.sub_agent_panel.agent_type:
+        if not self._is_visible_agent(agent_str):
             if not message.streaming and message.content:
                 self._conv_store.append_message(agent_str, "agent", message.content)
             return
         panel = self._get_panel_for_agent(agent_str)
-        if getattr(message, "thinking", None):
-            panel.append_thinking(message.thinking or "")
-            return
-        # Empty non-streaming message = completion signal for streaming
-        if not message.streaming and not message.content:
+        state = self._state_for_agent(agent_str)
+
+        def _latest_incomplete_agent_row():
             rows = panel._messages_area.get_message_rows()
             for row in reversed(rows):
-                if row._role == "agent" and getattr(row, "_content", ""):
-                    row.mark_complete()
-                    break
-            return
-        # Non-streaming with content — check if streaming already delivered it
-        if not message.streaming and message.content:
-            rows = panel._messages_area.get_message_rows()
-            if (rows
-                    and rows[-1]._role == "agent"
-                    and rows[-1]._content
-                    and not rows[-1]._complete):
-                rows[-1].mark_complete()
-                self._conv_store.append_message(agent_str, "agent", rows[-1]._content)
+                if getattr(row, "_role", "") != "agent":
+                    continue
+                if getattr(row, "_summary", None) is not None:
+                    continue
+                if not getattr(row, "_content", ""):
+                    continue
+                if getattr(row, "_complete", True):
+                    continue
+                return row
+            return None
+
+        msg_id = str(getattr(message, "message_id", "") or "")
+        if msg_id and state.message_id != msg_id:
+            state.message_id = msg_id
+            state.answer_started = False
+            state.phase = "idle"
+
+        if getattr(message, "thinking", None):
+            if state.answer_started:
                 return
+            panel.append_thinking(message.thinking or "")
+            state.phase = "thinking"
+            return
+
+        if not message.streaming and not message.content:
+            panel.finish_thinking()
+            row = _latest_incomplete_agent_row()
+            if row is not None:
+                row.mark_complete()
+            state.answer_started = False
+            state.phase = "idle"
+            return
+
+        if not message.streaming and message.content:
+            panel.finish_thinking()
+            row = _latest_incomplete_agent_row()
+            if row is not None:
+                row.mark_complete()
+                self._conv_store.append_message(agent_str, "agent", row._content)
+                state.answer_started = False
+                state.phase = "idle"
+                return
+
+        panel.finish_thinking()
+        state.answer_started = True
+        state.phase = "answer"
         panel.add_message("agent", message.content, streaming=message.streaming)
         if not message.streaming:
             self._conv_store.append_message(agent_str, "agent", message.content)
-            # Mark newly added message as complete (copy button visible)
             rows = panel._messages_area.get_message_rows()
             if rows and rows[-1]._role == "agent":
                 rows[-1].mark_complete()
+            state.answer_started = False
+            state.phase = "idle"
 
     def _handle_user_message(self, message: UserMessage) -> None:
         agent_str = str(message.agent_type)
-        if agent_str != "main" and agent_str != self.sub_agent_panel.agent_type:
+        if not self._is_visible_agent(agent_str):
             self._conv_store.append_message(
                 agent_str,
                 "user",
@@ -1289,10 +1328,13 @@ class MainWindow(QMainWindow):
 
     def _handle_tool_call(self, message: ToolCall) -> None:
         agent_str = str(message.agent_type)
-        if agent_str != "main" and agent_str != self.sub_agent_panel.agent_type:
+        state = self._state_for_agent(agent_str)
+        if not self._is_visible_agent(agent_str):
             self._conv_store.append_tool_call(agent_str, message.tool_name, message.arguments)
             return
         panel = self._get_panel_for_agent(agent_str)
+        panel.finish_thinking()
+        state.phase = "tool"
         summary = None
         detail = None
         expandable = True
@@ -1321,7 +1363,8 @@ class MainWindow(QMainWindow):
 
     def _handle_tool_result(self, message: ToolResult) -> None:
         agent_str = str(message.agent_type)
-        if agent_str != "main" and agent_str != self.sub_agent_panel.agent_type:
+        state = self._state_for_agent(agent_str)
+        if not self._is_visible_agent(agent_str):
             result_str = str(message.result) if message.result else None
             self._conv_store.append_tool_result(
                 agent_str,
@@ -1355,6 +1398,7 @@ class MainWindow(QMainWindow):
             detail=detail,
             expandable=expandable,
         )
+        state.phase = "tool"
         self._conv_store.append_tool_result(
             agent_str,
             message.tool_name,
@@ -1414,12 +1458,12 @@ class MainWindow(QMainWindow):
                     break
                 status = str(item.get("status", "pending")).lower()
                 brief = str(item.get("brief", "")).strip() or "task"
-                done = status == "completed"
-                box = "☑" if done else "☐"
+                done = status in {"completed", "cancelled", "failed"}
+                marker = "☑" if done else "☐"
                 if done:
-                    lines.append(f"<span style='color:#9098a3'>{box} <s>{brief}</s></span>")
+                    lines.append(f"<span style='color:#9098a3'>{marker} <s>{brief}</s></span>")
                 else:
-                    lines.append(f"<span style='color:#9098a3'>{box} {brief}</span>")
+                    lines.append(f"<span style='color:#9098a3'>{marker} {brief}</span>")
                 shown += 1
             if shown == 0:
                 lines.append("<span style='color:#9098a3'>—</span>")
@@ -1428,8 +1472,9 @@ class MainWindow(QMainWindow):
         todolist = result.get("todolist")
         waitlist = result.get("waitlist")
         if isinstance(todolist, list) and isinstance(waitlist, list):
-            detail = "\n".join(_rows(todolist, "Todo") + ["", *(_rows(waitlist, "Waiting"))])
-            return ("<b>Todo</b>", detail, True)
+            body = "\n".join(_rows(todolist, "Todo") + ["", *(_rows(waitlist, "Waiting"))])
+            summary = f"<b>Task</b><br/>{body}"
+            return (summary, None, False)
 
         ui_summary = str(result.get("_ui_summary", "") or "").strip()
         ui_detail = str(result.get("_ui_detail", "") or "").strip()
@@ -1450,14 +1495,13 @@ class MainWindow(QMainWindow):
     def _handle_status_change(self, message: StatusChange) -> None:
         agent_str = str(message.agent_type)
         self._agent_status_cache[agent_str] = (str(message.status), dict(message.extra or {}))
-        if agent_str == "main":
-            self.main_agent_panel.set_status(message.status, message.extra)
-            return
-        if agent_str == self.sub_agent_panel.agent_type:
-            self.sub_agent_panel.set_status(message.status, message.extra)
+        if self._is_visible_agent(agent_str):
+            self.agent_panel.set_status(message.status, message.extra)
 
     def _handle_error(self, message: Error) -> None:
-        self.main_agent_panel.add_error(message.source, message.message)
+        if self._is_visible_agent("main"):
+            self.agent_panel.add_error(message.source, message.message)
+        self._conv_store.append_message("main", "error", message.message, extra={"source": message.source})
 
     def _handle_agent_feedback(self, message: AgentFeedback) -> None:
         """Handle AgentFeedback and show collapsed sub-agent issue reports in main."""
@@ -1469,14 +1513,15 @@ class MainWindow(QMainWindow):
             f"{self._get_agent_display_name(agent_str)} reported {issue_type}",
             message.content,
         )
-        self.main_agent_panel.add_message(
-            "agent",
-            message.content,
-            source=agent_str,
-            summary=summary,
-            detail=detail,
-            expandable=expandable,
-        )
+        if self._is_visible_agent("main"):
+            self.agent_panel.add_message(
+                "agent",
+                message.content,
+                source=agent_str,
+                summary=summary,
+                detail=detail,
+                expandable=expandable,
+            )
         self._conv_store.append_message(
             "main",
             "agent",
@@ -1492,17 +1537,15 @@ class MainWindow(QMainWindow):
 
     def _handle_queue_update(self, message: QueueUpdateMessage) -> None:
         agent_str = str(message.agent_type)
-        if agent_str != "main" and agent_str != self.sub_agent_panel.agent_type:
-            return
-        panel = self._get_panel_for_agent(agent_str)
-        panel.set_queue_preview(message.queued_messages)
+        self._agent_queue_cache[agent_str] = list(message.queued_messages)
+        if self._is_visible_agent(agent_str):
+            self.agent_panel.set_queue_preview(message.queued_messages)
 
     def _handle_checkpoint(self, message: Checkpoint) -> None:
         agent_str = str(message.agent_type) if hasattr(message, "agent_type") else "main"
-        if agent_str != "main" and agent_str != self.sub_agent_panel.agent_type:
+        if not self._is_visible_agent(agent_str):
             return
-        panel = self._get_panel_for_agent(agent_str)
-        panel.add_checkpoint(message.checkpoint_id, message.description)
+        self.agent_panel.add_checkpoint(message.checkpoint_id, message.description)
 
     def _handle_task_update_msg(self, message) -> None:
         """Handle TaskUpdateMessage — display task notification in relevant panels."""
@@ -1513,21 +1556,34 @@ class MainWindow(QMainWindow):
         tgt = message.target_agent
         tgt_str = tgt.value if isinstance(tgt, Enum) else str(tgt)
 
-        src_panel = self._get_panel_for_agent(src_str)
-        tgt_panel = self._get_panel_for_agent(tgt_str)
-        for panel in {src_panel, tgt_panel}:
-            panel.handle_task_update(
-                task_id=message.task_id,
-                action=message.action,
-                source=src_str,
-                target=tgt_str,
-                brief=getattr(message, "brief", "") or "",
-            )
+        if self.current_agent_type == "main" or self.current_agent_type in {src_str, tgt_str}:
+            self._render_task_block_for_current_agent()
+
+    def _render_task_block_for_current_agent(self) -> None:
+        loop_manager = getattr(self.backend, "loop_manager", None)
+        task_board = getattr(loop_manager, "_task_board", None) if loop_manager is not None else None
+        if task_board is None:
+            return
+        try:
+            agent_type = AgentType(self.current_agent_type)
+        except ValueError:
+            return
+        session_id = self._conv_store.get_current_session_id(self.current_agent_type)
+        todolist = task_board.get_todolist(agent_type, session_id=session_id)
+        waitlist = task_board.get_waitlist(agent_type, session_id=session_id)
+        todo_rows = [{"brief": t.brief, "status": t.status.value} for t in todolist]
+        wait_rows = [{"brief": t.brief, "status": t.status.value} for t in waitlist]
+        self.agent_panel.add_task_block(todo_rows, wait_rows)
 
     def _get_panel_for_agent(self, agent_type: str) -> AgentPanel:
-        if agent_type == "main":
-            return self.main_agent_panel
-        return self.sub_agent_panel
+        return self.agent_panel
+
+    def _state_for_agent(self, agent_type: str) -> _TurnState:
+        state = self._turn_state.get(agent_type)
+        if state is None:
+            state = _TurnState()
+            self._turn_state[agent_type] = state
+        return state
 
     # ---- Conversation History ----
 
@@ -1542,14 +1598,26 @@ class MainWindow(QMainWindow):
         panel = self._get_panel_for_agent(agent_type)
         panel._messages_area.clear()
         if hasattr(self.backend, "sync_agent_conversation"):
-            self._submit_coroutine(self.backend.sync_agent_conversation(agent_type, []))
+            self._submit_coroutine(
+                self.backend.sync_agent_conversation(
+                    agent_type,
+                    [],
+                    session_id=self._conv_store.get_current_session_id(agent_type),
+                )
+            )
         logger.info("New conversation session for {}: {}", agent_type,
                      self._conv_store.get_current_session_id(agent_type))
 
     def _on_conversation_cleared(self, agent_type: str) -> None:
         self._conv_store.new_session(agent_type=agent_type)
         if hasattr(self.backend, "sync_agent_conversation"):
-            self._submit_coroutine(self.backend.sync_agent_conversation(agent_type, []))
+            self._submit_coroutine(
+                self.backend.sync_agent_conversation(
+                    agent_type,
+                    [],
+                    session_id=self._conv_store.get_current_session_id(agent_type),
+                )
+            )
         logger.info("/clear for {}: new session {}", agent_type,
                      self._conv_store.get_current_session_id(agent_type))
 
@@ -1560,7 +1628,13 @@ class MainWindow(QMainWindow):
             self._load_conversations_for_agent(agent_type, panel)
             if hasattr(self.backend, "sync_agent_conversation"):
                 msgs = self._records_to_backend_messages(agent_type)
-                self._submit_coroutine(self.backend.sync_agent_conversation(agent_type, msgs))
+                self._submit_coroutine(
+                    self.backend.sync_agent_conversation(
+                        agent_type,
+                        msgs,
+                        session_id=self._conv_store.get_current_session_id(agent_type),
+                    )
+                )
             logger.info("Switched {} to session: {}", agent_type, session_id)
 
     def _on_delete_session(self, session_id: str) -> None:
@@ -1574,16 +1648,16 @@ class MainWindow(QMainWindow):
         logger.info("Renamed session {} to {}", session_id, new_name)
 
     def _clear_all_panels(self) -> None:
-        self.main_agent_panel._messages_area.clear()
-        self.sub_agent_panel._messages_area.clear()
+        self.agent_panel._messages_area.clear()
 
     def _subscribe_to_debug_messages(self) -> None:
-        self.main_agent_panel.subscribe_to_debug_messages(self.backend.bus)
-        self.sub_agent_panel.subscribe_to_debug_messages(self.backend.bus)
+        self.agent_panel.subscribe_to_debug_messages(self.backend.bus)
 
     def closeEvent(self, event) -> None:  # noqa: N802
         if hasattr(self, "preview"):
             self.preview.save_open_tabs()
+        if hasattr(self, "file_tree"):
+            self.file_tree.save_state()
         super().closeEvent(event)
 
     def resizeEvent(self, event):
@@ -1617,31 +1691,28 @@ class MainWindow(QMainWindow):
         if total_width <= 0:
             return
 
-        # Use the same proportions as stretch factors: 20%, 40%, 20%, 20%
+        # Use the same proportions as stretch factors: 20%, 45%, 35%
         # But respect minimum widths of each panel
-        total_factor = 20 + 40 + 20 + 20  # 100
+        total_factor = 20 + 45 + 35  # 100
 
         # Calculate minimum widths
         file_tree_min = self.file_tree.minimumWidth()
         preview_min = self.preview.minimumWidth()
-        sub_agent_min = self.sub_agent_panel.minimumWidth()
-        main_agent_min = self.main_agent_panel.minimumWidth()
+        agent_panel_min = self.agent_panel.minimumWidth()
 
         # Calculate sizes based on proportions
         file_tree_size = max(file_tree_min, int(total_width * 20 / total_factor))
-        preview_size = max(preview_min, int(total_width * 40 / total_factor))
-        sub_agent_size = max(sub_agent_min, int(total_width * 20 / total_factor))
-        main_agent_size = max(main_agent_min, int(total_width * 20 / total_factor))
+        preview_size = max(preview_min, int(total_width * 45 / total_factor))
+        agent_panel_size = max(agent_panel_min, int(total_width * 35 / total_factor))
 
         # If sum exceeds total, scale down proportionally
-        total_calculated = file_tree_size + preview_size + sub_agent_size + main_agent_size
+        total_calculated = file_tree_size + preview_size + agent_panel_size
         if total_calculated > total_width:
             scale = total_width / total_calculated
             file_tree_size = int(file_tree_size * scale)
             preview_size = int(preview_size * scale)
-            sub_agent_size = int(sub_agent_size * scale)
-            main_agent_size = int(main_agent_size * scale)
+            agent_panel_size = int(agent_panel_size * scale)
 
-        sizes = [file_tree_size, preview_size, sub_agent_size, main_agent_size]
+        sizes = [file_tree_size, preview_size, agent_panel_size]
         self._main_splitter.setSizes(sizes)
         self._splitter_sizes_initialized = True

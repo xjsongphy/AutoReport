@@ -71,16 +71,6 @@ class WriteEnabledTool(Tool, FileSafetyMixin):
                 f"{action} not allowed outside {self.write_allowed_dir}. Attempted: {file_path}"
             )
 
-    async def _touch_manifest(self, file_path: Path) -> None:
-        if self._manifest_manager:
-            posix_path = file_path.relative_to(self.workspace).as_posix()
-            await self._manifest_manager.touch_files(self._agent_type, [posix_path])
-
-    async def _remove_from_manifest(self, file_path: Path) -> None:
-        if self._manifest_manager:
-            posix_path = file_path.relative_to(self.workspace).as_posix()
-            await self._manifest_manager.remove_files(self._agent_type, [posix_path])
-
 
 class ReadFileTool(Tool):
     """Tool for reading files."""
@@ -258,7 +248,6 @@ class WriteFileTool(WriteEnabledTool):
             }
             if backup_path:
                 result["backup_path"] = str(backup_path)
-            await self._touch_manifest(file_path)
 
             return result
         except Exception as e:
@@ -531,7 +520,6 @@ class EditFileTool(WriteEnabledTool):
             }
 
         await asyncio.to_thread(file_path.write_text, new_content, encoding="utf-8")
-        await self._touch_manifest(file_path)
 
         # Record new file state after edit
         if self._file_state_manager:
@@ -571,7 +559,6 @@ class DeleteFileTool(WriteEnabledTool):
             except FileNotFoundError:
                 existed = False
 
-            await self._remove_from_manifest(file_path)
             return {"path": str(file_path), "deleted": existed}
         except Exception as e:
             logger.error("Failed to delete file {}: {}", file_path, e)

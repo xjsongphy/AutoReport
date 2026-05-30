@@ -36,6 +36,7 @@ class TaskBoard:
         brief: str,
         blocking: bool = False,
         task_id: str | None = None,
+        session_id: str | None = None,
     ) -> TaskItem:
         """Create a new task item. task_id may be reused across a routed chain."""
         text = str(brief or "").strip()
@@ -47,6 +48,7 @@ class TaskBoard:
             status=TaskStatus.PENDING,
             created_at=datetime.now(timezone.utc),
             blocking=blocking,
+            session_id=session_id,
         )
         self._tasks.append(task)
         logger.debug("TaskBoard: created task {} ({} -> {}, {})", task.task_id, source, target, task.brief[:60])
@@ -59,6 +61,7 @@ class TaskBoard:
         target_agent: AgentType | None = None,
         source_agent: AgentType | None = None,
         active_only: bool = False,
+        session_id: str | None = None,
     ) -> TaskItem | None:
         for task in self._tasks:
             if task.task_id != task_id:
@@ -69,33 +72,60 @@ class TaskBoard:
                 continue
             if active_only and task.status not in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS):
                 continue
+            if session_id is not None and task.session_id != session_id:
+                continue
             return task
         return None
 
     def get_tasks_by_id(self, task_id: str) -> list[TaskItem]:
         return [task for task in self._tasks if task.task_id == task_id]
 
-    def start_task(self, task_id: str, target_agent: AgentType | None = None) -> TaskItem:
-        task = self._require_task(task_id, target_agent=target_agent, active_only=False)
+    def start_task(
+        self,
+        task_id: str,
+        target_agent: AgentType | None = None,
+        session_id: str | None = None,
+    ) -> TaskItem:
+        task = self._require_task(task_id, target_agent=target_agent, active_only=False, session_id=session_id)
         if task.status != TaskStatus.PENDING:
             raise ValueError(f"Task {task_id} is {task.status}, expected {TaskStatus.PENDING}")
         task.status = TaskStatus.IN_PROGRESS
         logger.debug("TaskBoard: started task {}", task_id)
         return task
 
-    def complete_task(self, task_id: str, target_agent: AgentType | None = None) -> list[TaskItem]:
-        return self._update_chain(task_id, TaskStatus.COMPLETED, target_agent=target_agent)
+    def complete_task(
+        self,
+        task_id: str,
+        target_agent: AgentType | None = None,
+        session_id: str | None = None,
+    ) -> list[TaskItem]:
+        return self._update_chain(task_id, TaskStatus.COMPLETED, target_agent=target_agent, session_id=session_id)
 
-    def fail_task(self, task_id: str, target_agent: AgentType | None = None) -> list[TaskItem]:
-        return self._update_chain(task_id, TaskStatus.FAILED, target_agent=target_agent)
+    def fail_task(
+        self,
+        task_id: str,
+        target_agent: AgentType | None = None,
+        session_id: str | None = None,
+    ) -> list[TaskItem]:
+        return self._update_chain(task_id, TaskStatus.FAILED, target_agent=target_agent, session_id=session_id)
 
-    def cancel_task(self, task_id: str, target_agent: AgentType | None = None) -> list[TaskItem]:
-        return self._update_chain(task_id, TaskStatus.CANCELLED, target_agent=target_agent)
+    def cancel_task(
+        self,
+        task_id: str,
+        target_agent: AgentType | None = None,
+        session_id: str | None = None,
+    ) -> list[TaskItem]:
+        return self._update_chain(task_id, TaskStatus.CANCELLED, target_agent=target_agent, session_id=session_id)
 
     def _update_chain(
-        self, task_id: str, new_status: TaskStatus, *, target_agent: AgentType | None = None
+        self,
+        task_id: str,
+        new_status: TaskStatus,
+        *,
+        target_agent: AgentType | None = None,
+        session_id: str | None = None,
     ) -> list[TaskItem]:
-        task = self._require_task(task_id, target_agent=target_agent, active_only=False)
+        task = self._require_task(task_id, target_agent=target_agent, active_only=False, session_id=session_id)
         if task.status not in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS):
             raise ValueError(f"Task {task_id} is {task.status}, cannot {new_status.value}")
         affected: list[TaskItem] = []
@@ -104,7 +134,12 @@ class TaskBoard:
 
         current_target = task.source_agent
         while True:
-            upstream = self.get_task(task_id, target_agent=current_target, active_only=True)
+            upstream = self.get_task(
+                task_id,
+                target_agent=current_target,
+                active_only=True,
+                session_id=session_id,
+            )
             if upstream is None:
                 break
             self._mark(upstream, new_status)
@@ -118,16 +153,33 @@ class TaskBoard:
         task.status = new_status
         task.completed_at = datetime.now(timezone.utc)
 
-    def get_todolist(self, agent_type: AgentType) -> list[TaskItem]:
-        return [
+    def get_todolist(self, agent_type: AgentType, session_id: str | None = None) -> list[TaskItem]:
+        active_assigned = [
             t for t in self._tasks
             if t.target_agent == agent_type and t.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS)
+            and (session_id is None or t.session_id == session_id)
         ]
+        resolved_followups = [
+            t for t in self._tasks
+            if t.source_agent == agent_type
+            and t.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)
+            and (session_id is None or t.session_id == session_id)
+        ]
+        seen = set()
+        merged: list[TaskItem] = []
+        for t in [*active_assigned, *resolved_followups]:
+            key = (t.task_id, t.source_agent, t.target_agent, t.created_at)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(t)
+        return merged
 
-    def get_waitlist(self, agent_type: AgentType) -> list[TaskItem]:
+    def get_waitlist(self, agent_type: AgentType, session_id: str | None = None) -> list[TaskItem]:
         return [
             t for t in self._tasks
             if t.source_agent == agent_type and t.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS)
+            and (session_id is None or t.session_id == session_id)
         ]
 
     def get_all_tasks(self) -> dict[str, dict[str, list[TaskItem]]]:
@@ -146,12 +198,14 @@ class TaskBoard:
         target_agent: AgentType | None = None,
         source_agent: AgentType | None = None,
         active_only: bool = False,
+        session_id: str | None = None,
     ) -> TaskItem:
         task = self.get_task(
             task_id,
             target_agent=target_agent,
             source_agent=source_agent,
             active_only=active_only,
+            session_id=session_id,
         )
         if task is None:
             raise ValueError(f"Task {task_id} not found")

@@ -181,6 +181,7 @@ class TaskItem(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
     completed_at: datetime | None = None
     blocking: bool = False
+    session_id: str | None = None
 
 
 class TaskUpdateMessage(Message):

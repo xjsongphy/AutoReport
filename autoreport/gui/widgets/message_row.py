@@ -6,8 +6,9 @@
 """
 
 import re
+from functools import lru_cache
 
-from PyQt6.QtCore import QEvent, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QClipboard, QColor, QIcon, QKeySequence, QPainter, QPalette, QPen
 
 from ..scale import scaled_size
@@ -26,8 +27,10 @@ from .markdown_renderer import render_markdown
 from ..theme import get_theme_colors
 from .timeline import TimelineRail
 from .ui_utils import create_isolated_context_menu, install_compact_tooltip, render_svg_icon
+from ...utils.editor_context import parse_editor_context
 
 TIMELINE_EVENT_ROW_HEIGHT = 34
+_CODE_BLOCK_PATTERN = re.compile(r"```(\w*)\n(.*?)```", re.DOTALL)
 
 class _DisclosureArrow(QWidget):
     def __init__(self, expanded: bool = False, parent: QWidget | None = None):
@@ -69,12 +72,56 @@ class _SummaryHeader(QWidget):
             self.clicked.emit()
 
 
+class _ElidedLabel(QLabel):
+    """Single-line label that preserves full text while displaying an elided copy."""
+
+    def __init__(self, text: str, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._full_text = str(text or "")
+        super().setText(self._full_text)
+        self.setTextFormat(Qt.TextFormat.PlainText)
+        self.setWordWrap(False)
+
+    @property
+    def full_text(self) -> str:
+        return self._full_text
+
+    def set_full_text(self, text: str) -> None:
+        self._full_text = str(text or "")
+        self._update_elided_text()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._update_elided_text()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._update_elided_text()
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        metrics = self.fontMetrics()
+        return QSize(metrics.horizontalAdvance(self._full_text), metrics.height())
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        metrics = self.fontMetrics()
+        return QSize(20, metrics.height())
+
+    def _update_elided_text(self) -> None:
+        width = max(20, self.width())
+        elided = self.fontMetrics().elidedText(
+            self._full_text,
+            Qt.TextElideMode.ElideMiddle,
+            width,
+        )
+        if self.text() != elided:
+            super().setText(elided)
+
+
 def _parse_code_blocks(content: str) -> list[tuple[str, str | None]]:
     """Split content into segments: (text, None) for text, (code, language) for code."""
-    pattern = r"```(\w*)\n(.*?)```"
     parts: list[tuple[str, str | None]] = []
     last_end = 0
-    for m in re.finditer(pattern, content, re.DOTALL):
+    for m in _CODE_BLOCK_PATTERN.finditer(content):
         if m.start() > last_end:
             parts.append((content[last_end:m.start()], None))
         lang = m.group(1) or None
@@ -88,8 +135,29 @@ def _parse_code_blocks(content: str) -> list[tuple[str, str | None]]:
     return parts
 
 
-def _copy_icon() -> QIcon:
-    return render_svg_icon("copy", QColor(get_theme_colors()["muted"]), size=16)
+@lru_cache(maxsize=8)
+def _copy_icon(color: str = "") -> QIcon:
+    if not color:
+        color = get_theme_colors()["muted"]
+    return render_svg_icon("copy", QColor(color), size=16)
+
+
+@lru_cache(maxsize=8)
+def _file_chip_icon(color: str = "") -> QIcon:
+    if not color:
+        color = get_theme_colors()["muted"]
+    return render_svg_icon("file", QColor(color), size=14)
+
+
+def _parse_editor_context_block(content: str) -> tuple[str | None, str | None, str]:
+    parsed = parse_editor_context(content)
+    if not parsed.get("has_context"):
+        return None, None, content
+    return (
+        parsed.get("chip_text"),
+        parsed.get("chip_tooltip"),
+        str(parsed.get("bubble_text") or ""),
+    )
 
 
 def _plain_markdown_with_raw_map(raw_markdown: str) -> tuple[str, list[int]]:
@@ -298,6 +366,7 @@ class MessageRow(QWidget):
         self._summary_btn: QPushButton | None = None
         self._summary_header: QWidget | None = None
         self._summary_arrow_widget: _DisclosureArrow | None = None
+        self._summary_arrow_host: QWidget | None = None
         self._summary_text_label: QLabel | None = None
         self._detail_label: QLabel | None = None
         self._detail_widget: QWidget | None = None
@@ -312,7 +381,10 @@ class MessageRow(QWidget):
         self._edit_bubble_widget: QWidget | None = None
         self._user_bubble_widget: QWidget | None = None
         self._user_bubble_layout: QVBoxLayout | None = None
+        self._context_chip_widget: QWidget | None = None
+        self._context_chip_label: QLabel | None = None
         self._checkpoint_id: str | None = None
+        self._context_chip_text, self._context_chip_tooltip, self._bubble_text = _parse_editor_context_block(content)
         self._setup_ui()
         self._setup_hover_handler()
 
@@ -352,7 +424,7 @@ class MessageRow(QWidget):
             self._user_bubble_container = QWidget(row)
             self._user_bubble_container.setObjectName("userMessageBubbleContainer")
             self._user_bubble_container.setSizePolicy(
-                QSizePolicy.Policy.Fixed,
+                QSizePolicy.Policy.Preferred,
                 QSizePolicy.Policy.Preferred,
             )
             bcl = QVBoxLayout(self._user_bubble_container)
@@ -377,18 +449,7 @@ class MessageRow(QWidget):
                 bl.addWidget(self._detail_widget)
                 self._detail_widget.setVisible(False)
             else:
-                text = QLabel(self._content)
-                text.setObjectName("userMessageText")
-                text.setWordWrap(True)
-                text.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-                text.setTextFormat(Qt.TextFormat.PlainText)
-                text.setTextInteractionFlags(
-                    Qt.TextInteractionFlag.TextSelectableByMouse
-                )
-                text.setMinimumWidth(0)
-                c = get_theme_colors()
-                text.setStyleSheet(f"color: {c['editor_fg']}; background-color: transparent;")
-                bl.addWidget(text)
+                self._populate_user_bubble_content(bl)
 
             bcl.addWidget(bubble)
 
@@ -444,6 +505,65 @@ class MessageRow(QWidget):
 
         layout.addWidget(outer)
 
+    def _populate_user_bubble_content(self, layout: QVBoxLayout) -> None:
+        if self._context_chip_text:
+            layout.addWidget(
+                self._build_context_chip(self._context_chip_text),
+                0,
+                Qt.AlignmentFlag.AlignLeft,
+            )
+        text_content = self._content if self._context_chip_text is None else self._bubble_text
+        if not text_content:
+            return
+        text = QLabel(text_content)
+        text.setObjectName("userMessageText")
+        text.setWordWrap(True)
+        text.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        text.setTextFormat(Qt.TextFormat.PlainText)
+        text.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        text.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        text.setMinimumWidth(0)
+        text.installEventFilter(self)
+        c = get_theme_colors()
+        text.setStyleSheet(f"color: {c['editor_fg']}; background-color: transparent;")
+        layout.addWidget(text)
+
+    def _build_context_chip(self, chip_text: str) -> QWidget:
+        chip = QWidget(self)
+        chip.setObjectName("userContextChip")
+        chip.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        chip_layout = QHBoxLayout(chip)
+        chip_layout.setContentsMargins(10, 0, 10, 0)
+        chip_layout.setSpacing(6)
+        chip.setFixedHeight(30)
+
+        icon_label = QLabel(chip)
+        icon_label.setObjectName("userContextChipIcon")
+        icon = _file_chip_icon(get_theme_colors()["muted"])
+        icon_label.setPixmap(icon.pixmap(14, 14))
+        icon_label.setFixedSize(14, 14)
+        chip_layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        text_label = _ElidedLabel(chip_text, chip)
+        text_label.setObjectName("userContextChipText")
+        text_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        text_label.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        text_label.installEventFilter(self)
+        text_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        text_label.setFixedHeight(18)
+        text_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        text_label.setContentsMargins(0, 0, 0, 0)
+        if self._context_chip_tooltip:
+            text_label.setToolTip(self._context_chip_tooltip)
+            chip.setToolTip(self._context_chip_tooltip)
+        chip_layout.addWidget(text_label, 1, Qt.AlignmentFlag.AlignVCenter)
+        self._context_chip_widget = chip
+        self._context_chip_label = text_label
+        self._sync_context_chip_width()
+        return chip
+
     def _clear_agent_content(self) -> None:
         self._wrapping_labels = []
         self._raw_markdown_labels = {}
@@ -470,11 +590,13 @@ class MessageRow(QWidget):
             self._detail_widget = self._build_detail_widget("agent")
             self._agent_content_layout.addWidget(self._detail_widget)
             self._detail_widget.setVisible(self._expanded and self._has_detail())
+            self._sync_timeline_dot_alignment()
             return
 
         text_label = self._build_agent_markdown_label(self._content)
         self._agent_content_layout.addWidget(text_label)
         self._apply_text_width_constraints()
+        self._sync_timeline_dot_alignment()
 
     def _build_agent_markdown_label(self, raw_markdown: str) -> QLabel:
         label = QLabel(render_markdown(raw_markdown))
@@ -497,6 +619,8 @@ class MessageRow(QWidget):
 
     def append_content(self, delta: str) -> None:
         """Append streaming text delta and rebuild content area."""
+        if not delta:
+            return
         self._content += delta
         self._rebuild_agent_content()
         self._apply_text_width_constraints()
@@ -530,6 +654,12 @@ class MessageRow(QWidget):
 
         self._summary_arrow_widget = _DisclosureArrow(self._expanded, widget)
         self._summary_arrow_widget.setVisible(self._expandable and self._has_detail())
+        self._summary_arrow_host = QWidget(widget)
+        self._summary_arrow_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+        ahl = QVBoxLayout(self._summary_arrow_host)
+        ahl.setContentsMargins(0, 0, 0, 0)
+        ahl.setSpacing(0)
+        ahl.addWidget(self._summary_arrow_widget, 0, Qt.AlignmentFlag.AlignTop)
         left_margin = 4 if summary_type == "agent" else 0
         layout.setContentsMargins(left_margin, 4, 0, 6)
 
@@ -541,8 +671,10 @@ class MessageRow(QWidget):
         self._summary_text_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
         self._summary_text_label.setMinimumWidth(0)
         layout.addWidget(self._summary_text_label, 0, Qt.AlignmentFlag.AlignTop)
-        layout.addWidget(self._summary_arrow_widget, 0, Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(self._summary_arrow_host, 0, Qt.AlignmentFlag.AlignTop)
         layout.addStretch(1)
+        self._sync_summary_arrow_alignment()
+        self._sync_timeline_dot_alignment()
 
         widget.setCursor(
             Qt.CursorShape.PointingHandCursor
@@ -611,11 +743,55 @@ class MessageRow(QWidget):
         if self._summary_arrow_widget is not None:
             self._summary_arrow_widget.setVisible(can_expand)
             self._summary_arrow_widget.set_expanded(self._expanded)
+        self._sync_summary_arrow_alignment()
+        self._sync_timeline_dot_alignment()
         if self._summary_header is not None:
             self._summary_header.setCursor(
                 Qt.CursorShape.PointingHandCursor if can_expand else Qt.CursorShape.ArrowCursor
             )
         self._apply_thinking_text_style()
+
+    def _sync_summary_arrow_alignment(self) -> None:
+        """Align disclosure arrow center to the first summary text line center."""
+        if (
+            self._summary_arrow_host is None
+            or self._summary_text_label is None
+            or self._summary_arrow_widget is None
+        ):
+            return
+        metrics = self._summary_text_label.fontMetrics()
+        line_height = max(1, metrics.height())
+        arrow_height = max(1, self._summary_arrow_widget.height())
+        top_offset = max(0, (line_height - arrow_height) // 2)
+        host_layout = self._summary_arrow_host.layout()
+        if isinstance(host_layout, QVBoxLayout):
+            host_layout.setContentsMargins(0, top_offset, 0, 0)
+
+    @staticmethod
+    def _first_line_center_y(top_offset: int, line_height: int) -> float:
+        return float(top_offset + (max(1, line_height) / 2.0))
+
+    def _sync_timeline_dot_alignment(self) -> None:
+        """Align timeline dot center to the first visible text line center."""
+        if self._timeline_rail is None:
+            return
+        # Summary rows (e.g. Thought): align to summary first line.
+        if self._summary_text_label is not None and self._summary_header is not None:
+            metrics = self._summary_text_label.fontMetrics()
+            line_height = metrics.height()
+            margins = self._summary_header.layout().contentsMargins() if self._summary_header.layout() else None
+            top = margins.top() if margins is not None else 0
+            self._timeline_rail.set_dot_center_y(self._first_line_center_y(top, line_height))
+            return
+        # Plain agent messages: align to first markdown label first line.
+        if self._wrapping_labels:
+            label = self._wrapping_labels[0]
+            metrics = label.fontMetrics()
+            line_height = metrics.height()
+            top = label.contentsMargins().top()
+            self._timeline_rail.set_dot_center_y(self._first_line_center_y(top, line_height))
+            return
+        self._timeline_rail.set_dot_center_y(None)
 
     def set_thinking_row_style(self, enabled: bool) -> None:
         self._is_thinking_row = enabled
@@ -685,7 +861,13 @@ class MessageRow(QWidget):
             f"}}"
         )
 
-        edit_content = self._detail if self._summary is not None else self._content
+        if self._summary is not None:
+            edit_content = self._detail
+        elif self._context_chip_text is not None:
+            # Edit only the visible user text, not serialized editor-context header.
+            edit_content = self._bubble_text
+        else:
+            edit_content = self._content
 
         edit_bubble = QWidget(self._user_bubble_container)
         edit_bubble.setObjectName("userEditBubble")
@@ -744,12 +926,12 @@ class MessageRow(QWidget):
 
         if self._user_bubble_container is not None:
             self._user_bubble_container.setSizePolicy(
-                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Preferred,
                 QSizePolicy.Policy.Preferred,
             )
-            self._user_bubble_container.setMinimumWidth(0)
+            self._user_bubble_container.setMinimumWidth(max(80, self.width() - 32))
             self._user_bubble_container.setMaximumWidth(16777215)
-            self._user_bubble_container.setFixedWidth(max(80, self.width() - 32))
+            self._user_bubble_container.setMaximumWidth(max(80, self.width() - 32))
         self._update_edit_widget_height()
         self._edit_widget.setFocus()
         self._edit_widget.textChanged.connect(self._update_edit_widget_height)
@@ -832,14 +1014,14 @@ class MessageRow(QWidget):
 
         if self._user_bubble_container is not None:
             self._user_bubble_container.setSizePolicy(
-                QSizePolicy.Policy.Fixed,
+                QSizePolicy.Policy.Preferred,
                 QSizePolicy.Policy.Preferred,
             )
 
     def _copy_content(self) -> None:
         clipboard = QApplication.clipboard()
         if clipboard:
-            clipboard.setText(self._content, QClipboard.Mode.Clipboard)
+            clipboard.setText(self._bubble_text, QClipboard.Mode.Clipboard)
 
     def set_checkpoint_id(self, checkpoint_id: str | None) -> None:
         self._checkpoint_id = checkpoint_id
@@ -895,6 +1077,59 @@ class MessageRow(QWidget):
                     QClipboard.Mode.Clipboard,
                 )
             return True
+
+        if (
+            isinstance(obj, QLabel)
+            and event.type() == QEvent.Type.ContextMenu
+            and (
+                obj in self._raw_markdown_labels
+                or obj.objectName() in {"userMessageText", "userContextChipText"}
+            )
+        ):
+            menu = create_isolated_context_menu(self)
+            selected = obj.selectedText()
+
+            copy_selected_action = None
+            if selected:
+                copy_selected_action = menu.addAction("复制所选")
+            copy_all_action = menu.addAction("复制")
+            edit_action = None
+            if (
+                obj.objectName() in {"userMessageText", "userContextChipText"}
+                and self._role == "user"
+                and self._editable
+            ):
+                edit_action = menu.addAction("编辑并重发")
+            action = menu.exec(event.globalPos())
+            if not action:
+                return True
+
+            clipboard = QApplication.clipboard()
+            if clipboard is None:
+                return True
+            if action == copy_selected_action and selected:
+                if obj in self._raw_markdown_labels:
+                    raw = self._raw_markdown_labels[obj]
+                    clipboard.setText(
+                        _raw_markdown_for_selected_text(raw, selected),
+                        QClipboard.Mode.Clipboard,
+                    )
+                else:
+                    clipboard.setText(selected, QClipboard.Mode.Clipboard)
+                return True
+
+            if action == copy_all_action:
+                if obj in self._raw_markdown_labels:
+                    clipboard.setText(self._raw_markdown_labels[obj], QClipboard.Mode.Clipboard)
+                elif isinstance(obj, _ElidedLabel):
+                    clipboard.setText(obj.full_text, QClipboard.Mode.Clipboard)
+                else:
+                    clipboard.setText(obj.text(), QClipboard.Mode.Clipboard)
+                return True
+
+            if action == edit_action:
+                self._request_edit()
+                return True
 
         if not self._is_outbound_message():
             return super().eventFilter(obj, event)
@@ -977,12 +1212,17 @@ class MessageRow(QWidget):
         """Keep message content constrained to current panel width."""
         super().resizeEvent(event)
         self._apply_text_width_constraints()
+        self._sync_summary_arrow_alignment()
+        self._sync_timeline_dot_alignment()
         if self._is_outbound_message() and self._user_bubble_container is not None:
             if self._editing:
                 width = max(80, self.width() - 32)
+                self._user_bubble_container.setMinimumWidth(width)
             else:
-                width = max(80, int(self.width() * 0.45))
-            self._user_bubble_container.setFixedWidth(width)
+                width = max(80, int(self.width() * 0.75))
+                self._user_bubble_container.setMinimumWidth(0)
+            self._user_bubble_container.setMaximumWidth(width)
+            self._sync_context_chip_width()
 
     def _is_outbound_message(self) -> bool:
         """Right-side messages sent to an agent share the user bubble layout."""
@@ -996,9 +1236,38 @@ class MessageRow(QWidget):
     def _content_width_limit(self) -> int:
         return self.width() - 56
 
+    def _sync_context_chip_width(self) -> None:
+        if self._context_chip_widget is None:
+            return
+        bubble = self._user_bubble_widget
+        bubble_width = self._user_bubble_container.width() if self._user_bubble_container is not None else 0
+        if bubble_width <= 0 and bubble is not None:
+            bubble_width = bubble.width()
+        if bubble_width <= 0:
+            return
+
+        margins = bubble.layout().contentsMargins() if bubble is not None and bubble.layout() else None
+        horizontal_padding = (margins.left() + margins.right()) if margins is not None else 20
+        max_chip_width = max(80, bubble_width - horizontal_padding)
+        self._context_chip_widget.setMaximumWidth(max_chip_width)
+        self._context_chip_widget.updateGeometry()
+        if isinstance(self._context_chip_label, _ElidedLabel):
+            self._context_chip_label._update_elided_text()
+
     def get_display_text(self) -> str:
         role_text = "You" if self._role == "user" else "Agent"
         return f"{role_text}: {self._content}"
 
     def is_expanded(self) -> bool:
         return self._expanded
+
+    def context_chip_panel_width_hint(self) -> int:
+        if self._context_chip_widget is None:
+            return 0
+        chip_width = min(
+            self._context_chip_widget.sizeHint().width(),
+            self._context_chip_widget.maximumWidth(),
+        )
+        bubble_padding = 24
+        row_gutters = 40
+        return int((chip_width + bubble_padding) / 0.75) + row_gutters

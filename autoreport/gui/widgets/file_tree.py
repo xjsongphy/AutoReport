@@ -9,6 +9,7 @@ Uses native QTreeWidget styling with:
 
 import shutil
 from pathlib import Path
+import json
 
 from loguru import logger
 from PyQt6.QtCore import QFileInfo, QFileSystemWatcher, QMimeData, QPoint, QRect, QSize, QSignalBlocker, Qt, QTimer, pyqtSignal
@@ -406,6 +407,7 @@ class FileTreeWidget(QWidget):
     def __init__(self, workspace: Path):
         super().__init__()
         self.workspace = Path(workspace).resolve()
+        self._tree_state_path = self.workspace / ".autoreport" / "file_tree_state.json"
         self._editing_item: QTreeWidgetItem | None = None
         self._pending_new_item: QTreeWidgetItem | None = None
         self._pending_new_kind: str | None = None  # "file" | "folder"
@@ -421,6 +423,10 @@ class FileTreeWidget(QWidget):
         self._hovered_item: QTreeWidgetItem | None = None
         self._drop_target_item: QTreeWidgetItem | None = None
         self._root_selected = False
+        self._state_save_timer = QTimer(self)
+        self._state_save_timer.setSingleShot(True)
+        self._state_save_timer.setInterval(200)
+        self._state_save_timer.timeout.connect(self.save_state)
         self._setup_ui()
         self._init_directories()
         self._ensure_directory_indicators()
@@ -500,6 +506,9 @@ class FileTreeWidget(QWidget):
         self.tree.itemEntered.connect(self._on_item_entered)
         self.tree.viewport().installEventFilter(self)
         self.tree.itemExpanded.connect(self._on_item_expanded)
+        self.tree.itemExpanded.connect(lambda _item: self._schedule_state_save())
+        self.tree.itemCollapsed.connect(lambda _item: self._schedule_state_save())
+        self.tree.currentItemChanged.connect(lambda _cur, _prev: self._schedule_state_save())
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
         self.tree.setEditTriggers(QTreeWidget.EditTrigger.EditKeyPressed)
@@ -1227,6 +1236,75 @@ class FileTreeWidget(QWidget):
         self._restore_multi_selection(selected_files, selected_dirs)
         self._ensure_directory_indicators()
         self.tree.viewport().update()
+        self._schedule_state_save()
+
+    def _schedule_state_save(self) -> None:
+        if self._state_save_timer.isActive():
+            self._state_save_timer.stop()
+        self._state_save_timer.start()
+
+    def save_state(self) -> None:
+        current_item = self.tree.currentItem()
+        selected_file = None
+        selected_dir = None
+        if current_item is not None:
+            selected_file = current_item.data(0, Qt.ItemDataRole.UserRole + 1)
+            if not selected_file:
+                selected_dir = current_item.data(0, Qt.ItemDataRole.UserRole)
+        state = {
+            "expanded_dirs": sorted(self._snapshot_expanded_directories()),
+            "selected_file": selected_file,
+            "selected_dir": selected_dir,
+            "root_selected": bool(self._root_selected),
+        }
+        try:
+            self._tree_state_path.parent.mkdir(parents=True, exist_ok=True)
+            self._tree_state_path.write_text(
+                json.dumps(state, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            logger.warning("Failed to save file tree state: {}", self._tree_state_path)
+
+    def restore_state(self) -> None:
+        if not self._tree_state_path.exists():
+            return
+        try:
+            state = json.loads(self._tree_state_path.read_text(encoding="utf-8"))
+        except Exception:
+            logger.warning("Failed to read file tree state: {}", self._tree_state_path)
+            return
+        if not isinstance(state, dict):
+            return
+
+        expanded_dirs = state.get("expanded_dirs")
+        selected_file = state.get("selected_file")
+        selected_dir = state.get("selected_dir")
+        root_selected = bool(state.get("root_selected", False))
+
+        if isinstance(expanded_dirs, list):
+            for dir_name in sorted(
+                [d for d in expanded_dirs if isinstance(d, str)],
+                key=lambda x: x.count("/"),
+            ):
+                item = self._find_item_by_dir(dir_name)
+                if item is None:
+                    continue
+                item.setExpanded(True)
+                self._on_item_expanded(item)
+
+        if isinstance(selected_file, str) and selected_file:
+            self._restore_selection(selected_file, None)
+            self._root_selected = False
+        elif isinstance(selected_dir, str) and selected_dir:
+            self._restore_selection(None, selected_dir)
+            self._root_selected = False
+        elif root_selected:
+            self.tree.setCurrentItem(None)
+            self._root_selected = True
+
+        self._ensure_directory_indicators()
+        self.tree.viewport().update()
 
     def _snapshot_expanded_directories(self) -> set[str]:
         expanded: set[str] = set()
@@ -1298,6 +1376,25 @@ class FileTreeWidget(QWidget):
         if file_path_str:
             return Path(file_path_str)
         return None
+
+    def select_file(self, file_path: Path) -> bool:
+        """Select a file in the tree programmatically.
+
+        Returns True if the file item was found and selected.
+        """
+        try:
+            resolved = file_path.resolve()
+            resolved.relative_to(self.workspace)
+        except ValueError:
+            return False
+
+        self._ensure_directory_path_loaded(resolved.parent)
+        item = self._find_item_by_file(str(resolved))
+        if item is None:
+            return False
+        self.tree.setCurrentItem(item)
+        self.tree.scrollToItem(item)
+        return True
 
     def _get_selected_dir(self) -> str:
         """Get the selected directory path, falling back to 'References'."""

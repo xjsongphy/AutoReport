@@ -33,7 +33,8 @@ class BashTool(Tool):
 
     name = "bash"
     description = (
-        "Execute a shell command. "
+        "Execute a shell command in the project root directory. "
+        "Commands that generate files must specify output paths explicitly—no output files allowed in the project root. "
         "You must provide both command and a short command_description."
     )
 

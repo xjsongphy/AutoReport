@@ -31,10 +31,19 @@ class SendToAgentTool(Tool):
         "Returns the sub-agent's full response text."
     )
 
-    def __init__(self, bus: MessageBus, task_board=None, timeout: int = 120):
+    def __init__(self, bus: MessageBus, task_board=None, timeout: int = 120, session_id_resolver=None):
         self._bus = bus
         self._task_board = task_board
         self._timeout = timeout
+        self._session_id_resolver = session_id_resolver
+
+    def _session_id(self) -> str | None:
+        if callable(self._session_id_resolver):
+            try:
+                return self._session_id_resolver()
+            except Exception:
+                return None
+        return None
 
     async def __call__(
         self,
@@ -114,6 +123,7 @@ class SendToAgentTool(Tool):
                     target=target,
                     brief=brief,
                     blocking=blocking,
+                    session_id=self._session_id(),
                 )
                 created_task_ids.append(task.task_id)
             logger.info("SendToAgentTool: created tasks {}", created_task_ids)
@@ -226,10 +236,19 @@ class ReportIssueTool(Tool):
         "or you need Main Agent to coordinate a fix."
     )
 
-    def __init__(self, bus: MessageBus, agent_type: AgentType, task_board=None):
+    def __init__(self, bus: MessageBus, agent_type: AgentType, task_board=None, session_id_resolver=None):
         self._bus = bus
         self._agent_type = agent_type
         self._task_board = task_board
+        self._session_id_resolver = session_id_resolver
+
+    def _session_id(self) -> str | None:
+        if callable(self._session_id_resolver):
+            try:
+                return self._session_id_resolver()
+            except Exception:
+                return None
+        return None
 
     async def __call__(
         self,
@@ -277,6 +296,7 @@ class ReportIssueTool(Tool):
                 brief=brief_text,
                 blocking=False,
                 task_id=task_link_id,
+                session_id=self._session_id(),
             )
             created_task_id = parent_task.task_id
             logger.info(
@@ -298,6 +318,7 @@ class ReportIssueTool(Tool):
                     brief=brief_text,
                     blocking=False,
                     task_id=task_link_id,
+                    session_id=self._session_id(),
                 )
                 dispatched_task_id = child_task.task_id
                 logger.info(

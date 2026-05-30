@@ -170,6 +170,7 @@ class AgentLoop:
         self._message_queue: asyncio.Queue[UserMessage] = asyncio.Queue()
         self._current_message: UserMessage | None = None
         self._conversation_history: list[LLMMessage] = []
+        self._current_session_id: str | None = None
         self._manifest_dirty = False
         self._cancel_event = asyncio.Event()
 
@@ -1001,8 +1002,8 @@ class AgentLoop:
         if task_board is None:
             return ""
 
-        todolist = task_board.get_todolist(self.agent_type)
-        waitlist = task_board.get_waitlist(self.agent_type)
+        todolist = task_board.get_todolist(self.agent_type, session_id=self._current_session_id)
+        waitlist = task_board.get_waitlist(self.agent_type, session_id=self._current_session_id)
 
         if not todolist and not waitlist:
             return ""

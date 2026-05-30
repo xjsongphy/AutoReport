@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -24,7 +25,7 @@ from ..config.presets import ProviderPreset, get_presets_by_category, load_prese
 from ..config.schema import ApiConfig
 from ..core.preset_sync import is_cached, sync_presets
 from .theme import get_theme_colors
-from .widgets.ui_utils import NoWheelComboBox, combo_box_qss, line_edit_qss
+from .widgets.ui_utils import IconActionButton, NoWheelComboBox, TextButton, combo_box_qss, line_edit_qss, render_svg_icon
 
 CATEGORY_LABELS = {
     "official": "官方",
@@ -50,10 +51,11 @@ PROVIDER_LABELS = {
 class ConfigCard(QFrame):
     """Card widget for a single API configuration."""
 
+    delete_requested = pyqtSignal()
+
     def __init__(self, config: ApiConfig, parent=None):
         super().__init__(parent)
         self.config = config
-        self._eye_icons = self._create_eye_icons()
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -62,33 +64,24 @@ class ConfigCard(QFrame):
         layout.setSpacing(10)
         layout.setContentsMargins(16, 14, 16, 14)
 
-        # Row 1: Name + Delete button
-        row1 = QHBoxLayout()
-        row1.setSpacing(8)
-
-        name_label = QLabel("名称")
-        name_label.setFixedWidth(60)
-        row1.addWidget(name_label)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(6)
+        grid.setColumnStretch(1, 1)
 
         self.name_input = QLineEdit()
         self.name_input.setText(self.config.name)
-        row1.addWidget(self.name_input, 1)
+        grid.addWidget(QLabel("名称"), 0, 0)
+        grid.addWidget(self.name_input, 0, 1)
 
-        self.delete_btn = QPushButton("×")
-        self.delete_btn.setObjectName("deleteBtn")
-        self.delete_btn.setFixedWidth(28)
-        self.delete_btn.setToolTip("删除此配置")
-        row1.addWidget(self.delete_btn)
-
-        layout.addLayout(row1)
-
-        # Row 2: Provider type
-        row2 = QHBoxLayout()
-        row2.setSpacing(8)
-
-        type_label = QLabel("类型")
-        type_label.setFixedWidth(60)
-        row2.addWidget(type_label)
+        self.delete_btn = IconActionButton(
+            text="×",
+            tooltip="删除此配置",
+            object_name="deleteBtn",
+            button_size=(32, 28),
+        )
+        self.delete_btn.clicked.connect(self._on_delete_clicked)
+        grid.addWidget(self.delete_btn, 0, 2)
 
         self.provider_combo = NoWheelComboBox()
         for pid, label in PROVIDER_LABELS.items():
@@ -97,126 +90,65 @@ class ConfigCard(QFrame):
         if idx >= 0:
             self.provider_combo.setCurrentIndex(idx)
         self.provider_combo.currentIndexChanged.connect(self._on_provider_changed)
-        row2.addWidget(self.provider_combo, 1)
-
-        layout.addLayout(row2)
-
-        # Row 3: API Key
-        row3 = QHBoxLayout()
-        row3.setSpacing(6)
-
-        key_label = QLabel("API Key")
-        key_label.setFixedWidth(60)
-        row3.addWidget(key_label)
+        grid.addWidget(QLabel("类型"), 1, 0)
+        grid.addWidget(self.provider_combo, 1, 1, 1, 2)
 
         self.key_input = QLineEdit()
         self.key_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.key_input.setText(self.config.api_key or "")
         self.key_input.setPlaceholderText("sk-...")
-        row3.addWidget(self.key_input, 1)
+        grid.addWidget(QLabel("API Key"), 2, 0)
+        grid.addWidget(self.key_input, 2, 1)
 
-        self.show_key_btn = QPushButton()
-        self.show_key_btn.setIcon(self._eye_icons["eye"])
-        self.show_key_btn.setIconSize(QSize(16, 16))
-        self.show_key_btn.setFixedSize(32, 28)
-        self.show_key_btn.setCheckable(True)
-        self.show_key_btn.setToolTip("显示 API Key")
-        self.show_key_btn.toggled.connect(self._toggle_key_visibility)
-        row3.addWidget(self.show_key_btn)
-
-        layout.addLayout(row3)
-
-        # Row 4: Base URL
-        row4 = QHBoxLayout()
-        row4.setSpacing(6)
-
-        url_label = QLabel("Base URL")
-        url_label.setFixedWidth(60)
-        row4.addWidget(url_label)
+        self.show_key_btn = IconActionButton(
+            tooltip="显示 API Key",
+            object_name="showKeyBtn",
+            button_size=(32, 28),
+            icon_size=(16, 16),
+            on_click=self._toggle_key_visibility,
+        )
+        self._update_key_visibility_icon(False)
+        grid.addWidget(self.show_key_btn, 2, 2)
 
         self.base_url_input = QLineEdit()
         self.base_url_input.setText(self.config.api_base or "")
         self.base_url_input.setPlaceholderText("https://api.example.com")
-        row4.addWidget(self.base_url_input, 1)
-
-        layout.addLayout(row4)
-
-        # Row 5: Default Model + Test button
-        row5 = QHBoxLayout()
-        row5.setSpacing(6)
-
-        model_label = QLabel("默认模型")
-        model_label.setFixedWidth(60)
-        row5.addWidget(model_label)
+        grid.addWidget(QLabel("Base URL"), 3, 0)
+        grid.addWidget(self.base_url_input, 3, 1, 1, 2)
 
         self.model_input = QLineEdit()
         self.model_input.setText(self.config.default_model or "")
         self.model_input.setPlaceholderText("例如: claude-sonnet-4-20250514")
-        row5.addWidget(self.model_input, 1)
+        grid.addWidget(QLabel("默认模型"), 4, 0)
+        grid.addWidget(self.model_input, 4, 1)
 
-        self.test_btn = QPushButton("测试连接")
-        self.test_btn.setObjectName("testBtn")
-        self.test_btn.clicked.connect(self._test_connection)
-        row5.addWidget(self.test_btn)
-
-        layout.addLayout(row5)
-
-    def _toggle_key_visibility(self, checked: bool) -> None:
-        if checked:
-            self.key_input.setEchoMode(QLineEdit.EchoMode.Normal)
-            self.show_key_btn.setIcon(self._eye_icons["eye_off"])
-            self.show_key_btn.setToolTip("隐藏 API Key")
-        else:
-            self.key_input.setEchoMode(QLineEdit.EchoMode.Password)
-            self.show_key_btn.setIcon(self._eye_icons["eye"])
-            self.show_key_btn.setToolTip("显示 API Key")
-
-    @staticmethod
-    def _create_eye_icons() -> dict[str, QIcon]:
-        """Create Eye (open) and EyeOff (slashed) icons via QPainter.
-
-        Matches the lucide Eye / EyeOff style used in cc-switch.
-        """
         c = get_theme_colors()
-        size = 64  # Render at 64px for crisp scaling
-        half = size // 2
+        self.test_btn = TextButton(
+            text="测试连接",
+            tooltip="测试连接",
+            color=c["primaryBtnBg"],
+            object_name="testBtn",
+            on_click=self._test_connection,
+        )
+        grid.addWidget(self.test_btn, 4, 2)
+        layout.addLayout(grid)
 
-        # --- Eye open icon ---
-        eye_pixmap = QPixmap(size, size)
-        eye_pixmap.fill(Qt.GlobalColor.transparent)
-        p = QPainter(eye_pixmap)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen_color = QColor(c["muted"])
-        pen = QPen(pen_color, 3.5)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        p.setPen(pen)
-        # Eye outline: two bezier curves forming an almond/eye shape
-        path = QPainterPath()
-        path.moveTo(6, half)
-        path.cubicTo(16, 12, size - 16, 12, size - 6, half)
-        path.cubicTo(size - 16, size - 12, 16, size - 12, 6, half)
-        p.drawPath(path)
-        # Pupil circle
-        p.setBrush(pen_color)
-        p.drawEllipse(QPointF(half, half), 8, 8)
-        p.end()
+    def _toggle_key_visibility(self) -> None:
+        is_visible = self.key_input.echoMode() == QLineEdit.EchoMode.Normal
+        if is_visible:
+            self.key_input.setEchoMode(QLineEdit.EchoMode.Password)
+            self._update_key_visibility_icon(False)
+        else:
+            self.key_input.setEchoMode(QLineEdit.EchoMode.Normal)
+            self._update_key_visibility_icon(True)
 
-        # --- Eye-off icon (eye with diagonal slash) ---
-        off_pixmap = QPixmap(size, size)
-        off_pixmap.fill(Qt.GlobalColor.transparent)
-        p = QPainter(off_pixmap)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(pen)
-        p.drawPath(path)
-        # Diagonal slash line
-        p.drawLine(10, 10, size - 10, size - 10)
-        p.end()
-
-        return {
-            "eye": QIcon(eye_pixmap),
-            "eye_off": QIcon(off_pixmap),
-        }
+    def _update_key_visibility_icon(self, is_visible: bool) -> None:
+        c = get_theme_colors()
+        icon_name = "eye-off" if is_visible else "eye"
+        icon = render_svg_icon(icon_name, QColor(c["fg"]), size=16)
+        self.show_key_btn.setIcon(icon)
+        tooltip = "隐藏 API Key" if is_visible else "显示 API Key"
+        self.show_key_btn.setToolTip(tooltip)
 
     _DEFAULT_BASES: dict[str, str] = {
         "deepseek": "https://api.deepseek.com",
@@ -249,6 +181,9 @@ class ConfigCard(QFrame):
             self.base_url_input.setText(default_base)
         if default_model:
             self.model_input.setText(default_model)
+
+    def _on_delete_clicked(self) -> None:
+        self.delete_requested.emit()
 
     def _test_connection(self) -> None:
         api_key = self.key_input.text().strip()
@@ -393,10 +328,14 @@ class ConfigDialog(QDialog):
         title_row.addWidget(title)
         title_row.addStretch()
 
-        self.sync_btn = QPushButton("同步预设")
-        self.sync_btn.setObjectName("syncBtn")
-        self.sync_btn.setToolTip("从 cc-switch 仓库同步最新预设模板")
-        self.sync_btn.clicked.connect(self._sync_presets)
+        c = get_theme_colors()
+        self.sync_btn = TextButton(
+            text="同步预设",
+            tooltip="从 cc-switch 仓库同步最新预设模板",
+            color=c["primaryBtnBg"],
+            object_name="syncBtn",
+            on_click=self._sync_presets,
+        )
         title_row.addWidget(self.sync_btn)
 
         header_layout.addLayout(title_row)
@@ -693,69 +632,17 @@ class ConfigDialog(QDialog):
 
     def _apply_style(self) -> None:
         from PyQt6.QtGui import QPalette
-        c0 = get_theme_colors()
+        c = get_theme_colors()
+        # Add/override colors specific to config dialog
+        c["addBtnBorder"] = c["primaryBtnBg"]  # 蓝色添加按钮边框
+        c["addBtnFg"] = c["primaryBtnBg"]
+        c["deleteFg"] = c["fg"]  # 使用主题前景色
+        c["deleteHoverBg"] = c["warningBg"]
+        c["deleteHoverFg"] = c["warningFg"]
         palette = self.palette()
-        palette.setColor(QPalette.ColorRole.Window, QColor(c0["bg"]))
+        palette.setColor(QPalette.ColorRole.Window, QColor(c["bg"]))
         self.setPalette(palette)
         self.setAutoFillBackground(True)
-
-        c = {
-            "headerBg": c0["surface"],
-            "headerBorder": c0["border"],
-            "titleFg": c0["fg"],
-            "subtitleFg": c0["muted"],
-            "activeFg": c0["activeFg"],
-            "footerBg": c0["surface"],
-            "footerBorder": c0["border"],
-            "cardBg": c0["cardBg"],
-            "cardBorder": c0["cardBorder"],
-            "primaryBtnBg": c0["primaryBtnBg"],
-            "primaryBtnFg": c0["primaryBtnFg"],
-            "primaryBtnHover": c0["primaryBtnHover"],
-            "primaryBtnPressed": c0["primaryBtnPressed"],
-            "secondaryBtnBg": c0["secondaryBtnBg"],
-            "secondaryBtnFg": c0["secondaryBtnFg"],
-            "secondaryBtnBorder": c0["secondaryBtnBorder"],
-            "secondaryBtnHoverBg": c0["secondaryBtnHoverBg"],
-            "secondaryBtnHoverBorder": c0["secondaryBtnHoverBorder"],
-            "resetFg": c0["subtitleFg"],
-            "resetHoverFg": c0["deleteFg"],
-            "testFg": c0["primaryBtnBg"],
-            "testBorder": c0["primaryBtnBg"],
-            "testHoverBg": c0["hover"],
-            "testDisabledFg": c0["inputDisabledFg"],
-            "testDisabledBorder": c0["border"],
-            "deleteFg": c0["subtitleFg"],
-            "deleteHoverFg": c0["deleteFg"],
-            "deleteHoverBg": c0["warningBg"],
-            "inputBorder": c0["inputBorder"],
-            "inputFocusBorder": c0["inputFocusBorder"],
-            "inputBg": c0["inputBg"],
-            "inputFg": c0["inputFg"],
-            "inputDisabledBg": c0["inputDisabledBg"],
-            "inputDisabledFg": c0["inputDisabledFg"],
-            "checkFg": c0["checkFg"],
-            "warningFg": c0["warningFg"],
-            "warningBg": c0["warningBg"],
-            "warningBorder": c0["warningBorder"],
-            "bodyBg": c0["bodyBg"],
-            "categoryFg": c0["subtitleFg"],
-            "presetBtnBg": c0["presetBtnBg"],
-            "presetBtnFg": c0["presetBtnFg"],
-            "presetBtnBorder": c0["presetBtnBorder"],
-            "presetBtnHoverBg": c0["presetBtnHoverBg"],
-            "addBtnFg": c0["primaryBtnBg"],
-            "addBtnBorder": c0["primaryBtnBg"],
-            "addBtnHoverBg": c0["hover"],
-            "syncBtnFg": c0["primaryBtnBg"],
-            "syncBtnBorder": c0["primaryBtnBg"],
-            "syncBtnHoverBg": c0["hover"],
-            "radius_sm": c0["radius_sm"],
-            "radius_md": c0["radius_md"],
-            "radius_lg": c0["radius_lg"],
-            "fw_semibold": "600",
-            "fw_bold": "700",
-        }
 
         self.setStyleSheet(f"""
             ConfigDialog {{
@@ -841,31 +728,26 @@ class ConfigDialog(QDialog):
                 font-size: 13px;
             }}
             #resetBtn:hover {{ color: {c["resetHoverFg"]}; text-decoration: underline; }}
-            #testBtn {{
-                background-color: transparent;
-                color: {c["testFg"]};
-                border: 1px solid {c["testBorder"]};
-                border-radius: {c["radius_sm"]};
-                padding: 4px 12px;
-                font-size: 12px;
-            }}
-            #testBtn:hover {{ background-color: {c["testHoverBg"]}; }}
-            #testBtn:disabled {{
-                color: {c["testDisabledFg"]};
-                border-color: {c["testDisabledBorder"]};
-            }}
             #deleteBtn {{
                 background-color: transparent;
                 color: {c["deleteFg"]};
-                border: 1px solid transparent;
-                border-radius: {c["radius_sm"]};
+                border: none;
                 font-size: 16px;
                 font-weight: {c["fw_bold"]};
             }}
             #deleteBtn:hover {{
                 color: {c["deleteHoverFg"]};
                 background-color: {c["deleteHoverBg"]};
-                border-color: {c["deleteHoverFg"]};
+                border: none;
+                border-radius: {c["radius_sm"]};
+            }}
+            #showKeyBtn {{
+                background-color: transparent;
+                border: none;
+                border-radius: {c["radius_sm"]};
+            }}
+            #showKeyBtn:hover {{
+                background-color: {c["hover"]};
             }}
             #addBtn {{
                 background-color: transparent;
@@ -876,15 +758,6 @@ class ConfigDialog(QDialog):
                 font-size: 13px;
             }}
             #addBtn:hover {{ background-color: {c["addBtnHoverBg"]}; }}
-            #syncBtn {{
-                background-color: transparent;
-                color: {c["syncBtnFg"]};
-                border: 1px solid {c["syncBtnBorder"]};
-                border-radius: {c["radius_sm"]};
-                padding: 4px 12px;
-                font-size: 12px;
-            }}
-            #syncBtn:hover {{ background-color: {c["syncBtnHoverBg"]}; }}
             #presetBtn {{
                 background-color: {c["presetBtnBg"]};
                 color: {c["presetBtnFg"]};
@@ -926,14 +799,23 @@ class ConfigDialog(QDialog):
                 background_color=c["inputBg"],
                 foreground_color=c["inputFg"],
                 hover_border_color=c["inputFocusBorder"],
-                selection_bg=c["primaryBtnBg"],
-                selection_fg=c["primaryBtnFg"],
+                selection_bg=c["selection"],
+                selection_fg=c["fg"],
                 font_size=13,
                 padding="6px 30px 6px 10px",
-                radius=c["radius_md"],
-                popup_radius=c["radius_md"],
+                radius=c["radius_sm"],
+                popup_radius=c["radius_sm"],
                 item_radius="4px",
             )}
+            /* Icon buttons inside provider cards */
+            IconActionButton {{
+                background-color: transparent;
+                border: none;
+                border-radius: {c["radius_sm"]};
+            }}
+            IconActionButton:hover {{
+                background-color: {c["hover"]};
+            }}
             QScrollArea {{
                 background-color: {c["bodyBg"]};
                 border: none;

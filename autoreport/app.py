@@ -427,6 +427,7 @@ class BackendAPIImpl(BackendAPI):
         self,
         agent_type: str,
         messages: list[dict[str, str]] | None = None,
+        session_id: str | None = None,
     ) -> None:
         """Replace in-memory conversation history for an agent loop."""
         if self.loop_manager is None:
@@ -449,6 +450,8 @@ class BackendAPIImpl(BackendAPI):
         loop = self.loop_manager._loops.get(agent_enum)  # noqa: SLF001
         if loop is None:
             return
+
+        loop._current_session_id = session_id  # noqa: SLF001
 
         loop._conversation_history.clear()  # noqa: SLF001
         for msg in messages or []:

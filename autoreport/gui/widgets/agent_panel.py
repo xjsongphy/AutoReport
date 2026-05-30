@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 import time
 from typing import Any
+from concurrent.futures import ThreadPoolExecutor
 
 from PyQt6.QtCore import QPoint, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QLinearGradient, QPainter
@@ -27,19 +28,19 @@ from autoreport.gui.widgets.file_search_popup import FileSearchPopup
 from autoreport.gui.widgets.ui_utils import IconActionButton, NoWheelComboBox, render_svg_icon
 from autoreport.utils.agent_labels import get_agent_badge, get_agent_title, get_agent_icon
 from autoreport.gui.widgets.messages_area import MessagesArea
-from autoreport.gui.widgets.status_indicator import StatusIndicator
 from autoreport.interfaces.types import ApiDebugMessage
 from autoreport.utils.logging_config import ui_logger
 from ..theme import get_theme_colors
 
 
 class _ComposerTopFade(QWidget):
-    """Top fade mask above composer: alpha from 100% to 50%."""
+    """Top fade mask above composer: alpha from 0% (top) to 100% (bottom)."""
 
     def __init__(self, base_color: QColor, parent: QWidget | None = None):
         super().__init__(parent)
         self._base_color = QColor(base_color)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAutoFillBackground(False)
 
     def set_base_color(self, base_color: QColor) -> None:
@@ -53,8 +54,8 @@ class _ComposerTopFade(QWidget):
         grad = QLinearGradient(0, 0, 0, max(1, self.height()))
         top = QColor(self._base_color)
         bottom = QColor(self._base_color)
-        top.setAlpha(255)
-        bottom.setAlpha(127)
+        top.setAlpha(0)
+        bottom.setAlpha(255)
         grad.setColorAt(0.0, top)
         grad.setColorAt(1.0, bottom)
         p.fillRect(self.rect(), grad)
@@ -100,6 +101,8 @@ class AgentPanel(QWidget):
         self._composer_horizontal_margin = scaled(16)
 
         self._file_search_manager = FileSearchManager(self._workspace)
+        self._file_search_executor = ThreadPoolExecutor(max_workers=1)
+        self._file_search_ticket = 0
         self._file_search_popup: FileSearchPopup | None = None
 
         self._setup_ui(title)
@@ -137,10 +140,11 @@ class AgentPanel(QWidget):
         self._title_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         hl.addWidget(self._title_label)
 
-        if self.panel_id == "sub":
+        if self.panel_id != "main":
             self._title_label.setVisible(False)
             self._agent_selector = NoWheelComboBox()
             self._agent_selector.setObjectName("subAgentSelector")
+            self._agent_selector.addItem("Main", "main")
             self._agent_selector.addItem("Data Analysis", "data_analysis")
             self._agent_selector.addItem("Plotting", "plotting")
             self._agent_selector.addItem("Theory", "theory")
@@ -160,24 +164,27 @@ class AgentPanel(QWidget):
             text="+",
             tooltip="New conversation",
             object_name="headerAction",
-            button_size=(28, 28),
+            button_size=(22, 22),
+            icon_size=(16, 16),
             on_click=self._on_new_conversation,
         )
         hl.addWidget(self._new_conv_btn)
 
         self._history_btn = IconActionButton(
-            text="☰",
             tooltip="History",
             object_name="headerAction",
-            button_size=(28, 28),
+            button_size=(22, 22),
+            icon_size=(16, 16),
             on_click=self._on_history,
         )
         hl.addWidget(self._history_btn)
+        self._setup_header_icons()
 
         layout.addWidget(header)
 
         # ---- Floating history dropdown (popup, not in layout) ----
-        self._history_dropdown = ConversationHistoryDropdown()
+        self._history_show_pending = False
+        self._history_dropdown = ConversationHistoryDropdown(self)
         self._history_dropdown.session_selected.connect(self._on_history_session_selected)
         self._history_dropdown.delete_session_requested.connect(self._on_history_delete)
         self._history_dropdown.rename_session_requested.connect(self._on_history_rename)
@@ -216,17 +223,12 @@ class AgentPanel(QWidget):
         self._debug_panel.setVisible(False)
         layout.addWidget(self._debug_panel)
 
-        # ---- Status indicator (Codex-style, animated) ----
-        self._status_indicator = StatusIndicator()
-        layout.addWidget(self._status_indicator)
-
         # ---- Composer (floating input + dock bar) ----
         c = get_theme_colors()
-        self._composer_top_fade = _ComposerTopFade(QColor(c["panel_bg"]), self)
+        self._composer_top_fade = _ComposerTopFade(QColor(c["messages_bg"]), self)
         self._composer_top_fade.setObjectName("composerTopFade")
         self._composer_top_fade.setFixedHeight(scaled(18))
         self._composer_top_fade.setStyleSheet("QWidget#composerTopFade { border: none; background: transparent; }")
-        layout.addWidget(self._composer_top_fade)
 
         self._composer_host = QWidget(self)
         self._composer_host.setObjectName("composerHost")
@@ -334,6 +336,12 @@ class AgentPanel(QWidget):
         self._composer_bottom_gap.setFixedHeight(0)
         layout.addWidget(self._composer_bottom_gap)
         self._layout = layout
+        self._update_composer_fade_geometry()
+
+    def _setup_header_icons(self) -> None:
+        c = get_theme_colors()
+        icon_color = QColor(c["fg"])
+        self._history_btn.setIcon(render_svg_icon("history", icon_color, size=16))
 
     def _setup_file_search(self) -> None:
         self._file_search_popup = FileSearchPopup(self)
@@ -373,14 +381,23 @@ class AgentPanel(QWidget):
         margin_total = (margins.left() + margins.right()) if margins else 32
         content_width = sum(w.sizeHint().width() for w in widgets)
         gap_count = max(0, len(widgets) - 1)
-        min_width = margin_total + content_width + (gap_count * spacing) + 24
+        header_min_width = margin_total + content_width + (gap_count * spacing) + 24
+        min_width = max(header_min_width, self._content_minimum_width())
         self.setMinimumWidth(min_width)
         self._sync_composer_gap()
 
+    def _content_minimum_width(self) -> int:
+        width = 0
+        for row in self._messages_area.get_message_rows():
+            hint_fn = getattr(row, "context_chip_panel_width_hint", None)
+            if callable(hint_fn):
+                width = max(width, int(hint_fn()))
+        return width
+
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
-        self._update_composer_alignment()
-        self._sync_composer_gap()
+        # Update geometry after layout system processes the resize
+        QTimer.singleShot(0, self._update_composer_fade_geometry)
         QTimer.singleShot(0, self._update_composer_alignment)
         QTimer.singleShot(0, self._sync_composer_gap)
 
@@ -388,9 +405,8 @@ class AgentPanel(QWidget):
         super().showEvent(event)
         # Initial splitter/layout negotiation can leave an outdated minimum width
         # until first maximize/restore; refresh once when panel is shown.
-        self._update_width()
-        self._update_composer_alignment()
         QTimer.singleShot(0, self._update_width)
+        QTimer.singleShot(0, self._update_composer_fade_geometry)
         QTimer.singleShot(0, self._update_composer_alignment)
 
     def _sync_composer_gap(self) -> None:
@@ -400,8 +416,17 @@ class AgentPanel(QWidget):
         side_gap = max(0, self._input_container.mapTo(self, QPoint(0, 0)).x())
         if self._composer_bottom_gap.height() != side_gap:
             self._composer_bottom_gap.setFixedHeight(side_gap)
+        self._update_composer_fade_geometry()
+        self._composer_top_fade.raise_()
         self._composer_host.raise_()
         self._composer_bottom_gap.raise_()
+
+    def _update_composer_fade_geometry(self) -> None:
+        if not hasattr(self, "_composer_top_fade") or not hasattr(self, "_composer_host"):
+            return
+        fade_h = self._composer_top_fade.height()
+        composer_top = self._composer_host.y()
+        self._composer_top_fade.setGeometry(0, max(0, composer_top - fade_h), self.width(), fade_h)
 
     def _composer_anchor_bounds(self) -> tuple[int, int]:
         """Return (left, right) anchor x positions for composer in panel coordinates."""
@@ -410,23 +435,15 @@ class AgentPanel(QWidget):
         if hasattr(self, "_icon_label") and self._icon_label is not None:
             left = self._icon_label.mapTo(self, QPoint(0, 0)).x()
 
-        right = panel_w - left
-        rows = self._messages_area.get_message_rows()
-        for row in reversed(rows):
-            bubble = getattr(row, "_user_bubble_container", None)
-            if bubble is None:
-                continue
-            right = bubble.mapTo(self, bubble.rect().topRight()).x()
-            break
-
         min_width = 220
         max_right = panel_w - self._composer_horizontal_margin
+        right = max_right
         right = min(max_right, max(right, left + min_width))
         left = max(0, left)
         return left, right
 
     def _update_composer_alignment(self) -> None:
-        """Align composer to avatar-left and latest user-bubble right edge."""
+        """Align composer to avatar-left and current panel width."""
         if not hasattr(self, "_composer_host_layout"):
             return
         left, right = self._composer_anchor_bounds()
@@ -452,21 +469,21 @@ class AgentPanel(QWidget):
         self._file_search_popup.show()
         self._file_search_popup.raise_()
 
-        # Run search synchronously via thread pool (fast: in-memory cache)
-        from concurrent.futures import ThreadPoolExecutor
-        executor = ThreadPoolExecutor(max_workers=1)
+        # Run search via persistent single-worker pool; discard stale completions.
+        self._file_search_ticket += 1
+        ticket = self._file_search_ticket
+        future = self._file_search_executor.submit(self._file_search_manager._do_search, query)
+        future.add_done_callback(lambda f: QTimer.singleShot(0, lambda: self._apply_file_search_result(ticket, f)))
 
-        def _do_search():
-            return self._file_search_manager._do_search(query)
-
-        def _on_done(future):
+    def _apply_file_search_result(self, ticket: int, future) -> None:
+        if ticket != self._file_search_ticket:
+            return
+        try:
             matches = future.result()
-            if self._file_search_popup and self._file_search_popup.isVisible():
-                self._file_search_popup.set_matches(matches)
-            executor.shutdown(wait=False)
-
-        future = executor.submit(_do_search)
-        future.add_done_callback(_on_done)
+        except Exception:
+            matches = []
+        if self._file_search_popup and self._file_search_popup.isVisible():
+            self._file_search_popup.set_matches(matches)
 
     def _on_file_selected(self, file_path: Path) -> None:
         self._file_search_popup.hide()
@@ -520,6 +537,11 @@ class AgentPanel(QWidget):
     def _on_message_edit_cancelled(self) -> None:
         """Handle edit cancelled - just reset state."""
         pass
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        self._file_search_manager.close()
+        self._file_search_executor.shutdown(wait=False, cancel_futures=True)
+        super().closeEvent(event)
 
     # ---- Command palette (/ commands) ----
 
@@ -715,6 +737,7 @@ class AgentPanel(QWidget):
             detail=detail,
             expandable=expandable,
         )
+        self._update_width()
         if streaming and role == "agent":
             row._complete = False
         if role == "agent":
@@ -886,76 +909,87 @@ class AgentPanel(QWidget):
         brief: str,
     ) -> None:
         """Render task/list updates in a compact, stable format."""
-        is_main = self._agent_type in ("main",)
         am_source = self._agent_type == source
         am_target = self._agent_type == target
-        is_local = source == target
 
         summary = str(brief or "").strip() or "task"
-        source_badge = get_agent_badge(source)
         target_badge = get_agent_badge(target)
+        source_badge = get_agent_badge(source)
 
-        if action == "created":
-            if is_local:
-                text = f"TODO ? Local ? {summary}"
-            elif am_source:
-                text = f"WAIT ? {target_badge} ? {summary}"
+        status_text = {
+            "created": "○ 完成任务",
+            "started": "● 进行中",
+            "completed": "✓ 已完成",
+            "cancelled": "✗ 已取消",
+            "failed": "⚠ 失败",
+        }
+
+        if action in ("created", "started"):
+            if am_source:
+                text = f"⏳ 等待{target_badge}: {summary}"
             elif am_target:
-                text = f"TODO ? From {source_badge} ? {summary}"
-            elif is_main:
-                text = f"TASK ? {source_badge} -> {target_badge} ? {summary}"
+                text = f"📋 {status_text[action]}：{summary}"
             else:
-                text = f"TASK ? {summary}"
+                text = f"📋 {status_text[action]}：{summary}"
 
         elif action == "completed":
-            if am_source:
-                text = f"DONE ? {target_badge} ? {summary}"
-            elif am_target:
-                text = f"DONE ? From {source_badge} ? {summary}"
-            elif is_main:
-                text = f"DONE ? {source_badge} -> {target_badge} ? {summary}"
+            if am_target:
+                text = f"📋 {status_text[action]}：{summary}"
             else:
-                text = f"DONE ? {summary}"
+                text = f"✅ {source_badge} 完成了任务：{summary}"
 
         elif action == "failed":
-            if am_source:
-                text = f"FAIL ? {target_badge} ? {summary}"
-            elif am_target:
-                text = f"FAIL ? From {source_badge} ? {summary}"
-            elif is_main:
-                text = f"FAIL ? {source_badge} -> {target_badge} ? {summary}"
+            if am_target:
+                text = f"📋 {status_text[action]}：{summary}"
             else:
-                text = f"FAIL ? {summary}"
+                text = f"⚠ {source_badge} 任务失败：{summary}"
 
         elif action == "cancelled":
-            if am_source:
-                text = f"CANCEL ? {target_badge} ? {summary}"
-            elif am_target:
-                text = f"CANCEL ? From {source_badge} ? {summary}"
-            elif is_main:
-                text = f"CANCEL ? {source_badge} -> {target_badge} ? {summary}"
+            if am_target:
+                text = f"📋 {status_text[action]}：{summary}"
             else:
-                text = f"CANCEL ? {summary}"
-
-        elif action == "started":
-            if is_local:
-                text = f"RUNNING ? Local ? {summary}"
-            elif am_source:
-                text = f"RUNNING ? {target_badge} ? {summary}"
-            elif am_target:
-                text = f"RUNNING ? From {source_badge} ? {summary}"
-            elif is_main:
-                text = f"RUNNING ? {source_badge} -> {target_badge} ? {summary}"
-            else:
-                text = f"RUNNING ? {summary}"
+                text = f"✗ {source_badge} 任务已取消：{summary}"
 
         else:
-            text = f"TASK UPDATE ? {summary}"
+            text = f"任务更新 {action}: {summary}"
 
         ts = datetime.now().strftime("%H:%M")
         self._messages_area.add_message_row(
             role="agent",
             content=text,
+            timestamp=ts,
+            is_coordination=True,
+        )
+
+    def add_task_block(self, todolist: list[dict], waitlist: list[dict]) -> None:
+        """Render full Task block with Todo/Wait sections."""
+        lines = ["Task", "", "Todo"]
+        if todolist:
+            for item in todolist[:10]:
+                brief = str(item.get("brief", "")).strip() or "task"
+                status = str(item.get("status", "pending")).lower()
+                done = status in {"completed", "cancelled", "failed"}
+                marker = "☑" if done else "☐"
+                lines.append(f"- {marker} {brief}")
+        else:
+            lines.append("- —")
+
+        lines.append("")
+        lines.append("Wait")
+        if waitlist:
+            for item in waitlist[:10]:
+                brief = str(item.get("brief", "")).strip() or "task"
+                status = str(item.get("status", "pending")).lower()
+                done = status in {"completed", "cancelled", "failed"}
+                marker = "☑" if done else "☐"
+                lines.append(f"- {marker} {brief}")
+        else:
+            lines.append("- —")
+
+        ts = datetime.now().strftime("%H:%M")
+        self._messages_area.add_message_row(
+            role="agent",
+            content="\n".join(lines),
             timestamp=ts,
             is_coordination=True,
         )
@@ -991,17 +1025,15 @@ class AgentPanel(QWidget):
         colors = get_theme_colors()
         self._status_label.setStyleSheet(f"color: {colors.get(color_key, colors['status_idle'])};")
 
-        if status == "thinking":
-            self.start_thinking()
-        else:
+        # Thinking rows should be driven by real thinking chunks from model
+        # responses. Status events may arrive out-of-order and create phantom
+        # thought rows if they start thinking UI directly.
+        if status != "thinking":
             self.finish_thinking()
 
         if active:
-            header = "Thinking" if status == "thinking" else "Running tool"
-            self._status_indicator.start(header)
             self._set_working(True)
         else:
-            self._status_indicator.stop()
             self._set_working(False)
 
     def set_queue_preview(self, queued_messages: list[str]) -> None:
@@ -1076,7 +1108,8 @@ class AgentPanel(QWidget):
 
     def _on_history(self) -> None:
         ui_logger.debug("AgentPanel[{}]: history button clicked", self.panel_id)
-        if self._history_dropdown.isVisible():
+        if self._history_dropdown.isVisible() or self._history_show_pending:
+            self._history_show_pending = False
             self._history_dropdown.hide()
         else:
             # Request session data and show dropdown
@@ -1089,6 +1122,13 @@ class AgentPanel(QWidget):
 
     def show_history_dropdown(self, sessions: list[dict], current_id: str | None = None) -> None:
         self._history_dropdown.populate(sessions, current_id)
+        self._history_show_pending = True
+        QTimer.singleShot(0, self._show_history_dropdown_now)
+
+    def _show_history_dropdown_now(self) -> None:
+        if not self._history_show_pending:
+            return
+        self._history_show_pending = False
         self._history_dropdown.show_dropdown(self._history_btn)
 
     def _on_history_session_selected(self, session_id: str) -> None:
@@ -1131,6 +1171,7 @@ class AgentPanel(QWidget):
     def clear_conversation(self) -> None:
         """Clear messages and notify backend."""
         self._messages_area.clear()
+        self._update_width()
         self._update_composer_alignment()
         self._pending_tool_groups.clear()
         self._current_tool_group = None

@@ -1,6 +1,6 @@
 """Tests for ToolCallGroup widget."""
 
-from PyQt6.QtWidgets import QSizePolicy
+from PyQt6.QtWidgets import QPushButton, QSizePolicy
 
 from autoreport.gui.widgets.tool_call_group import ToolCallGroup
 
@@ -93,3 +93,21 @@ def test_bash_out_preview_is_limited_to_three_lines(qtbot):
     out_labels = [lab for lab in labels if lab.objectName() == "bashDetailText" and "one" in lab.text()]
     assert out_labels
     assert out_labels[0].text() == "one\ntwo\nthree"
+
+
+def test_bash_copy_button_reserves_width_by_default(qtbot):
+    widget = ToolCallGroup()
+    qtbot.addWidget(widget)
+    widget.add_tool_call(
+        "bash",
+        {"command": "echo ok", "command_description": "show output"},
+        success=True,
+        duration_ms=10,
+    )
+
+    copy_buttons = [btn for btn in widget.findChildren(QPushButton) if btn.objectName() == "userCopyBtn"]
+    assert copy_buttons
+    for btn in copy_buttons:
+        assert not btn.isEnabled()
+        assert btn.minimumWidth() == 30
+        assert btn.maximumWidth() == 30

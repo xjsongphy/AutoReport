@@ -59,12 +59,25 @@ class _EmbeddedImageLabel(QLabel):
         target = self.size()
         if target.width() <= 1 or target.height() <= 1:
             return
-        scaled = self._source_pixmap.scaled(
-            target,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        self.setPixmap(scaled)
+        dpr = max(1.0, self.devicePixelRatioF())
+        target_px_w = max(1, int(target.width() * dpr))
+        target_px_h = max(1, int(target.height() * dpr))
+        source_px_w = self._source_pixmap.width()
+        source_px_h = self._source_pixmap.height()
+
+        # Do not upscale beyond source resolution by default; this avoids
+        # blurry rendering when the viewport is larger than the image.
+        if source_px_w <= target_px_w and source_px_h <= target_px_h:
+            display = self._source_pixmap
+        else:
+            display = self._source_pixmap.scaled(
+                target_px_w,
+                target_px_h,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        display.setDevicePixelRatio(dpr)
+        self.setPixmap(display)
 
 
 class _TabAffordanceButton(QPushButton):
@@ -1240,21 +1253,27 @@ class PreviewWidget(QWidget):
         active = data.get("active") if isinstance(data, dict) else None
         self._restoring_tabs = True
         try:
-            for item in tabs:
-                if not isinstance(item, str) or not item:
-                    continue
-                path = self._resolve_cross_platform_path(item)
-                self.load_file(path)
-            if isinstance(active, str) and active:
-                active_path = self._resolve_cross_platform_path(active)
-                key = _tab_key(active_path)
-                for i in range(self._unified_tab_bar.count()):
-                    if self._unified_tab_bar.tabData(i) == key:
-                        self._unified_tab_bar.setCurrentIndex(i)
-                        break
+            # Prevent per-tab file_changed emissions while replaying tabs.
+            with QSignalBlocker(self):
+                for item in tabs:
+                    if not isinstance(item, str) or not item:
+                        continue
+                    path = self._resolve_cross_platform_path(item)
+                    self.load_file(path)
+                if isinstance(active, str) and active:
+                    active_path = self._resolve_cross_platform_path(active)
+                    key = _tab_key(active_path)
+                    for i in range(self._unified_tab_bar.count()):
+                        if self._unified_tab_bar.tabData(i) == key:
+                            self._unified_tab_bar.setCurrentIndex(i)
+                            break
         finally:
             self._restoring_tabs = False
         self._sync_tabs_from_panels()
+        # Emit once with the final active tab only.
+        active_file = self.current_file
+        if active_file:
+            self.file_changed.emit(active_file)
 
     def _on_unified_tab_context_menu(self, pos) -> None:
         """Show context menu for unified tab bar."""

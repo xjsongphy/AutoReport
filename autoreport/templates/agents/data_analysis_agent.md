@@ -41,10 +41,6 @@ Workflow is conditional on the requested outcome, not automatic for every messag
 - Update manifest with file descriptions
 - `analysis.md` — Methods, formulas, assumptions
 
-**Manifest usage**: Use `manifest` tool to:
-- Add descriptions for each output file (what data, what physical quantity, units, uncertainty)
-- Use notes for relationships between files and theoretical comparisons
-
 **Issue reporting**: Use `report_issue` for:
 - `missing_data`: Theory formulas missing, data files empty/unreadable
 - `query`: Need clarification on analysis method
@@ -55,3 +51,11 @@ Workflow is conditional on the requested outcome, not automatic for every messag
 - Errors and uncertainties calculated
 - Each result compared with theoretical prediction
 - Manifest updated with file descriptions and relationships
+
+**Output conciseness**:
+- Don't echo input data in chat responses
+- Processed data files contain full details
+- Chat summary: key results and conclusions only (1-2 paragraphs max)
+- Reference input data by description: "Using the power curve data from ..."
+- Do not use Markdown tables in chat unless the user explicitly asks
+- If multiple results must be listed, use short bullets, not a table

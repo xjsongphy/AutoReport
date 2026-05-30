@@ -5,7 +5,7 @@ from pathlib import Path
 from PyQt6.QtCore import QObject, QPoint, QRectF, QSize, Qt, QTimer
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
-from PyQt6.QtWidgets import QApplication, QComboBox, QFrame, QLabel, QListView, QMenu, QPushButton, QStyleFactory, QWidget
+from PyQt6.QtWidgets import QApplication, QComboBox, QFrame, QLabel, QListView, QMenu, QPushButton, QStyle, QStyledItemDelegate, QStyleFactory, QStyleOptionViewItem, QWidget
 
 from ..theme import get_theme_colors
 
@@ -19,7 +19,9 @@ _SVG_ICONS = {
     "settings": "settings.svg",
     "run": "run.svg",
     "preview": "preview.svg",
+    "eye": "eye.svg",
     "eye-off": "eye-off.svg",
+    "history": "history.svg",
 }
 UI_HOVER_DELAY_MS = 2000
 
@@ -146,8 +148,36 @@ def compact_tooltip_qss(selector: str = "QLabel") -> str:
 
 def create_isolated_context_menu(anchor: QWidget | None = None) -> QMenu:
     """Create a context menu isolated from parent-widget QSS inheritance."""
+    c = get_theme_colors()
     menu = QMenu()
-    menu.setStyleSheet("")
+    menu.setStyleSheet(
+        f"""
+        QMenu {{
+            background-color: {c["context_bg"]};
+            border: 1px solid {c["context_border"]};
+            border-radius: {c["radius_md"]};
+            padding: 4px;
+        }}
+        QMenu::item {{
+            background-color: transparent;
+            color: {c["popup_fg"]};
+            padding: 4px 8px;
+            margin: 0;
+            font-size: 12px;
+            border-radius: {c["radius_md"]};
+        }}
+        QMenu::indicator {{
+            width: 0px;
+            height: 0px;
+        }}
+        QMenu::item:selected {{
+            background-color: {c["popup_hover"]};
+        }}
+        QMenu::item:hover {{
+            background-color: {c["popup_hover"]};
+        }}
+        """
+    )
     if anchor is not None:
         menu.setFont(anchor.font())
     return menu
@@ -160,6 +190,48 @@ def install_compact_tooltip(button: QPushButton, text: str) -> None:
     tooltip_filter = CompactTooltipFilter(text, button)
     button.installEventFilter(tooltip_filter)
     button._compact_tooltip_filter = tooltip_filter  # keep QObject alive
+
+
+class _ComboPopupDelegate(QStyledItemDelegate):
+    """Draw combo popup rows using current-index selection, not hover selection."""
+
+    def __init__(self, combo: QComboBox, parent=None):
+        super().__init__(parent)
+        self._combo = combo
+
+    @staticmethod
+    def _radius_px(value: str) -> float:
+        try:
+            return float(str(value).strip().removesuffix("px"))
+        except ValueError:
+            return 4.0
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:  # noqa: N802
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        c = get_theme_colors()
+        opt.textElideMode = Qt.TextElideMode.ElideRight
+
+        is_current = index.row() == self._combo.currentIndex()
+        is_hovered = bool(opt.state & QStyle.StateFlag.State_MouseOver)
+        bg = c["selection"] if is_current else (c["hover"] if is_hovered else None)
+
+        opt.state &= ~QStyle.StateFlag.State_Selected
+        opt.state &= ~QStyle.StateFlag.State_MouseOver
+        opt.palette.setColor(opt.palette.ColorRole.Text, QColor(c["fg"]))
+        opt.palette.setColor(opt.palette.ColorRole.HighlightedText, QColor(c["fg"]))
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if bg is not None:
+            radius = self._radius_px(c.get("radius_sm", "4px"))
+            rect = opt.rect.adjusted(0, 0, -1, -1)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(bg))
+            painter.drawRoundedRect(rect, radius, radius)
+
+        QApplication.style().drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
+        painter.restore()
 
 
 class NoWheelComboBox(QComboBox):
@@ -184,6 +256,7 @@ class NoWheelComboBox(QComboBox):
         popup_view.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
         popup_view.viewport().setMouseTracking(True)
         popup_view.viewport().installEventFilter(self)
+        popup_view.setItemDelegate(_ComboPopupDelegate(self, popup_view))
         self.setView(popup_view)
 
     def wheelEvent(self, event) -> None:  # noqa: N802
@@ -272,12 +345,17 @@ class NoWheelComboBox(QComboBox):
                 border-radius: {item_radius};
             }}
             QListView#comboPopupView::item:selected {{
-                background: transparent;
+                background-color: {c["selection"]};
                 color: {c["fg"]};
             }}
             QListView#comboPopupView::item:hover {{
-                background-color: {c["focus"]};
+                background-color: {c["hover"]};
                 color: {c["fg"]};
+            }}
+            QListView#comboPopupView::item:selected:hover {{
+                background-color: {c["selection"]};
+                color: {c["fg"]};
+                border-radius: {item_radius};
             }}
             """
         )
@@ -309,6 +387,48 @@ class IconActionButton(QPushButton):
             self.clicked.connect(on_click)
 
 
+class TextButton(QPushButton):
+    """Text button with border, transparent background, and configurable color."""
+
+    def __init__(
+        self,
+        text: str = "",
+        tooltip: str = "",
+        color: str = "",
+        hover_bg: str = "",
+        object_name: str = "",
+        on_click=None,
+        parent=None,
+    ):
+        super().__init__(text, parent)
+        if object_name:
+            self.setObjectName(object_name)
+        if tooltip:
+            install_compact_tooltip(self, tooltip)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        c = get_theme_colors()
+        _color = color or c["fg"]
+        _hover_bg = hover_bg or c["hover"]
+        _radius = c["radius_sm"]
+
+        self.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {_color};
+                border: 1px solid {_color};
+                border-radius: {_radius};
+                padding: 4px 12px;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {_hover_bg};
+            }}
+        """)
+        if on_click is not None:
+            self.clicked.connect(on_click)
+
+
 def combo_box_qss(
     selector: str,
     *,
@@ -325,6 +445,7 @@ def combo_box_qss(
     item_radius: str = "0px",
 ) -> str:
     """Build a reusable combo-box + popup list QSS fragment."""
+    c = get_theme_colors()
     effective_popup_radius = popup_radius if popup_radius is not None else radius
     return f"""
         QComboBox{selector} {{
@@ -376,12 +497,17 @@ def combo_box_qss(
             background: transparent;
         }}
         QComboBox{selector} QAbstractItemView::item:selected {{
-            background-color: transparent;
-            color: {foreground_color};
-        }}
-        QComboBox{selector} QAbstractItemView::item:hover {{
             background-color: {selection_bg};
             color: {selection_fg};
+        }}
+        QComboBox{selector} QAbstractItemView::item:hover {{
+            background-color: {c["hover"]};
+            color: {foreground_color};
+        }}
+        QComboBox{selector} QAbstractItemView::item:selected:hover {{
+            background-color: {selection_bg};
+            color: {selection_fg};
+            border-radius: {item_radius};
         }}
     """
 

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QIcon
 from PyQt6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 from ..theme import get_theme_colors
 from .timeline import TimelineRail
@@ -262,19 +262,26 @@ class ToolCallGroup(QWidget):
             row_layout.addWidget(value, 1)
             copy_btn = QPushButton(row)
             copy_btn.setObjectName("userCopyBtn")
-            copy_btn.setIcon(_copy_icon_dark())
             copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             copy_btn.setFixedSize(30, 24)
             install_compact_tooltip(copy_btn, "Copy")
-            copy_btn.setVisible(False)
+            # Keep button width reserved so IN/OUT text width is stable before hover.
+            copy_btn.setVisible(True)
+            copy_btn.setEnabled(False)
+            copy_btn.setFlat(True)
+            copy_btn.setIcon(QIcon())
             copy_btn.clicked.connect(lambda _=False, t=text: QApplication.clipboard().setText(t))
             row_layout.addWidget(copy_btn, 0, Qt.AlignmentFlag.AlignRight)
 
             def _enter(_):
-                copy_btn.setVisible(True)
+                copy_btn.setEnabled(True)
+                copy_btn.setFlat(False)
+                copy_btn.setIcon(_copy_icon_dark())
 
             def _leave(_):
-                copy_btn.setVisible(False)
+                copy_btn.setEnabled(False)
+                copy_btn.setFlat(True)
+                copy_btn.setIcon(QIcon())
 
             row.enterEvent = _enter  # type: ignore[method-assign]
             row.leaveEvent = _leave  # type: ignore[method-assign]
