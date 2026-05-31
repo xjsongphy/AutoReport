@@ -179,6 +179,17 @@ def test_add_tool_result_updates_pending_group_item(agent_panel):
     assert "Theory replied: first line" in groups[0].get_summary_text()
 
 
+def test_batch_tool_calls_render_as_separate_timeline_items(agent_panel):
+    agent_panel.add_tool_call("write_file", {"path": "a.txt"})
+    agent_panel.add_tool_call("write_file", {"path": "b.txt"})
+
+    groups = agent_panel._messages_area.get_tool_groups()
+
+    assert len(groups) == 2
+    assert "a.txt" in groups[0].get_summary_text()
+    assert "b.txt" in groups[1].get_summary_text()
+
+
 def test_tool_call_before_agent_text_keeps_event_order(agent_panel):
     agent_panel.add_tool_call("list_dir", {"path": "."})
     agent_panel.add_message(role="agent", content="Hello", streaming=True)
@@ -436,6 +447,20 @@ def test_edit_saved_retracts_following_rows_and_sends_immediately(qtbot, agent_p
 
     assert blocker.args[0].startswith("new user")
     assert agent_panel._messages_area.message_count() == 0
+
+
+def test_edit_saved_resends_plain_text_with_latest_file_context(qtbot, agent_panel):
+    wrapped = "Editor context: file\nCurrent file: old.tex\n\nold user"
+    row = agent_panel.add_message(role="user", content=wrapped)
+    target_row = agent_panel._messages_area.get_message_rows()[-1]
+    agent_panel.set_opened_file("latest.tex")
+
+    with qtbot.waitSignal(agent_panel.file_context_attached, timeout=1000) as context_blocker:
+        with qtbot.waitSignal(agent_panel.message_sent, timeout=1000) as message_blocker:
+            agent_panel._on_message_edit_saved("new user", target_row)
+
+    assert message_blocker.args == ["new user"]
+    assert context_blocker.args[0]["file"] == "latest.tex"
 
 
 def test_hide_conv_buttons(agent_panel):
