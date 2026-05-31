@@ -45,7 +45,7 @@ from .title_bar import TitleBar
 from .widgets.agent_panel import AgentPanel
 from .widgets.file_tree import FileTreeWidget
 from .widgets.preview import PreviewWidget
-from .widgets.ui_utils import combo_box_qss, compact_tooltip_qss
+from .widgets.ui_utils import combo_box_qss, compact_tooltip_qss, filled_button_qss, outlined_button_qss
 
 
 @dataclass
@@ -402,7 +402,13 @@ class MainWindow(QMainWindow):
                 background-color: {c["card"]};
                 border: 1px solid {c["border"]};
                 border-radius: {px(8)};
-                margin-bottom: {px(8)};
+            }}
+            #userContextChipIcon {{
+                color: {c["muted"]};
+                font-size: {px(10)};
+                font-weight: {c["fw_semibold"]};
+                font-family: "Cascadia Code", "SF Mono", "Consolas", monospace;
+                background-color: transparent;
             }}
             #userContextChipText {{
                 color: {c["fg"]};
@@ -441,36 +447,30 @@ class MainWindow(QMainWindow):
                 background-color: {c["hover"]};
                 color: {c["fg"]};
             }}
-            #userSaveBtn {{
-                background-color: {c["primary"]};
-                color: {c["primaryBtnFg"]};
-                border: none;
-                border-radius: {px(4)};
-                padding: {px(4)} {px(10)};
-                font-size: {px(12)};
-                font-weight: {c["fw_semibold"]};
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
-            }}
-            #userSaveBtn:hover {{
-                background-color: {c["primary_hover"]};
-            }}
-            #userSaveBtn:disabled {{
-                background-color: {c["muted"]};
+            {filled_button_qss(
+                "#userSaveBtn",
+                bg=c["primary"],
+                fg=c["primaryBtnFg"],
+                hover_bg=c["primary_hover"],
+                disabled_bg=c["muted"],
+                disabled_fg=c["primaryBtnFg"],
+                radius=px(4),
+                padding=f"{px(4)} {px(10)}",
+                font_size=round(12 * s),
+            )}
+            QPushButton#userSaveBtn:disabled {{
                 opacity: 0.5;
             }}
-            #userCancelBtn {{
-                background-color: transparent;
-                color: {c["fg"]};
-                border: 1px solid {c["border"]};
-                border-radius: {px(4)};
-                padding: {px(4)} {px(10)};
-                font-size: {px(12)};
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
-            }}
-            #userCancelBtn:hover {{
-                background-color: {c["hover"]};
-                border-color: {c["muted"]};
-            }}
+            {outlined_button_qss(
+                "#userCancelBtn",
+                fg=c["fg"],
+                border=c["border"],
+                hover_bg=c["hover"],
+                hover_border=c["muted"],
+                radius=px(4),
+                padding=f"{px(4)} {px(10)}",
+                font_size=round(12 * s),
+            )}
             #queuePreview {{
                 background-color: {c["surface"]};
                 border-bottom: 1px solid {c["border"]};

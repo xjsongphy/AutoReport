@@ -25,7 +25,18 @@ from ..config.presets import ProviderPreset, get_presets_by_category, load_prese
 from ..config.schema import ApiConfig
 from ..core.preset_sync import is_cached, sync_presets
 from .theme import get_theme_colors
-from .widgets.ui_utils import IconActionButton, NoWheelComboBox, TextButton, combo_box_qss, line_edit_qss, render_svg_icon
+from .widgets.ui_utils import (
+    IconActionButton,
+    NoWheelComboBox,
+    TextButton,
+    combo_box_qss,
+    dashed_button_qss,
+    filled_button_qss,
+    ghost_button_qss,
+    line_edit_qss,
+    render_svg_icon,
+    secondary_filled_button_qss,
+)
 
 CATEGORY_LABELS = {
     "official": "官方",
@@ -402,7 +413,6 @@ class ConfigDialog(QDialog):
         add_btn.clicked.connect(self._add_config)
         add_row.addWidget(add_btn)
         add_row.addStretch()
-        root.addLayout(add_row)
 
         # Footer
         footer = QWidget(self)
@@ -411,12 +421,18 @@ class ConfigDialog(QDialog):
         footer_layout.setContentsMargins(24, 12, 24, 16)
         footer_layout.setSpacing(12)
 
+        self.add_btn = QPushButton("+ 添加配置")
+        self.add_btn.setObjectName("addBtn")
+        self.add_btn.clicked.connect(self._add_config)
+        footer_layout.addWidget(self.add_btn)
+
+        footer_layout.addStretch()
+
         self.reset_btn = QPushButton("恢复默认")
         self.reset_btn.setObjectName("resetBtn")
         self.reset_btn.clicked.connect(self._reset_config)
         footer_layout.addWidget(self.reset_btn)
 
-        footer_layout.addStretch()
 
         self.cancel_btn = QPushButton("取消")
         self.cancel_btn.setObjectName("cancelBtn")
@@ -697,37 +713,36 @@ class ConfigDialog(QDialog):
                 text-transform: uppercase;
                 margin-top: 4px;
             }}
-            #saveBtn {{
-                background-color: {c["primaryBtnBg"]};
-                color: {c["primaryBtnFg"]};
-                border: none;
-                border-radius: {c["radius_md"]};
-                padding: 8px 24px;
-                font-weight: {c["fw_semibold"]};
-                font-size: 13px;
+            {filled_button_qss(
+                "#saveBtn",
+                bg=c["primaryBtnBg"],
+                fg=c["primaryBtnFg"],
+                hover_bg=c["primaryBtnHover"],
+                disabled_bg=c["border"],
+                disabled_fg=c["muted"],
+                radius=c["radius_md"],
+                padding="8px 24px",
+                font_size=13,
+            )}
+            QPushButton#saveBtn:pressed {{
+                background-color: {c["primaryBtnPressed"]};
             }}
-            #saveBtn:hover {{ background-color: {c["primaryBtnHover"]}; }}
-            #saveBtn:pressed {{ background-color: {c["primaryBtnPressed"]}; }}
-            #cancelBtn {{
-                background-color: {c["secondaryBtnBg"]};
-                color: {c["secondaryBtnFg"]};
-                border: 1px solid {c["secondaryBtnBorder"]};
-                border-radius: {c["radius_md"]};
-                padding: 8px 20px;
-                font-size: 13px;
-            }}
-            #cancelBtn:hover {{
-                background-color: {c["secondaryBtnHoverBg"]};
-                border-color: {c["secondaryBtnHoverBorder"]};
-            }}
-            #resetBtn {{
-                background-color: transparent;
-                color: {c["resetFg"]};
-                border: none;
-                padding: 8px 16px;
-                font-size: 13px;
-            }}
-            #resetBtn:hover {{ color: {c["resetHoverFg"]}; text-decoration: underline; }}
+            {secondary_filled_button_qss(
+                "#addBtn",
+                radius=c["radius_md"],
+                padding="8px 16px",
+                font_size=13,
+            )}
+            {secondary_filled_button_qss("#cancelBtn")}
+            {ghost_button_qss(
+                "#resetBtn",
+                fg=c["resetFg"],
+                hover_bg="transparent",
+                hover_fg=c["resetHoverFg"],
+                padding="8px 16px",
+                font_size=13,
+            )}
+            QPushButton#resetBtn:hover {{ text-decoration: underline; }}
             #deleteBtn {{
                 background-color: transparent;
                 color: {c["deleteFg"]};
@@ -749,37 +764,26 @@ class ConfigDialog(QDialog):
             #showKeyBtn:hover {{
                 background-color: {c["hover"]};
             }}
-            #addBtn {{
-                background-color: transparent;
-                color: {c["addBtnFg"]};
-                border: 1px dashed {c["addBtnBorder"]};
-                border-radius: {c["radius_md"]};
-                padding: 8px 16px;
-                font-size: 13px;
-            }}
-            #addBtn:hover {{ background-color: {c["addBtnHoverBg"]}; }}
-            #presetBtn {{
-                background-color: {c["presetBtnBg"]};
-                color: {c["presetBtnFg"]};
-                border: 1px solid {c["presetBtnBorder"]};
-                border-radius: {c["radius_md"]};
-                padding: 10px 14px;
-                font-size: 13px;
+            {secondary_filled_button_qss(
+                "#presetBtn",
+                radius=c["radius_md"],
+                padding="10px 14px",
+                font_size=13,
+            )}
+            QPushButton#presetBtn {{
                 text-align: left;
             }}
-            #presetBtn:hover {{ background-color: {c["presetBtnHoverBg"]}; }}
-            #blankBtn {{
-                background-color: transparent;
-                color: {c["subtitleFg"]};
-                border: 1px dashed {c["inputBorder"]};
-                border-radius: {c["radius_sm"]};
-                padding: 6px 14px;
-                font-size: 12px;
-            }}
-            #blankBtn:hover {{
-                color: {c["primaryBtnBg"]};
-                border-color: {c["primaryBtnBg"]};
-            }}
+            {dashed_button_qss(
+                "#blankBtn",
+                fg=c["subtitleFg"],
+                border=c["inputBorder"],
+                hover_bg="transparent",
+                hover_fg=c["primaryBtnBg"],
+                hover_border=c["primaryBtnBg"],
+                radius=c["radius_sm"],
+                padding="6px 14px",
+                font_size=12,
+            )}
             {line_edit_qss(
                 "",
                 border_color=c["inputBorder"],

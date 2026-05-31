@@ -21,6 +21,12 @@ from PyQt6.QtWidgets import (
 from ..config import ConfigManager
 from ..core.recent_projects import RecentProjects
 from .theme import format_stylesheet, get_theme_colors, is_dark_mode
+from .widgets.ui_utils import (
+    filled_button_qss,
+    ghost_button_qss,
+    link_button_qss,
+    secondary_filled_button_qss,
+)
 
 PROJECT_DIRECTORIES = ["data", "data/processed", "references", "theory", "code", "tex"]
 
@@ -178,6 +184,7 @@ class ProjectDialog(QDialog):
         footer_layout.setContentsMargins(40, 12, 40, 16)
         cancel_btn = QPushButton("退出")
         cancel_btn.setObjectName("cancelBtn")
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         cancel_btn.clicked.connect(self.reject)
         footer_layout.addStretch()
         footer_layout.addWidget(cancel_btn)
@@ -205,38 +212,19 @@ class ProjectDialog(QDialog):
             #actionBar {{
                 background-color: {colors["bg"]};
             }}
-            #primaryBtn {{
-                background-color: {colors["primary"]};
-                color: {colors["primaryFg"]};
-                border: none;
-                border-radius: {colors["radius_sm"]};
-                padding: 8px 20px;
-                font-size: 13px;
-                font-weight: {colors["fw_semibold"]};
-            }}
-            #primaryBtn:hover {{ background-color: {colors["primaryHover"]}; }}
-            #secondaryBtn {{
-                background-color: transparent;
-                color: {colors["secondaryFg"]};
-                border: 1px solid {colors["secondaryBorder"]};
-                border-radius: {colors["radius_sm"]};
-                padding: 8px 20px;
-                font-size: 13px;
-            }}
-            #secondaryBtn:hover {{
-                background-color: {colors["secondaryHoverBg"]};
-            }}
-            #configBtn {{
-                background-color: transparent;
-                color: {colors["secondaryFg"]};
-                border: 1px solid {colors["secondaryBorder"]};
-                border-radius: {colors["radius_sm"]};
-                padding: 8px 20px;
-                font-size: 13px;
-            }}
-            #configBtn:hover {{
-                background-color: {colors["secondaryHoverBg"]};
-            }}
+            {filled_button_qss(
+                "#primaryBtn",
+                bg=colors["primaryBtnBg"],
+                fg=colors["primaryBtnFg"],
+                hover_bg=colors["primaryBtnHover"],
+                disabled_bg=colors["border"],
+                disabled_fg=colors["muted"],
+                radius=colors["radius_sm"],
+                padding="8px 20px",
+                font_size=13,
+            )}
+            {secondary_filled_button_qss("#secondaryBtn")}
+            {secondary_filled_button_qss("#configBtn")}
             #sectionHeader {{
                 background-color: {colors["bg"]};
             }}
@@ -263,19 +251,7 @@ class ProjectDialog(QDialog):
                 background-color: transparent;
                 padding: 4px 0;
             }}
-            #recentName {{
-                background-color: transparent;
-                border: none;
-                border-bottom: 1px solid transparent;
-                color: {colors["link"]};
-                font-size: 13px;
-                text-align: left;
-                padding: 2px 0;
-            }}
-            #recentName:hover {{
-                color: {colors["linkHover"]};
-                border-bottom: 1px solid {colors["linkHover"]};
-            }}
+            {link_button_qss("#recentName")}
             #recentPath {{
                 font-size: 13px;
                 color: {colors["pathFg"]};
@@ -300,16 +276,7 @@ class ProjectDialog(QDialog):
             #footer {{
                 background-color: {colors["surface"]};
             }}
-            #cancelBtn {{
-                background-color: transparent;
-                color: {colors["cancelFg"]};
-                border: none;
-                padding: 6px 16px;
-                font-size: 12px;
-            }}
-            #cancelBtn:hover {{
-                color: {colors["cancelHoverFg"]};
-            }}
+            {ghost_button_qss("#cancelBtn")}
             QScrollArea {{
                 border: none;
             }}
