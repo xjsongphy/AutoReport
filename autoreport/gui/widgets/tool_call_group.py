@@ -13,6 +13,10 @@ from .ui_utils import install_compact_tooltip, render_svg_icon
 
 TIMELINE_EVENT_ROW_HEIGHT = 34
 
+
+def _timeline_bottom_padding(widget: QWidget) -> int:
+    return max(8, int(round(widget.fontMetrics().lineSpacing() * 0.5)))
+
 def _copy_icon_dark():
     # Keep copy icon visually consistent with user bubble actions.
     return render_svg_icon("copy", QColor(get_theme_colors()["muted"]), size=16)
@@ -71,7 +75,7 @@ class ToolCallGroup(QWidget):
 
         content = QWidget(self)
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(4, 0, 0, 0)
+        content_layout.setContentsMargins(4, 0, 0, _timeline_bottom_padding(self))
         content_layout.setSpacing(0)
         layout.addWidget(content, 1)
 
@@ -321,35 +325,15 @@ class ToolCallGroup(QWidget):
         if not self._calls:
             return
 
+        running = any(c.success is None for c in self._calls)
+        failed = any(c.success is False for c in self._calls)
+        success = not running and not failed
+        lines = [self._header_text_for_call(call) for call in self._calls]
+        self._header_text.setText("<br/>".join(lines))
+
         if len(self._calls) == 1:
-            call = self._calls[0]
-            self._header_text.setText(self._header_text_for_call(call))
-            dot_color = self._status_dot_color(call.success)
+            dot_color = self._status_dot_color(self._calls[0].success)
         else:
-            running = any(c.success is None for c in self._calls)
-            failed = any(c.success is False for c in self._calls)
-            success = not running and not failed
-            same_name = len({c.name for c in self._calls}) == 1
-            if same_name and self._calls[0].name in {"read_file", "list_dir", "parse_pdf", "write_file", "edit_file", "delete_file"}:
-                tool = self._calls[0].name
-                files: list[str] = []
-                for c in self._calls:
-                    files.extend(c.file_names)
-                file_text = " ".join(files).strip()
-                label = {
-                    "read_file": "Read",
-                    "list_dir": "List",
-                    "parse_pdf": "Parse",
-                    "write_file": "Write",
-                    "edit_file": "Edit",
-                    "delete_file": "Delete",
-                }[tool]
-                joined = f"<b>{label}</b>&nbsp;&nbsp;{file_text}".strip()
-            elif same_name:
-                joined = self._header_text_for_call(self._calls[0])
-            else:
-                joined = " ".join(self._header_text_for_call(c) for c in self._calls)
-            self._header_text.setText(joined)
             dot_color = self._status_dot_color(None if running else success)
 
         if self._timeline_rail is not None:

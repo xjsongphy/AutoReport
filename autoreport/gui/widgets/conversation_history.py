@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 
 from ..theme import get_theme_colors
 from ...utils.editor_context import user_visible_content
-from .ui_utils import create_isolated_context_menu
+from .ui_utils import create_isolated_context_menu, danger_filled_button_qss
 
 
 def _bubble_visible_text(text: str) -> str:
@@ -329,18 +329,13 @@ class ConversationHistoryDropdown(QFrame):
                 border: none;
                 height: 0px;
             }}
-            QPushButton#sessionDeleteBtn {{
-                background-color: {c["danger"]};
-                border: none;
-                color: {c["primaryBtnFg"]};
-                font-size: 11px;
-                font-weight: 500;
-                border-radius: {c["radius_sm"]};
-                padding: 0 6px;
-            }}
-            QPushButton#sessionDeleteBtn:hover {{
-                background-color: {c["danger_hover"]};
-            }}
+            {danger_filled_button_qss(
+                "#sessionDeleteBtn",
+                radius=c["radius_sm"],
+                padding="0 6px",
+                font_size=11,
+                font_weight=c["fw_medium"],
+            )}
         """)
 
     def show_dropdown(self, parent_widget: QWidget) -> None:

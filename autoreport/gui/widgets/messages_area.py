@@ -34,6 +34,13 @@ class MessagesArea(QScrollArea):
         super().__init__(parent)
         self._auto_scroll_enabled = True
         self._user_scrolled = False
+        self._suppress_scroll_tracking = False
+        self._pending_scroll_to_bottom = False
+        self._scroll_retry_intervals_ms = (0, 20, 80, 160)
+        self._scroll_retry_index = 0
+        self._auto_scroll_timer = QTimer(self)
+        self._auto_scroll_timer.setSingleShot(True)
+        self._auto_scroll_timer.timeout.connect(self._run_scheduled_scroll_attempt)
         self._latest_user_row: MessageRow | None = None
         self._editing_row: MessageRow | None = None
 
@@ -68,7 +75,7 @@ class MessagesArea(QScrollArea):
                 background-color: {c["messages_bg"]};
             }}
             QScrollBar:vertical {{
-                background-color: transparent;
+                background-color: {c["messages_bg"]};
                 width: 8px;
                 border: none;
             }}
@@ -89,6 +96,7 @@ class MessagesArea(QScrollArea):
             }}
         """)
 
+
     def _connect_scroll_signals(self) -> None:
         """Connect scroll bar signals to detect user scrolling."""
         scrollbar = self.verticalScrollBar()
@@ -100,6 +108,8 @@ class MessagesArea(QScrollArea):
         Args:
             value: New scroll bar value.
         """
+        if self._suppress_scroll_tracking:
+            return
         scrollbar = self.verticalScrollBar()
         max_value = scrollbar.maximum()
 
@@ -121,21 +131,51 @@ class MessagesArea(QScrollArea):
             self._user_scrolled = True
             self._auto_scroll_enabled = False
 
-    def _update_auto_scroll_state(self) -> None:
-        """Update auto-scroll state based on current scroll position.
+    def _schedule_scroll_to_bottom(self) -> None:
+        """Scroll after layout settles, unless the user has explicitly scrolled up."""
+        if self._user_scrolled:
+            return
+        self._auto_scroll_enabled = True
+        if self._pending_scroll_to_bottom:
+            return
+        self._pending_scroll_to_bottom = True
+        self._scroll_retry_index = 0
+        self._arm_next_scroll_attempt()
 
-        This is called when we need to check the scroll position
-        without waiting for the signal to fire.
-        """
+    def _arm_next_scroll_attempt(self) -> None:
+        if not self._pending_scroll_to_bottom:
+            return
+        if self._scroll_retry_index >= len(self._scroll_retry_intervals_ms):
+            self._pending_scroll_to_bottom = False
+            return
+        delay_ms = self._scroll_retry_intervals_ms[self._scroll_retry_index]
+        self._scroll_retry_index += 1
+        if delay_ms <= 0:
+            self._run_scheduled_scroll_attempt()
+            return
+        self._auto_scroll_timer.start(delay_ms)
+
+    def _run_scheduled_scroll_attempt(self) -> None:
+        if not self._pending_scroll_to_bottom:
+            return
+        last_attempt = self._scroll_retry_index >= len(self._scroll_retry_intervals_ms)
+        self._flush_scroll_to_bottom(last_attempt)
+        if self._pending_scroll_to_bottom:
+            self._arm_next_scroll_attempt()
+
+    def _flush_scroll_to_bottom(self, last_attempt: bool) -> None:
+        if self._user_scrolled:
+            self._pending_scroll_to_bottom = False
+            self._auto_scroll_timer.stop()
+            return
         scrollbar = self.verticalScrollBar()
-        value = scrollbar.value()
-        max_value = scrollbar.maximum()
-
-        # If scrolled away from bottom (more than 10px threshold)
-        if max_value - value > 10:
-            self._auto_scroll_enabled = False
-        else:
-            self._auto_scroll_enabled = True
+        self._suppress_scroll_tracking = True
+        scrollbar.setValue(scrollbar.maximum())
+        self._suppress_scroll_tracking = False
+        self._user_scrolled = False
+        self._auto_scroll_enabled = True
+        if last_attempt:
+            self._pending_scroll_to_bottom = False
 
     def check_scroll_position(self) -> tuple:
         """Check current scroll position (for debugging).
@@ -207,7 +247,8 @@ class MessagesArea(QScrollArea):
 
         # Auto-scroll if enabled
         if self._auto_scroll_enabled:
-            self.scroll_to_bottom()
+            QTimer.singleShot(0, lambda r=row: self.ensureWidgetVisible(r, 0, 0))
+            self._schedule_scroll_to_bottom()
 
         return row
 
@@ -237,7 +278,8 @@ class MessagesArea(QScrollArea):
 
         # Auto-scroll if enabled
         if self._auto_scroll_enabled:
-            self.scroll_to_bottom()
+            QTimer.singleShot(0, lambda g=group: self.ensureWidgetVisible(g, 0, 0))
+            self._schedule_scroll_to_bottom()
 
         return group
 
@@ -297,20 +339,18 @@ class MessagesArea(QScrollArea):
         self._update_timeline_chains()
 
         if self._auto_scroll_enabled:
-            self.scroll_to_bottom()
+            QTimer.singleShot(0, lambda r=row: self.ensureWidgetVisible(r, 0, 0))
+            self._schedule_scroll_to_bottom()
 
     def scroll_to_bottom(self) -> None:
         """Scroll to the bottom of the messages area."""
-        scrollbar = self.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
+        self._schedule_scroll_to_bottom()
 
     def follow_streaming_if_enabled(self) -> None:
         """Keep following streaming output unless user has scrolled up."""
-        self._update_auto_scroll_state()
-        if not self._auto_scroll_enabled:
+        if self._user_scrolled:
             return
-        # Defer until layout/size updates from appended text are applied.
-        QTimer.singleShot(0, self.scroll_to_bottom)
+        self._schedule_scroll_to_bottom()
 
     def clear(self) -> None:
         """Remove all messages from the container."""
@@ -322,6 +362,12 @@ class MessagesArea(QScrollArea):
         # Reset latest-user pointer to avoid accessing deleted row widgets.
         self._latest_user_row = None
         self._editing_row = None
+        self._auto_scroll_enabled = True
+        self._user_scrolled = False
+        self._suppress_scroll_tracking = False
+        self._pending_scroll_to_bottom = False
+        self._auto_scroll_timer.stop()
+        self._scroll_retry_index = 0
 
     def _on_edit_saved(self, content: str, row: MessageRow) -> None:
         """Handle edit saved signal from a message row."""
@@ -356,7 +402,7 @@ class MessagesArea(QScrollArea):
 
         # Auto-scroll if enabled
         if self._auto_scroll_enabled:
-            self.scroll_to_bottom()
+            self._schedule_scroll_to_bottom()
 
     def retract_from_row(self, row: MessageRow) -> None:
         """Remove `row` and every following message/tool row."""
@@ -389,7 +435,7 @@ class MessagesArea(QScrollArea):
         self._update_timeline_chains()
 
         if self._auto_scroll_enabled:
-            self.scroll_to_bottom()
+            self._schedule_scroll_to_bottom()
 
     # ---- Query methods for testing ----
 
@@ -415,7 +461,6 @@ class MessagesArea(QScrollArea):
         Returns:
             The vertical QScrollBar.
         """
-        self._update_auto_scroll_state()
         return self.verticalScrollBar()
 
     def is_scrollable(self) -> bool:

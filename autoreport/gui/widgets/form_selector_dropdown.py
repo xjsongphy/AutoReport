@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidg
 
 from ..theme import get_theme_colors
 from .base_popup_dropdown import BasePopupDropdown
+from .ui_utils import input_button_qss
 
 
 class _SelectorButton(QPushButton):
@@ -102,23 +103,14 @@ class FormSelectorDropdown(QWidget):
         """Apply theme styling."""
         c = get_theme_colors()
 
-        self._button.setStyleSheet(f"""
-            QPushButton#selectorButton {{
-                background-color: {c["input_bg"]};
-                border: 1px solid {c["input_border"]};
-                border-radius: {c["radius_sm"]};
-                padding: 4px 24px 4px 8px;
-                text-align: left;
-                color: {c["inputFg"]};
-                font-size: 12px;
-            }}
-            QPushButton#selectorButton:hover {{
-                border: 1px solid {c["focus"]};
-            }}
-            QPushButton#selectorButton:pressed {{
-                background-color: {c["input_bg"]};
-            }}
-        """)
+        self._button.setStyleSheet(
+            input_button_qss(
+                "#selectorButton",
+                padding="4px 24px 4px 8px",
+                font_size=12,
+                radius=c["radius_sm"],
+            )
+        )
 
     # ---- Public API ----
 

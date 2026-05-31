@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, QPoint, QRectF, QSize, Qt, QTimer
-from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+from PyQt6.QtCore import QObject, QPoint, QRect, QRectF, QSize, Qt, QTimer
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap, QRegion
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import QApplication, QComboBox, QFrame, QLabel, QListView, QMenu, QPushButton, QStyle, QStyledItemDelegate, QStyleFactory, QStyleOptionViewItem, QWidget
 
@@ -22,6 +22,7 @@ _SVG_ICONS = {
     "eye": "eye.svg",
     "eye-off": "eye-off.svg",
     "history": "history.svg",
+    "code-context": "code-context.svg",
 }
 UI_HOVER_DELAY_MS = 2000
 
@@ -296,13 +297,11 @@ class NoWheelComboBox(QComboBox):
                 | Qt.WindowType.FramelessWindowHint
                 | Qt.WindowType.NoDropShadowWindowHint
             )
-            popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-            popup.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
-            popup.setContentsMargins(0, 0, 0, 0)
-            popup.setStyleSheet("background: transparent; border: none;")
+            self._style_popup_host(popup)
             # Stronger overlap to eliminate visual seam between combo and popup.
             popup.move(self.mapToGlobal(QPoint(0, self.height() - 2)))
             popup.show()
+            self._apply_popup_mask(popup)
 
     def eventFilter(self, obj, event):  # noqa: N802
         view = self.view()
@@ -360,6 +359,26 @@ class NoWheelComboBox(QComboBox):
             """
         )
 
+    def _style_popup_host(self, popup: QWidget) -> None:
+        popup.setContentsMargins(0, 0, 0, 0)
+        popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        popup.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        popup.setAutoFillBackground(False)
+        popup.setStyleSheet("background: transparent; border: none;")
+
+    def _apply_popup_mask(self, popup: QWidget) -> None:
+        radius = 6.0
+        try:
+            radius = float(str(get_theme_colors().get("radius_md", "6px")).removesuffix("px"))
+        except ValueError:
+            pass
+        path = QPainterPath()
+        rect = QRectF(QRect(popup.rect()).adjusted(0, 0, -1, -1))
+        if rect.isEmpty():
+            return
+        path.addRoundedRect(rect, radius, radius)
+        popup.setMask(QRegion(path.toFillPolygon().toPolygon()))
+
 
 class IconActionButton(QPushButton):
     """Small clickable icon/text action button with shared defaults."""
@@ -410,21 +429,17 @@ class TextButton(QPushButton):
         c = get_theme_colors()
         _color = color or c["fg"]
         _hover_bg = hover_bg or c["hover"]
-        _radius = c["radius_sm"]
-
-        self.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                color: {_color};
-                border: 1px solid {_color};
-                border-radius: {_radius};
-                padding: 4px 12px;
-                font-size: 12px;
-            }}
-            QPushButton:hover {{
-                background-color: {_hover_bg};
-            }}
-        """)
+        self.setStyleSheet(
+            outlined_button_qss(
+                "",
+                fg=_color,
+                border=_color,
+                hover_bg=_hover_bg,
+                padding="4px 12px",
+                font_size=12,
+                radius=c["radius_sm"],
+            )
+        )
         if on_click is not None:
             self.clicked.connect(on_click)
 
@@ -553,18 +568,24 @@ def filled_button_qss(
     hover_bg: str,
     disabled_bg: str,
     disabled_fg: str,
+    border: str = "none",
+    radius: str = "4px",
+    padding: str = "2px 12px",
+    font_size: int = 12,
+    font_weight: str | None = None,
 ) -> str:
     """Build a reusable filled button QSS fragment."""
     c = get_theme_colors()
+    effective_weight = font_weight or c["fw_semibold"]
     return f"""
         QPushButton{selector} {{
             background-color: {bg};
             color: {fg};
-            border: none;
-            border-radius: 4px;
-            font-weight: {c["fw_semibold"]};
-            font-size: 12px;
-            padding: 2px 12px;
+            border: {border};
+            border-radius: {radius};
+            font-weight: {effective_weight};
+            font-size: {font_size}px;
+            padding: {padding};
         }}
         QPushButton{selector}:hover {{
             background-color: {hover_bg};
@@ -572,5 +593,217 @@ def filled_button_qss(
         QPushButton{selector}:disabled {{
             background-color: {disabled_bg};
             color: {disabled_fg};
+        }}
+    """
+
+
+def outlined_button_qss(
+    selector: str,
+    *,
+    fg: str,
+    border: str,
+    hover_bg: str,
+    bg: str = "transparent",
+    hover_fg: str | None = None,
+    hover_border: str | None = None,
+    disabled_bg: str = "transparent",
+    disabled_fg: str | None = None,
+    disabled_border: str | None = None,
+    radius: str = "4px",
+    padding: str = "6px 16px",
+    font_size: int = 12,
+    font_weight: str | None = None,
+) -> str:
+    """Build a reusable outlined text button QSS fragment."""
+    c = get_theme_colors()
+    effective_hover_fg = hover_fg or fg
+    effective_hover_border = hover_border or border
+    effective_disabled_fg = disabled_fg or c["muted"]
+    effective_disabled_border = disabled_border or c["border"]
+    effective_weight = font_weight or c["fw_normal"]
+    return f"""
+        QPushButton{selector} {{
+            background-color: {bg};
+            color: {fg};
+            border: 1px solid {border};
+            border-radius: {radius};
+            font-size: {font_size}px;
+            font-weight: {effective_weight};
+            padding: {padding};
+        }}
+        QPushButton{selector}:hover {{
+            background-color: {hover_bg};
+            color: {effective_hover_fg};
+            border-color: {effective_hover_border};
+        }}
+        QPushButton{selector}:disabled {{
+            background-color: {disabled_bg};
+            color: {effective_disabled_fg};
+            border-color: {effective_disabled_border};
+        }}
+    """
+
+
+def secondary_filled_button_qss(
+    selector: str,
+    *,
+    radius: str | None = None,
+    padding: str = "8px 20px",
+    font_size: int = 13,
+    font_weight: str | None = None,
+) -> str:
+    """Build a reusable secondary button with persistent background color."""
+    c = get_theme_colors()
+    return outlined_button_qss(
+        selector,
+        fg=c["secondaryBtnFg"],
+        border=c["secondaryBtnBorder"],
+        hover_bg=c["secondaryBtnHoverBg"],
+        bg=c["secondaryBtnBg"],
+        hover_border=c["secondaryBtnHoverBorder"],
+        disabled_bg=c["inputDisabledBg"],
+        disabled_fg=c["inputDisabledFg"],
+        radius=radius or c["radius_md"],
+        padding=padding,
+        font_size=font_size,
+        font_weight=font_weight,
+    )
+
+
+def ghost_button_qss(
+    selector: str,
+    *,
+    fg: str | None = None,
+    hover_bg: str | None = None,
+    hover_fg: str | None = None,
+    radius: str | None = None,
+    padding: str = "8px 16px",
+    font_size: int = 13,
+    font_weight: str | None = None,
+) -> str:
+    """Build a reusable ghost button with hover-only background."""
+    c = get_theme_colors()
+    return f"""
+        QPushButton{selector} {{
+            background-color: transparent;
+            color: {fg or c["secondaryBtnFg"]};
+            border: none;
+            border-radius: {radius or c["radius_md"]};
+            padding: {padding};
+            font-size: {font_size}px;
+            font-weight: {font_weight or c["fw_normal"]};
+        }}
+        QPushButton{selector}:hover {{
+            background-color: {hover_bg or c["hover"]};
+            color: {hover_fg or c["cancelHoverFg"]};
+        }}
+        QPushButton{selector}:disabled {{
+            color: {c["muted"]};
+        }}
+    """
+
+
+def danger_filled_button_qss(
+    selector: str,
+    *,
+    radius: str | None = None,
+    padding: str = "4px 10px",
+    font_size: int = 12,
+    font_weight: str | None = None,
+) -> str:
+    """Build a reusable destructive filled text button QSS fragment."""
+    c = get_theme_colors()
+    return filled_button_qss(
+        selector,
+        bg=c["danger"],
+        fg=c["primaryBtnFg"],
+        hover_bg=c["danger_hover"],
+        disabled_bg=c["inputDisabledBg"],
+        disabled_fg=c["inputDisabledFg"],
+        radius=radius or c["radius_sm"],
+        padding=padding,
+        font_size=font_size,
+        font_weight=font_weight,
+    )
+
+
+def dashed_button_qss(
+    selector: str,
+    *,
+    fg: str,
+    border: str,
+    hover_bg: str,
+    bg: str = "transparent",
+    hover_fg: str | None = None,
+    hover_border: str | None = None,
+    radius: str = "4px",
+    padding: str = "8px 16px",
+    font_size: int = 13,
+    font_weight: str | None = None,
+) -> str:
+    """Build a reusable dashed text button QSS fragment."""
+    c = get_theme_colors()
+    return f"""
+        QPushButton{selector} {{
+            background-color: {bg};
+            color: {fg};
+            border: 1px dashed {border};
+            border-radius: {radius};
+            font-size: {font_size}px;
+            font-weight: {font_weight or c["fw_normal"]};
+            padding: {padding};
+        }}
+        QPushButton{selector}:hover {{
+            background-color: {hover_bg};
+            color: {hover_fg or fg};
+            border-color: {hover_border or border};
+        }}
+    """
+
+
+def input_button_qss(
+    selector: str,
+    *,
+    padding: str = "4px 24px 4px 8px",
+    font_size: int = 12,
+    radius: str | None = None,
+) -> str:
+    """Build a reusable input-like selector button QSS fragment."""
+    c = get_theme_colors()
+    return f"""
+        QPushButton{selector} {{
+            background-color: {c["input_bg"]};
+            border: 1px solid {c["input_border"]};
+            border-radius: {radius or c["radius_sm"]};
+            padding: {padding};
+            text-align: left;
+            color: {c["inputFg"]};
+            font-size: {font_size}px;
+        }}
+        QPushButton{selector}:hover {{
+            border-color: {c["focus"]};
+        }}
+        QPushButton{selector}:pressed {{
+            background-color: {c["input_bg"]};
+        }}
+    """
+
+
+def link_button_qss(selector: str, *, font_size: int = 13, padding: str = "2px 0") -> str:
+    """Build a reusable link-style text button QSS fragment."""
+    c = get_theme_colors()
+    return f"""
+        QPushButton{selector} {{
+            background-color: transparent;
+            border: none;
+            border-bottom: 1px solid transparent;
+            color: {c["link"]};
+            font-size: {font_size}px;
+            text-align: left;
+            padding: {padding};
+        }}
+        QPushButton{selector}:hover {{
+            color: {c["linkHover"]};
+            border-bottom: 1px solid {c["linkHover"]};
         }}
     """

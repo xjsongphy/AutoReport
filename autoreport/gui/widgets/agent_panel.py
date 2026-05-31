@@ -264,6 +264,7 @@ class AgentPanel(QWidget):
         self._input_field.file_reference_requested.connect(self._on_file_reference_requested)
         self._input_field.command_palette_requested.connect(self._on_command_palette_requested)
         self._input_field.popup_navigate.connect(self._on_popup_navigate)
+        self._input_field.height_changed.connect(lambda _height: QTimer.singleShot(0, self._update_composer_alignment))
         icl.addWidget(self._input_field, 1)
 
         self._send_btn = IconActionButton(
@@ -762,19 +763,9 @@ class AgentPanel(QWidget):
             and not getattr(last, "_complete", True)
         ):
             last.mark_complete()
-        # Merge adjacent identical tool calls to avoid long noisy rows.
-        merge_target = None
-        if (
-            tool_name != "send_to_agent"
-            and self._current_tool_group
-            and self._current_tool_group.can_merge_with_last(tool_name)
-        ):
-            merge_target = self._current_tool_group
-        else:
-            self._current_tool_group = self._messages_area.add_tool_group()
-            merge_target = self._current_tool_group
-        self._pending_tool_groups.append(merge_target)
-        merge_target.add_tool_call(
+        self._current_tool_group = self._messages_area.add_tool_group()
+        self._pending_tool_groups.append(self._current_tool_group)
+        self._current_tool_group.add_tool_call(
             name=tool_name,
             arguments=arguments,
             success=None,

@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..theme import get_theme_colors
+from .ui_utils import ghost_button_qss, secondary_filled_button_qss
 
 
 @dataclass
@@ -61,6 +62,7 @@ class DebugPanel(QWidget):
         header_layout.setContentsMargins(8, 8, 8, 8)
 
         self._toggle_btn = QPushButton("▼")
+        self._toggle_btn.setObjectName("debugToggleBtn")
         self._toggle_btn.setFixedWidth(30)
         self._toggle_btn.clicked.connect(self._toggle_collapsed)
 
@@ -98,9 +100,11 @@ class DebugPanel(QWidget):
         button_layout.setSpacing(8)
 
         self._clear_btn = QPushButton("Clear All")
+        self._clear_btn.setObjectName("debugClearBtn")
         self._clear_btn.clicked.connect(self.clear_all)
 
         self._export_btn = QPushButton("Export JSON")
+        self._export_btn.setObjectName("debugExportBtn")
         self._export_btn.clicked.connect(self._export_json)
 
         button_layout.addWidget(self._clear_btn)
@@ -124,17 +128,26 @@ class DebugPanel(QWidget):
             QLabel {{
                 color: {c["popup_fg"]};
             }}
-            QPushButton {{
-                background-color: {c["secondaryBtnBg"]};
-                border: 1px solid {c["secondaryBtnBorder"]};
-                border-radius: {c["radius_sm"]};
-                padding: 4px 12px;
-                color: {c["secondaryBtnFg"]};
-            }}
-            QPushButton:hover {{
-                background-color: {c["secondaryBtnHoverBg"]};
-            }}
-            QPushButton:pressed {{
+            {ghost_button_qss(
+                "#debugToggleBtn",
+                padding="4px 6px",
+                font_size=12,
+                radius=c["radius_sm"],
+            )}
+            {secondary_filled_button_qss(
+                "#debugClearBtn",
+                radius=c["radius_sm"],
+                padding="4px 12px",
+                font_size=12,
+            )}
+            {secondary_filled_button_qss(
+                "#debugExportBtn",
+                radius=c["radius_sm"],
+                padding="4px 12px",
+                font_size=12,
+            )}
+            QPushButton#debugClearBtn:pressed,
+            QPushButton#debugExportBtn:pressed {{
                 background-color: {c["hover"]};
             }}
         """)
