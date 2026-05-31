@@ -612,7 +612,7 @@ class MessageRow(QWidget):
         chip.setObjectName("userContextChip")
         chip.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         chip_layout = QHBoxLayout(chip)
-        chip_layout.setContentsMargins(10, 0, 10, 0)
+        chip_layout.setContentsMargins(10, 0, 10, 2)
         chip_layout.setSpacing(6)
         chip.setFixedHeight(30)
 
