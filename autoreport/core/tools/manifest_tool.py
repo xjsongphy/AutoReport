@@ -33,10 +33,10 @@ IGNORED_PATTERNS = [
 IGNORED_DIRS = {".git", "__pycache__", ".autoreport", ".checkpoints"}
 
 AGENT_DIRECTORIES = {
-    "data_analysis": ["Data", "Data/Processed"],
-    "plotting": ["Data", "Data/fig", "Code"],
+    "data_analysis": ["Data"],
+    "plotting": ["Code"],
     "theory": ["Theory"],
-    "report": ["Tex", "Data/fig", "References"],
+    "report": ["Tex"],
     "main": ["Data", "Theory", "Code", "Tex", "References"],
 }
 
