@@ -52,6 +52,7 @@ class CheckpointData:
     epoch: int
     description: str
     source: str             # "pre_message" | "manual" | "rollback"
+    message_id: str | None = None  # The message that triggered this checkpoint
 
     # Full file states — only populated for the baseline checkpoint (epoch=1)
     file_states: dict[str, "FileState"] = field(default_factory=dict)
@@ -72,6 +73,7 @@ class CheckpointData:
             "epoch": self.epoch,
             "description": self.description,
             "source": self.source,
+            "message_id": self.message_id,
             "file_states": {
                 path: state.to_dict()
                 for path, state in self.file_states.items()
@@ -107,6 +109,7 @@ class CheckpointData:
             epoch=data.get("epoch", 0),
             description=data["description"],
             source=data.get("source", "manual"),
+            message_id=data.get("message_id"),
             file_states=file_states,
             file_diffs=file_diffs,
             parent_id=data.get("parent_id"),
@@ -177,12 +180,20 @@ class CheckpointManager:
         description: str = "",
         source: str = "pre_message",
         conversation_history: list[dict[str, Any]] | None = None,
+        message_id: str | None = None,
     ) -> str:
         """Create a checkpoint for *agent_type*.
 
         If this is the first checkpoint for the agent, captures full file
         states.  Otherwise, computes and stores only the diffs against the
         previous checkpoint.
+
+        Args:
+            agent_type: Agent type string.
+            description: Human-readable description.
+            source: Source of checkpoint creation.
+            conversation_history: Conversation history snapshot.
+            message_id: The message that triggered this checkpoint (if any).
 
         Returns the checkpoint ID.
         """
@@ -200,6 +211,7 @@ class CheckpointManager:
             epoch=epoch,
             description=description or f"Checkpoint {agent_type}#{epoch}",
             source=source,
+            message_id=message_id,
             conversation_history=conversation_history or [],
         )
 
