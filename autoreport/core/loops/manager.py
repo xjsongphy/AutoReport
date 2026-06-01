@@ -2,21 +2,23 @@
 
 import asyncio
 from pathlib import Path
-from typing import Any, Dict, 
+from typing import Any, Dict, List
 
 from loguru import logger
 
 from ...config import ConfigManager
 from ...core.providers import ProviderFactory, ProviderManager
-from ...interfaces.types import AgentType, FileRollbackRequest, Message, RestartRequest, RollbackStatus
+from ...interfaces.types import AgentType, Message, RestartRequest
 from ..checkpoints import CheckpointManager
 from ..tools import SkillLoader
 from ..tools import (
     BashTool,
     BuiltinTemplateTool,
+    CreateCheckpointTool,
     DeleteFileTool,
     EditFileTool,
     FileStateManager,
+    ListCheckpointsTool,
     ListDirTool,
     LoadSkillTool,
     ManageTasksTool,
@@ -24,6 +26,7 @@ from ..tools import (
     PDFParseTool,
     ReadFileTool,
     ReportIssueTool,
+    RollbackCheckpointTool,
     SendToAgentTool,
     SkillLoader,
     TaskBoard,
@@ -65,9 +68,6 @@ class LoopManager:
 
         # Subscribe to restart requests
         self.bus.subscribe(RestartRequest, self._handle_restart_request)
-
-        # Subscribe to file rollback requests from GUI
-        self.bus.subscribe(FileRollbackRequest, self._handle_file_rollback_request)
 
     @property
     def is_running(self) -> bool:
@@ -335,6 +335,24 @@ class LoopManager:
             session_id_resolver=lambda a=agent_type: self.get_agent_session_id(a),
         ))
 
+        # Per-agent checkpoint tools
+        agent_type_str = agent_type.value
+        registry.register(CreateCheckpointTool(
+            checkpoint_manager=self.checkpoint_manager,
+            agent_type=agent_type_str,
+        ))
+        registry.register(ListCheckpointsTool(
+            checkpoint_manager=self.checkpoint_manager,
+            agent_type=agent_type_str,
+        ))
+        # Rollback is restricted to main agent inside the tool itself;
+        # we register it everywhere so main can use it, but sub-agents
+        # will get an error message if they try.
+        registry.register(RollbackCheckpointTool(
+            checkpoint_manager=self.checkpoint_manager,
+            agent_type=agent_type_str,
+        ))
+
         return registry
 
     def _get_file_state_manager(self, agent_type: AgentType) -> FileStateManager:
@@ -347,7 +365,6 @@ class LoopManager:
     async def create_checkpoint(
         self, agent_type: str, description: str = "", source: str = "pre_message",
         conversation_history: List[Dict[str, Any]] | None = None,
-        message_id: str | None = None,
     ) -> str:
         """Create a per-agent checkpoint.
 
@@ -356,7 +373,6 @@ class LoopManager:
             description: Human-readable description.
             source: Checkpoint source — "pre_message" | "manual" | "rollback".
             conversation_history: Optional conversation history to save.
-            message_id: Optional message ID that triggered this checkpoint.
 
         Returns:
             Checkpoint ID.
@@ -376,7 +392,6 @@ class LoopManager:
                 checkpoint_id=checkpoint_id,
                 description=cp.description,
                 file_states={path: state.hash for path, state in cp.file_states.items()},
-                message_id=message_id,
             )
             await self.bus.publish(msg)
 
@@ -431,46 +446,6 @@ class LoopManager:
         )
 
         return result
-
-    async def _handle_file_rollback_request(self, message: Message) -> None:
-        """Handle file rollback request from the GUI.
-
-        This is triggered when the user right-clicks a chat message and
-        selects "Rollback files to this point".
-
-        Args:
-            message: FileRollbackRequest message from GUI.
-        """
-        if not isinstance(message, FileRollbackRequest):
-            return
-
-        logger.info(
-            "File rollback request: agent={}, checkpoint={}",
-            message.agent_type, message.checkpoint_id,
-        )
-
-        try:
-            result = await self.rollback_to_checkpoint(
-                agent_type=message.agent_type,
-                checkpoint_id=message.checkpoint_id,
-                restore_conversation=False,  # Don't restore conv on GUI rollback
-            )
-            status = RollbackStatus(
-                checkpoint_id=message.checkpoint_id,
-                agent_type=message.agent_type,
-                success=True,
-                restored_files=result["restored_files"],
-            )
-        except Exception as e:
-            logger.error("Rollback failed: {}", e)
-            status = RollbackStatus(
-                checkpoint_id=message.checkpoint_id,
-                agent_type=message.agent_type,
-                success=False,
-                error=str(e),
-            )
-
-        await self.bus.publish(status)
 
     async def _handle_restart_request(self, message: Message) -> None:
         """Handle restart request from GUI.
