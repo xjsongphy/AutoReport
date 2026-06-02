@@ -44,7 +44,7 @@ class AnthropicProvider(LLMProvider):
 
     def _convert_messages(
         self, messages: list[Message],
-    ) -> tuple[str | None, list[dict]]:
+    ) -> tuple[str | list[dict] | None, list[dict]]:
         """Convert internal messages to Anthropic API format.
 
         Handles three special message types:
@@ -53,19 +53,29 @@ class AnthropicProvider(LLMProvider):
            with type="tool_result" blocks
         3. Regular messages -> simple role/content dicts
 
+        When a system message has ``cache_control=True`` the system parameter is
+        emitted as a list of content blocks so the last block can carry an
+        ephemeral cache-control marker.
+
         Per Anthropic API spec:
         - tool_use blocks go in assistant messages
         - tool_result blocks go in user messages (keyed by tool_use_id)
         - Consecutive same-role messages must be merged
         - Conversation cannot end with an assistant turn
         """
-        system_message = None
+        system_message: str | list[dict] | None = None
         anthropic_messages: list[dict] = []
         pending_tool_results: list[dict] = []
 
         for msg in messages:
             if msg.role == "system":
-                system_message = self._safe_text(msg.content)
+                if msg.cache_control:
+                    system_message = [
+                        {"type": "text", "text": self._safe_text(msg.content),
+                         "cache_control": {"type": "ephemeral"}},
+                    ]
+                else:
+                    system_message = self._safe_text(msg.content)
                 continue
 
             # Flush pending tool results before adding a new non-tool message

@@ -94,6 +94,7 @@ dev = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "pytest-asyncio" },
     { name = "pytest-qt" },
 ]
 
@@ -123,7 +124,10 @@ requires-dist = [
 provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest-qt", specifier = ">=4.5.0" }]
+dev = [
+    { name = "pytest-asyncio", specifier = ">=0.26.0" },
+    { name = "pytest-qt", specifier = ">=4.5.0" },
+]
 
 [[package]]
 name = "certifi"
