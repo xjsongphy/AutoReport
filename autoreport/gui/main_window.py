@@ -4,6 +4,7 @@ import asyncio
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 from PyQt6.QtCore import QTimer, Qt, pyqtSignal
@@ -37,7 +38,7 @@ from ..interfaces.types import (
     UserMessage,
 )
 from ..utils.agent_labels import get_agent_badge, get_agent_title
-from ..utils.editor_context import build_editor_context_message
+from ..utils.editor_context import build_editor_context_message, build_editor_context_prompt
 from ..utils.logging_config import ui_logger
 from .scale import dpi_scale
 from .theme import get_theme_colors
@@ -262,8 +263,8 @@ class MainWindow(QMainWindow):
                 border_color=c["border"],
                 background_color=c["surface"],
                 foreground_color=c["fg"],
-                hover_border_color=c["focus"],
-                selection_bg=c["selection"],
+                hover_border_color=c["buttonBlue"],
+                selection_bg=c["selectionBlue"],
                 selection_fg=c["fg"],
                 font_size=12,
                 padding="2px 24px 2px 8px",
@@ -333,9 +334,9 @@ class MainWindow(QMainWindow):
             }}
             /* VS Code send button */
             #sendBtn {{
-                background-color: {c["send_bg"]};
+                background-color: {c["buttonBlue"]};
                 color: {c["primaryBtnFg"]};
-                border: 1px solid {c["send_bg"]};
+                border: 1px solid {c["buttonBlue"]};
                 border-radius: {px(6)};
                 font-size: {px(14)};
                 font-weight: {c["fw_bold"]};
@@ -346,8 +347,8 @@ class MainWindow(QMainWindow):
                 max-height: {px(22)};
             }}
             #sendBtn:hover {{
-                background-color: {c["send_hover"]};
-                border-color: {c["send_hover"]};
+                background-color: {c["buttonBlue"]};
+                border-color: {c["buttonBlue"]};
             }}
             #stopBtn {{
                 background-color: transparent;
@@ -399,7 +400,7 @@ class MainWindow(QMainWindow):
                 background-color: {c["bubble_hover"]};
             }}
             #userContextChip {{
-                background-color: {c["card"]};
+                background-color: {c["hover"]};
                 border: 1px solid {c["border"]};
                 border-radius: {px(8)};
             }}
@@ -425,8 +426,20 @@ class MainWindow(QMainWindow):
             #userMessageText {{
                 color: {c["editor_fg"]};
                 font-size: {px(13)};
-                line-height: 1.5;
+                line-height: 1.7;
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
+            }}
+            #messageExpandBtn {{
+                background-color: rgba(32, 33, 36, 0.92);
+                color: #f3f4f6;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: {px(9)};
+                padding: {px(3)} {px(8)};
+                font-size: {px(11)};
+                font-weight: {c["fw_medium"]};
+            }}
+            #messageExpandBtn:hover {{
+                background-color: rgba(48, 50, 56, 0.96);
             }}
             #userMessageBubbleContainer {{
                 background-color: transparent;
@@ -449,9 +462,9 @@ class MainWindow(QMainWindow):
             }}
             {filled_button_qss(
                 "#userSaveBtn",
-                bg=c["primary"],
+                bg=c["buttonBlue"],
                 fg=c["primaryBtnFg"],
-                hover_bg=c["primary_hover"],
+                hover_bg=c["buttonBlue"],
                 disabled_bg=c["muted"],
                 disabled_fg=c["primaryBtnFg"],
                 radius=px(4),
@@ -588,7 +601,7 @@ class MainWindow(QMainWindow):
                 color: {c["tool_fg"]};
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
                 font-size: {px(13)};
-                line-height: 1.5;
+                line-height: 1.7;
                 font-weight: {c["fw_medium"]};
             }}
             #toolCallDetail {{
@@ -620,6 +633,37 @@ class MainWindow(QMainWindow):
                 background-color: #353b46;
                 border: none;
             }}
+            #manageDetailCard {{
+                background-color: #23272f;
+                border: 1px solid #353b46;
+                border-radius: {px(8)};
+            }}
+            #manageDetailTitle {{
+                color: #9aa3b2;
+                font-size: {px(10)};
+                font-weight: {c["fw_semibold"]};
+            }}
+            #manageDetailItem {{
+                color: #d5dbe5;
+                font-size: {px(11)};
+                line-height: 1.6;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
+            }}
+            #manageDetailDone {{
+                color: #9aa3b2;
+                font-size: {px(11)};
+                line-height: 1.6;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
+                text-decoration: line-through;
+            }}
+            #manageDetailEmpty {{
+                color: #9aa3b2;
+                font-size: {px(11)};
+            }}
+            #manageDetailDivider {{
+                background-color: #353b46;
+                border: none;
+            }}
             #bashCopyBtn {{
                 background-color: transparent;
                 border: none;
@@ -633,7 +677,7 @@ class MainWindow(QMainWindow):
 
             /* ---- Status Indicator ---- */
             #statusSpinner {{
-                color: {c["spinner_fg"]};
+                color: {c["buttonBlue"]};
                 font-size: {px(13)};
             }}
             #statusHeader {{
@@ -981,33 +1025,41 @@ class MainWindow(QMainWindow):
                 panel.add_message(
                     "user",
                     content,
-                    summary=rec.get("summary"),
-                    detail=rec.get("detail"),
-                    expandable=rec.get("expandable", True),
+                    display_mode=str(rec.get("display_mode") or "bubble"),
+                    bubble_title=rec.get("bubble_title"),
+                    bubble_align=str(rec.get("bubble_align") or "right"),
+                    bubble_on_timeline=bool(rec.get("bubble_on_timeline", False)),
+                    bubble_collapsible=bool(rec.get("bubble_collapsible", True)),
+                    allow_edit=str(rec.get("source", "user")) == "user",
                 )
             elif role == "agent":
-                panel.add_message(
-                    "agent",
-                    content,
-                    summary=rec.get("summary"),
-                    detail=rec.get("detail"),
-                    expandable=rec.get("expandable", True),
-                )
+                if rec.get("display_mode") == "bubble":
+                    panel.add_message(
+                        "agent",
+                        content,
+                        display_mode="bubble",
+                        bubble_title=rec.get("bubble_title"),
+                        bubble_align=str(rec.get("bubble_align") or "left"),
+                        bubble_on_timeline=bool(rec.get("bubble_on_timeline", True)),
+                        bubble_collapsible=bool(rec.get("bubble_collapsible", True)),
+                    )
+                else:
+                    panel.add_message("agent", content)
             elif role == "thinking":
                 panel.add_message(
                     "agent",
                     content,
-                    summary=rec.get("summary") or "Thought",
-                    detail=rec.get("detail") or content,
-                    expandable=rec.get("expandable", True),
+                    display_mode="bubble",
+                    bubble_title=rec.get("bubble_title") or "Thought",
+                    bubble_align="left",
+                    bubble_on_timeline=True,
+                    bubble_collapsible=bool(rec.get("bubble_collapsible", True)),
                 )
             elif role == "tool_call":
                 panel.add_tool_call(
                     content,
                     rec.get("arguments", {}),
                     summary=rec.get("summary"),
-                    detail=rec.get("detail"),
-                    expandable=rec.get("expandable", True),
                 )
             elif role == "tool_result":
                 panel.add_tool_result(
@@ -1015,8 +1067,6 @@ class MainWindow(QMainWindow):
                     rec.get("result"),
                     rec.get("error"),
                     summary=rec.get("summary"),
-                    detail=rec.get("detail"),
-                    expandable=rec.get("expandable"),
                 )
             elif role == "error":
                 panel.add_error(rec.get("source", ""), content)
@@ -1031,9 +1081,11 @@ class MainWindow(QMainWindow):
             "thinking",
             detail or "",
             extra={
-                "summary": summary,
-                "detail": detail or "",
-                "expandable": expandable,
+                "display_mode": "bubble",
+                "bubble_title": summary,
+                "bubble_align": "left",
+                "bubble_on_timeline": True,
+                "bubble_collapsible": expandable,
             },
         )
 
@@ -1045,6 +1097,9 @@ class MainWindow(QMainWindow):
             role = str(rec.get("role", ""))
             content = str(rec.get("content", ""))
             if role == "user":
+                context = rec.get("editor_context")
+                if isinstance(context, dict):
+                    content = build_editor_context_prompt(context, content)
                 converted.append({"role": "user", "content": content})
             elif role == "agent":
                 converted.append({"role": "assistant", "content": content})
@@ -1095,34 +1150,10 @@ class MainWindow(QMainWindow):
         full_content = content
         file_context = self._pending_file_context.get(agent_type)
         if file_context:
-            context_msg = self._format_file_context(file_context)
-            if context_msg:
-                full_content = f"{context_msg}\n\n{content}"
+            full_content = build_editor_context_prompt(file_context, content)
             self._pending_file_context[agent_type] = None
 
         self._submit_coroutine(self.backend.send_user_message(full_content, agent_type))
-
-    def _format_file_context(self, file_context: dict) -> str:
-        """Format file context for attachment to user message."""
-        if not file_context:
-            return ""
-
-        if file_context.get("type") == "selection":
-            fp = file_context.get("file", "")
-            s = file_context.get("start_line", "")
-            e = file_context.get("end_line", "")
-            return (
-                "Editor context: selection\n"
-                f"File: {fp}\n"
-                f"Selected lines: {s}-{e}\n"
-            )
-        elif file_context.get("type") == "file":
-            fp = file_context.get("file", "")
-            return (
-                "Editor context: file\n"
-                f"Current file: {fp}\n"
-            )
-        return ""
 
     def _on_agent_file_context(self, file_context: dict) -> None:
         self._pending_file_context[self.current_agent_type] = file_context
@@ -1224,7 +1255,7 @@ class MainWindow(QMainWindow):
             for row in reversed(rows):
                 if getattr(row, "_role", "") != "agent":
                     continue
-                if getattr(row, "_summary", None) is not None:
+                if getattr(row, "_display_mode", "") != "agent_markdown":
                     continue
                 if not getattr(row, "_content", ""):
                     continue
@@ -1289,13 +1320,13 @@ class MainWindow(QMainWindow):
             return
         source_key = str(message.source or "user")
         is_agent_message = source_key not in {"user", "system"}
-        is_coordination = source_key == "main_agent"
-        summary = None
-        detail = None
-        expandable = True
+        bubble_title = None
+        bubble_align = "right"
+        bubble_on_timeline = False
+        allow_edit = source_key == "user"
         if is_agent_message:
             sender = "Main" if source_key == "main_agent" else self._get_agent_display_name(source_key)
-            summary, detail, expandable = self._build_inter_agent_summary(
+            bubble_title = self._build_inter_agent_title(
                 f"Message From {sender}",
                 message.content,
             )
@@ -1305,10 +1336,13 @@ class MainWindow(QMainWindow):
             "user",
             message.content,
             source=message.source,
-            coordination=is_coordination,
-            summary=summary,
-            detail=detail,
-            expandable=expandable,
+            coordination=False,
+            display_mode="bubble",
+            bubble_title=bubble_title,
+            bubble_align=bubble_align,
+            bubble_on_timeline=bubble_on_timeline,
+            bubble_collapsible=True,
+            allow_edit=allow_edit,
         )
 
         self._conv_store.append_message(
@@ -1317,9 +1351,11 @@ class MainWindow(QMainWindow):
             message.content,
             extra={
                 "source": message.source,
-                "summary": summary,
-                "detail": detail,
-                "expandable": expandable,
+                "display_mode": "bubble",
+                "bubble_title": bubble_title,
+                "bubble_align": bubble_align,
+                "bubble_on_timeline": bubble_on_timeline,
+                "bubble_collapsible": True,
             },
         )
 
@@ -1336,19 +1372,14 @@ class MainWindow(QMainWindow):
         panel.finish_thinking()
         state.phase = "tool"
         summary = None
-        detail = None
-        expandable = True
         if agent_str == "main" and message.tool_name == "send_to_agent":
             target = self._get_agent_display_name(str(message.arguments.get("agent_type", "sub")))
             summary = f"Main To {target}"
-            expandable = False
 
         panel.add_tool_call(
             message.tool_name,
             message.arguments,
             summary=summary,
-            detail=detail,
-            expandable=expandable,
         )
         self._conv_store.append_tool_call(
             agent_str,
@@ -1356,8 +1387,6 @@ class MainWindow(QMainWindow):
             message.arguments,
             extra={
                 "summary": summary,
-                "detail": detail,
-                "expandable": expandable,
             },
         )
 
@@ -1366,6 +1395,21 @@ class MainWindow(QMainWindow):
         state = self._state_for_agent(agent_str)
         if not self._is_visible_agent(agent_str):
             result_str = str(message.result) if message.result else None
+            if agent_str == "main" and message.tool_name == "send_to_agent":
+                bubble_title, bubble_body = self._format_send_to_agent_bubble(message.result, message.error)
+                if bubble_title:
+                    self._conv_store.append_message(
+                        agent_str,
+                        "agent",
+                        bubble_body or "",
+                        extra={
+                            "display_mode": "bubble",
+                            "bubble_title": bubble_title,
+                            "bubble_align": "left",
+                            "bubble_on_timeline": True,
+                            "bubble_collapsible": True,
+                        },
+                    )
             self._conv_store.append_tool_result(
                 agent_str,
                 message.tool_name,
@@ -1376,28 +1420,50 @@ class MainWindow(QMainWindow):
         panel = self._get_panel_for_agent(agent_str)
         result_str = str(message.result) if message.result else None
         summary = None
-        detail = None
-        expandable = None
         safe_error = None
         if message.error:
             safe_error = "Tool execution failed"
 
         if agent_str == "main" and message.tool_name == "send_to_agent":
-            summary, detail, expandable = self._format_send_to_agent_result(message.result, message.error)
-            result_str = detail or summary
+            summary, bubble_body = self._format_send_to_agent_bubble(message.result, message.error)
+            result_str = bubble_body or summary
         elif message.tool_name == "manage_tasks":
-            summary, detail, expandable = self._format_manage_tasks_result(message.result, message.error)
-            if summary or detail:
-                result_str = detail or summary
+            message.result = self._augment_manage_tasks_result(agent_str, message.result)
+            summary, _, _ = self._format_manage_tasks_result(message.result, message.error)
+            if summary:
+                result_str = summary
 
         panel.add_tool_result(
             message.tool_name,
             message.result,
             safe_error,
             summary=summary,
-            detail=detail,
-            expandable=expandable,
         )
+        if agent_str == "main" and message.tool_name == "send_to_agent":
+            bubble_title, bubble_body = self._format_send_to_agent_bubble(message.result, message.error)
+            if bubble_title:
+                if self._is_visible_agent(agent_str):
+                    panel.add_message(
+                        "agent",
+                        bubble_body or "",
+                        display_mode="bubble",
+                        bubble_title=bubble_title,
+                        bubble_align="left",
+                        bubble_on_timeline=True,
+                        bubble_collapsible=True,
+                    )
+                self._conv_store.append_message(
+                    agent_str,
+                    "agent",
+                    bubble_body or "",
+                    extra={
+                        "display_mode": "bubble",
+                        "bubble_title": bubble_title,
+                        "bubble_align": "left",
+                        "bubble_on_timeline": True,
+                        "bubble_collapsible": True,
+                    },
+                )
         state.phase = "tool"
         self._conv_store.append_tool_result(
             agent_str,
@@ -1406,18 +1472,44 @@ class MainWindow(QMainWindow):
             message.error,
             extra={
                 "summary": summary,
-                "detail": detail,
-                "expandable": expandable,
             },
         )
 
-    def _format_send_to_agent_result(self, result, error: str | None) -> tuple[str, str | None, bool]:
+    def _augment_manage_tasks_result(self, agent_str: str, result: Any) -> Any:
+        """Ensure manage_tasks result always carries todolist/waitlist for UI rendering."""
+        if not isinstance(result, dict):
+            return result
+        if isinstance(result.get("todolist"), list) and isinstance(result.get("waitlist"), list):
+            return result
+        loop_manager = getattr(self.backend, "loop_manager", None)
+        task_board = getattr(loop_manager, "_task_board", None) if loop_manager is not None else None
+        if task_board is None:
+            return result
+        try:
+            agent_type = AgentType(agent_str)
+        except ValueError:
+            return result
+        session_id = self._conv_store.get_current_session_id(agent_str)
+        todolist = task_board.get_todolist(agent_type, session_id=session_id)
+        waitlist = task_board.get_waitlist(agent_type, session_id=session_id)
+        augmented = dict(result)
+        augmented["todolist"] = [
+            {"task_id": t.task_id, "brief": t.brief, "status": t.status.value, "source_agent": t.source_agent.value}
+            for t in todolist
+        ]
+        augmented["waitlist"] = [
+            {"task_id": t.task_id, "brief": t.brief, "status": t.status.value, "target_agent": t.target_agent.value}
+            for t in waitlist
+        ]
+        return augmented
+
+    def _format_send_to_agent_bubble(self, result, error: str | None) -> tuple[str, str | None]:
         if error:
-            return ("Send To Agent", error, True)
+            return ("Send To Agent", error)
 
         if not isinstance(result, dict):
             text = str(result).strip() if result is not None else ""
-            return ("Sub-agent replied", text or None, bool(text))
+            return ("Sub-agent replied", text or None)
 
         target = self._get_agent_display_name(str(result.get("agent_type", "sub")))
         status = str(result.get("status", "success"))
@@ -1425,23 +1517,22 @@ class MainWindow(QMainWindow):
 
         if status == "delegated":
             detail = str(result.get("message", "") or "").strip() or None
-            return (f"Delegated To {target}", detail, bool(detail))
+            return (f"Delegated To {target}", detail)
 
         if status == "timeout":
             detail = str(result.get("error", "") or "").strip() or None
-            return (f"{target} did not reply in time", detail, bool(detail))
+            return (f"{target} did not reply in time", detail)
 
         if status == "error":
             detail = str(result.get("error", "") or "").strip() or None
-            return (f"Send To {target}", detail, bool(detail))
+            return (f"Send To {target}", detail)
 
         if not response:
-            return (f"{target} replied", None, False)
+            return (f"{target} replied", None)
 
         first_line = response.splitlines()[0].strip()
         summary = f"{target} replied: {first_line}" if first_line else f"{target} replied"
-        detail = response if ("\n" in response or len(response) > len(first_line)) else None
-        return (summary, detail, bool(detail))
+        return (summary, response)
 
     def _format_manage_tasks_result(self, result, error: str | None) -> tuple[str | None, str | None, bool | None]:
         if error or not isinstance(result, dict):
@@ -1451,7 +1542,7 @@ class MainWindow(QMainWindow):
             return (None, None, None)
 
         def _rows(items: list[dict], title: str) -> list[str]:
-            lines = [f"<b>{title}</b>"]
+            lines = [title]
             shown = 0
             for item in items:
                 if shown >= 10:
@@ -1460,20 +1551,16 @@ class MainWindow(QMainWindow):
                 brief = str(item.get("brief", "")).strip() or "task"
                 done = status in {"completed", "cancelled", "failed"}
                 marker = "☑" if done else "☐"
-                if done:
-                    lines.append(f"<span style='color:#9098a3'>{marker} <s>{brief}</s></span>")
-                else:
-                    lines.append(f"<span style='color:#9098a3'>{marker} {brief}</span>")
+                lines.append(f"{marker} {brief}")
                 shown += 1
             if shown == 0:
-                lines.append("<span style='color:#9098a3'>—</span>")
+                lines.append("—")
             return lines
 
         todolist = result.get("todolist")
         waitlist = result.get("waitlist")
         if isinstance(todolist, list) and isinstance(waitlist, list):
-            body = "\n".join(_rows(todolist, "Todo") + ["", *(_rows(waitlist, "Waiting"))])
-            summary = f"<b>Task</b><br/>{body}"
+            summary = "\n".join(["<b>Task</b>", *(_rows(todolist, "Todo")), "", *(_rows(waitlist, "Wait"))])
             return (summary, None, False)
 
         ui_summary = str(result.get("_ui_summary", "") or "").strip()
@@ -1482,15 +1569,13 @@ class MainWindow(QMainWindow):
             return (None, None, None)
         return (ui_summary or "Task completed", ui_detail or None, bool(ui_detail))
 
-    def _build_inter_agent_summary(self, prefix: str, content: str) -> tuple[str, str | None, bool]:
+    def _build_inter_agent_title(self, prefix: str, content: str) -> str:
         response = str(content or "").strip()
         if not response:
-            return (prefix, None, False)
+            return prefix
 
         first_line = response.splitlines()[0].strip()
-        summary = f"{prefix}: {first_line}" if first_line else prefix
-        detail = response if ("\n" in response or len(response) > len(first_line)) else None
-        return (summary, detail, bool(detail))
+        return f"{prefix}: {first_line}" if first_line else prefix
 
     def _handle_status_change(self, message: StatusChange) -> None:
         agent_str = str(message.agent_type)
@@ -1509,7 +1594,7 @@ class MainWindow(QMainWindow):
 
         agent_str = message.agent_type.value if isinstance(message.agent_type, Enum) else str(message.agent_type)
         issue_type = message.feedback_type or "issue"
-        summary, detail, expandable = self._build_inter_agent_summary(
+        bubble_title = self._build_inter_agent_title(
             f"{self._get_agent_display_name(agent_str)} reported {issue_type}",
             message.content,
         )
@@ -1518,9 +1603,11 @@ class MainWindow(QMainWindow):
                 "agent",
                 message.content,
                 source=agent_str,
-                summary=summary,
-                detail=detail,
-                expandable=expandable,
+                display_mode="bubble",
+                bubble_title=bubble_title,
+                bubble_align="left",
+                bubble_on_timeline=True,
+                bubble_collapsible=True,
             )
         self._conv_store.append_message(
             "main",
@@ -1528,9 +1615,11 @@ class MainWindow(QMainWindow):
             message.content,
             extra={
                 "source": agent_str,
-                "summary": summary,
-                "detail": detail,
-                "expandable": expandable,
+                "display_mode": "bubble",
+                "bubble_title": bubble_title,
+                "bubble_align": "left",
+                "bubble_on_timeline": True,
+                "bubble_collapsible": True,
                 "feedback_type": issue_type,
             },
         )

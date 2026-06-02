@@ -134,29 +134,67 @@ def test_multiline_content(qtbot):
 def test_user_message_can_render_collapsed_summary(qtbot):
     widget = MessageRow(
         role="user",
-        content="line 1\nline 2",
-        summary="Message From Main: line 1",
-        detail="line 1\nline 2",
+        content="line 1\nline 2\nline 3\nline 4\nline 5\nline 6",
+        bubble_title="Message From Main: line 1",
     )
     qtbot.addWidget(widget)
+    widget.resize(520, 240)
+    widget.show()
+    qtbot.waitExposed(widget)
+    qtbot.wait(20)
 
     assert not widget.is_expanded()
-    widget._summary_header.clicked.emit()
+    assert widget._body_content_widget is not None
+    widget._bubble_header.clicked.emit()
     assert widget.is_expanded()
 
 
 def test_agent_message_can_render_collapsed_summary(qtbot):
     widget = MessageRow(
         role="agent",
-        content="issue detail",
-        summary="Theory reported quality: issue detail",
-        detail="issue detail\nmore",
+        content="issue detail\nmore\nline 3\nline 4\nline 5\nline 6",
+        display_mode="bubble",
+        bubble_title="Theory reported quality: issue detail",
+        bubble_align="left",
+        bubble_on_timeline=True,
     )
     qtbot.addWidget(widget)
+    widget.resize(520, 260)
+    widget.show()
+    qtbot.waitExposed(widget)
+    qtbot.wait(20)
 
     assert not widget.is_expanded()
-    widget._summary_header.clicked.emit()
+    assert widget._body_content_widget is not None
+    widget._bubble_header.clicked.emit()
     assert widget.is_expanded()
+
+
+def test_long_user_bubble_shows_expand_button_on_hover(qtbot):
+    widget = MessageRow(
+        role="user",
+        content="\n".join(f"line {i}" for i in range(1, 9)),
+    )
+    qtbot.addWidget(widget)
+    widget.resize(520, 260)
+    widget.show()
+    qtbot.waitExposed(widget)
+    qtbot.wait(20)
+
+    assert widget._body_content_widget is not None
+    body = widget._body_content_widget
+    assert body.has_overflow() is True
+    assert body._toggle_btn.isVisible() is False
+
+    QApplication.sendEvent(body, QEvent(QEvent.Type.Enter))
+    qtbot.wait(20)
+    assert body._toggle_btn.isVisible() is True
+    assert body._toggle_btn.text() == "Show More"
+
+    qtbot.mouseClick(body._toggle_btn, Qt.MouseButton.LeftButton)
+    qtbot.wait(20)
+    assert body.is_expanded() is True
+    assert body._toggle_btn.text() == "Show less"
 
 
 def test_user_bubble_width_stable_when_actions_toggle(qtbot):

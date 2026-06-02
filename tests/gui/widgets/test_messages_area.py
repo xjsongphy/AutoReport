@@ -54,8 +54,10 @@ def test_add_collapsed_message_row(qtbot):
     widget.add_message_row(
         role="agent",
         content="detail line 1\ndetail line 2",
-        summary="Collapsed summary",
-        detail="detail line 1\ndetail line 2",
+        display_mode="bubble",
+        bubble_title="Collapsed summary",
+        bubble_align="left",
+        bubble_on_timeline=True,
     )
 
     rows = widget.get_message_rows()
@@ -306,10 +308,11 @@ def test_timeline_chain_breaks_on_user_bubble_between_chainable_items(qtbot):
     tool = widget.add_tool_group()
     # Simulate other-agent message rendered as user bubble in current panel.
     widget.add_message_row(
-        role="user",
+        role="agent",
         content="interruption",
         timestamp="12:01",
-        render_as_user_bubble=True,
+        display_mode="bubble",
+        bubble_align="right",
     )
     second_agent = widget.add_message_row(role="agent", content="a2", timestamp="12:02")
 

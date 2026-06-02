@@ -69,8 +69,10 @@ def test_add_message_with_summary(agent_panel):
     agent_panel.add_message(
         role="agent",
         content="detail line 1\ndetail line 2",
-        summary="Collapsed summary",
-        detail="detail line 1\ndetail line 2",
+        display_mode="bubble",
+        bubble_title="Collapsed summary",
+        bubble_align="left",
+        bubble_on_timeline=True,
     )
 
     rows = agent_panel._messages_area.get_message_rows()
@@ -215,21 +217,21 @@ def test_agent_text_tool_text_keeps_separate_timeline_items(agent_panel):
 
 
 def test_thinking_row_finishes_with_elapsed_summary(agent_panel):
-    agent_panel.set_status("thinking")
+    agent_panel.start_thinking()
     rows = agent_panel._messages_area.get_message_rows()
     assert len(rows) == 1
-    assert rows[0]._summary.startswith("Thought for ")
+    assert rows[0]._bubble_title.startswith("Thought for ")
 
     agent_panel.append_thinking("raw **markdown** thought")
-    assert rows[0]._detail == "raw **markdown** thought"
+    assert rows[0]._bubble_text == "raw **markdown** thought"
 
-    agent_panel.set_status("idle")
-    assert rows[0]._summary.startswith("Thought for ")
+    agent_panel.finish_thinking()
+    assert rows[0]._bubble_title.startswith("Thought for ")
     assert rows[0]._complete is True
 
 
 def test_thinking_timer_updates_existing_row_in_place(agent_panel):
-    agent_panel.set_status("thinking")
+    agent_panel.start_thinking()
     row = agent_panel._messages_area.get_message_rows()[0]
 
     agent_panel._thinking_started_at -= 2
@@ -237,24 +239,24 @@ def test_thinking_timer_updates_existing_row_in_place(agent_panel):
 
     rows = agent_panel._messages_area.get_message_rows()
     assert rows == [row]
-    assert row._summary.startswith("Thought for ")
-    assert row._summary != "Thought for 1s"
+    assert row._bubble_title.startswith("Thought for ")
+    assert row._bubble_title != "Thought for 1s"
 
 
 def test_thinking_detail_updates_existing_detail_label(agent_panel):
-    agent_panel.set_status("thinking")
+    agent_panel.start_thinking()
     row = agent_panel._messages_area.get_message_rows()[0]
-    agent_panel.append_thinking("first")
-    row._summary_header.clicked.emit()
+    agent_panel.append_thinking("first\nsecond\nthird\nfourth\nfifth\nsixth")
+    row._bubble_header.clicked.emit()
     assert row.is_expanded()
-    assert row._detail_label is not None
-    assert "first" in row._detail_label.text()
+    assert row._body_content_widget is not None
+    assert "first" in row._body_content_widget.label().text()
 
-    agent_panel.append_thinking(" second")
+    agent_panel.append_thinking("first\nsecond\nthird\nfourth\nfifth\nsixth\nseventh")
     rows = agent_panel._messages_area.get_message_rows()
     assert rows == [row]
     assert row.is_expanded()
-    assert "first second" in row._detail_label.text()
+    assert "seventh" in row._body_content_widget.label().text()
 
 
 def test_thinking_stream_merge_handles_delta_snapshot_and_final(agent_panel):
@@ -263,25 +265,32 @@ def test_thinking_stream_merge_handles_delta_snapshot_and_final(agent_panel):
     assert agent_panel._merge_thinking_chunk("hello world", "hello world") == "hello world"
     assert agent_panel._merge_thinking_chunk("hello wor", "world") == "hello world"
 
-    agent_panel.set_status("thinking")
+    agent_panel.start_thinking()
     agent_panel.append_thinking("hello ")
     agent_panel.append_thinking("world")
     agent_panel.append_thinking("hello world")
     row = agent_panel._messages_area.get_message_rows()[0]
-    assert row._detail == "hello world"
+    assert row._bubble_text == "hello world"
 
 
 def test_summary_arrow_stays_next_to_text(qtbot):
     from autoreport.gui.widgets.message_row import MessageRow
 
-    row = MessageRow(role="agent", content="", summary="Thought for 1s", detail="detail")
+    row = MessageRow(
+        role="agent",
+        content="detail",
+        display_mode="bubble",
+        bubble_title="Thought for 1s",
+        bubble_align="left",
+        bubble_on_timeline=True,
+    )
     qtbot.addWidget(row)
     row.resize(600, 80)
     row.show()
     qtbot.waitExposed(row)
 
-    text_right = row._summary_text_label.mapTo(row, row._summary_text_label.rect().topRight()).x()
-    arrow_left = row._summary_arrow_widget.mapTo(row, row._summary_arrow_widget.rect().topLeft()).x()
+    text_right = row._bubble_title_label.mapTo(row, row._bubble_title_label.rect().topRight()).x()
+    arrow_left = row._bubble_arrow_widget.mapTo(row, row._bubble_arrow_widget.rect().topLeft()).x()
     assert 0 <= arrow_left - text_right <= 10
 
 

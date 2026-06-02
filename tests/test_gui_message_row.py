@@ -114,14 +114,14 @@ class TestMessageRowCopyButton:
     def test_footer_hidden_initially(self, qtbot):
         row = MessageRow("agent", "Hello")
         qtbot.addWidget(row)
-        assert row._footer.isHidden()
+        assert not hasattr(row, "_footer")
 
     def test_mark_complete_shows_footer(self, qtbot):
         row = MessageRow("agent", "Hello")
         qtbot.addWidget(row)
         row.mark_complete()
         assert row._complete
-        assert not row._footer.isHidden()
+        assert not hasattr(row, "_footer")
 
     def test_user_message_has_no_footer(self, qtbot):
         row = MessageRow("user", "Query")
@@ -147,7 +147,7 @@ class TestMessageRowCopyButton:
         row = MessageRow("agent", "Result:\n```py\nx = 1\n```\nDone")
         qtbot.addWidget(row)
         assert row._agent_content_layout is not None
-        assert row._agent_content_layout.count() >= 2
+        assert "x = 1" in row._wrapping_labels[0].text()
 
 
 class TestCodeBlockWidget:

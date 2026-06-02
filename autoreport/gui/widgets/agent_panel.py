@@ -6,9 +6,10 @@ import time
 from typing import Any
 from concurrent.futures import ThreadPoolExecutor
 
-from PyQt6.QtCore import QPoint, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QEvent, QPoint, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QLinearGradient, QPainter
 from PyQt6.QtWidgets import (
+    QStyle,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -55,7 +56,8 @@ class _ComposerTopFade(QWidget):
         top = QColor(self._base_color)
         bottom = QColor(self._base_color)
         top.setAlpha(0)
-        bottom.setAlpha(255)
+        # Keep fade visible but lighter to avoid "heavier opacity" after z-order fixes.
+        bottom.setAlpha(210)
         grad.setColorAt(0.0, top)
         grad.setColorAt(1.0, bottom)
         p.fillRect(self.rect(), grad)
@@ -211,7 +213,6 @@ class AgentPanel(QWidget):
 
         # ---- Messages area ----
         self._messages_area = MessagesArea()
-        self._messages_area.setViewportMargins(0, 0, 0, 0)
         self._messages_area.edit_requested.connect(self._on_message_edit_requested)
         self._messages_area.edit_saved.connect(self._on_message_edit_saved)
         self._messages_area.edit_cancelled.connect(self._on_message_edit_cancelled)
@@ -264,7 +265,7 @@ class AgentPanel(QWidget):
         self._input_field.file_reference_requested.connect(self._on_file_reference_requested)
         self._input_field.command_palette_requested.connect(self._on_command_palette_requested)
         self._input_field.popup_navigate.connect(self._on_popup_navigate)
-        self._input_field.height_changed.connect(lambda _height: QTimer.singleShot(0, self._update_composer_alignment))
+        self._input_field.height_changed.connect(self._on_input_height_changed)
         icl.addWidget(self._input_field, 1)
 
         self._send_btn = IconActionButton(
@@ -331,13 +332,15 @@ class AgentPanel(QWidget):
 
         composer_layout.addWidget(secondary_bar)
         composer_host_layout.addWidget(self._input_container, 1)
+        self._composer_host.installEventFilter(self)
+        self._input_container.installEventFilter(self)
         layout.addWidget(self._composer_host)
         self._composer_bottom_gap = QWidget(self)
         self._composer_bottom_gap.setObjectName("composerBottomGap")
         self._composer_bottom_gap.setFixedHeight(0)
         layout.addWidget(self._composer_bottom_gap)
         self._layout = layout
-        self._update_composer_fade_geometry()
+        self._reflow_composer(stick_if_bottom=False, defer_once=False)
 
     def _setup_header_icons(self) -> None:
         c = get_theme_colors()
@@ -385,7 +388,7 @@ class AgentPanel(QWidget):
         header_min_width = margin_total + content_width + (gap_count * spacing) + 24
         min_width = max(header_min_width, self._content_minimum_width())
         self.setMinimumWidth(min_width)
-        self._sync_composer_gap()
+        self._reflow_composer(stick_if_bottom=False, defer_once=False)
 
     def _content_minimum_width(self) -> int:
         width = 0
@@ -397,37 +400,66 @@ class AgentPanel(QWidget):
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
-        # Update geometry after layout system processes the resize
-        QTimer.singleShot(0, self._update_composer_fade_geometry)
-        QTimer.singleShot(0, self._update_composer_alignment)
-        QTimer.singleShot(0, self._sync_composer_gap)
+        self._reflow_composer(stick_if_bottom=True, defer_once=True)
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
         # Initial splitter/layout negotiation can leave an outdated minimum width
         # until first maximize/restore; refresh once when panel is shown.
         QTimer.singleShot(0, self._update_width)
-        QTimer.singleShot(0, self._update_composer_fade_geometry)
-        QTimer.singleShot(0, self._update_composer_alignment)
+        QTimer.singleShot(0, lambda: self._reflow_composer(stick_if_bottom=False, defer_once=False))
 
     def _sync_composer_gap(self) -> None:
         """Keep bottom gap height equal to horizontal gutter width around composer."""
         if not hasattr(self, "_composer_bottom_gap"):
             return
-        side_gap = max(0, self._input_container.mapTo(self, QPoint(0, 0)).x())
+        left, _right = self._composer_anchor_bounds()
+        side_gap = max(0, int(left))
         if self._composer_bottom_gap.height() != side_gap:
             self._composer_bottom_gap.setFixedHeight(side_gap)
-        self._update_composer_fade_geometry()
-        self._composer_top_fade.raise_()
-        self._composer_host.raise_()
-        self._composer_bottom_gap.raise_()
+
+    def _sync_messages_bottom_inset(self) -> None:
+        """Prevent composer/fade from covering the last message rows."""
+        if not hasattr(self, "_messages_area") or not hasattr(self, "_composer_host"):
+            return
+        messages_rect = self._messages_area.geometry()
+        composer_rect = self._composer_host.geometry()
+        overlap = max(0, messages_rect.bottom() - composer_rect.top() + 1)
+        # Reserve space only for the composer body. The fade should sit on top of
+        # live message content, otherwise the gradient becomes a flat dark band.
+        self._messages_area.setViewportMargins(0, 0, 0, overlap)
 
     def _update_composer_fade_geometry(self) -> None:
-        if not hasattr(self, "_composer_top_fade") or not hasattr(self, "_composer_host"):
+        if (
+            not hasattr(self, "_composer_top_fade")
+            or not hasattr(self, "_composer_host")
+            or not hasattr(self, "_input_container")
+        ):
             return
         fade_h = self._composer_top_fade.height()
-        composer_top = self._composer_host.y()
-        self._composer_top_fade.setGeometry(0, max(0, composer_top - fade_h), self.width(), fade_h)
+        input_top_left = self._input_container.mapTo(self, QPoint(0, 0))
+        self._composer_top_fade.setGeometry(
+            input_top_left.x(),
+            max(0, input_top_left.y() - fade_h),
+            self._input_container.width(),
+            fade_h,
+        )
+        self._composer_top_fade.raise_()
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        if obj in (getattr(self, "_input_container", None), getattr(self, "_composer_host", None)):
+            if event.type() in (
+                QEvent.Type.Move,
+                QEvent.Type.Resize,
+                QEvent.Type.Show,
+                QEvent.Type.LayoutRequest,
+            ):
+                self._update_composer_fade_geometry()
+        return super().eventFilter(obj, event)
+
+    def _on_input_height_changed(self, _height: int) -> None:
+        """Keep message viewport bottom-anchored when composer grows/shrinks."""
+        self._reflow_composer(stick_if_bottom=True, defer_once=True)
 
     def _composer_anchor_bounds(self) -> tuple[int, int]:
         """Return (left, right) anchor x positions for composer in panel coordinates."""
@@ -452,7 +484,22 @@ class AgentPanel(QWidget):
         margins = self._composer_host_layout.contentsMargins()
         if margins.left() != left or margins.right() != right_gap:
             self._composer_host_layout.setContentsMargins(left, 0, right_gap, 0)
+
+    def _reflow_composer(self, *, stick_if_bottom: bool, defer_once: bool) -> None:
+        """Apply composer alignment, gap and fade updates in a single transaction."""
+        was_near_bottom = self._messages_area.is_near_bottom() if stick_if_bottom else False
+        self._update_composer_alignment()
+        self._messages_area.refresh_layout_for_width_change()
         self._sync_composer_gap()
+        self._update_composer_fade_geometry()
+        self._sync_messages_bottom_inset()
+        self._composer_host.raise_()
+        self._composer_bottom_gap.raise_()
+        self._composer_top_fade.raise_()
+        if stick_if_bottom:
+            self._messages_area.stick_to_bottom_if_tracking(was_near_bottom)
+        if defer_once:
+            QTimer.singleShot(0, lambda: self._reflow_composer(stick_if_bottom=stick_if_bottom, defer_once=False))
 
     # ---- File reference handling ----
 
@@ -655,11 +702,29 @@ class AgentPanel(QWidget):
         self._context_attachment_btn.setIcon(self._context_file_icon)
         self._context_separator.setVisible(True)
         self._context_attachment_btn.setVisible(True)
+        self._sync_context_attachment_width()
+        self._reflow_composer(stick_if_bottom=True, defer_once=True)
+
+    def _sync_context_attachment_width(self) -> None:
+        """Recompute attachment chip width so pasted/long labels expand immediately."""
+        btn = self._context_attachment_btn
+        text_w = btn.fontMetrics().horizontalAdvance(btn.text() or "")
+        icon_w = btn.iconSize().width() if not btn.icon().isNull() else 0
+        style = btn.style()
+        frame = style.pixelMetric(QStyle.PixelMetric.PM_DefaultFrameWidth, None, btn) * 2
+        left_pad = 6
+        right_pad = 6
+        icon_gap = 6 if icon_w else 0
+        min_w = text_w + icon_w + icon_gap + left_pad + right_pad + frame
+        btn.setMinimumWidth(max(0, min_w))
+        btn.adjustSize()
 
     def _on_context_attachment_toggled(self) -> None:
         self._context_enabled = self._context_attachment_btn.isChecked()
         icon = self._context_file_icon if self._context_enabled else self._context_disabled_icon
         self._context_attachment_btn.setIcon(icon)
+        self._sync_context_attachment_width()
+        self._reflow_composer(stick_if_bottom=True, defer_once=True)
 
     def set_workspace(self, workspace: Path) -> None:
         self._workspace = Path(workspace).resolve()
@@ -702,20 +767,24 @@ class AgentPanel(QWidget):
         source: str = "user",
         coordination: bool = False,
         streaming: bool = False,
-        summary: str | None = None,
-        detail: str | None = None,
-        expandable: bool = True,
+        display_mode: str | None = None,
+        bubble_title: str | None = None,
+        bubble_align: str | None = None,
+        bubble_on_timeline: bool = False,
+        bubble_collapsible: bool = True,
+        allow_edit: bool | None = None,
     ) -> None:
-        render_as_user_bubble = source == "main_agent"
+        resolved_display_mode = display_mode or ("bubble" if role == "user" else "agent_markdown")
+        resolved_bubble_align = bubble_align or ("right" if role == "user" else "left")
 
         if streaming and role == "agent" and not content:
             return
 
-        if role == "agent":
+        if role == "agent" and resolved_display_mode == "agent_markdown":
             last = self._messages_area.last_timeline_widget()
             if (
                 getattr(last, "_role", "") == "agent"
-                and getattr(last, "_summary", None) is None
+                and getattr(last, "_display_mode", "") == "agent_markdown"
                 and not getattr(last, "_complete", True)
             ):
                 if streaming:
@@ -731,17 +800,19 @@ class AgentPanel(QWidget):
             role=role,
             content=content,
             timestamp=ts,
-            is_coordination=coordination or source == "main_agent",
-            render_as_user_bubble=render_as_user_bubble,
+            is_coordination=coordination,
+            display_mode=resolved_display_mode,
+            bubble_align=resolved_bubble_align,
+            bubble_title=bubble_title,
+            bubble_on_timeline=bubble_on_timeline,
+            bubble_collapsible=bubble_collapsible,
+            allow_edit=allow_edit,
             agent_name=agent_name,
-            summary=summary,
-            detail=detail,
-            expandable=expandable,
         )
         self._update_width()
         if streaming and role == "agent":
             row._complete = False
-        if role == "agent":
+        if role == "agent" and resolved_display_mode == "agent_markdown":
             self._current_tool_group = None
         self._update_composer_alignment()
 
@@ -759,7 +830,7 @@ class AgentPanel(QWidget):
         last = self._messages_area.last_timeline_widget()
         if (
             getattr(last, "_role", "") == "agent"
-            and getattr(last, "_summary", None) is None
+            and getattr(last, "_display_mode", "") == "agent_markdown"
             and not getattr(last, "_complete", True)
         ):
             last.mark_complete()
@@ -808,10 +879,12 @@ class AgentPanel(QWidget):
             role="agent",
             content="",
             timestamp=ts,
+            display_mode="bubble",
+            bubble_align="left",
+            bubble_title="Thought for 1s",
+            bubble_on_timeline=True,
+            bubble_collapsible=True,
             agent_name=agent_name,
-            summary="Thought for 1s",
-            detail="",
-            expandable=True,
         )
         self._thinking_row._complete = False
         self._thinking_row.set_thinking_row_style(True)
@@ -824,7 +897,7 @@ class AgentPanel(QWidget):
             return
         if thinking:
             self._thinking_detail = self._merge_thinking_chunk(self._thinking_detail, thinking)
-        self._thinking_row.set_detail_text(self._thinking_detail)
+        self._thinking_row.set_bubble_content(self._thinking_detail)
         self._messages_area.follow_streaming_if_enabled()
 
     @staticmethod
@@ -850,7 +923,7 @@ class AgentPanel(QWidget):
         detail = (self._thinking_detail or "").strip()
         # Always complete the thinking row, even if empty
         # This preserves timeline order and prevents spacing issues
-        row.set_summary_text(summary)
+        row.set_bubble_title(summary)
         row.mark_complete()
         if detail:
             self.thinking_finished.emit(summary, detail, True)
@@ -868,7 +941,7 @@ class AgentPanel(QWidget):
         if self._thinking_row is None:
             self._thinking_timer.stop()
             return
-        self._thinking_row.set_summary_text(f"Thought for {self._thinking_elapsed_seconds()}s")
+        self._thinking_row.set_bubble_title(f"Thought for {self._thinking_elapsed_seconds()}s")
 
     def add_error(self, source: str, message: str) -> None:
         ts = datetime.now().strftime("%H:%M")
