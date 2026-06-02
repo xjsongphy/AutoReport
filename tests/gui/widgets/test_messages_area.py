@@ -17,6 +17,12 @@ def test_messages_area_initial_state(qtbot):
     assert widget.is_scrollable()
 
 
+def test_messages_area_uses_half_line_item_spacing(qtbot):
+    widget = MessagesArea()
+    qtbot.addWidget(widget)
+    assert widget._layout.spacing() == 0
+
+
 def test_add_message_row(qtbot):
     """Adding a MessageRow should increase message count."""
     widget = MessagesArea()
@@ -245,6 +251,51 @@ def test_follow_streaming_respects_user_scroll_state(qtbot):
     widget.follow_streaming_if_enabled()
     qtbot.wait(20)
     assert sb.value() < sb.maximum()
+
+
+def test_new_messages_keep_following_when_user_has_not_scrolled(qtbot):
+    widget = MessagesArea()
+    qtbot.addWidget(widget)
+    widget.resize(320, 120)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    for i in range(30):
+        widget.add_message_row(role="agent", content=f"line {i}", timestamp="12:00")
+    qtbot.wait(220)
+
+    sb = widget.verticalScrollBar()
+    assert sb.value() == sb.maximum()
+    assert widget.auto_scroll_enabled() is True
+
+    widget.add_message_row(role="user", content="latest", timestamp="12:01")
+    qtbot.wait(220)
+
+    assert sb.value() == sb.maximum()
+    assert widget.auto_scroll_enabled() is True
+
+
+def test_new_messages_do_not_move_view_after_user_scrolls_up(qtbot):
+    widget = MessagesArea()
+    qtbot.addWidget(widget)
+    widget.resize(320, 120)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    for i in range(30):
+        widget.add_message_row(role="agent", content=f"line {i}", timestamp="12:00")
+    qtbot.wait(220)
+
+    sb = widget.verticalScrollBar()
+    sb.setValue(max(0, sb.maximum() - 50))
+    qtbot.wait(20)
+    frozen_value = sb.value()
+
+    widget.add_message_row(role="agent", content="later", timestamp="12:01")
+    qtbot.wait(220)
+
+    assert sb.value() == frozen_value
+    assert widget.auto_scroll_enabled() is False
 
 
 def test_timeline_chain_breaks_on_user_bubble_between_chainable_items(qtbot):

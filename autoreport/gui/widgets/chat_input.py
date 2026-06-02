@@ -3,8 +3,8 @@
 from pathlib import Path
 from typing import override
 
-from PyQt6.QtCore import QPoint, Qt, pyqtSignal
-from PyQt6.QtGui import QKeyEvent, QTextCursor
+from PyQt6.QtCore import QPoint, QTimer, Qt, pyqtSignal
+from PyQt6.QtGui import QInputMethodEvent, QKeyEvent, QTextCursor
 from PyQt6.QtWidgets import QPlainTextEdit
 
 from ..theme import get_theme_colors
@@ -22,6 +22,7 @@ class ChatInput(QPlainTextEdit):
     command_palette_requested = pyqtSignal(str, QPoint)
     send_message = pyqtSignal()
     popup_navigate = pyqtSignal(str)  # "up" | "down" | "select" | "cancel"
+    height_changed = pyqtSignal(int)
     _MIN_LINES = 1
     _MAX_LINES = 10
 
@@ -29,10 +30,12 @@ class ChatInput(QPlainTextEdit):
         super().__init__(parent)
         self._popup_active = False
         self._popup_kind: str = ""  # "@" or "/"
+        self._base_placeholder = "Message…  (@ file, / command)"
+        self._composing = False
         self._setup_ui()
 
     def _setup_ui(self) -> None:
-        self.setPlaceholderText("Message…  (@ file, / command)")
+        self.setPlaceholderText(self._base_placeholder)
         self.setMinimumHeight(0)
         self.setMaximumHeight(16777215)
         self.setSizePolicy(
@@ -76,12 +79,45 @@ class ChatInput(QPlainTextEdit):
                 height: 0;
             }}
         """)
-        self.textChanged.connect(self._update_height)
-        self._update_height()
+        self.textChanged.connect(self._sync_after_text_change)
+        layout = self.document().documentLayout()
+        if layout is not None:
+            layout.documentSizeChanged.connect(lambda _size: self._schedule_sync())
+        self._sync_after_text_change()
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
         self._update_height()
+
+    def setPlaceholderText(self, placeholder: str) -> None:  # noqa: N802
+        self._base_placeholder = placeholder
+        super().setPlaceholderText(placeholder)
+        self._update_placeholder_visibility()
+
+    def inputMethodEvent(self, event: QInputMethodEvent) -> None:  # noqa: N802
+        self._composing = bool(event.preeditString())
+        self._update_placeholder_visibility()
+        super().inputMethodEvent(event)
+        self._composing = bool(event.preeditString())
+        self._schedule_sync()
+
+    def _schedule_sync(self) -> None:
+        QTimer.singleShot(0, self._sync_after_text_change)
+
+    def _sync_after_text_change(self) -> None:
+        self._update_placeholder_visibility()
+        self._update_height()
+        self.ensureCursorVisible()
+        self.updateGeometry()
+        self.height_changed.emit(self.height())
+
+    def _update_placeholder_visibility(self) -> None:
+        if self._composing or self.toPlainText():
+            placeholder = ""
+        else:
+            placeholder = self._base_placeholder
+        if self.placeholderText() != placeholder:
+            super().setPlaceholderText(placeholder)
 
     def _update_height(self) -> None:
         metrics = self.fontMetrics()

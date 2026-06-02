@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QStyle,
     QStyleOptionTitleBar,
+    QSizePolicy,
 )
 
 from .theme import get_theme_colors
@@ -72,6 +73,7 @@ class TitleBar(QWidget):
         self._menu_bar.setObjectName("titleBarMenuBar")
         self._menu_height = int(26 * s)
         self._menu_bar.setFixedHeight(self._menu_height)
+        self._menu_bar.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self._menu_bar.setContentsMargins(0, 0, 0, 0)
         self._menu_bar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._menu_bar.installEventFilter(self)

@@ -52,6 +52,20 @@ def test_pending_call_can_be_completed(qtbot):
     assert "Theory replied: done" in widget.get_summary_text()
 
 
+def test_multiple_tool_calls_render_on_separate_lines(qtbot):
+    widget = ToolCallGroup()
+    qtbot.addWidget(widget)
+
+    widget.add_tool_call("read_file", {"path": "a.txt"}, success=True, duration_ms=10)
+    widget.add_tool_call("read_file", {"path": "b.txt"}, success=True, duration_ms=10)
+
+    summary = widget.get_summary_text()
+    assert "Read" in summary
+    assert "a.txt" in summary
+    assert "b.txt" in summary
+    assert "<br/>" in summary
+
+
 def test_bash_detail_text_shrinks_in_narrow_panel(qtbot):
     widget = ToolCallGroup()
     qtbot.addWidget(widget)
