@@ -194,11 +194,13 @@ class MessagesArea(QScrollArea):
         content: str,
         timestamp: str = "",
         is_coordination: bool = False,
-        render_as_user_bubble: bool = False,
+        display_mode: str = "agent_markdown",
+        bubble_align: str = "left",
+        bubble_title: str | None = None,
+        bubble_on_timeline: bool = False,
+        bubble_collapsible: bool = True,
+        allow_edit: bool | None = None,
         agent_name: str = "Agent",
-        summary: str | None = None,
-        detail: str | None = None,
-        expandable: bool = True,
     ) -> MessageRow:
         """Add a message row to the container."""
         row = MessageRow(
@@ -206,26 +208,31 @@ class MessagesArea(QScrollArea):
             content=content,
             timestamp=timestamp,
             is_coordination=is_coordination,
-            render_as_user_bubble=render_as_user_bubble,
+            display_mode=display_mode,
+            bubble_align=bubble_align,
+            bubble_title=bubble_title,
+            bubble_on_timeline=bubble_on_timeline,
+            bubble_collapsible=bubble_collapsible,
+            allow_edit=allow_edit,
             agent_name=agent_name,
-            summary=summary,
-            detail=detail,
-            expandable=expandable,
             agent_chain_prev=False,
             agent_chain_next=False,
             parent=self._container,
         )
 
         # Connect edit signals for user messages
-        if role == "user":
+        if allow_edit is None:
+            allow_edit = role == "user" and display_mode == "agent_markdown"
+
+        if allow_edit:
             row.edit_requested.connect(self.edit_requested.emit)
             row.edit_saved.connect(self._on_edit_saved)
             row.edit_cancelled.connect(self._on_edit_cancelled)
-        if role == "user" or render_as_user_bubble:
+        if (display_mode == "bubble" and bubble_align == "right") or (role == "user" and display_mode == "agent_markdown"):
             row.rollback_requested.connect(self.rollback_requested.emit)
 
         # Handle editable state — only latest user message is editable
-        if role == "user":
+        if allow_edit:
             # Make previous user message non-editable
             if self._latest_user_row:
                 self._latest_user_row.set_editable(False)
@@ -254,7 +261,7 @@ class MessagesArea(QScrollArea):
 
     def attach_checkpoint_to_latest_outbound(self, checkpoint_id: str) -> bool:
         for row in reversed(self.get_message_rows()):
-            if not (getattr(row, "_role", "") == "user" or getattr(row, "_render_as_user_bubble", False)):
+            if not (getattr(row, "_display_mode", "") == "bubble" and getattr(row, "_bubble_align", "") == "right"):
                 continue
             if getattr(row, "_checkpoint_id", None):
                 continue
@@ -299,7 +306,7 @@ class MessagesArea(QScrollArea):
         if isinstance(widget, ToolCallGroup):
             return True
         if isinstance(widget, MessageRow):
-            return getattr(widget, "_role", "") == "agent" and not getattr(widget, "_render_as_user_bubble", False)
+            return bool(getattr(widget, "_uses_timeline", lambda: False)())
         return False
 
     def _set_widget_chain(self, widget: QWidget, prev_link: bool, next_link: bool) -> None:
@@ -344,6 +351,19 @@ class MessagesArea(QScrollArea):
 
     def scroll_to_bottom(self) -> None:
         """Scroll to the bottom of the messages area."""
+        self._schedule_scroll_to_bottom()
+
+    def is_near_bottom(self, threshold: int = 10) -> bool:
+        """Return whether current scroll position is within threshold to bottom."""
+        scrollbar = self.verticalScrollBar()
+        return (scrollbar.maximum() - scrollbar.value()) <= max(0, threshold)
+
+    def stick_to_bottom_if_tracking(self, was_near_bottom: bool) -> None:
+        """Keep bottom-anchored viewport after external layout/width changes."""
+        if not was_near_bottom:
+            return
+        self._user_scrolled = False
+        self._auto_scroll_enabled = True
         self._schedule_scroll_to_bottom()
 
     def follow_streaming_if_enabled(self) -> None:
@@ -500,3 +520,13 @@ class MessagesArea(QScrollArea):
                 if isinstance(widget, ToolCallGroup):
                     groups.append(widget)
         return groups
+
+    def refresh_layout_for_width_change(self) -> None:
+        """Force immediate width-dependent relayout for visible timeline items."""
+        for row in self.get_message_rows():
+            row.refresh_layout_for_width_change()
+            row.updateGeometry()
+        for group in self.get_tool_groups():
+            group.updateGeometry()
+        self.widget().updateGeometry()
+        self.viewport().update()

@@ -9,7 +9,6 @@ from ..theme import get_theme_colors
 TIMELINE_DOT_CENTER_Y = 11
 TIMELINE_DOT_SIZE = 7
 TIMELINE_RAIL_WIDTH = 12
-TIMELINE_AGENT_DOT = "#9ca3af"
 
 
 class TimelineRail(QWidget):
@@ -19,8 +18,10 @@ class TimelineRail(QWidget):
     cannot vertically re-center the marker.
     """
 
-    def __init__(self, dot_color: str = TIMELINE_AGENT_DOT, parent: QWidget | None = None):
+    def __init__(self, dot_color: str | None = None, parent: QWidget | None = None):
         super().__init__(parent)
+        if dot_color is None:
+            dot_color = get_theme_colors()["timeline_dot"]
         self._dot_color = dot_color
         self._prev_link = False
         self._next_link = False
