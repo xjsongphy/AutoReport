@@ -160,7 +160,7 @@ class BasePopupDropdown(QListWidget):
                 border-radius: {item_radius};
             }}
             QListWidget#{self.objectName()}::item:selected {{
-                background-color: {c["selection"]};
+                background-color: {c["selectionBlue"]};
                 color: {c["fg"]};
             }}
             QListWidget#{self.objectName()}::item:hover {{
@@ -168,7 +168,7 @@ class BasePopupDropdown(QListWidget):
                 color: {c["fg"]};
             }}
             QListWidget#{self.objectName()}::item:selected:hover {{
-                background-color: {c["selection"]};
+                background-color: {c["selectionBlue"]};
                 color: {c["fg"]};
                 border-radius: {item_radius};
             }}

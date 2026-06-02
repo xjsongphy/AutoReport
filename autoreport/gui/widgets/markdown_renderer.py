@@ -44,7 +44,7 @@ class _QtCompatTreeprocessor(Treeprocessor):
         code_fg = c["editor_fg"]
         inline_code_bg = c["bubble_bg"]
         inline_code_fg = c["editor_fg"]
-        accent = c["accent"]
+        accent = c["buttonBlue"]
         muted = c["muted"]
         th_bg = c["card"] if _is_dark_mode() else "#ffffff"
 

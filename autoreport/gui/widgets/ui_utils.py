@@ -215,7 +215,7 @@ class _ComboPopupDelegate(QStyledItemDelegate):
 
         is_current = index.row() == self._combo.currentIndex()
         is_hovered = bool(opt.state & QStyle.StateFlag.State_MouseOver)
-        bg = c["selection"] if is_current else (c["hover"] if is_hovered else None)
+        bg = c["selectionBlue"] if is_current else (c["hover"] if is_hovered else None)
 
         opt.state &= ~QStyle.StateFlag.State_Selected
         opt.state &= ~QStyle.StateFlag.State_MouseOver
@@ -344,7 +344,7 @@ class NoWheelComboBox(QComboBox):
                 border-radius: {item_radius};
             }}
             QListView#comboPopupView::item:selected {{
-                background-color: {c["selection"]};
+                background-color: {c["selectionBlue"]};
                 color: {c["fg"]};
             }}
             QListView#comboPopupView::item:hover {{
@@ -352,7 +352,7 @@ class NoWheelComboBox(QComboBox):
                 color: {c["fg"]};
             }}
             QListView#comboPopupView::item:selected:hover {{
-                background-color: {c["selection"]};
+                background-color: {c["selectionBlue"]};
                 color: {c["fg"]};
                 border-radius: {item_radius};
             }}
@@ -781,7 +781,7 @@ def input_button_qss(
             font-size: {font_size}px;
         }}
         QPushButton{selector}:hover {{
-            border-color: {c["focus"]};
+            border-color: {c["buttonBlue"]};
         }}
         QPushButton{selector}:pressed {{
             background-color: {c["input_bg"]};
@@ -797,13 +797,13 @@ def link_button_qss(selector: str, *, font_size: int = 13, padding: str = "2px 0
             background-color: transparent;
             border: none;
             border-bottom: 1px solid transparent;
-            color: {c["link"]};
+            color: {c["buttonBlue"]};
             font-size: {font_size}px;
             text-align: left;
             padding: {padding};
         }}
         QPushButton{selector}:hover {{
-            color: {c["linkHover"]};
-            border-bottom: 1px solid {c["linkHover"]};
+            color: {c["buttonBlue"]};
+            border-bottom: 1px solid {c["buttonBlue"]};
         }}
     """

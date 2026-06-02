@@ -25,6 +25,7 @@ from .config import ConfigManager
 from .core.loops import LoopManager, MessageBus
 from .gui import MainWindow
 from .interfaces.protocol import BackendAPI
+from .utils.editor_context import build_editor_context_prompt
 from .utils import log_exception, setup_exception_handler, setup_logging
 
 console = Console()
@@ -370,22 +371,30 @@ class BackendAPIImpl(BackendAPI):
         # Format file context as system message.
         # Keep context strictly scoped to the attachment shown in agent composer.
         if file_context.get("type") == "selection":
-            fp = file_context.get("file", "")
-            s = file_context.get("start_line", "")
-            e = file_context.get("end_line", "")
+            context_msg = build_editor_context_prompt(
+                {
+                    "type": "selection",
+                    "file": file_context.get("file", ""),
+                    "selected_lines": f"{file_context.get('start_line', '')}-{file_context.get('end_line', '')}",
+                },
+                "",
+            )
             context_msg = (
-                "Editor context: selection\n"
-                f"File: {fp}\n"
-                f"Selected lines: {s}-{e}\n"
+                f"{context_msg}\n"
                 "Constraint: selected text is not attached; do not infer or list other open tabs.\n"
-            )
+            ).strip()
         elif file_context.get("type") == "file":
-            fp = file_context.get("file", "")
-            context_msg = (
-                "Editor context: file\n"
-                f"Current file: {fp}\n"
-                "Constraint: do not infer or list other open tabs.\n"
+            context_msg = build_editor_context_prompt(
+                {
+                    "type": "file",
+                    "file": file_context.get("file", ""),
+                },
+                "",
             )
+            context_msg = (
+                f"{context_msg}\n"
+                "Constraint: do not infer or list other open tabs.\n"
+            ).strip()
         else:
             return
 

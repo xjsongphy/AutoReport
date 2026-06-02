@@ -163,7 +163,7 @@ class SessionListItem(QWidget):
 
         c = get_theme_colors()
         if self._is_current:
-            bg = c["selection"]
+            bg = c["selectionBlue"]
         elif hovered:
             bg = c["hover"]
         else:

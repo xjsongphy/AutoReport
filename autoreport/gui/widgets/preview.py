@@ -654,7 +654,7 @@ class EditorPanel(QWidget):
             QTabBar#editorTabBar::tab:selected {{
                 background-color: {c["tab_active_bg"]};
                 color: {c["tab_active_fg"]};
-                border-top: 2px solid {c["accent"]};
+                border-top: 2px solid {c["buttonBlue"]};
                 border-right: 1px solid {c["border"]};
                 border-bottom: 1px solid {c["tab_active_bg"]};
                 margin: 1px 0 0 0;
@@ -867,7 +867,7 @@ class PreviewWidget(QWidget):
             QTabBar#previewTabBar::tab:selected {{
                 background-color: {c["tab_active_bg"]};
                 color: {c["tab_active_fg"]};
-                border-top: 2px solid {c["accent"]};
+                border-top: 2px solid {c["buttonBlue"]};
                 border-right: 1px solid {c["border"]};
                 border-bottom: 1px solid {c["tab_active_bg"]};
                 margin: 1px 0 0 0;
