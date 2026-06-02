@@ -1,7 +1,7 @@
 ﻿from pathlib import Path
 
-from PyQt6.QtCore import QEvent, Qt
-from PyQt6.QtGui import QColor, QPixmap
+from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
+from PyQt6.QtGui import QColor, QPixmap, QWheelEvent
 from PyQt6.QtWidgets import QApplication, QLabel, QTabBar, QPushButton
 from PyQt6.QtWidgets import QMessageBox
 
@@ -305,15 +305,156 @@ def test_tab_scrollbar_shows_on_hover_and_hides_on_leave(qtbot, tmp_path: Path) 
     enter_event = QEvent(QEvent.Type.Enter)
     leave_event = QEvent(QEvent.Type.Leave)
     QApplication.sendEvent(widget._tab_scroll.viewport(), enter_event)
+    qtbot.wait(10)
     assert (
         widget._tab_scroll.horizontalScrollBarPolicy()
         == Qt.ScrollBarPolicy.ScrollBarAsNeeded
     )
     QApplication.sendEvent(widget._tab_scroll.viewport(), leave_event)
+    qtbot.wait(10)
     assert (
         widget._tab_scroll.horizontalScrollBarPolicy()
         == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
     )
+
+
+def test_vertical_wheel_on_tab_bar_scrolls_tabs_instead_of_switching(qtbot, tmp_path: Path) -> None:
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.resize(260, 300)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    files = []
+    for i in range(6):
+        path = tmp_path / f"file_{i}.txt"
+        path.write_text(f"content {i}", encoding="utf-8")
+        files.append(path)
+        widget.load_file(path)
+
+    widget._unified_tab_bar.setCurrentIndex(2)
+    before = widget._unified_tab_bar.currentIndex()
+    before_scroll = widget._tab_scroll.horizontalScrollBar().value()
+
+    center = widget._unified_tab_bar.rect().center()
+    event = QWheelEvent(
+        QPointF(center),
+        QPointF(widget._unified_tab_bar.mapToGlobal(center)),
+        QPoint(0, 0),
+        QPoint(0, -120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+    QApplication.sendEvent(widget._unified_tab_bar, event)
+
+    assert widget._unified_tab_bar.currentIndex() == before
+    assert widget._tab_scroll.horizontalScrollBar().value() != before_scroll
+
+
+def test_horizontal_wheel_on_tab_bar_scrolls_tabs_instead_of_switching(qtbot, tmp_path: Path) -> None:
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.resize(260, 300)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    for i in range(10):
+        path = tmp_path / f"long_named_file_{i}.txt"
+        path.write_text(f"content {i}", encoding="utf-8")
+        widget.load_file(path)
+
+    scroll_bar = widget._tab_scroll.horizontalScrollBar()
+    assert scroll_bar.maximum() > 0
+
+    widget._unified_tab_bar.setCurrentIndex(5)
+    before_index = widget._unified_tab_bar.currentIndex()
+    before_scroll = scroll_bar.value()
+    center = widget._unified_tab_bar.rect().center()
+    event = QWheelEvent(
+        QPointF(center),
+        QPointF(widget._unified_tab_bar.mapToGlobal(center)),
+        QPoint(0, 0),
+        QPoint(-120, 0),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+    QApplication.sendEvent(widget._unified_tab_bar, event)
+
+    assert widget._unified_tab_bar.currentIndex() == before_index
+    assert scroll_bar.value() != before_scroll
+
+
+def test_shift_vertical_wheel_on_tab_bar_scrolls_tabs_horizontally(qtbot, tmp_path: Path) -> None:
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.resize(260, 300)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    for i in range(10):
+        path = tmp_path / f"shift_scroll_file_{i}.txt"
+        path.write_text(f"content {i}", encoding="utf-8")
+        widget.load_file(path)
+
+    scroll_bar = widget._tab_scroll.horizontalScrollBar()
+    assert scroll_bar.maximum() > 0
+
+    widget._unified_tab_bar.setCurrentIndex(4)
+    before_index = widget._unified_tab_bar.currentIndex()
+    before_scroll = scroll_bar.value()
+    center = widget._unified_tab_bar.rect().center()
+    event = QWheelEvent(
+        QPointF(center),
+        QPointF(widget._unified_tab_bar.mapToGlobal(center)),
+        QPoint(0, 0),
+        QPoint(0, -120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.ShiftModifier,
+        Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+    QApplication.sendEvent(widget._unified_tab_bar, event)
+
+    assert widget._unified_tab_bar.currentIndex() == before_index
+    assert scroll_bar.value() != before_scroll
+
+
+def test_horizontal_pixel_delta_on_tab_bar_scrolls_tabs(qtbot, tmp_path: Path) -> None:
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.resize(260, 300)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    for i in range(10):
+        path = tmp_path / f"pixel_scroll_file_{i}.txt"
+        path.write_text(f"content {i}", encoding="utf-8")
+        widget.load_file(path)
+
+    scroll_bar = widget._tab_scroll.horizontalScrollBar()
+    assert scroll_bar.maximum() > 0
+
+    before_index = widget._unified_tab_bar.currentIndex()
+    before_scroll = scroll_bar.value()
+    center = widget._unified_tab_bar.rect().center()
+    event = QWheelEvent(
+        QPointF(center),
+        QPointF(widget._unified_tab_bar.mapToGlobal(center)),
+        QPoint(-40, 0),
+        QPoint(0, 0),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+    QApplication.sendEvent(widget._unified_tab_bar, event)
+
+    assert widget._unified_tab_bar.currentIndex() == before_index
+    assert scroll_bar.value() != before_scroll
 
 
 

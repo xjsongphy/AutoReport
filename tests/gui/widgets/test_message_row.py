@@ -1,10 +1,11 @@
 """Tests for MessageRow component — Cline-style flat timeline."""
 
 import pytest
-from PyQt6.QtCore import QEvent, Qt
-from PyQt6.QtGui import QKeyEvent
-from PyQt6.QtWidgets import QApplication
-from autoreport.gui.widgets.message_row import MessageRow, _raw_markdown_for_selected_text
+from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
+from PyQt6.QtGui import QColor, QKeyEvent, QPainter, QPixmap, QWheelEvent
+from PyQt6.QtWidgets import QApplication, QVBoxLayout, QWidget
+from autoreport.gui.widgets.message_row import MessageRow, _opaque_bounds, _raw_markdown_for_selected_text
+from autoreport.gui.widgets.messages_area import MessagesArea
 from autoreport.gui.widgets.ui_utils import compact_tooltip_qss
 
 
@@ -63,6 +64,17 @@ def test_selected_agent_markdown_copy_preserves_inline_markup():
     assert _raw_markdown_for_selected_text(raw, "Bold") == "**Bold**"
     assert _raw_markdown_for_selected_text(raw, "code") == "`code`"
     assert _raw_markdown_for_selected_text(raw, "Bold and code") == raw
+
+
+def test_opaque_bounds_detects_nontransparent_region():
+    pixmap = QPixmap(10, 10)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.fillRect(2, 1, 4, 5, QColor("#ffffff"))
+    painter.end()
+
+    bounds = _opaque_bounds(pixmap)
+    assert bounds == QRect(2, 1, 4, 5)
 
 
 def test_message_row_emits_rollback_checkpoint(qtbot):
@@ -166,6 +178,42 @@ def test_user_bubble_width_stable_when_actions_toggle(qtbot):
     assert before == after_show == after_hide
 
 
+def test_user_bubble_has_reasonable_min_width_in_normal_mode(qtbot):
+    widget = MessageRow(role="user", content="short")
+    qtbot.addWidget(widget)
+    widget.resize(900, 200)
+    widget.show()
+    qtbot.waitExposed(widget)
+    qtbot.wait(20)
+
+    assert widget._user_bubble_container.width() >= 800
+
+
+def test_user_bubble_is_centered_in_row(qtbot):
+    widget = MessageRow(role="user", content="center me")
+    qtbot.addWidget(widget)
+    widget.resize(900, 200)
+    widget.show()
+    qtbot.waitExposed(widget)
+    qtbot.wait(20)
+
+    bubble_center = widget._user_bubble_container.mapTo(widget, widget._user_bubble_container.rect().center()).x()
+    row_center = widget.rect().center().x()
+    assert abs(bubble_center - row_center) <= 10
+
+
+def test_user_bubble_left_edge_aligns_with_timeline_dot_guide(qtbot):
+    widget = MessageRow(role="user", content="align me")
+    qtbot.addWidget(widget)
+    widget.resize(900, 200)
+    widget.show()
+    qtbot.waitExposed(widget)
+    qtbot.wait(20)
+
+    bubble_left = widget._user_bubble_container.mapTo(widget, widget._user_bubble_container.rect().topLeft()).x()
+    assert abs(bubble_left - 22) <= 2
+
+
 def test_tooltip_delay_is_2s_for_action_buttons(qtbot):
     widget = MessageRow(role="user", content="tooltip check")
     qtbot.addWidget(widget)
@@ -226,3 +274,88 @@ def test_edit_input_height_grows_and_caps_at_10_lines(qtbot):
     assert h19 >= h5
     # capped around 10 lines (not unbounded growth)
     assert h19 - h5 < 8 * edit.fontMetrics().lineSpacing()
+
+
+def test_edit_wheel_at_boundary_does_not_scroll_outer_messages_area(qtbot):
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    layout.setContentsMargins(0, 0, 0, 0)
+    area = MessagesArea()
+    layout.addWidget(area)
+    host.resize(420, 220)
+    qtbot.addWidget(host)
+    host.show()
+    qtbot.waitExposed(host)
+
+    for i in range(12):
+        area.add_message_row(role="agent", content=f"agent {i}\nline 2\nline 3", timestamp="12:00")
+    row = area.add_message_row(role="user", content="edit me")
+    row.set_editable(True)
+    row.enter_edit_mode()
+    assert row._edit_widget is not None
+
+    edit = row._edit_widget
+    edit.setPlainText("\n".join(f"line {i}" for i in range(1, 40)))
+    qtbot.wait(20)
+    edit.verticalScrollBar().setValue(0)
+    area.verticalScrollBar().setValue(max(0, area.verticalScrollBar().maximum() - 40))
+    qtbot.wait(20)
+    outer_before = area.verticalScrollBar().value()
+
+    pos = edit.viewport().rect().center()
+    wheel = QWheelEvent(
+        QPointF(pos),
+        QPointF(edit.viewport().mapToGlobal(pos)),
+        QPoint(0, 0),
+        QPoint(0, 120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+    QApplication.sendEvent(edit.viewport(), wheel)
+    qtbot.wait(20)
+
+    assert area.verticalScrollBar().value() == outer_before
+
+
+def test_copy_user_message_excludes_editor_context_metadata(qtbot):
+    content = "Editor context: file\nCurrent file: docs/report.tex\n\nActual user message"
+    widget = MessageRow(role="user", content=content)
+    qtbot.addWidget(widget)
+
+    widget._copy_content()
+
+    assert QApplication.clipboard().text() == "Actual user message"
+    assert "Current file:" not in QApplication.clipboard().text()
+
+
+def test_edit_mode_uses_visible_text_without_editor_context_metadata(qtbot):
+    content = "Editor context: selection\nFile: docs/report.tex\nSelected lines: 3-4\n\nActual user message"
+    widget = MessageRow(role="user", content=content)
+    qtbot.addWidget(widget)
+    widget.mark_complete()
+    widget.set_editable(True)
+    widget.enter_edit_mode()
+
+    assert widget._edit_widget is not None
+    assert widget._edit_widget.toPlainText() == "Actual user message"
+
+
+def test_context_chip_text_is_vertically_centered(qtbot):
+    content = "Editor context: file\nCurrent file: docs/report.tex\n\nActual user message"
+    widget = MessageRow(role="user", content=content)
+    qtbot.addWidget(widget)
+    widget.resize(900, 200)
+    widget.show()
+    qtbot.waitExposed(widget)
+    qtbot.wait(20)
+
+    chip = widget._context_chip_widget
+    label = widget._context_chip_label
+    assert chip is not None
+    assert label is not None
+
+    chip_center = chip.mapTo(widget, chip.rect().center()).y()
+    label_center = label.mapTo(widget, label.rect().center()).y()
+    assert abs(chip_center - label_center) <= 2

@@ -1416,6 +1416,12 @@ class PreviewWidget(QWidget):
                     self._tab_hovered_index = -1
                     self._refresh_unified_tab_affordances()
         if obj in (self._tab_scroll, self._tab_scroll.viewport(), self._unified_tab_bar):
+            if event.type() in (QEvent.Type.Wheel, QEvent.Type.NativeGesture):
+                horizontal_delta = self._tab_scroll_delta(event)
+                if horizontal_delta:
+                    self._apply_tab_strip_scroll(horizontal_delta)
+                    event.accept()
+                    return True
             if event.type() in (
                 QEvent.Type.Enter,
                 QEvent.Type.HoverEnter,
@@ -1425,6 +1431,32 @@ class PreviewWidget(QWidget):
             ):
                 QTimer.singleShot(0, self._update_tab_scrollbar_visibility)
         return super().eventFilter(obj, event)
+
+    def _tab_scroll_delta(self, event) -> int:
+        if event.type() == QEvent.Type.Wheel:
+            angle_delta = event.angleDelta()
+            pixel_delta = event.pixelDelta()
+            return int(angle_delta.x() or pixel_delta.x() or angle_delta.y() or pixel_delta.y())
+
+        if event.type() == QEvent.Type.NativeGesture:
+            if event.gestureType() != Qt.NativeGestureType.PanNativeGesture:
+                return 0
+            delta = event.delta()
+            if hasattr(delta, "x") and delta.x():
+                return int(delta.x())
+            if event.value():
+                return int(event.value())
+        return 0
+
+    def _apply_tab_strip_scroll(self, horizontal_delta: int) -> None:
+        scroll_bar = self._tab_scroll.horizontalScrollBar()
+        if abs(horizontal_delta) >= 120:
+            step = scroll_bar.singleStep() or 24
+            units = max(1, abs(horizontal_delta) // 120)
+            delta = (-1 if horizontal_delta > 0 else 1) * step * units
+        else:
+            delta = -horizontal_delta
+        scroll_bar.setValue(scroll_bar.value() + delta)
 
     def _sync_unified_tab_bar_width(self) -> None:
         total_w = 0

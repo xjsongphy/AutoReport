@@ -2,7 +2,7 @@
 
 import pytest
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QKeyEvent
+from PyQt6.QtGui import QInputMethodEvent, QKeyEvent
 from autoreport.gui.widgets.chat_input import ChatInput
 
 
@@ -97,3 +97,16 @@ def test_input_height_grows_and_scrolls_after_10_lines(qtbot):
     assert widget.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOn
     assert h19 >= h5
     assert h19 - h5 < 8 * widget.fontMetrics().lineSpacing()
+
+
+def test_input_method_preedit_hides_placeholder(qtbot):
+    widget = ChatInput()
+    qtbot.addWidget(widget)
+
+    assert widget.placeholderText()
+
+    widget.inputMethodEvent(QInputMethodEvent("ni", []))
+    assert widget.placeholderText() == ""
+
+    widget.inputMethodEvent(QInputMethodEvent("", []))
+    assert widget.placeholderText()

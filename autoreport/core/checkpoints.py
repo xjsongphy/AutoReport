@@ -1,16 +1,18 @@
-"""Per-agent checkpoint management for independent rollback.
+"""Per-agent checkpoint management using diff-based storage.
 
 Each of the 5 agents maintains its own checkpoint timeline under
 .checkpoints/{agent_type}/.  A checkpoint is created before every message
-is processed so the agent can always undo to the pre-message state.
+is processed so the workspace can always be rolled back.
 
-Design follows VS Code Copilot Chat:
-- Sentinel checkpoints mark request boundaries (pre-message state)
-- Each checkpoint stores file states only for the agent's write directory
-- Checkpoint IDs include agent_type to prevent cross-agent mixing
+Storage design (similar to Git's delta approach):
+- First checkpoint stores full file contents (baseline)
+- Subsequent checkpoints only store diffs (unified diff format) relative
+  to the immediate previous checkpoint
+- Rollback applies diffs in sequence: forward or reverse to reach target
 """
 
 import asyncio
+import difflib
 import hashlib
 import json
 from dataclasses import asdict, dataclass, field
@@ -21,36 +23,46 @@ from typing import Any
 from loguru import logger
 
 
+# ==== Diff-based file state representation ====
+
+
 @dataclass
-class FileState:
-    """State of a single file at a checkpoint."""
+class FileDiff:
+    """Represents a single file's change between two checkpoints."""
 
     path: str           # relative posix path from workspace root
-    hash: str           # SHA256 hex digest
-    size: int           # bytes
-    mtime: float        # file modification time
-    is_binary: bool = False
-    content: str | None = None  # text content snapshot (None for binary)
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "FileState":
-        return cls(**data)
+    operation: str      # "added" | "modified" | "deleted"
+    sha256_before: str  # SHA256 before the change (empty for "added")
+    sha256_after: str   # SHA256 after the change (empty for "deleted")
+    unified_diff: str | None = None  # unified diff text (None for add/delete)
 
 
 @dataclass
 class CheckpointData:
-    """A single checkpoint in an agent's timeline."""
+    """A single checkpoint in an agent's timeline.
 
-    id: str                 # unique checkpoint ID
-    agent_type: str         # which agent owns this checkpoint
-    timestamp: str          # ISO 8601 timestamp
-    epoch: int              # monotonically increasing counter per agent
-    description: str        # human-readable label
+    The first checkpoint (epoch=1) stores full baseline content via
+    ``file_states``.  Subsequent checkpoints store only ``file_diffs``
+    against the previous checkpoint.
+    """
+
+    id: str
+    agent_type: str
+    timestamp: str          # ISO 8601
+    epoch: int
+    description: str
     source: str             # "pre_message" | "manual" | "rollback"
-    file_states: dict[str, FileState] = field(default_factory=dict)
+    message_id: str | None = None  # The message that triggered this checkpoint
+
+    # Full file states — only populated for the baseline checkpoint (epoch=1)
+    file_states: dict[str, "FileState"] = field(default_factory=dict)
+
+    # Diffs — populated for all checkpoints (baseline has empty diffs)
+    file_diffs: dict[str, FileDiff] = field(default_factory=dict)
+
+    # Previous checkpoint ID for diff chain
+    parent_id: str | None = None
+
     conversation_history: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -61,15 +73,35 @@ class CheckpointData:
             "epoch": self.epoch,
             "description": self.description,
             "source": self.source,
+            "message_id": self.message_id,
             "file_states": {
                 path: state.to_dict()
                 for path, state in self.file_states.items()
             },
+            "file_diffs": {
+                path: asdict(d)
+                for path, d in self.file_diffs.items()
+            },
+            "parent_id": self.parent_id,
             "conversation_history": self.conversation_history,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CheckpointData":
+        file_states = {}
+        for path, state in data.get("file_states", {}).items():
+            if isinstance(state, dict):
+                file_states[path] = FileState.from_dict(state)
+            else:
+                file_states[path] = FileState.from_dict(state)
+
+        file_diffs = {}
+        for path, d in data.get("file_diffs", {}).items():
+            if isinstance(d, dict):
+                file_diffs[path] = FileDiff(**d)
+            else:
+                file_diffs[path] = d
+
         return cls(
             id=data["id"],
             agent_type=data.get("agent_type", "main"),
@@ -77,15 +109,35 @@ class CheckpointData:
             epoch=data.get("epoch", 0),
             description=data["description"],
             source=data.get("source", "manual"),
-            file_states={
-                path: FileState.from_dict(state)
-                for path, state in data.get("file_states", {}).items()
-            },
+            message_id=data.get("message_id"),
+            file_states=file_states,
+            file_diffs=file_diffs,
+            parent_id=data.get("parent_id"),
             conversation_history=data.get("conversation_history", []),
         )
 
 
-# Write directories per agent type (relative to workspace root)
+@dataclass
+class FileState:
+    """Full state of a single file (used for baseline checkpoint only)."""
+
+    path: str
+    hash: str
+    size: int
+    mtime: float
+    is_binary: bool = False
+    content: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "FileState":
+        return cls(**data)
+
+
+# ==== Agent write directories ====
+
 _AGENT_WRITE_DIRS: dict[str, list[str]] = {
     "main": ["Data", "Data/Processed", "References", "Theory", "Code", "Tex"],
     "data_analysis": ["Data/Processed"],
@@ -95,12 +147,16 @@ _AGENT_WRITE_DIRS: dict[str, list[str]] = {
 }
 
 
-class CheckpointManager:
-    """Per-agent checkpoint manager.
+# ==== Checkpoint Manager ====
 
-    Checkpoints are stored in .checkpoints/{agent_type}/ as individual JSON
-    files.  Each agent has its own epoch counter and only captures files
-    within its write directory.
+
+class CheckpointManager:
+    """Per-agent checkpoint manager with diff-based storage.
+
+    :class:`CheckpointManager` stores each agent's checkpoints under
+    ``.checkpoints/{agent_type}/`` as individual JSON files.  The first
+    checkpoint for each agent is a full baseline; subsequent checkpoints
+    store only the unified diff of changed files.
     """
 
     def __init__(self, workspace: Path):
@@ -124,8 +180,20 @@ class CheckpointManager:
         description: str = "",
         source: str = "pre_message",
         conversation_history: list[dict[str, Any]] | None = None,
+        message_id: str | None = None,
     ) -> str:
-        """Create a checkpoint for *agent_type* capturing current file states.
+        """Create a checkpoint for *agent_type*.
+
+        If this is the first checkpoint for the agent, captures full file
+        states.  Otherwise, computes and stores only the diffs against the
+        previous checkpoint.
+
+        Args:
+            agent_type: Agent type string.
+            description: Human-readable description.
+            source: Source of checkpoint creation.
+            conversation_history: Conversation history snapshot.
+            message_id: The message that triggered this checkpoint (if any).
 
         Returns the checkpoint ID.
         """
@@ -134,7 +202,7 @@ class CheckpointManager:
         timestamp = datetime.now(timezone.utc).isoformat()
 
         dirs = _AGENT_WRITE_DIRS.get(agent_type, [])
-        file_states = await self._capture_file_states(dirs)
+        prev_cp = self.get_latest(agent_type)
 
         cp = CheckpointData(
             id=checkpoint_id,
@@ -143,37 +211,74 @@ class CheckpointManager:
             epoch=epoch,
             description=description or f"Checkpoint {agent_type}#{epoch}",
             source=source,
-            file_states=file_states,
+            message_id=message_id,
             conversation_history=conversation_history or [],
         )
+
+        if prev_cp is None:
+            # First checkpoint: store full file states
+            file_states = await self._capture_file_states(dirs)
+            cp.file_states = file_states
+            cp.file_diffs = {}
+            cp.parent_id = None
+        else:
+            # Subsequent checkpoint: compute diffs against previous
+            current_states = await self._capture_file_states(dirs)
+            cp.file_diffs = await self._compute_diffs(prev_cp, current_states)
+            cp.file_states = {}
+            cp.parent_id = prev_cp.id
 
         await self._save(cp)
 
         bucket = self._checkpoints.setdefault(agent_type, {})
         bucket[checkpoint_id] = cp
 
-        logger.info(
-            "{} checkpoint {} — {} files captured",
-            agent_type, checkpoint_id, len(file_states),
-        )
+        if prev_cp is None:
+            logger.info(
+                "{} baseline checkpoint {} — {} files captured",
+                agent_type, checkpoint_id, len(cp.file_states),
+            )
+        else:
+            logger.info(
+                "{} checkpoint {} — {} files changed",
+                agent_type, checkpoint_id, len(cp.file_diffs),
+            )
         return checkpoint_id
 
     async def rollback(self, agent_type: str, checkpoint_id: str) -> int:
-        """Rollback *agent_type* to a specific checkpoint by restoring file content.
+        """Rollback *agent_type* to a specific checkpoint.
+
+        Restores file content by walking the diff chain:
+        - Finds the closest full baseline
+        - Applies diffs forward/backward to reach the target checkpoint
 
         Returns the number of files restored.
         """
         bucket = self._checkpoints.get(agent_type, {})
-        cp = bucket.get(checkpoint_id)
-        if cp is None:
+        target = bucket.get(checkpoint_id)
+        if target is None:
             raise ValueError(
                 f"Checkpoint not found: {checkpoint_id} for agent {agent_type}"
             )
 
-        logger.info("Rolling back {} to checkpoint {}", agent_type, checkpoint_id)
-        restored = await self._restore_files(cp)
-        logger.info("Rollback complete — {} files restored", restored)
-        return restored
+        # Walk the chain to assemble full file content at target
+        restored_content = await self._assemble_state(agent_type, target)
+
+        # Write restored files to disk
+        count = 0
+        for rel, content in restored_content.items():
+            fp = self.workspace / rel
+            if content is not None:
+                fp.parent.mkdir(parents=True, exist_ok=True)
+                await asyncio.to_thread(fp.write_text, content, encoding="utf-8")
+                count += 1
+            elif fp.exists():
+                # File was deleted at this checkpoint
+                fp.unlink(missing_ok=True)
+                count += 1
+
+        logger.info("Rolled back {} to {} — {} files restored", agent_type, checkpoint_id, count)
+        return count
 
     def get_checkpoint(self, agent_type: str, checkpoint_id: str) -> CheckpointData | None:
         """Get a single checkpoint by agent_type and ID."""
@@ -210,7 +315,7 @@ class CheckpointManager:
         return removed
 
     # ------------------------------------------------------------------
-    # Internal
+    # Internal: Load / Save
     # ------------------------------------------------------------------
 
     def _load_all(self) -> None:
@@ -230,7 +335,6 @@ class CheckpointManager:
                 except Exception:
                     logger.warning("Failed to load checkpoint {}", f)
 
-            # Restore highest epoch
             bucket = self._checkpoints.get(agent_type, {})
             if bucket:
                 self._epochs[agent_type] = max(c.epoch for c in bucket.values())
@@ -239,8 +343,34 @@ class CheckpointManager:
                     len(bucket), agent_type, self._epochs[agent_type],
                 )
 
-    async def _capture_file_states(self, dirs: list[str]) -> dict[str, FileState]:
-        """Capture file states for the given workspace-relative directories."""
+    async def _save(self, cp: CheckpointData) -> None:
+        agent_dir = self._base_dir / cp.agent_type
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        (agent_dir / f"{cp.id}.json").write_text(
+            json.dumps(cp.to_dict(), indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+    def _delete_one(self, cp: CheckpointData) -> None:
+        bucket = self._checkpoints.get(cp.agent_type, {})
+        bucket.pop(cp.id, None)
+        f = self._base_dir / cp.agent_type / f"{cp.id}.json"
+        try:
+            f.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def _next_epoch(self, agent_type: str) -> int:
+        epoch = self._epochs.get(agent_type, 0) + 1
+        self._epochs[agent_type] = epoch
+        return epoch
+
+    # ------------------------------------------------------------------
+    # Internal: File state capture
+    # ------------------------------------------------------------------
+
+    async def _capture_file_states(self, dirs: list[str]) -> dict[str, "FileState"]:
+        """Capture full file states for the given workspace-relative directories."""
         states: dict[str, FileState] = {}
 
         for rel_dir in dirs:
@@ -275,45 +405,127 @@ class CheckpointManager:
 
         return states
 
-    async def _restore_files(self, checkpoint: CheckpointData) -> int:
-        """Restore files from checkpoint content snapshots."""
-        count = 0
-        for rel, state in checkpoint.file_states.items():
-            fp = self.workspace / rel
-            if state.content is not None:
-                fp.parent.mkdir(parents=True, exist_ok=True)
-                await asyncio.to_thread(fp.write_text, state.content, encoding="utf-8")
-                count += 1
-            elif not fp.exists():
-                logger.warning("Cannot restore binary file without snapshot: {}", rel)
-        return count
+    # ------------------------------------------------------------------
+    # Internal: Diff computation and state assembly
+    # ------------------------------------------------------------------
 
-    async def _save(self, cp: CheckpointData) -> None:
-        agent_dir = self._base_dir / cp.agent_type
-        agent_dir.mkdir(parents=True, exist_ok=True)
-        (agent_dir / f"{cp.id}.json").write_text(
-            json.dumps(cp.to_dict(), indent=2, ensure_ascii=False),
-            encoding="utf-8",
+    async def _compute_diffs(
+        self,
+        prev_cp: CheckpointData,
+        current_states: dict[str, "FileState"],
+    ) -> dict[str, FileDiff]:
+        """Compute diffs between the previous checkpoint and current file states.
+
+        We reconstruct the full file content at *prev_cp* by assembling
+        its baseline + diffs, then diff against *current_states*.
+        """
+        # Reconstruct previous state's file content
+        prev_content = await self._assemble_state(
+            prev_cp.agent_type, prev_cp
         )
 
-    def _delete_one(self, cp: CheckpointData) -> None:
-        bucket = self._checkpoints.get(cp.agent_type, {})
-        bucket.pop(cp.id, None)
-        f = self._base_dir / cp.agent_type / f"{cp.id}.json"
-        try:
-            f.unlink(missing_ok=True)
-        except OSError:
-            pass
+        diffs: dict[str, FileDiff] = {}
+        prev_paths = set(prev_content.keys())
+        curr_paths = set(current_states.keys())
 
-    def _next_epoch(self, agent_type: str) -> int:
-        epoch = self._epochs.get(agent_type, 0) + 1
-        self._epochs[agent_type] = epoch
-        return epoch
+        # Deleted files
+        for path in prev_paths - curr_paths:
+            diffs[path] = FileDiff(
+                path=path,
+                operation="deleted",
+                sha256_before=prev_content.get(path, "") if path in prev_content else "",
+                sha256_after="",
+                unified_diff=None,
+            )
+
+        # Added files
+        for path in curr_paths - prev_paths:
+            state = current_states[path]
+            diffs[path] = FileDiff(
+                path=path,
+                operation="added",
+                sha256_before="",
+                sha256_after=state.hash,
+                unified_diff=None,
+            )
+
+        # Modified files
+        for path in prev_paths & curr_paths:
+            state = current_states[path]
+            prev_text = prev_content.get(path, "")
+            if prev_text is None:
+                prev_text = ""
+            curr_text = state.content or ""
+            if prev_text != curr_text:
+                udiff = "\n".join(difflib.unified_diff(
+                    prev_text.splitlines(),
+                    curr_text.splitlines(),
+                    fromfile=path,
+                    tofile=path,
+                    lineterm="",
+                ))
+                diffs[path] = FileDiff(
+                    path=path,
+                    operation="modified",
+                    sha256_before=await _sha256_of_string(prev_text),
+                    sha256_after=state.hash,
+                    unified_diff=udiff,
+                )
+
+        return diffs
+
+    async def _assemble_state(
+        self,
+        agent_type: str,
+        target: CheckpointData,
+    ) -> dict[str, str]:
+        """Reconstruct full file content at a given checkpoint.
+
+        Walks back to find the closest full baseline, then applies diffs
+        forward to reach *target*.
+        """
+        bucket = self._checkpoints.get(agent_type, {})
+        chain: list[CheckpointData] = []
+
+        # Walk back to baseline
+        cp = target
+        while cp is not None and not cp.file_states:
+            chain.append(cp)
+            cp = bucket.get(cp.parent_id) if cp.parent_id else None
+
+        if cp is None or not cp.file_states:
+            raise ValueError(
+                f"Cannot find baseline checkpoint for {target.id}"
+            )
+
+        baseline = cp
+
+        # Start with baseline content
+        result: dict[str, str] = {}
+        for path, state in baseline.file_states.items():
+            if state.content is not None:
+                result[path] = state.content
+
+        # Apply diffs forward
+        for cp_node in reversed(chain):
+            for path, diff in cp_node.file_diffs.items():
+                if diff.operation == "added":
+                    # We need content from the diff — but for diffs we don't
+                    # store full content for added files. Fallback: we can
+                    # try to find it in the next checkpoint's file_states or
+                    # just apply the diff to empty string.
+                    result[path] = _apply_unified_diff("", diff.unified_diff) if diff.unified_diff else ""
+                elif diff.operation == "modified":
+                    old_content = result.get(path, "")
+                    result[path] = _apply_unified_diff(old_content, diff.unified_diff) if diff.unified_diff else old_content
+                elif diff.operation == "deleted":
+                    result.pop(path, None)
+
+        return result
 
 
-# ------------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------------
+# ==== Helpers ====
+
 
 async def _sha256(fp: Path) -> str:
     import aiofiles
@@ -325,6 +537,10 @@ async def _sha256(fp: Path) -> str:
     return h.hexdigest()
 
 
+async def _sha256_of_string(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 async def _is_binary(fp: Path) -> bool:
     try:
         with open(fp, "rb") as fh:
@@ -334,9 +550,74 @@ async def _is_binary(fp: Path) -> bool:
 
 
 def _make_checkpoint_id(agent_type: str, epoch: int) -> str:
-    """Generate a unique checkpoint ID.
-
-    Format: cp_{agent_type}_{epoch:04d}_{timestamp}
-    """
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     return f"cp_{agent_type}_{epoch:04d}_{ts}"
+
+
+def _apply_unified_diff(original: str, diff_text: str | None) -> str:
+    """Apply a unified diff to *original* and return the result.
+
+    If *diff_text* is None or empty, returns *original* unchanged.
+    """
+    if not diff_text:
+        return original
+
+    result_lines = list(original.splitlines(keepends=True))
+    # Keep trailing newline if original had one
+    has_trailing_newline = original.endswith("\n") if original else False
+
+    diff_lines = diff_text.splitlines(keepends=True)
+    # Parse unified diff and apply
+    # Using difflib's built-in patch capability
+    patches: list[tuple[int, int, list[str]]] = []  # (start, end, new_lines)
+
+    i = 0
+    while i < len(diff_lines):
+        line = diff_lines[i]
+        # Parse hunk header: @@ -start,count +start,count @@
+        if line.startswith("@@"):
+            header = line
+            parts = header.split()
+            # Find the second @@
+            if len(parts) >= 2:
+                from_range = parts[1]  # e.g. -1,3
+                to_range = parts[2] if len(parts) > 2 else "+0,0"
+
+                # Parse from_range
+                from_parts = from_range[1:].split(",")  # remove leading '-'
+                from_start = int(from_parts[0])
+                from_count = int(from_parts[1]) if len(from_parts) > 1 else 0
+
+                # Read hunk body
+                hunk_remove: list[str] = []
+                hunk_add: list[str] = []
+                i += 1
+                while i < len(diff_lines) and not diff_lines[i].startswith("@@"):
+                    dl = diff_lines[i]
+                    if dl.startswith("---") or dl.startswith("+++"):
+                        i += 1
+                        continue
+                    if dl.startswith("-"):
+                        hunk_remove.append(dl[1:])  # strip leading '-'
+                    elif dl.startswith("+"):
+                        hunk_add.append(dl[1:])  # strip leading '+'
+                    else:
+                        hunk_remove.append(dl)
+                        hunk_add.append(dl)
+                    i += 1
+
+                # Apply patch: remove from_start..from_start+from_count,
+                # insert hunk_add at from_start-1 (0-indexed)
+                start_idx = from_start - 1 if from_start > 0 else 0
+                end_idx = start_idx + from_count
+                # Ensure indices are within bounds
+                start_idx = max(0, min(start_idx, len(result_lines)))
+                end_idx = max(start_idx, min(end_idx, len(result_lines)))
+                result_lines[start_idx:end_idx] = hunk_add
+                continue
+        i += 1
+
+    result = "".join(result_lines)
+    if has_trailing_newline and not result.endswith("\n"):
+        result += "\n"
+    return result

@@ -15,6 +15,7 @@ class MessageType(str, Enum):
     CONFIG_CHANGE = "config_change"
     PROJECT_SELECT = "project_select"
     RESTART_REQUEST = "restart_request"
+    FILE_ROLLBACK_REQUEST = "file_rollback_request"
 
     # Backend → GUI
     AGENT_RESPONSE = "agent_response"
@@ -24,6 +25,7 @@ class MessageType(str, Enum):
     STATUS_CHANGE = "status_change"
     ERROR = "error"
     CHECKPOINT = "checkpoint"
+    ROLLBACK_STATUS = "rollback_status"
     API_DEBUG = "api_debug"  # API call debugging information
     TASK_UPDATE = "task_update"
     QUEUE_UPDATE = "queue_update"
@@ -159,8 +161,31 @@ class Checkpoint(Message):
     checkpoint_id: str
     description: str
     file_states: dict[str, str]  # path -> hash
+    message_id: str | None = None  # The message that triggered this checkpoint
 
 
+class FileRollbackRequest(Message):
+    """GUI request to rollback files to a specific checkpoint.
+
+    Sent when the user right-clicks a message in the chat and selects
+    "Rollback files to this point".
+    """
+
+    type: MessageType = MessageType.FILE_ROLLBACK_REQUEST
+    checkpoint_id: str
+    agent_type: str  # "main", "data_analysis", "plotting", "theory", "report"
+    message_id: str | None = None  # The message that triggered this rollback
+
+
+class RollbackStatus(Message):
+    """Backend → GUI: result of a file rollback operation."""
+
+    type: MessageType = MessageType.ROLLBACK_STATUS
+    checkpoint_id: str
+    agent_type: str
+    success: bool
+    restored_files: int = 0
+    error: str | None = None
 class Error(Message):
     """Error message."""
 
