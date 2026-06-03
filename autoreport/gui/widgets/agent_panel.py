@@ -879,10 +879,8 @@ class AgentPanel(QWidget):
             role="agent",
             content="",
             timestamp=ts,
-            display_mode="bubble",
-            bubble_align="left",
+            display_mode="thought",
             bubble_title="Thought for 1s",
-            bubble_on_timeline=True,
             bubble_collapsible=True,
             agent_name=agent_name,
         )

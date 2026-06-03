@@ -396,9 +396,6 @@ class MainWindow(QMainWindow):
                 border: 1px solid {c["border"]};
                 border-radius: {px(12)};
             }}
-            #userMessageBubble:hover {{
-                background-color: {c["bubble_hover"]};
-            }}
             #userContextChip {{
                 background-color: {c["hover"]};
                 border: 1px solid {c["border"]};
@@ -426,7 +423,6 @@ class MainWindow(QMainWindow):
             #userMessageText {{
                 color: {c["editor_fg"]};
                 font-size: {px(13)};
-                line-height: 1.7;
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             #messageExpandBtn {{
@@ -1049,10 +1045,8 @@ class MainWindow(QMainWindow):
                 panel.add_message(
                     "agent",
                     content,
-                    display_mode="bubble",
+                    display_mode="thought",
                     bubble_title=rec.get("bubble_title") or "Thought",
-                    bubble_align="left",
-                    bubble_on_timeline=True,
                     bubble_collapsible=bool(rec.get("bubble_collapsible", True)),
                 )
             elif role == "tool_call":
@@ -1081,10 +1075,8 @@ class MainWindow(QMainWindow):
             "thinking",
             detail or "",
             extra={
-                "display_mode": "bubble",
+                "display_mode": "thought",
                 "bubble_title": summary,
-                "bubble_align": "left",
-                "bubble_on_timeline": True,
                 "bubble_collapsible": expandable,
             },
         )

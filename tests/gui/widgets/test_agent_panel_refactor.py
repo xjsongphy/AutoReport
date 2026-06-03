@@ -222,9 +222,11 @@ def test_thinking_row_finishes_with_elapsed_summary(agent_panel):
     assert len(rows) == 1
     assert rows[0]._display_mode == "thought"
     assert rows[0]._bubble_title.startswith("Thought for ")
+    assert rows[0]._summary_text_label is not None
 
     agent_panel.append_thinking("raw **markdown** thought")
     assert rows[0]._bubble_text == "raw **markdown** thought"
+    assert rows[0]._detail_label is not None
 
     agent_panel.finish_thinking()
     assert rows[0]._bubble_title.startswith("Thought for ")
@@ -248,16 +250,17 @@ def test_thinking_detail_updates_existing_detail_label(agent_panel):
     agent_panel.start_thinking()
     row = agent_panel._messages_area.get_message_rows()[0]
     agent_panel.append_thinking("first\nsecond\nthird\nfourth\nfifth\nsixth")
-    row._bubble_header.clicked.emit()
+    row._summary_header.clicked.emit()
     assert row.is_expanded()
-    assert row._body_content_widget is not None
-    assert "first" in row._body_content_widget.label().text()
+    assert row._detail_label is not None
+    assert "first" in row._detail_label.text()
 
     agent_panel.append_thinking("first\nsecond\nthird\nfourth\nfifth\nsixth\nseventh")
     rows = agent_panel._messages_area.get_message_rows()
     assert rows == [row]
     assert row.is_expanded()
-    assert "seventh" in row._body_content_widget.label().text()
+    assert row._detail_label is not None
+    assert "seventh" in row._detail_label.text()
 
 
 def test_thinking_stream_merge_handles_delta_snapshot_and_final(agent_panel):
@@ -289,9 +292,73 @@ def test_summary_arrow_stays_next_to_text(qtbot):
     row.show()
     qtbot.waitExposed(row)
 
-    text_right = row._bubble_title_label.mapTo(row, row._bubble_title_label.rect().topRight()).x()
-    arrow_left = row._bubble_arrow_widget.mapTo(row, row._bubble_arrow_widget.rect().topLeft()).x()
+    text_right = row._summary_text_label.mapTo(row, row._summary_text_label.rect().topRight()).x()
+    arrow_left = row._summary_arrow_widget.mapTo(row, row._summary_arrow_widget.rect().topLeft()).x()
     assert 0 <= arrow_left - text_right <= 10
+
+
+def test_thought_summary_stays_single_line_when_width_is_sufficient(qtbot):
+    from autoreport.gui.widgets.message_row import MessageRow
+
+    row = MessageRow(
+        role="agent",
+        content="detail",
+        display_mode="thought",
+        bubble_title="Thought for 1s",
+        bubble_collapsible=True,
+    )
+    qtbot.addWidget(row)
+    row.resize(600, 80)
+    row.show()
+    qtbot.waitExposed(row)
+
+    assert row._summary_text_label is not None
+    line_height = row._summary_text_label.fontMetrics().lineSpacing()
+    assert row._summary_text_label.height() <= line_height + 6
+
+
+def test_thought_summary_label_keeps_visible_width(qtbot):
+    from autoreport.gui.widgets.message_row import MessageRow
+
+    row = MessageRow(
+        role="agent",
+        content="detail",
+        display_mode="thought",
+        bubble_title="Thought for 1s",
+        bubble_collapsible=True,
+    )
+    qtbot.addWidget(row)
+    row.resize(600, 80)
+    row.show()
+    qtbot.waitExposed(row)
+
+    assert row._summary_text_label is not None
+    assert row._summary_text_label.width() >= 80
+
+
+def test_thought_detail_aligns_close_to_summary_start(qtbot):
+    from autoreport.gui.widgets.message_row import MessageRow
+
+    row = MessageRow(
+        role="agent",
+        content="detail line",
+        display_mode="thought",
+        bubble_title="Thought for 1s",
+        bubble_collapsible=True,
+    )
+    qtbot.addWidget(row)
+    row.resize(600, 120)
+    row.show()
+    qtbot.waitExposed(row)
+
+    assert row._summary_header is not None
+    assert row._detail_label is not None
+    row._summary_header.clicked.emit()
+    qtbot.wait(20)
+
+    summary_left = row._summary_text_label.mapTo(row, row._summary_text_label.rect().topLeft()).x()
+    detail_left = row._detail_label.mapTo(row, row._detail_label.rect().topLeft()).x()
+    assert abs(detail_left - summary_left) <= 4
 
 
 def test_set_debug_mode_shows_hides_panel(agent_panel):
