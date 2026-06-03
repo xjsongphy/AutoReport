@@ -8,7 +8,7 @@
 import re
 from functools import lru_cache
 
-from PyQt6.QtCore import QEvent, QPoint, QRect, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, QPoint, QRect, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import (
     QClipboard,
     QColor,
@@ -20,6 +20,7 @@ from PyQt6.QtGui import (
     QPen,
     QWheelEvent,
 )
+from PyQt6.QtCore import QMargins
 
 from ..scale import scaled_size
 from PyQt6.QtWidgets import (
@@ -41,6 +42,8 @@ from ...utils.editor_context import parse_editor_context
 
 TIMELINE_EVENT_ROW_HEIGHT = 34
 COLLAPSE_LINE_LIMIT = 5
+TIMELINE_TEXT_LEFT_GUTTER = 4
+USER_BUBBLE_CONTENT_MARGINS = QMargins(10, 10, 10, 10)
 _CODE_BLOCK_PATTERN = re.compile(r"```(\w*)\n(.*?)```", re.DOTALL)
 
 class _DisclosureArrow(QWidget):
@@ -411,50 +414,83 @@ class _ExpandableContentWidget(QWidget):
         *,
         fade_color: str,
         line_limit: int = COLLAPSE_LINE_LIMIT,
+        collapsed_text: str | None = None,
+        expanded_text: str | None = None,
+        clamp_collapsed: bool = True,
+        overlay_host: QWidget | None = None,
+        toggle_host: QWidget | None = None,
+        toggle_host_margins: QMargins | None = None,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._line_limit = max(1, int(line_limit))
         self._expanded = False
-        self._hovered = False
+        self._self_hovered = False
+        self._host_hovered = False
         self._has_overflow = False
         self._max_content_width: int | None = None
+        self._clamp_collapsed = clamp_collapsed
+        self._overlay_host = overlay_host or self
+        self._toggle_host = toggle_host or self._overlay_host
+        self._toggle_host_margins = toggle_host_margins or QMargins(0, 0, 0, 0)
+        self._collapsed_text = str(label.text() if collapsed_text is None else collapsed_text)
+        default_expanded = self._collapsed_text if expanded_text is None else expanded_text
+        self._expanded_text = str(default_expanded or "")
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(0)
 
         self._label = label
         self._label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self._label.setMinimumWidth(0)
-        layout.addWidget(self._label)
+        self._layout.addWidget(self._label)
 
-        self._fade = _FadeMask(fade_color, self)
+        self._fade = _FadeMask(fade_color, self._overlay_host)
         self._fade.setObjectName("messageFadeMask")
         self._fade.hide()
 
-        self._toggle_btn = QPushButton("Show More", self)
+        self._toggle_btn = QPushButton("Show More", self._toggle_host)
         self._toggle_btn.setObjectName("messageExpandBtn")
         self._toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._toggle_btn.clicked.connect(self._toggle_from_button)
         self._toggle_btn.hide()
 
         self.setMouseTracking(True)
+        if self._overlay_host is not self:
+            self._overlay_host.setMouseTracking(True)
+            self._overlay_host.installEventFilter(self)
+        if self._toggle_host not in {self, self._overlay_host}:
+            self._toggle_host.setMouseTracking(True)
+            self._toggle_host.installEventFilter(self)
 
     def enterEvent(self, event) -> None:  # noqa: N802
         super().enterEvent(event)
-        self._hovered = True
+        self._self_hovered = True
         self._update_toggle_visibility()
 
     def leaveEvent(self, event) -> None:  # noqa: N802
         super().leaveEvent(event)
-        self._hovered = False
+        self._self_hovered = False
         self._update_toggle_visibility()
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
         self._refresh_clamp()
         self._position_overlay()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if watched in {self._overlay_host, self._toggle_host}:
+            if event.type() in (QEvent.Type.Enter, QEvent.Type.HoverEnter):
+                self._host_hovered = True
+                self._update_toggle_visibility()
+            elif event.type() in (QEvent.Type.Leave, QEvent.Type.HoverLeave):
+                self._host_hovered = False
+                self._update_toggle_visibility()
+            elif event.type() in (QEvent.Type.Resize, QEvent.Type.Move, QEvent.Type.Show):
+                self._position_overlay()
+        return super().eventFilter(watched, event)
 
     def setMaximumContentWidth(self, width: int) -> None:
         width = max(40, int(width))
@@ -465,7 +501,23 @@ class _ExpandableContentWidget(QWidget):
         self._refresh_clamp()
 
     def set_text(self, text: str) -> None:
-        self._label.setText(text)
+        value = str(text or "")
+        self._collapsed_text = value
+        self._expanded_text = value
+        self._refresh_clamp()
+
+    def set_collapsed_text(self, text: str) -> None:
+        self._collapsed_text = str(text or "")
+        self._refresh_clamp()
+
+    def set_expanded_text(self, text: str) -> None:
+        self._expanded_text = str(text or "")
+        self._refresh_clamp()
+
+    def set_texts(self, collapsed_text: str, expanded_text: str, *, clamp_collapsed: bool) -> None:
+        self._collapsed_text = str(collapsed_text or "")
+        self._expanded_text = str(expanded_text or "")
+        self._clamp_collapsed = bool(clamp_collapsed)
         self._refresh_clamp()
 
     def label(self) -> QLabel:
@@ -478,7 +530,7 @@ class _ExpandableContentWidget(QWidget):
         return self._has_overflow
 
     def can_toggle(self) -> bool:
-        return self._has_overflow or self._expanded
+        return self._has_distinct_expanded_text() or self._has_overflow or self._expanded
 
     def set_expanded(self, expanded: bool) -> None:
         expanded = bool(expanded)
@@ -495,41 +547,68 @@ class _ExpandableContentWidget(QWidget):
         self._refresh_clamp()
         self.toggled.emit(self._expanded)
 
+    def _has_distinct_expanded_text(self) -> bool:
+        return bool(self._expanded_text) and self._expanded_text != self._collapsed_text
+
+    def _display_text(self) -> str:
+        if self._expanded and self._has_distinct_expanded_text():
+            return self._expanded_text
+        return self._collapsed_text
+
     def _collapsed_height(self) -> int:
         margins = self._label.contentsMargins()
         return (
-            self._label.fontMetrics().lineSpacing() * self._line_limit
+            self._label.fontMetrics().height() * self._line_limit
             + margins.top()
             + margins.bottom()
             + 2
         )
 
+    def _text_height_for_width(self, width: int) -> int:
+        text = self._display_text()
+        margins = self._label.contentsMargins()
+        content_width = max(1, width - margins.left() - margins.right())
+        flags = int(Qt.TextFlag.TextWordWrap | Qt.TextFlag.TextExpandTabs)
+        rect = self._label.fontMetrics().boundingRect(
+            QRect(0, 0, content_width, 100000),
+            flags,
+            text,
+        )
+        return rect.height() + margins.top() + margins.bottom()
+
     def _label_width(self) -> int:
-        if self._max_content_width is not None:
-            return self._max_content_width
-        return max(40, self.width())
+        width = self._max_content_width if self._max_content_width is not None else self.width()
+        width = max(40, int(width))
+        if not self._clamp_collapsed and self.can_toggle():
+            width -= self._toggle_btn.sizeHint().width() + 8
+        return max(40, width)
 
     def _refresh_clamp(self) -> None:
+        display_text = self._display_text()
+        if self._label.text() != display_text:
+            self._label.setText(display_text)
+
         label_width = self._label_width()
-        natural_height = max(self._label.sizeHint().height(), self._label.heightForWidth(label_width))
-        collapsed_height = self._collapsed_height()
         old_overflow = self._has_overflow
-        self._has_overflow = natural_height > (collapsed_height + 2)
-
-        if self._expanded or not self._has_overflow:
-            self._label.setMaximumHeight(16777215)
-            self._label.setMinimumHeight(0)
+        if self._clamp_collapsed and not self._has_distinct_expanded_text():
+            natural_height = max(
+                self._text_height_for_width(label_width),
+                self._label.heightForWidth(label_width),
+            )
+            collapsed_height = self._collapsed_height()
+            self._has_overflow = natural_height > (collapsed_height + 2)
+            if self._expanded or not self._has_overflow:
+                self._label.setMinimumHeight(0)
+                self._label.setMaximumHeight(16777215)
+            else:
+                self._label.setMinimumHeight(collapsed_height)
+                self._label.setMaximumHeight(collapsed_height)
         else:
-            self._label.setFixedHeight(collapsed_height)
-
-        if self._expanded or not self._has_overflow:
+            self._has_overflow = False
             self._label.setMinimumHeight(0)
             self._label.setMaximumHeight(16777215)
-        else:
-            self._label.setMinimumHeight(collapsed_height)
-            self._label.setMaximumHeight(collapsed_height)
 
-        self._fade.setVisible(self._has_overflow and not self._expanded)
+        self._fade.setVisible(self._clamp_collapsed and self._has_overflow and not self._expanded)
         self._toggle_btn.setText("Show less" if self._expanded else "Show More")
         self._update_toggle_visibility()
         self._position_overlay()
@@ -538,16 +617,34 @@ class _ExpandableContentWidget(QWidget):
             self.overflow_changed.emit()
 
     def _update_toggle_visibility(self) -> None:
-        self._toggle_btn.setVisible(self._hovered and self.can_toggle())
+        self._toggle_btn.setVisible((self._self_hovered or self._host_hovered) and self.can_toggle())
 
     def _position_overlay(self) -> None:
+        overlay_rect = self._overlay_host.rect()
         fade_height = max(28, self._label.fontMetrics().lineSpacing() * 2)
-        self._fade.setGeometry(0, max(0, self.height() - fade_height), self.width(), fade_height)
-        btn_size = self._toggle_btn.sizeHint()
-        self._toggle_btn.move(
-            max(0, self.width() - btn_size.width() - 2),
-            max(0, self.height() - btn_size.height() - 2),
+        fade_bottom = overlay_rect.height()
+        self._fade.setGeometry(
+            0,
+            max(0, fade_bottom - fade_height),
+            overlay_rect.width(),
+            fade_height,
         )
+        btn_size = self._toggle_btn.sizeHint()
+        toggle_host_rect = self._toggle_host.rect()
+        btn_x = max(
+            self._toggle_host_margins.left(),
+            toggle_host_rect.width() - self._toggle_host_margins.right() - btn_size.width(),
+        )
+        btn_y = max(
+            self._toggle_host_margins.top(),
+            toggle_host_rect.height() - self._toggle_host_margins.bottom() - btn_size.height(),
+        )
+        self._toggle_btn.move(
+            btn_x,
+            btn_y,
+        )
+        self._fade.raise_()
+        self._toggle_btn.raise_()
 
 
 class MessageRow(QWidget):
@@ -620,6 +717,12 @@ class MessageRow(QWidget):
         self._bubble_arrow_widget: _DisclosureArrow | None = None
         self._bubble_arrow_host: QWidget | None = None
         self._bubble_title_label: QLabel | None = None
+        self._summary_header: QWidget | None = None
+        self._summary_arrow_widget: _DisclosureArrow | None = None
+        self._summary_arrow_host: QWidget | None = None
+        self._summary_text_label: QLabel | None = None
+        self._detail_label: QLabel | None = None
+        self._detail_widget: QWidget | None = None
         self._is_thinking_row = False
         self._user_actions_visible = False
         self._editing = False  # Track if in edit mode
@@ -691,7 +794,7 @@ class MessageRow(QWidget):
                 QSizePolicy.Policy.Preferred,
             )
             bl = QVBoxLayout(bubble)
-            bl.setContentsMargins(8, 8, 12, 8)
+            bl.setContentsMargins(USER_BUBBLE_CONTENT_MARGINS)
             bl.setSpacing(0)
             self._user_bubble_widget = bubble
             self._user_bubble_layout = bcl
@@ -766,7 +869,7 @@ class MessageRow(QWidget):
                     QSizePolicy.Policy.Preferred,
                 )
                 bubble_layout = QVBoxLayout(bubble)
-                bubble_layout.setContentsMargins(8, 8, 12, 8)
+                bubble_layout.setContentsMargins(USER_BUBBLE_CONTENT_MARGINS)
                 bubble_layout.setSpacing(0)
                 self._user_bubble_widget = bubble
                 self._populate_bubble_content(bubble_layout, bubble_type="left")
@@ -787,8 +890,6 @@ class MessageRow(QWidget):
             )
             if self._bubble_text:
                 layout.addSpacing(8)
-        if self._bubble_title:
-            layout.addWidget(self._build_bubble_header())
         text = QLabel(self._bubble_text)
         text.setObjectName("userMessageText")
         text.setWordWrap(True)
@@ -800,9 +901,16 @@ class MessageRow(QWidget):
         text.installEventFilter(self)
         c = get_theme_colors()
         text.setStyleSheet(f"color: {c['editor_fg']}; background-color: transparent;")
+        collapsed_text, expanded_text, clamp_collapsed = self._bubble_text_strategy()
         self._body_content_widget = self._build_expandable_content_widget(
             text,
             fade_color=c["bubble_bg"],
+            collapsed_text=collapsed_text,
+            expanded_text=expanded_text,
+            clamp_collapsed=clamp_collapsed,
+            overlay_host=None,
+            toggle_host=self._user_bubble_widget,
+            toggle_host_margins=layout.contentsMargins(),
         )
         self._body_content_widget.toggled.connect(self._on_bubble_expanded_changed)
         self._body_content_widget.overflow_changed.connect(self._refresh_bubble_header)
@@ -845,6 +953,17 @@ class MessageRow(QWidget):
     def _clear_agent_content(self) -> None:
         self._wrapping_labels = []
         self._raw_markdown_labels = {}
+        self._body_content_widget = None
+        self._bubble_header = None
+        self._bubble_arrow_widget = None
+        self._bubble_arrow_host = None
+        self._bubble_title_label = None
+        self._summary_header = None
+        self._summary_arrow_widget = None
+        self._summary_arrow_host = None
+        self._summary_text_label = None
+        self._detail_label = None
+        self._detail_widget = None
         if self._agent_content_layout is None:
             return
         while self._agent_content_layout.count():
@@ -861,6 +980,14 @@ class MessageRow(QWidget):
     def _rebuild_agent_content(self) -> None:
         self._clear_agent_content()
         if self._agent_content_layout is None:
+            return
+        if self._display_mode == "thought":
+            self._agent_content_layout.addWidget(self._build_summary_widget())
+            self._detail_widget = self._build_detail_widget()
+            self._agent_content_layout.addWidget(self._detail_widget)
+            self._detail_widget.setVisible(self._expanded and self._has_detail())
+            self._apply_text_width_constraints()
+            self._sync_timeline_dot_alignment()
             return
 
         text_label = self._build_agent_markdown_label(self._content)
@@ -904,6 +1031,101 @@ class MessageRow(QWidget):
         if self._timeline_rail is not None:
             self._timeline_rail.set_chain(self._agent_chain_prev, self._agent_chain_next)
 
+    def _has_detail(self) -> bool:
+        return bool(self._content)
+
+    def _build_summary_widget(self) -> QWidget:
+        widget = _SummaryHeader(self)
+        widget.setMinimumHeight(TIMELINE_EVENT_ROW_HEIGHT)
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(TIMELINE_TEXT_LEFT_GUTTER, 4, 0, 6)
+        layout.setSpacing(6)
+        self._summary_header = widget
+        widget.setObjectName("toolCallHeader")
+
+        self._summary_arrow_widget = _DisclosureArrow(self._expanded, widget)
+        self._summary_arrow_widget.setVisible(self._bubble_collapsible and self._has_detail())
+        self._summary_arrow_host = QWidget(widget)
+        self._summary_arrow_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+        ahl = QVBoxLayout(self._summary_arrow_host)
+        ahl.setContentsMargins(0, 0, 0, 0)
+        ahl.setSpacing(0)
+        ahl.addWidget(self._summary_arrow_widget, 0, Qt.AlignmentFlag.AlignTop)
+
+        self._summary_text_label = QLabel(self._bubble_title or "", widget)
+        self._summary_text_label.setObjectName("toolCallHeaderText")
+        self._summary_text_label.setTextFormat(Qt.TextFormat.PlainText)
+        self._summary_text_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self._summary_text_label.setWordWrap(True)
+        self._summary_text_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._summary_text_label.setMinimumWidth(0)
+        layout.addWidget(self._summary_text_label, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(self._summary_arrow_host, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addStretch(1)
+        self._sync_summary_arrow_alignment()
+        self._sync_timeline_dot_alignment()
+
+        widget.setCursor(
+            Qt.CursorShape.PointingHandCursor
+            if (self._bubble_collapsible and self._has_detail())
+            else Qt.CursorShape.ArrowCursor
+        )
+        widget.clicked.connect(self._toggle_summary)
+        self._refresh_summary_header()
+        return widget
+
+    def _build_detail_widget(self) -> QWidget:
+        widget = QWidget(self)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(TIMELINE_TEXT_LEFT_GUTTER, 2, 0, 0)
+        layout.setSpacing(0)
+        label = self._build_agent_markdown_label(self._content or "")
+        self._detail_label = label
+        layout.addWidget(label)
+        return widget
+
+    def _toggle_summary(self) -> None:
+        if not (self._bubble_collapsible and self._has_detail()):
+            return
+        self._expanded = not self._expanded
+        if self._detail_widget is not None:
+            self._detail_widget.setVisible(self._expanded)
+        self._refresh_summary_header()
+
+    def set_summary_text(self, summary: str) -> None:
+        self._bubble_title = summary
+        self._refresh_summary_header()
+
+    def set_detail_text(self, detail: str) -> None:
+        self._bubble_text = detail or ""
+        self._content = detail or ""
+        if self._detail_label is not None:
+            self._detail_label.setText(render_markdown(detail or ""))
+            self._raw_markdown_labels[self._detail_label] = detail or ""
+            self._apply_text_width_constraints()
+        elif self._agent_content_layout is not None:
+            expanded = self._expanded
+            self._rebuild_agent_content()
+            self._expanded = expanded
+        if self._detail_widget is not None:
+            self._detail_widget.setVisible(self._expanded and self._has_detail())
+        self._refresh_summary_header()
+
+    def _refresh_summary_header(self) -> None:
+        can_expand = self._bubble_collapsible and self._has_detail()
+        if self._summary_text_label is not None:
+            self._summary_text_label.setText(self._bubble_title or "")
+        if self._summary_arrow_widget is not None:
+            self._summary_arrow_widget.setVisible(can_expand)
+            self._summary_arrow_widget.set_expanded(self._expanded)
+        self._sync_summary_arrow_alignment()
+        self._sync_timeline_dot_alignment()
+        if self._summary_header is not None:
+            self._summary_header.setCursor(
+                Qt.CursorShape.PointingHandCursor if can_expand else Qt.CursorShape.ArrowCursor
+            )
+        self._apply_thinking_text_style()
+
     def _build_bubble_header(self) -> QWidget:
         widget = _SummaryHeader(self)
         if self._bubble_on_timeline:
@@ -913,7 +1135,7 @@ class MessageRow(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
         self._bubble_header = widget
-        widget.setObjectName("msgSummaryHeader")
+        widget.setObjectName("toolCallHeader" if self._display_mode == "thought" else "msgSummaryHeader")
 
         self._bubble_arrow_widget = _DisclosureArrow(self._expanded, widget)
         self._bubble_arrow_host = QWidget(widget)
@@ -953,21 +1175,38 @@ class MessageRow(QWidget):
         self._set_bubble_expanded(not self._expanded)
 
     def _set_bubble_expanded(self, expanded: bool) -> None:
-        if self._body_content_widget is None:
-            return
         self._expanded = bool(expanded)
-        self._body_content_widget.set_expanded(self._expanded)
+        if self._body_content_widget is not None:
+            self._body_content_widget.set_expanded(self._expanded)
         self._refresh_bubble_header()
 
     def set_bubble_title(self, title: str | None) -> None:
+        if self._display_mode == "thought":
+            self.set_summary_text(title or "")
+            return
         self._bubble_title = title
+        if self._body_content_widget is not None:
+            collapsed_text, expanded_text, clamp_collapsed = self._bubble_text_strategy()
+            self._body_content_widget.set_texts(
+                collapsed_text,
+                expanded_text,
+                clamp_collapsed=clamp_collapsed,
+            )
         self._refresh_bubble_header()
 
     def set_bubble_content(self, content: str) -> None:
+        if self._display_mode == "thought":
+            self.set_detail_text(content)
+            return
         self._bubble_text = content or ""
         self._content = content or ""
         if self._body_content_widget is not None:
-            self._body_content_widget.set_text(self._bubble_text)
+            collapsed_text, expanded_text, clamp_collapsed = self._bubble_text_strategy()
+            self._body_content_widget.set_texts(
+                collapsed_text,
+                expanded_text,
+                clamp_collapsed=clamp_collapsed,
+            )
             self._apply_text_width_constraints()
         self._refresh_bubble_header()
 
@@ -977,23 +1216,31 @@ class MessageRow(QWidget):
 
     def _refresh_bubble_header(self) -> None:
         can_expand = self._can_toggle_bubble()
-        if self._bubble_title_label is not None:
-            self._bubble_title_label.setText(self._bubble_title or "")
-        if self._bubble_arrow_widget is not None:
-            self._bubble_arrow_widget.setVisible(can_expand)
-            self._bubble_arrow_widget.set_expanded(self._expanded)
-        self._sync_bubble_arrow_alignment()
         self._sync_timeline_dot_alignment()
-        if self._bubble_header is not None:
-            self._bubble_header.setCursor(
-                Qt.CursorShape.PointingHandCursor if can_expand else Qt.CursorShape.ArrowCursor
-            )
         self._apply_thinking_text_style()
 
     def _can_toggle_bubble(self) -> bool:
-        if not self._bubble_collapsible or self._body_content_widget is None:
+        if not self._bubble_collapsible:
+            return False
+        if self._body_content_widget is None:
             return False
         return self._body_content_widget.can_toggle()
+
+    def _sync_summary_arrow_alignment(self) -> None:
+        """Align disclosure arrow center to the first summary text line center."""
+        if (
+            self._summary_arrow_host is None
+            or self._summary_text_label is None
+            or self._summary_arrow_widget is None
+        ):
+            return
+        metrics = self._summary_text_label.fontMetrics()
+        line_height = max(1, metrics.height())
+        arrow_height = max(1, self._summary_arrow_widget.height())
+        top_offset = max(0, (line_height - arrow_height) // 2)
+        host_layout = self._summary_arrow_host.layout()
+        if isinstance(host_layout, QVBoxLayout):
+            host_layout.setContentsMargins(0, top_offset, 0, 0)
 
     def _sync_bubble_arrow_alignment(self) -> None:
         """Align disclosure arrow center to the first summary text line center."""
@@ -1018,6 +1265,13 @@ class MessageRow(QWidget):
     def _sync_timeline_dot_alignment(self) -> None:
         """Align timeline dot center to the first visible text line center."""
         if self._timeline_rail is None:
+            return
+        if self._summary_text_label is not None and self._summary_header is not None:
+            metrics = self._summary_text_label.fontMetrics()
+            line_height = metrics.height()
+            margins = self._summary_header.layout().contentsMargins() if self._summary_header.layout() else None
+            top = margins.top() if margins is not None else 0
+            self._timeline_rail.set_dot_center_y(self._first_line_center_y(top, line_height))
             return
         if self._bubble_title_label is not None and self._bubble_header is not None:
             metrics = self._bubble_title_label.fontMetrics()
@@ -1049,6 +1303,20 @@ class MessageRow(QWidget):
 
     def _apply_thinking_text_style(self) -> None:
         color = get_theme_colors()["muted"] if self._is_thinking_row else ""
+        if self._summary_text_label is not None:
+            if color:
+                self._summary_text_label.setStyleSheet(
+                    f"color: {color}; background-color: transparent;"
+                )
+            else:
+                self._summary_text_label.setStyleSheet("")
+        if self._detail_label is not None:
+            if color:
+                self._detail_label.setStyleSheet(
+                    f"color: {color}; background-color: transparent;"
+                )
+            else:
+                self._detail_label.setStyleSheet("")
         if self._bubble_title_label is not None:
             if color:
                 self._bubble_title_label.setStyleSheet(
@@ -1118,7 +1386,7 @@ class MessageRow(QWidget):
         edit_bubble.setObjectName("userEditBubble")
         edit_bubble.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         ebl = QVBoxLayout(edit_bubble)
-        ebl.setContentsMargins(8, 8, 12, 8)
+        ebl.setContentsMargins(USER_BUBBLE_CONTENT_MARGINS)
         ebl.setSpacing(0)
 
         edit = _NestedScrollPlainTextEdit(edit_content or "")
@@ -1461,6 +1729,7 @@ class MessageRow(QWidget):
         """Keep message content constrained to current panel width."""
         super().resizeEvent(event)
         self._apply_text_width_constraints()
+        self._sync_summary_arrow_alignment()
         self._sync_bubble_arrow_alignment()
         self._sync_timeline_dot_alignment()
         if self._is_outbound_message() and self._user_bubble_container is not None:
@@ -1481,7 +1750,15 @@ class MessageRow(QWidget):
         return self._display_mode == "bubble"
 
     def _uses_timeline(self) -> bool:
-        return self._display_mode == "agent_markdown" or self._bubble_on_timeline
+        return self._display_mode in {"agent_markdown", "thought"} or self._bubble_on_timeline
+
+    def _uses_summary_bubble(self) -> bool:
+        return self._uses_bubble_layout() and bool(self._bubble_title) and not self._allow_edit
+
+    def _bubble_text_strategy(self) -> tuple[str, str, bool]:
+        if self._uses_summary_bubble():
+            return (str(self._bubble_title or ""), self._bubble_text, False)
+        return (self._bubble_text, self._bubble_text, True)
 
     def _apply_text_width_constraints(self) -> None:
         max_w = max(40, self._content_width_limit())
@@ -1493,6 +1770,10 @@ class MessageRow(QWidget):
                 self._bubble_title_label.setMaximumWidth(max(40, bubble_max_w - 24))
             if self._body_content_widget is not None:
                 self._body_content_widget.setMaximumContentWidth(bubble_max_w)
+        elif self._display_mode == "thought" and self._summary_text_label is not None:
+            self._summary_text_label.setMaximumWidth(
+                max(40, max_w - 24 - TIMELINE_TEXT_LEFT_GUTTER)
+            )
 
     def _target_user_bubble_width(self) -> int:
         # Match the agent/tool timeline geometry: when the user bubble is
@@ -1566,6 +1847,27 @@ class MessageRow(QWidget):
         row_gutters = 40
         return int((chip_width + bubble_padding) / 0.75) + row_gutters
 
-    def _build_expandable_content_widget(self, label: QLabel, *, fade_color: str) -> _ExpandableContentWidget:
-        widget = _ExpandableContentWidget(label, fade_color=fade_color, parent=self)
+    def _build_expandable_content_widget(
+        self,
+        label: QLabel,
+        *,
+        fade_color: str,
+        collapsed_text: str | None = None,
+        expanded_text: str | None = None,
+        clamp_collapsed: bool = True,
+        overlay_host: QWidget | None = None,
+        toggle_host: QWidget | None = None,
+        toggle_host_margins: QMargins | None = None,
+    ) -> _ExpandableContentWidget:
+        widget = _ExpandableContentWidget(
+            label,
+            fade_color=fade_color,
+            collapsed_text=collapsed_text,
+            expanded_text=expanded_text,
+            clamp_collapsed=clamp_collapsed,
+            overlay_host=overlay_host,
+            toggle_host=toggle_host,
+            toggle_host_margins=toggle_host_margins,
+            parent=self,
+        )
         return widget
