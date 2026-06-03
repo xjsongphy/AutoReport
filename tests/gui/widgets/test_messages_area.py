@@ -78,7 +78,7 @@ def test_add_tool_group(qtbot):
 
     # Add some tool calls to the group
     tool_group.add_tool_call(
-        name="read_file",
+        name="read",
         arguments={"path": "test.py"},
         success=True,
         duration_ms=150,

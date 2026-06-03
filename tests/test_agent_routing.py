@@ -63,8 +63,8 @@ class TestAgentRoutingInStore:
 
     def test_tool_calls_isolated_per_agent(self, store):
         """Tool calls are stored per agent."""
-        store.append_tool_call("main", "list_dir", {"path": "/"})
-        store.append_tool_call("data_analysis", "read_file", {"path": "data.csv"})
+        store.append_tool_call("main", "read", {"path": "/"})
+        store.append_tool_call("data_analysis", "read", {"path": "data.csv"})
 
         main_msgs = store.load_messages("main")
         da_msgs = store.load_messages("data_analysis")
@@ -74,7 +74,7 @@ class TestAgentRoutingInStore:
 
         assert len(da_msgs) == 1
         assert da_msgs[0]["role"] == "tool_call"
-        assert da_msgs[0]["content"] == "read_file"
+        assert da_msgs[0]["content"] == "read"
 
     def test_sessions_isolated_per_agent_type(self, store):
         """New session creates fresh history for a specific agent."""
@@ -136,7 +136,7 @@ class TestMessageTypesForRouting:
     def test_tool_call_has_agent_type(self):
         msg = ToolCallMsg(
             agent_type=AgentType.THEORY,
-            tool_name="read_file",
+            tool_name="read",
             arguments={"path": "ref.pdf"},
         )
         assert msg.agent_type == AgentType.THEORY

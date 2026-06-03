@@ -144,7 +144,7 @@ async def test_process_message(agent_loop, mock_provider, mock_gui):
 
 @pytest.mark.asyncio
 async def test_process_message_with_tool_calls(agent_loop, mock_provider, mock_gui):
-    tc = ToolCall(id="call_1", name="read_file", arguments={"path": "test.txt"})
+    tc = ToolCall(id="call_1", name="read", arguments={"path": "test.txt"})
 
     # Mock streaming: first yields chunks, then tool calls at end
     async def mock_chat_stream_with_tools(*args, **kwargs):
@@ -163,7 +163,7 @@ async def test_process_message_with_tool_calls(agent_loop, mock_provider, mock_g
         tool_called.append(kwargs)
         return {"content": "file data"}
 
-    agent_loop.tools.get = lambda name: mock_tool if name == "read_file" else None
+    agent_loop.tools.get = lambda name: mock_tool if name == "read" else None
 
     msg = UserMessage(content="Read file", agent_type=AgentType.MAIN)
     await agent_loop._process_message(msg)

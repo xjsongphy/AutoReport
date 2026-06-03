@@ -8,8 +8,7 @@ import pytest
 
 from autoreport.core.tools.file_tools import (
     EditFileTool,
-    ListDirTool,
-    ReadFileTool,
+    ReadTool,
     WriteFileTool,
 )
 
@@ -29,7 +28,7 @@ async def test_read_file(temp_workspace):
     test_file = temp_workspace / "test.txt"
     test_file.write_text("Hello, World!", encoding="utf-8")
 
-    tool = ReadFileTool(workspace=temp_workspace)
+    tool = ReadTool(workspace=temp_workspace)
     result = await tool(path="test.txt")
 
     assert Path(result["path"]) == test_file.resolve()
@@ -42,7 +41,7 @@ async def test_read_file(temp_workspace):
 async def test_read_file_pdf_rejected(temp_workspace):
     test_file = temp_workspace / "paper.pdf"
     test_file.write_bytes(b"%PDF-1.4")
-    tool = ReadFileTool(workspace=temp_workspace)
+    tool = ReadTool(workspace=temp_workspace)
     with pytest.raises(ValueError, match="Use parse_pdf"):
         await tool(path="paper.pdf")
 
@@ -138,15 +137,15 @@ async def test_edit_file(temp_workspace):
 
 
 @pytest.mark.asyncio
-async def test_list_dir(temp_workspace):
-    """Test listing directory contents."""
+async def test_read_directory(temp_workspace):
+    """Test reading directory contents."""
     # Create test structure
     (temp_workspace / "dir1").mkdir()
     (temp_workspace / "dir2").mkdir()
     (temp_workspace / "file1.txt").write_text("content")
     (temp_workspace / "dir1" / "subfile.txt").write_text("content")
 
-    tool = ListDirTool(workspace=temp_workspace)
+    tool = ReadTool(workspace=temp_workspace)
 
     # Test non-recursive
     result = await tool(path=".", recursive=False)

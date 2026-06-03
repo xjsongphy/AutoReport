@@ -67,7 +67,7 @@ def test_subscribes_to_restart(manager):
 def test_create_tools_for_main(manager):
     tools = manager._create_tools_for_agent(AgentType.MAIN)
     tool_names = {t.name for t in tools.get_all().values()}
-    assert "read_file" in tool_names
+    assert "read" in tool_names
     assert "write_file" in tool_names
     assert "bash" in tool_names
 
@@ -82,7 +82,7 @@ def test_create_tools_for_data_analysis(manager):
 def test_create_tools_for_theory(manager):
     tools = manager._create_tools_for_agent(AgentType.THEORY)
     tool_names = {t.name for t in tools.get_all().values()}
-    assert "read_file" in tool_names
+    assert "read" in tool_names
     assert "write_file" in tool_names
     assert "bash" not in tool_names
     assert "parse_pdf" in tool_names

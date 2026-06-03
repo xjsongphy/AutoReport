@@ -111,9 +111,9 @@ class TestMainAgentTools:
             tool_calls = await collector.wait_for(ToolCall, timeout=60, count=1)
 
             assert len(tool_calls) >= 1
-            # Should have a read_file tool call
+            # Should have a read tool call
             tool_names = [tc.tool_name for tc in collector.tool_calls]
-            assert "read_file" in tool_names
+            assert "read" in tool_names
 
             # Should have tool results
             await collector.wait_for(ToolResult, timeout=30, count=1)

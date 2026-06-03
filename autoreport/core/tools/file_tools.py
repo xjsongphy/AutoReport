@@ -72,11 +72,16 @@ class WriteEnabledTool(Tool, FileSafetyMixin):
             )
 
 
-class ReadFileTool(Tool):
-    """Tool for reading files."""
+class ReadTool(Tool):
+    """Tool for reading files or inspecting directories."""
 
-    name = "read_file"
-    description = "Read the contents of a file. Supports line ranges."
+    name = "read"
+    description = (
+        "Read a UTF-8 text file or inspect a directory. "
+        "If path is a file, returns file contents. "
+        "If path is a directory, returns child directories and files. "
+        "Supports line ranges for files and optional recursive traversal for directories."
+    )
 
     def __init__(self, workspace: Path, file_state_manager: FileStateManager | None = None):
         self.workspace = Path(workspace).resolve()
@@ -87,22 +92,24 @@ class ReadFileTool(Tool):
         path: str,
         offset: int | None = None,
         limit: int | None = None,
+        recursive: bool = False,
     ) -> dict[str, Any]:
-        """Read a file.
+        """Read a file or directory.
 
         Args:
-            path: Path to file (relative to workspace)
-            offset: Optional starting line number (0-indexed)
-            limit: Optional maximum number of lines to read
+            path: Path to file or directory (relative to workspace)
+            offset: Optional starting line number (0-indexed) for files
+            limit: Optional maximum number of lines to read from files
+            recursive: Whether to list directories recursively
 
         Returns:
-            Dictionary with content, line_count, and path
+            Dictionary with file contents or directory listing metadata
 
         Raises:
             ValueError: If path is outside workspace or contains path traversal.
         """
         file_path = resolve_and_validate_path(path, self.workspace)
-        logger.debug("Reading file: {}", file_path)
+        logger.debug("Reading path: {}", file_path)
 
         if is_internal_metadata_path(file_path, self.workspace):
             raise PermissionError("Access to internal metadata under .autoreport is not allowed.")
@@ -113,11 +120,11 @@ class ReadFileTool(Tool):
             raise FileNotFoundError(f"File not found: {file_path}.{hint}")
 
         if file_path.is_dir():
-            raise ValueError(f"Path is a directory, not a file: {file_path}. Use list_dir to explore directories.")
+            return await self._read_directory(file_path, recursive=recursive)
 
         if file_path.suffix.lower() == ".pdf":
             raise ValueError(
-                f"read_file does not support PDF files: {file_path.name}. "
+                f"read does not support PDF files: {file_path.name}. "
                 "Use parse_pdf to extract content first."
             )
 
@@ -181,7 +188,7 @@ class ReadFileTool(Tool):
             detected_type = binary_exts.get(ext, "binary")
             return {
                 "error": f"Cannot read '{file_path.name}' as text: it appears to be a {detected_type} file (not UTF-8 encoded text). "
-                         f"The read_file tool only supports UTF-8 text files. If you need to work with this file type, "
+                         f"The read tool only supports UTF-8 text files. If you need to work with this file type, "
                          f"please use a different approach (e.g., bash for file analysis).",
                 "path": str(file_path),
                 "is_binary": True,
@@ -189,6 +196,40 @@ class ReadFileTool(Tool):
             }
         except Exception as e:
             logger.error("Failed to read file {}: {}", file_path, e)
+            raise
+
+    async def _read_directory(self, dir_path: Path, recursive: bool) -> dict[str, Any]:
+        try:
+            directories = []
+            files = []
+
+            if recursive:
+                for item in sorted(dir_path.rglob("*")):
+                    rel = item.relative_to(dir_path).as_posix()
+                    if is_internal_metadata_rel(rel):
+                        continue
+                    if item.is_dir():
+                        directories.append(rel)
+                    else:
+                        files.append(rel)
+            else:
+                for item in sorted(dir_path.iterdir()):
+                    if item.name in {".autoreport", ".checkpoints"}:
+                        continue
+                    if item.is_dir():
+                        directories.append(item.name)
+                    else:
+                        files.append(item.name)
+
+            return {
+                "path": str(dir_path),
+                "is_directory": True,
+                "directories": directories,
+                "files": files,
+                "count": len(directories) + len(files),
+            }
+        except Exception as e:
+            logger.error("Failed to read directory {}: {}", dir_path, e)
             raise
 
 
@@ -261,7 +302,7 @@ class EditFileTool(WriteEnabledTool):
     name = "edit_file"
     description = (
         "Replace text in a file. Finds old_text and replaces with new_text. "
-        "Always use read_file first to get the exact content before editing. "
+        "Always use read first to get the exact content before editing. "
         "If exact match fails, the tool will attempt fuzzy matching and show a diff of the closest match."
     )
 
@@ -493,8 +534,8 @@ class EditFileTool(WriteEnabledTool):
                 "error": (
                     f"old_text not found in file after trying 4 levels of fuzzy matching "
                     f"(exact, whitespace-tolerant, quote-normalized, combined). "
-                    f"Use read_file to get the current file content, then provide exact old_text.\n"
-                    f"Tip: edit_file uses SEARCH/REPLACE — copy-paste the exact lines from read_file output."
+                    f"Use read to get the current file content, then provide exact old_text.\n"
+                    f"Tip: edit_file uses SEARCH/REPLACE — copy-paste the exact lines from read output."
                 ),
                 "path": str(file_path),
                 "fuzzy_match_failed": True,
@@ -565,71 +606,3 @@ class DeleteFileTool(WriteEnabledTool):
             raise
 
 
-class ListDirTool(Tool):
-    """Tool for listing directory contents."""
-
-    name = "list_dir"
-    description = "List contents of a directory."
-
-    def __init__(self, workspace: Path):
-        self.workspace = Path(workspace).resolve()
-
-    async def __call__(
-        self,
-        path: str = ".",
-        recursive: bool = False,
-    ) -> dict[str, Any]:
-        """List directory contents.
-
-        Args:
-            path: Path to directory (relative to workspace)
-            recursive: Whether to list recursively
-
-        Returns:
-            Dictionary with directories, files, and path
-
-        Raises:
-            ValueError: If path is outside workspace or contains path traversal.
-        """
-        dir_path = resolve_and_validate_path(path, self.workspace)
-        logger.debug("Listing directory: {}", dir_path)
-
-        if not dir_path.exists():
-            suggestion = suggest_canonical_path(path)
-            hint = f" Did you mean '{suggestion}'?" if suggestion and suggestion != path else ""
-            raise FileNotFoundError(f"Directory not found: {dir_path}.{hint}")
-
-        if not dir_path.is_dir():
-            raise NotADirectoryError(f"Not a directory: {dir_path}")
-
-        try:
-            directories = []
-            files = []
-
-            if recursive:
-                for item in sorted(dir_path.rglob("*")):
-                    rel = item.relative_to(dir_path).as_posix()
-                    if is_internal_metadata_rel(rel):
-                        continue
-                    if item.is_dir():
-                        directories.append(rel)
-                    else:
-                        files.append(rel)
-            else:
-                for item in sorted(dir_path.iterdir()):
-                    if item.name in {".autoreport", ".checkpoints"}:
-                        continue
-                    if item.is_dir():
-                        directories.append(item.name)
-                    else:
-                        files.append(item.name)
-
-            return {
-                "path": str(dir_path),
-                "directories": directories,
-                "files": files,
-                "count": len(directories) + len(files),
-            }
-        except Exception as e:
-            logger.error("Failed to list directory {}: {}", dir_path, e)
-            raise

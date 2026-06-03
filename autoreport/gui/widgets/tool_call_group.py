@@ -228,12 +228,9 @@ class ToolCallGroup(QWidget):
         if call.summary:
             return self._normalize_summary_html(call.summary)
         sep = "&nbsp;&nbsp;"
-        if call.name == "read_file":
+        if call.name == "read":
             files = " ".join(call.file_names) if call.file_names else ""
             return f"<b>Read</b>{sep}{files}".strip()
-        if call.name == "list_dir":
-            files = " ".join(call.file_names) if call.file_names else "."
-            return f"<b>List</b>{sep}{files}".strip()
         if call.name == "parse_pdf":
             files = " ".join(call.file_names) if call.file_names else ""
             return f"<b>Parse</b>{sep}{files}".strip()

@@ -19,12 +19,11 @@ from ..tools import (
     EditFileTool,
     FileStateManager,
     ListCheckpointsTool,
-    ListDirTool,
     LoadSkillTool,
     ManageTasksTool,
     ManifestManager,
     PDFParseTool,
-    ReadFileTool,
+    ReadTool,
     ReportIssueTool,
     RollbackCheckpointTool,
     SendToAgentTool,
@@ -237,11 +236,10 @@ class LoopManager:
         file_state_manager = self._get_file_state_manager(agent_type)
 
         # Common tools for all agents
-        registry.register(ReadFileTool(
+        registry.register(ReadTool(
             workspace=self.workspace,
             file_state_manager=file_state_manager,
         ))
-        registry.register(ListDirTool(workspace=self.workspace))
 
         # Determine write allowed directory based on agent type
         write_dirs = {

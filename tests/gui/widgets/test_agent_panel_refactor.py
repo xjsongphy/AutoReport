@@ -135,7 +135,7 @@ def test_set_agent_type_uses_badged_title(agent_panel):
 
 def test_add_tool_call_creates_group(agent_panel):
     """add_tool_call should create a ToolCallGroup."""
-    agent_panel.add_tool_call("read_file", {"path": "test.py"})
+    agent_panel.add_tool_call("read", {"path": "test.py"})
 
     groups = agent_panel._messages_area.get_tool_groups()
     assert len(groups) == 1
@@ -146,10 +146,10 @@ def test_add_tool_call_creates_group(agent_panel):
 def test_add_tool_result_adds_to_group(agent_panel):
     """add_tool_result should add to the current tool group."""
     # First add a tool call
-    agent_panel.add_tool_call("read_file", {"path": "test.py"})
+    agent_panel.add_tool_call("read", {"path": "test.py"})
 
     # Then add the result
-    agent_panel.add_tool_result("read_file", "file content", error=None)
+    agent_panel.add_tool_result("read", "file content", error=None)
 
     groups = agent_panel._messages_area.get_tool_groups()
     assert len(groups) == 1
@@ -193,7 +193,7 @@ def test_batch_tool_calls_render_as_separate_timeline_items(agent_panel):
 
 
 def test_tool_call_before_agent_text_keeps_event_order(agent_panel):
-    agent_panel.add_tool_call("list_dir", {"path": "."})
+    agent_panel.add_tool_call("read", {"path": "."})
     agent_panel.add_message(role="agent", content="Hello", streaming=True)
 
     rows = agent_panel._messages_area.get_message_rows()
@@ -205,7 +205,7 @@ def test_tool_call_before_agent_text_keeps_event_order(agent_panel):
 
 def test_agent_text_tool_text_keeps_separate_timeline_items(agent_panel):
     agent_panel.add_message(role="agent", content="First", streaming=True)
-    agent_panel.add_tool_call("list_dir", {"path": "."})
+    agent_panel.add_tool_call("read", {"path": "."})
     agent_panel.add_message(role="agent", content="Second", streaming=True)
 
     rows = agent_panel._messages_area.get_message_rows()
@@ -220,6 +220,7 @@ def test_thinking_row_finishes_with_elapsed_summary(agent_panel):
     agent_panel.start_thinking()
     rows = agent_panel._messages_area.get_message_rows()
     assert len(rows) == 1
+    assert rows[0]._display_mode == "thought"
     assert rows[0]._bubble_title.startswith("Thought for ")
 
     agent_panel.append_thinking("raw **markdown** thought")
@@ -279,10 +280,9 @@ def test_summary_arrow_stays_next_to_text(qtbot):
     row = MessageRow(
         role="agent",
         content="detail",
-        display_mode="bubble",
+        display_mode="thought",
         bubble_title="Thought for 1s",
-        bubble_align="left",
-        bubble_on_timeline=True,
+        bubble_collapsible=True,
     )
     qtbot.addWidget(row)
     row.resize(600, 80)
@@ -384,11 +384,11 @@ def test_multiple_messages_and_tools(agent_panel):
     assert agent_panel._messages_area.message_count() == 1
 
     # Add tool call
-    agent_panel.add_tool_call("read_file", {"path": "test.py"})
+    agent_panel.add_tool_call("read", {"path": "test.py"})
     assert agent_panel._messages_area.message_count() == 2
 
     # Add tool result
-    agent_panel.add_tool_result("read_file", "content", None)
+    agent_panel.add_tool_result("read", "content", None)
     assert agent_panel._messages_area.message_count() == 2
 
     # Add agent response
@@ -447,7 +447,7 @@ def test_edit_saved_retracts_following_rows_and_sends_immediately(qtbot, agent_p
     agent_panel.add_message(role="user", content="old user")
     target_row = agent_panel._messages_area.get_message_rows()[-1]
     agent_panel.add_message(role="agent", content="old reply")
-    agent_panel.add_tool_call("read_file", {"path": "a.txt"})
+    agent_panel.add_tool_call("read", {"path": "a.txt"})
 
     assert agent_panel._messages_area.message_count() == 3
 
