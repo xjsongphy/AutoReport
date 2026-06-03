@@ -171,6 +171,7 @@ class AgentLoop:
         self._current_session_id: str | None = None
         self._manifest_dirty = False
         self._cancel_event = asyncio.Event()
+        self._consecutive_errors = 0
 
         # Debug mode
         self._debug_mode = False
@@ -582,12 +583,20 @@ class AgentLoop:
 
         except Exception as e:
             logger.error("Error processing message in {}: {}", self.agent_type, str(e))
+            self._consecutive_errors += 1
+
+            if self._consecutive_errors >= 3:
+                logger.warning("{}: 3 consecutive errors — skipping current message", self.agent_type)
+
             await self._flush_manifest_if_needed()
             await self._set_status(AgentStatus.ERROR)
             await self.bus.publish(Error(
                 source=str(self.agent_type),
                 message=str(e),
             ))
+
+        else:
+            self._consecutive_errors = 0
 
     async def _flush_manifest_if_needed(self) -> None:
         """Wrap up manifest at end of loop: prompt agent to update free-text notes.

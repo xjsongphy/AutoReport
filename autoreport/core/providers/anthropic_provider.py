@@ -30,6 +30,13 @@ class AnthropicProvider(LLMProvider):
             auth_token=api_key,  # Prevent ANTHROPIC_AUTH_TOKEN env var override
         )
 
+        # cache_control (prompt caching) is an Anthropic-only feature.
+        # Compatible endpoints (DeepSeek, MiniMax, etc.) reject it with 400.
+        self._supports_cache = (
+            api_base is None
+            or "anthropic" in api_base.lower()
+        )
+
     # ------------------------------------------------------------------
     # Message conversion
     # ------------------------------------------------------------------
@@ -41,6 +48,35 @@ class AnthropicProvider(LLMProvider):
         if isinstance(value, str):
             return value
         return str(value)
+
+    def _supports_cache_control(self) -> bool:
+        return getattr(self, "_supports_cache", True)
+
+    def _normalize_block(self, block: Any) -> dict[str, Any]:
+        """Normalize content blocks so compatible endpoints never receive null text."""
+        if not isinstance(block, dict):
+            return {"type": "text", "text": self._safe_text(block)}
+
+        normalized = dict(block)
+        block_type = normalized.get("type")
+
+        if block_type == "text":
+            normalized["text"] = self._safe_text(normalized.get("text"))
+        elif block_type == "thinking":
+            normalized["thinking"] = self._safe_text(normalized.get("thinking"))
+        elif block_type == "tool_result":
+            content = normalized.get("content")
+            if isinstance(content, list):
+                normalized["content"] = [self._normalize_block(item) for item in content]
+            else:
+                normalized["content"] = self._safe_text(content)
+
+        return normalized
+
+    def _normalize_message_content(self, content: Any) -> str | list[dict[str, Any]]:
+        if isinstance(content, list):
+            return [self._normalize_block(block) for block in content]
+        return self._safe_text(content)
 
     def _convert_messages(
         self, messages: list[Message],
@@ -69,7 +105,7 @@ class AnthropicProvider(LLMProvider):
 
         for msg in messages:
             if msg.role == "system":
-                if msg.cache_control:
+                if msg.cache_control and self._supports_cache_control():
                     system_message = [
                         {"type": "text", "text": self._safe_text(msg.content),
                          "cache_control": {"type": "ephemeral"}},
@@ -82,7 +118,7 @@ class AnthropicProvider(LLMProvider):
             if pending_tool_results and not msg.is_tool_result:
                 anthropic_messages.append({
                     "role": "user",
-                    "content": pending_tool_results,
+                    "content": self._normalize_message_content(pending_tool_results),
                 })
                 pending_tool_results = []
 
@@ -102,7 +138,7 @@ class AnthropicProvider(LLMProvider):
                     })
                 anthropic_messages.append({
                     "role": "assistant",
-                    "content": content_blocks,
+                    "content": self._normalize_message_content(content_blocks),
                 })
                 continue
 
@@ -118,14 +154,14 @@ class AnthropicProvider(LLMProvider):
             # Regular text message
             anthropic_messages.append({
                 "role": msg.role,
-                "content": self._safe_text(msg.content),
+                "content": self._normalize_message_content(msg.content),
             })
 
         # Flush any remaining tool results
         if pending_tool_results:
             anthropic_messages.append({
                 "role": "user",
-                "content": pending_tool_results,
+                "content": self._normalize_message_content(pending_tool_results),
             })
 
         # Merge consecutive same-role messages (Anthropic requirement)
@@ -141,8 +177,7 @@ class AnthropicProvider(LLMProvider):
 
         return system_message, merged
 
-    @staticmethod
-    def _merge_consecutive(msgs: list[dict]) -> list[dict]:
+    def _merge_consecutive(self, msgs: list[dict]) -> list[dict]:
         """Merge consecutive same-role messages for Anthropic API.
 
         Anthropic requires alternating user/assistant turns. Consecutive
@@ -170,6 +205,8 @@ class AnthropicProvider(LLMProvider):
                 merged[-1]["content"] = prev_c
             else:
                 merged.append(msg)
+        for msg in merged:
+            msg["content"] = self._normalize_message_content(msg.get("content"))
         return merged
 
     # ------------------------------------------------------------------

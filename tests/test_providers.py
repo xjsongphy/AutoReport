@@ -16,9 +16,9 @@ from autoreport.core.providers.openai_provider import OpenAICompatProvider
 
 
 def test_tool_call_dataclass():
-    tc = ToolCall(id="call_1", name="read_file", arguments={"path": "test.txt"})
+    tc = ToolCall(id="call_1", name="read", arguments={"path": "test.txt"})
     assert tc.id == "call_1"
-    assert tc.name == "read_file"
+    assert tc.name == "read"
     assert tc.arguments["path"] == "test.txt"
 
 
@@ -32,7 +32,7 @@ def test_message_dataclass():
 
 
 def test_message_with_tool_calls():
-    tc = ToolCall(id="call_1", name="read_file", arguments={})
+    tc = ToolCall(id="call_1", name="read", arguments={})
     msg = Message(role="assistant", content="", tool_calls=[tc])
     assert msg.tool_calls is not None
     assert len(msg.tool_calls) == 1
@@ -80,7 +80,7 @@ def test_anthropic_convert_tool_calls():
     from autoreport.core.providers.anthropic_provider import AnthropicProvider
 
     provider = AnthropicProvider.__new__(AnthropicProvider)
-    tc = ToolCall(id="call_1", name="read_file", arguments={"path": "test.txt"})
+    tc = ToolCall(id="call_1", name="read", arguments={"path": "test.txt"})
     messages = [
         Message(role="user", content="Read file"),
         Message(role="assistant", content="", tool_calls=[tc]),
@@ -108,11 +108,11 @@ def test_anthropic_convert_tools():
     from autoreport.core.providers.anthropic_provider import AnthropicProvider
 
     provider = AnthropicProvider.__new__(AnthropicProvider)
-    tools = [{"name": "read_file", "description": "Read a file", "input_schema": {"type": "object"}}]
+    tools = [{"name": "read", "description": "Read a file or inspect a directory", "input_schema": {"type": "object"}}]
 
     result = provider._convert_tools(tools)
     assert len(result) == 1
-    assert result[0]["name"] == "read_file"
+    assert result[0]["name"] == "read"
     assert "input_schema" in result[0]
 
 
@@ -134,7 +134,7 @@ def test_openai_convert_simple_messages():
 
 def test_openai_convert_tool_calls():
     provider = OpenAICompatProvider.__new__(OpenAICompatProvider)
-    tc = ToolCall(id="call_1", name="read_file", arguments={"path": "test.txt"})
+    tc = ToolCall(id="call_1", name="read", arguments={"path": "test.txt"})
     messages = [
         Message(role="user", content="Read"),
         Message(role="assistant", content="", tool_calls=[tc]),
@@ -147,7 +147,7 @@ def test_openai_convert_tool_calls():
     assistant_msg = result[1]
     assert assistant_msg["role"] == "assistant"
     assert "tool_calls" in assistant_msg
-    assert assistant_msg["tool_calls"][0]["function"]["name"] == "read_file"
+    assert assistant_msg["tool_calls"][0]["function"]["name"] == "read"
 
     # Tool result
     tool_msg = result[2]
