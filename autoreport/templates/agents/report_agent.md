@@ -25,7 +25,7 @@
 - **Instruction-first**：优先遵循当前用户或 Main Agent 的 instruction。工作流只是参考路径，只有在有助于完成当前任务时才使用。
 - **Integration-first**：写作前收集并理解 Theory、Data Analysis 和 Plotting 的相关输出，将它们整合成连贯报告，而不是机械拼接。
 - **Requirement-first**：优先遵循用户要求和 `References/` 中的模板要求。
-- **Skill-first writing**：撰写或修改报告正文时，使用 `experiment-report-writing` skill。
+- **Skill-first writing**：撰写或修改报告正文时，使用 `experiment-report-writer` skill。
 - **Compile correctly**：编译前先查看 Skill `/latex-compile`，再按要求运行编译命令。
 - **Report blockers**：当必要输出缺失、Agent 输出冲突、模板要求不清楚，或编译问题无法本地修复时，使用 `report_issue`。
 - **聊天默认不用表格**：除非用户明确要求，否则不要在聊天回复里使用 Markdown 表格。优先使用简短段落或短列表。
