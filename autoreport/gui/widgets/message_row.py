@@ -1038,8 +1038,8 @@ class MessageRow(QWidget):
         widget = _SummaryHeader(self)
         widget.setMinimumHeight(TIMELINE_EVENT_ROW_HEIGHT)
         layout = QHBoxLayout(widget)
-        layout.setContentsMargins(TIMELINE_TEXT_LEFT_GUTTER, 4, 0, 6)
-        layout.setSpacing(6)
+        layout.setContentsMargins(0, 4, 0, 6)
+        layout.setSpacing(4)
         self._summary_header = widget
         widget.setObjectName("toolCallHeader")
 
@@ -1059,9 +1059,8 @@ class MessageRow(QWidget):
         self._summary_text_label.setWordWrap(True)
         self._summary_text_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self._summary_text_label.setMinimumWidth(0)
-        layout.addWidget(self._summary_text_label, 0, Qt.AlignmentFlag.AlignTop)
         layout.addWidget(self._summary_arrow_host, 0, Qt.AlignmentFlag.AlignTop)
-        layout.addStretch(1)
+        layout.addWidget(self._summary_text_label, 1, Qt.AlignmentFlag.AlignTop)
         self._sync_summary_arrow_alignment()
         self._sync_timeline_dot_alignment()
 
@@ -1154,9 +1153,8 @@ class MessageRow(QWidget):
         self._bubble_title_label.setWordWrap(True)
         self._bubble_title_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self._bubble_title_label.setMinimumWidth(0)
-        layout.addWidget(self._bubble_title_label, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(self._bubble_title_label, 1, Qt.AlignmentFlag.AlignTop)
         layout.addWidget(self._bubble_arrow_host, 0, Qt.AlignmentFlag.AlignTop)
-        layout.addStretch(1)
         self._sync_bubble_arrow_alignment()
         self._sync_timeline_dot_alignment()
 
@@ -1750,6 +1748,8 @@ class MessageRow(QWidget):
         return self._display_mode == "bubble"
 
     def _uses_timeline(self) -> bool:
+        if self._is_coordination:
+            return False
         return self._display_mode in {"agent_markdown", "thought"} or self._bubble_on_timeline
 
     def _uses_summary_bubble(self) -> bool:
