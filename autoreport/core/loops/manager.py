@@ -247,7 +247,7 @@ class LoopManager:
             AgentType.PLOTTING: self.workspace / "Code",
             AgentType.THEORY: self.workspace / "Theory",
             AgentType.REPORT: self.workspace / "Tex",
-            AgentType.MAIN: self.workspace,  # Main agent has full access
+            AgentType.MAIN: self.workspace / "Outline",  # MAIN only writes Outline/report_outline.md
         }
 
         write_dir = write_dirs.get(agent_type, self.workspace)
@@ -280,8 +280,8 @@ class LoopManager:
             file_state_manager=file_state_manager,
         ))
 
-        # Execution tool (for data analysis, plotting, report, and main agent)
-        if agent_type in (AgentType.DATA_ANALYSIS, AgentType.PLOTTING, AgentType.REPORT, AgentType.MAIN):
+        # Execution tool (for data analysis, plotting, report agents only — MAIN delegates, does not execute)
+        if agent_type in (AgentType.DATA_ANALYSIS, AgentType.PLOTTING, AgentType.REPORT):
             registry.register(BashTool(
                 working_dir=self.workspace,
                 timeout=120,

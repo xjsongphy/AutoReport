@@ -25,6 +25,7 @@ ALLOWED_COMMANDS = {
     "wc", "sort", "uniq", "cut",
     "fc-list",
     "mineru-open-api",
+    "which", "sed",  # Standard Unix tools for cross-platform bash usage
 }
 
 
@@ -33,8 +34,14 @@ class BashTool(Tool):
 
     name = "bash"
     description = (
-        "Execute a shell command in the project root directory. "
-        "Commands that generate files must specify output paths explicitly—no output files allowed in the project root. "
+        "Execute a command in a Bash shell (NOT Windows cmd.exe or PowerShell). "
+        "The working directory is the project root. "
+        "All commands must use valid bash/Linux syntax:\n"
+        "- Use 'which' not 'where'\n"
+        "- Use 'cp' not 'copy'\n"
+        '- Use \'echo "" >> file\' not \'echo.>> file\'\n'
+        "- Paths use forward slashes, not backslashes\n"
+        "Commands that generate files must specify output paths explicitly. "
         "You must provide both command and a short command_description."
     )
 
