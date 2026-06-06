@@ -233,11 +233,54 @@ class ReadTool(Tool):
             raise
 
 
+def _validate_plotting_script(content: str, workspace: Path) -> str | None:
+    """Minimal validation for plotting scripts before saving.
+
+    Only checks that are absolutely reliable (no regex guessing of Python semantics):
+      1. unicode_minus — text match, 0% false positive
+      2. plt.close pairing — count comparison, straightforward
+
+    All other quality checks (x-monotonicity, data completeness, space utilization,
+    curve overlap, discontinuities) are the Plotting Agent's own responsibility
+    via the mandatory self-check protocol in its system prompt.
+    """
+    # Fast path: not a plotting script → skip all checks
+    if "matplotlib" not in content and "savefig" not in content:
+        return None
+
+    errors: list[str] = []
+
+    # 1. unicode_minus — Windows TNR fonts cannot render Unicode minus (U+2212)
+    if "'axes.unicode_minus': False" not in content:
+        errors.append(
+            "缺少 plt.rcParams['axes.unicode_minus'] = False —— "
+            "Windows 下负号可能显示为方框"
+        )
+
+    # 2. Every savefig should have a corresponding plt.close
+    savefig_count = len(re.findall(r'\.savefig\(', content))
+    close_count = len(re.findall(r'plt\.close\(', content))
+    if savefig_count > close_count:
+        errors.append(
+            f"有 {savefig_count} 个 savefig 但只有 {close_count} 个 plt.close —— "
+            "每个 fig.savefig() 后必须调用 plt.close(fig) 释放内存"
+        )
+
+    if errors:
+        header = f"校验不通过 ({len(errors)} 项):\n"
+        return header + "\n".join(f"  [{i+1}] {e}" for i, e in enumerate(errors))
+    return None
+
+
 class WriteFileTool(WriteEnabledTool):
     """Tool for writing files."""
 
     name = "write_file"
     description = "Write content to a file. Creates parent directories if needed."
+
+    def __init__(self, content_validator=None, **kwargs):
+        super().__init__(**kwargs)
+        self._content_validator = content_validator
 
     async def __call__(
         self,
@@ -263,6 +306,13 @@ class WriteFileTool(WriteEnabledTool):
         logger.debug("Writing file: {}", file_path)
 
         self._check_write_permission(file_path)
+
+        # Content validation for plotting scripts
+        if self._content_validator and file_path.suffix == '.py':
+            error = self._content_validator(content, self.workspace)
+            if error:
+                logger.warning("Plotting script validation failed: {}", error)
+                return {"error": error, "path": str(file_path), "validation_failed": True}
 
         # Check read-before-write safety for existing files
         if file_path.exists():

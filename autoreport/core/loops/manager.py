@@ -243,7 +243,7 @@ class LoopManager:
 
         # Determine write allowed directory based on agent type
         write_dirs = {
-            AgentType.DATA_ANALYSIS: self.workspace / "Data" / "Processed",
+            AgentType.DATA_ANALYSIS: self.workspace / "Data",
             AgentType.PLOTTING: self.workspace / "Code",
             AgentType.THEORY: self.workspace / "Theory",
             AgentType.REPORT: self.workspace / "Tex",
@@ -253,13 +253,18 @@ class LoopManager:
         write_dir = write_dirs.get(agent_type, self.workspace)
 
         # Register write tools
-        registry.register(WriteFileTool(
+        write_tool_kwargs = dict(
             workspace=self.workspace,
             write_allowed_dir=write_dir,
             manifest_manager=self.manifest_manager,
             agent_type=agent_type.value,
             file_state_manager=file_state_manager,
-        ))
+        )
+        if agent_type == AgentType.PLOTTING:
+            from ..tools.file_tools import _validate_plotting_script
+            write_tool_kwargs["content_validator"] = _validate_plotting_script
+
+        registry.register(WriteFileTool(**write_tool_kwargs))
         registry.register(EditFileTool(
             workspace=self.workspace,
             write_allowed_dir=write_dir,

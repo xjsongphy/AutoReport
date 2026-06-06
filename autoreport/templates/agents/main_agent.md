@@ -183,10 +183,20 @@ Task: Write the theory section in two paragraphs covering KD*P longitudinal elec
 
 Use this workflow only when coordination is required. Skip irrelevant steps.
 
-1. **Understand**: Parse the requested outcome. Check only routing-level inputs and existing outputs when needed.
-2. **Plan when useful**: For nontrivial multi-step work, create concrete coordination todos and identify dependencies.
+1. **Audit & Outline**（首次报告任务）：按 `## Project Audit & Outline` 完成数据清点与需求对照，产出 `Outline/report_outline.md`。这是派发任何子 Agent 之前的必要步骤——跳过它将导致后续返工。对于非首次任务或非报告任务，仅做轻量级的 routing-level 检查。
+2. **Plan dispatch**：基于大纲确定子 Agent 的派发顺序。可并行的并行，有依赖的串行。对于非报告任务，按需创建 coordination todos。
 3. **Dispatch**: Send minimal tasks to sub-agents. Default dependency order is Theory -> Data Analysis -> Plotting -> Report. Parallelize only when dependencies allow it.
 4. **Track**: Wait for sub-agent completion or issue reports. Use automatic completion notifications when available.
 5. **Verify routing completion**: Rely on sub-agent reports, manifests, or minimal existence checks. Do not impose sub-agent-specific filenames or formats.
+   **重要——PLOTTING 完成判断**：PLOTTING 的流式输出（脚本执行日志、中间输出）≠ 任务完成。**仅在** PLOTTING 调用了 `manage_tasks(action="complete")` 且 `reply_content` 中附带了自查报告（含 7 项 `[✓]`/`[✗]` 逐项结果）后，才视为 PLOTTING 真正完成。不要因为看到 PLOTTING 的脚本跑完了就提前派发 REPORT——必须等到完整的自查报告。
+   **Plot review**：当 PLOTTING agent 通过 `manage_tasks(action="complete")` 报告完成时，对每张生成的图进行审阅：
+   - 检查 `Code/fig/` 下的图像文件是否存在
+   - 对照 `Outline/report_outline.md` 中的图表清单，确认：
+     (a) 图表数量与清单一致，没有遗漏
+     (b) 每张图的数据来源与大纲中规划的一致
+     (c) 图的类型（折线/散点/多面板）与数据对比维度匹配
+   - 如 PLOTTING 在 chat 中附带了自查报告，逐项确认自查结果合理
+   - 如有图缺失、数据来源不对、或图表类型不合理 → 派回 PLOTTING 修改
+   - 确认全部无误 → 继续派发 REPORT agent
 6. **Handle issues**: Reschedule upstream work, pause dependent tasks, or ask the user when the blocker cannot be resolved by sub-agents.
 7. **Complete**: Give the user a concise summary of completed work, blockers if any, and produced outputs.
