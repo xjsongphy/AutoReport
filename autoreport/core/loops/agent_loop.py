@@ -101,11 +101,32 @@ def _trim_messages_to_budget(
         else:
             break
 
-    # Ensure the boundary is legal: first kept message should be user role
-    if kept and kept[0].role != "user":
-        # Find the next user message backwards from the trim point
-        # If none, keep the system prompt only
-        logger.debug("Adjusting trim boundary to user-turn alignment")
+    # Ensure the boundary is legal.
+    # 1. Strip orphan 'tool' messages whose 'assistant(tool_calls)' was trimmed.
+    # 2. Strip orphan 'assistant' messages whose preceding 'user' was trimmed.
+    # 3. The first real message after system must be 'user'.
+    # 4. Anthropic-style tool results (role="user", is_tool_result=True) whose
+    #    'assistant(tool_calls)' was trimmed.
+    while kept:
+        role = kept[0].role
+        has_tool_calls = bool(getattr(kept[0], "tool_calls", None))
+        is_tool_result = getattr(kept[0], "is_tool_result", False)
+        if role == "tool":
+            logger.debug("Stripping orphan tool message at trim boundary")
+            kept.pop(0)
+        elif role == "assistant":
+            logger.debug("Stripping orphan assistant message at trim boundary")
+            kept.pop(0)
+        elif role == "user" and is_tool_result:
+            # Anthropic-style orphan: tool result disguised as user message.
+            # Without its preceding assistant(tool_calls), this would cause
+            # an API error (tool result without tool_use).
+            logger.debug(
+                "Stripping orphan user/tool_result message at trim boundary"
+            )
+            kept.pop(0)
+        else:
+            break
 
     # Always prepend system prompt
     result = [system_msg] + kept
