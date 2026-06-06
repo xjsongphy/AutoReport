@@ -253,8 +253,8 @@ def _validate_plotting_script(content: str, workspace: Path) -> str | None:
     # 1. unicode_minus — Windows TNR fonts cannot render Unicode minus (U+2212)
     if "'axes.unicode_minus': False" not in content:
         errors.append(
-            "缺少 plt.rcParams['axes.unicode_minus'] = False —— "
-            "Windows 下负号可能显示为方框"
+            "Missing plt.rcParams['axes.unicode_minus'] = False — "
+            "minus signs may display as boxes on Windows"
         )
 
     # 2. Every savefig should have a corresponding plt.close
@@ -262,12 +262,12 @@ def _validate_plotting_script(content: str, workspace: Path) -> str | None:
     close_count = len(re.findall(r'plt\.close\(', content))
     if savefig_count > close_count:
         errors.append(
-            f"有 {savefig_count} 个 savefig 但只有 {close_count} 个 plt.close —— "
-            "每个 fig.savefig() 后必须调用 plt.close(fig) 释放内存"
+            f"Found {savefig_count} savefig calls but only {close_count} plt.close calls — "
+            "each fig.savefig() must be followed by plt.close(fig) to free memory"
         )
 
     if errors:
-        header = f"校验不通过 ({len(errors)} 项):\n"
+        header = f"Validation failed ({len(errors)} issue(s)):\n"
         return header + "\n".join(f"  [{i+1}] {e}" for i, e in enumerate(errors))
     return None
 

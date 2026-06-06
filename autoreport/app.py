@@ -90,33 +90,48 @@ def _copy_builtin_templates(workspace: Path) -> None:
 
     Args:
         workspace: Project workspace path.
+
+    Raises:
+        RuntimeError: If critical template file (main.tex) fails to copy.
     """
     tex_dir = workspace / "tex"
     template_root = importlib.resources.files("autoreport.templates.reports")
 
-    # main.tex (PKUMpLtX-based template)
+    # main.tex (PKUMpLtX-based template) - CRITICAL for LaTeX compilation
     dst_tex = tex_dir / "main.tex"
     if not dst_tex.exists():
         src = template_root / "template_mpl.tex"
         if src.is_file():
             try:
                 shutil.copy2(str(src), str(dst_tex))
-                logger.debug("Copied built-in template → Tex/main.tex")
+                logger.info("Copied built-in template → Tex/main.tex")
             except OSError as e:
                 logger.error("Failed to copy built-in template: {}", e)
+                raise RuntimeError(
+                    f"Failed to copy critical template file main.tex: {e}. "
+                    "LaTeX compilation will not work without this file."
+                ) from e
+        else:
+            logger.warning("Built-in template template_mpl.tex not found in package")
 
-    # mpltx.cls (document class, must be alongside main.tex for xelatex)
+    # mpltx.cls (document class, must be alongside main.tex for xelatex) - CRITICAL
     dst_cls = tex_dir / "mpltx.cls"
     if not dst_cls.exists():
         src = template_root / "template_mpl.cls"
         if src.is_file():
             try:
                 shutil.copy2(str(src), str(dst_cls))
-                logger.debug("Copied built-in .cls → Tex/mpltx.cls")
+                logger.info("Copied built-in .cls → Tex/mpltx.cls")
             except OSError as e:
                 logger.error("Failed to copy built-in .cls: {}", e)
+                raise RuntimeError(
+                    f"Failed to copy critical class file mpltx.cls: {e}. "
+                    "LaTeX compilation will not work without this file."
+                ) from e
+        else:
+            logger.warning("Built-in class template_mpl.cls not found in package")
 
-    # requirements.md (writing style guide, built-in only)
+    # requirements.md (writing style guide, built-in only) - OPTIONAL
     dst_req = tex_dir / "requirements.md"
     if not dst_req.exists():
         src = template_root / "requirements.md"
@@ -125,7 +140,10 @@ def _copy_builtin_templates(workspace: Path) -> None:
                 shutil.copy2(str(src), str(dst_req))
                 logger.debug("Copied built-in requirements.md")
             except OSError as e:
-                logger.error("Failed to copy requirements.md: {}", e)
+                logger.warning("Failed to copy requirements.md: {}", e)
+                # Non-critical, don't raise exception
+        else:
+            logger.debug("Built-in requirements.md not found in package")
 
 
 class AutoReportApp:
