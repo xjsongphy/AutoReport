@@ -1038,32 +1038,38 @@ class MessageRow(QWidget):
         widget = _SummaryHeader(self)
         widget.setMinimumHeight(TIMELINE_EVENT_ROW_HEIGHT)
         layout = QHBoxLayout(widget)
-        layout.setContentsMargins(0, 4, 0, 6)
-        layout.setSpacing(4)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         self._summary_header = widget
         widget.setObjectName("toolCallHeader")
 
-        self._summary_arrow_widget = _DisclosureArrow(self._expanded, widget)
+        # Content host with same margins as regular agent message labels (0,2,0,6)
+        content_host = QWidget(widget)
+        content_host_layout = QHBoxLayout(content_host)
+        content_host_layout.setContentsMargins(0, 2, 0, 6)
+        content_host_layout.setSpacing(4)
+
+        self._summary_arrow_widget = _DisclosureArrow(self._expanded, content_host)
         self._summary_arrow_widget.setVisible(self._bubble_collapsible and self._has_detail())
-        self._summary_arrow_host = QWidget(widget)
+        self._summary_arrow_host = QWidget(content_host)
         self._summary_arrow_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
         ahl = QVBoxLayout(self._summary_arrow_host)
         ahl.setContentsMargins(0, 0, 0, 0)
         ahl.setSpacing(0)
         ahl.addWidget(self._summary_arrow_widget, 0, Qt.AlignmentFlag.AlignTop)
 
-        self._summary_text_label = QLabel(self._bubble_title or "", widget)
+        self._summary_text_label = QLabel(self._bubble_title or "", content_host)
         self._summary_text_label.setObjectName("toolCallHeaderText")
         self._summary_text_label.setTextFormat(Qt.TextFormat.PlainText)
         self._summary_text_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        self._summary_text_label.setWordWrap(True)
-        self._summary_text_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self._summary_text_label.setMinimumWidth(0)
-        layout.addWidget(self._summary_arrow_host, 0, Qt.AlignmentFlag.AlignTop)
-        layout.addWidget(self._summary_text_label, 1, Qt.AlignmentFlag.AlignTop)
+        self._summary_text_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+
+        content_host_layout.addWidget(self._summary_text_label, 1, Qt.AlignmentFlag.AlignTop)
+        content_host_layout.addWidget(self._summary_arrow_host, 0, Qt.AlignmentFlag.AlignTop)
+
+        layout.addWidget(content_host, 1, Qt.AlignmentFlag.AlignTop)
         self._sync_summary_arrow_alignment()
         self._sync_timeline_dot_alignment()
-
         widget.setCursor(
             Qt.CursorShape.PointingHandCursor
             if (self._bubble_collapsible and self._has_detail())
