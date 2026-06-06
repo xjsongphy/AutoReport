@@ -432,6 +432,8 @@ class LoopManager:
                 # Clear current history and restore from checkpoint
                 loop._conversation_history.clear()
                 for msg_dict in cp.conversation_history:
+                    msg_dict = dict(msg_dict)
+                    msg_dict["content"] = msg_dict.get("content") or ""
                     msg = LLMMessage(**msg_dict)
                     loop._conversation_history.append(msg)
                 logger.info("Restored {} messages for {}", len(loop._conversation_history), agent_type)

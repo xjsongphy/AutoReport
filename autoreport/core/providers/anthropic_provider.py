@@ -78,6 +78,15 @@ class AnthropicProvider(LLMProvider):
             return [self._normalize_block(block) for block in content]
         return self._safe_text(content)
 
+    def _sanitize_messages_payload(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Defensively remove null content before sending to Anthropic."""
+        sanitized: list[dict[str, Any]] = []
+        for msg in messages:
+            clean = dict(msg)
+            clean["content"] = self._normalize_message_content(clean.get("content"))
+            sanitized.append(clean)
+        return sanitized
+
     def _convert_messages(
         self, messages: list[Message],
     ) -> tuple[str | list[dict] | None, list[dict]]:
@@ -165,7 +174,7 @@ class AnthropicProvider(LLMProvider):
             })
 
         # Merge consecutive same-role messages (Anthropic requirement)
-        merged = self._merge_consecutive(anthropic_messages)
+        merged = self._sanitize_messages_payload(self._merge_consecutive(anthropic_messages))
 
         # Strip empty trailing assistant turns (prefill).
         # Keep assistant turns that have actual content or tool_use blocks.
