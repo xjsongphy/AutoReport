@@ -28,7 +28,7 @@ from .core.loops import LoopManager, MessageBus
 from .gui import MainWindow
 from .interfaces.protocol import BackendAPI
 from .utils.editor_context import build_editor_context_prompt
-from .utils import log_exception, setup_exception_handler, setup_logging
+from .utils import add_project_logging, log_exception, setup_exception_handler, setup_logging
 
 console = Console()
 app = typer.Typer(
@@ -163,6 +163,9 @@ class AutoReportApp:
 
         # Use provided workspace
         workspace = Path(workspace).resolve()
+
+        # Add project-bound logging (in addition to global ./logs/)
+        add_project_logging(workspace)
 
         # Create project structure if needed
         self._ensure_project_structure(workspace)
