@@ -76,6 +76,12 @@ class BuiltinTemplateTool(Tool):
             return {
                 "templates": sorted(templates, key=lambda x: x["name"]),
                 "count": len(templates),
+                "usage": (
+                    "Use builtin_template(action='read', filename='<name>') "
+                    "to read any template listed above. "
+                    "Do NOT use the generic read tool — these files are inside "
+                    "the Python package, not in the project directory."
+                ),
             }
         except Exception as e:
             logger.error("Failed to list built-in templates: {}", e)
@@ -94,9 +100,10 @@ class BuiltinTemplateTool(Tool):
             return {"error": "filename is required for read action"}
 
         # Sanitize filename to prevent directory traversal
-        filename = Path(filename).name
-        if filename != filename:
+        safe_name = Path(filename).name
+        if safe_name != filename:
             return {"error": "Invalid filename"}
+        filename = safe_name
 
         try:
             file_path = self._template_root / filename

@@ -1,6 +1,8 @@
 """Main application entry point."""
 
 import asyncio
+import importlib.resources
+import shutil
 import signal
 import sys
 from pathlib import Path
@@ -79,6 +81,53 @@ def _install_stderr_filter() -> None:
     sys.stderr = _FilteredStderr(sys.stderr)
 
 
+def _copy_builtin_templates(workspace: Path) -> None:
+    """Copy built-in LaTeX template files to Tex/ on first project open.
+
+    Only copies files that don't already exist — user or agent modifications
+    are never overwritten.  User-provided templates in References/ are
+    handled by the Report Agent at writing time (see report_agent.md).
+
+    Args:
+        workspace: Project workspace path.
+    """
+    tex_dir = workspace / "tex"
+    template_root = importlib.resources.files("autoreport.templates.reports")
+
+    # main.tex (PKUMpLtX-based template)
+    dst_tex = tex_dir / "main.tex"
+    if not dst_tex.exists():
+        src = template_root / "template_mpl.tex"
+        if src.is_file():
+            try:
+                shutil.copy2(str(src), str(dst_tex))
+                logger.debug("Copied built-in template → Tex/main.tex")
+            except OSError as e:
+                logger.error("Failed to copy built-in template: {}", e)
+
+    # mpltx.cls (document class, must be alongside main.tex for xelatex)
+    dst_cls = tex_dir / "mpltx.cls"
+    if not dst_cls.exists():
+        src = template_root / "template_mpl.cls"
+        if src.is_file():
+            try:
+                shutil.copy2(str(src), str(dst_cls))
+                logger.debug("Copied built-in .cls → Tex/mpltx.cls")
+            except OSError as e:
+                logger.error("Failed to copy built-in .cls: {}", e)
+
+    # requirements.md (writing style guide, built-in only)
+    dst_req = tex_dir / "requirements.md"
+    if not dst_req.exists():
+        src = template_root / "requirements.md"
+        if src.is_file():
+            try:
+                shutil.copy2(str(src), str(dst_req))
+                logger.debug("Copied built-in requirements.md")
+            except OSError as e:
+                logger.error("Failed to copy requirements.md: {}", e)
+
+
 class AutoReportApp:
     """Main AutoReport application."""
 
@@ -154,6 +203,10 @@ class AutoReportApp:
 
         for dir_path in project_dirs:
             dir_path.mkdir(parents=True, exist_ok=True)
+
+        # Copy built-in LaTeX template files to tex/ (only if not already present).
+        # mpltx.cls must be in the same directory as main.tex for xelatex to find it.
+        _copy_builtin_templates(workspace)
 
         logger.debug("Ensured project structure in: {}", workspace)
 
