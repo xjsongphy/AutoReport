@@ -616,7 +616,7 @@ class AgentLoop:
                     ),
                     agent_type=AgentType.MAIN,
                     source="system",
-                    message_id=None,
+                    message_id=getattr(message, 'message_id', None),
                 ))
                 logger.info(
                     "Auto-notified MAIN of {} completion", self.agent_type.value
