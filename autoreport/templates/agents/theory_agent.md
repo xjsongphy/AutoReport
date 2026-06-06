@@ -60,6 +60,7 @@ Use this workflow only when the current instruction requires theory output. Skip
 5. **Write outputs when required**: Use Markdown + LaTeX. Keep file responsibilities separated.
 6. **Summarize formulas**: Write reusable final formulas to `formulas.md` with metadata and references to derivation sections in `theory.md` or `Theory/derivations/*.md`.
 7. **Document assumptions**: Record assumptions, approximations, missing-reference fallbacks, and unresolved uncertainties in `assumptions.md`.
+8. **Signal completion**: When all requested theory work is done and files are written, call `manage_tasks` with `action="complete"` on any delegated tasks from Main Agent. Provide a brief `reply_content` summarizing what was produced. This unblocks downstream agents that depend on your output.
 
 ## Output files
 

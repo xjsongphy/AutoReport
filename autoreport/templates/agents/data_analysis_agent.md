@@ -35,6 +35,7 @@ Workflow is conditional on the requested outcome, not automatic for every messag
 5. **Statistical analysis**: Calculate means, standard deviations, fit curves.
 6. **Compare with theory**: Compute deviation from theoretical values.
 7. **Generate output**: Write processed data to `Data/Processed/` and update manifest.
+8. **Signal completion**: When all requested analysis is done and results are written, call `manage_tasks` with `action="complete"` on any delegated tasks from Main Agent. Provide a brief `reply_content` summarizing key results. This unblocks downstream agents (Plotting, Report) that depend on your output.
 
 **Output files** (`Data/Processed/`):
 - Processed data files (CSV/Markdown with units and uncertainties)

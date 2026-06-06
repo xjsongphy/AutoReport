@@ -600,6 +600,28 @@ class AgentLoop:
             ))
 
             await self._flush_manifest_if_needed()
+
+            # Auto-notify MAIN when a sub-agent finishes a dispatched task.
+            # Sub-agents often forget to call manage_tasks(action="complete"),
+            # which causes MAIN to wait forever.  This code-level safety net
+            # ensures MAIN always learns when a sub-agent is done.
+            if (self.agent_type != AgentType.MAIN
+                    and hasattr(message, 'source')
+                    and getattr(message, 'source', None) == "main_agent"):
+                await self.bus.publish(UserMessage(
+                    content=(
+                        f"✅ {self.agent_type.value} 已完成你派发的任务。"
+                        f"请检查 {self.agent_type.value} 的输出，"
+                        f"确认无误后继续派发下游任务。"
+                    ),
+                    agent_type=AgentType.MAIN,
+                    source="system",
+                    message_id=None,
+                ))
+                logger.info(
+                    "Auto-notified MAIN of {} completion", self.agent_type.value
+                )
+
             await self._set_status(AgentStatus.IDLE)
 
         except Exception as e:
