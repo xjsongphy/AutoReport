@@ -67,8 +67,11 @@ class WriteEnabledTool(Tool, FileSafetyMixin):
         try:
             file_path.relative_to(self.write_allowed_dir)
         except ValueError:
+            rel_dir = self.write_allowed_dir.relative_to(self.workspace) if self.write_allowed_dir.is_relative_to(self.workspace) else str(self.write_allowed_dir)
             raise PermissionError(
-                f"{action} not allowed outside {self.write_allowed_dir}. Attempted: {file_path}"
+                f"{action} not allowed to {file_path.relative_to(self.workspace) if file_path.is_relative_to(self.workspace) else file_path}. "
+                f"Your allowed write directory is: {rel_dir}/. "
+                f"Please write your output files under {rel_dir}/ instead."
             )
 
 

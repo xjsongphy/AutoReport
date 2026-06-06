@@ -742,6 +742,23 @@ class AgentLoop:
                     if tool is None:
                         raise ValueError(f"Tool not found: {tool_call.name}")
 
+                    # Detect truncated tool calls: output hit max_tokens before arguments were complete
+                    if not tool_call.arguments:
+                        usage = response.usage or {}
+                        output_tokens = usage.get("output_tokens", 0)
+                        if output_tokens >= 8192:
+                            raise ValueError(
+                                f"Tool call to '{tool_call.name}' has no arguments — "
+                                f"the response was truncated at {output_tokens} output tokens. "
+                                f"Your output is too long. Break the file into smaller parts "
+                                f"and write them one at a time using write_file, or use a shorter response."
+                            )
+                        else:
+                            raise ValueError(
+                                f"Tool call to '{tool_call.name}' has no arguments. "
+                                f"Please provide the required parameters."
+                            )
+
                     result = await tool(**tool_call.arguments)
 
                     if tool_call.name in ("write_file", "edit_file", "delete_file"):
