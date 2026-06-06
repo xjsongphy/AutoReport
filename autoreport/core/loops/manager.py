@@ -12,8 +12,7 @@ from ...interfaces.types import AgentType, Message, RestartRequest
 from ..checkpoints import CheckpointManager
 from ..tools import SkillLoader
 from ..tools import (
-    BashTool,
-    BuiltinTemplateTool,
+    ExecTool,
     CreateCheckpointTool,
     DeleteFileTool,
     EditFileTool,
@@ -282,7 +281,7 @@ class LoopManager:
 
         # Execution tool (for data analysis, plotting, report agents only — MAIN delegates, does not execute)
         if agent_type in (AgentType.DATA_ANALYSIS, AgentType.PLOTTING, AgentType.REPORT):
-            registry.register(BashTool(
+            registry.register(ExecTool(
                 working_dir=self.workspace,
                 timeout=120,
             ))
@@ -303,10 +302,6 @@ class LoopManager:
                 workspace=self.workspace,
                 timeout=mineru_timeout,
             ))
-
-        # Built-in template access (Report Agent only)
-        if agent_type == AgentType.REPORT:
-            registry.register(BuiltinTemplateTool())
 
         # Skill loading — all agents can load skills on demand
         registry.register(LoadSkillTool(skill_loader=self.skill_loader))

@@ -243,11 +243,11 @@ class ToolCallGroup(QWidget):
         if call.name == "delete_file":
             files = " ".join(call.file_names) if call.file_names else ""
             return f"<b>Delete</b>{sep}{files}".strip()
-        if call.name == "bash":
+        if call.name == "exec":
             desc = str(call.arguments.get("command_description") or "").strip()
             if desc:
                 desc = desc[0].upper() + desc[1:]
-            return f"<b>Bash</b>{sep}{desc}".strip()
+            return f"<b>Exec</b>{sep}{desc}".strip()
         return f"<b>{self._display_name(call.name)}</b>"
 
     def _clear_detail(self) -> None:
@@ -256,9 +256,9 @@ class ToolCallGroup(QWidget):
             if item.widget():
                 item.widget().deleteLater()
 
-    def _bash_card(self, call: ToolCall) -> QWidget:
+    def _exec_card(self, call: ToolCall) -> QWidget:
         card = QFrame(self)
-        card.setObjectName("bashDetailCard")
+        card.setObjectName("execDetailCard")
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(8, 6, 8, 10)
         card_layout.setSpacing(4)
@@ -270,11 +270,11 @@ class ToolCallGroup(QWidget):
             row_layout.setContentsMargins(0, 0, 0, 0)
             row_layout.setSpacing(8)
             label = QLabel(tag, row)
-            label.setObjectName("bashDetailTag")
+            label.setObjectName("execDetailTag")
             label.setFixedWidth(24)
             row_layout.addWidget(label)
             value = QLabel(shown, row)
-            value.setObjectName("bashDetailText")
+            value.setObjectName("execDetailText")
             value.setTextFormat(Qt.TextFormat.PlainText)
             value.setWordWrap(False)
             # Allow long command/output text to shrink with panel width instead of
@@ -323,7 +323,7 @@ class ToolCallGroup(QWidget):
 
         card_layout.addWidget(_row("IN", cmd))
         divider = QFrame(card)
-        divider.setObjectName("bashDetailDivider")
+        divider.setObjectName("execDetailDivider")
         divider.setFixedHeight(1)
         card_layout.addWidget(divider)
         out_preview = "\n".join(out.splitlines()[:3])
@@ -331,13 +331,13 @@ class ToolCallGroup(QWidget):
         card.setMaximumHeight(110)
         return card
 
-    def _render_bash_detail(self) -> None:
+    def _render_exec_detail(self) -> None:
         self._clear_detail()
-        bash_calls = [c for c in self._calls if c.name == "bash"]
-        if not bash_calls:
+        exec_calls = [c for c in self._calls if c.name == "exec"]
+        if not exec_calls:
             self._detail_host.setVisible(False)
             return
-        self._detail_layout.addWidget(self._bash_card(bash_calls[-1]))
+        self._detail_layout.addWidget(self._exec_card(exec_calls[-1]))
         self._detail_host.setVisible(True)
 
     def _update_display(self) -> None:
@@ -357,7 +357,7 @@ class ToolCallGroup(QWidget):
 
         if self._timeline_rail is not None:
             self._timeline_rail.set_dot_color(dot_color)
-        self._render_bash_detail()
+        self._render_exec_detail()
 
         if any(c.success is None for c in self._calls):
             if not self._tick_timer.isActive():

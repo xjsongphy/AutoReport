@@ -189,7 +189,7 @@ class ReadTool(Tool):
             return {
                 "error": f"Cannot read '{file_path.name}' as text: it appears to be a {detected_type} file (not UTF-8 encoded text). "
                          f"The read tool only supports UTF-8 text files. If you need to work with this file type, "
-                         f"please use a different approach (e.g., bash for file analysis).",
+                         f"please use a different approach (e.g., exec for file analysis).",
                 "path": str(file_path),
                 "is_binary": True,
                 "detected_type": detected_type,

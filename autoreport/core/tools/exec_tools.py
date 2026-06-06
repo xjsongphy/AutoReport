@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import platform
 import shlex
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,18 @@ from loguru import logger
 from ..tools.registry import Tool
 from .path_utils import is_internal_metadata_rel
 
-# Allowed commands for BashTool (allowlist approach)
+
+def _get_shell_info() -> str:
+    """Get current shell information based on platform."""
+    system = platform.system()
+    if system == "Windows":
+        return "Windows command shell"
+    elif system == "Darwin":
+        return "Unix shell (macOS)"
+    else:  # Linux, etc.
+        return "Unix shell (Linux)"
+
+# Allowed commands for ExecTool (allowlist approach)
 ALLOWED_COMMANDS = {
     "python", "python3", "pip", "pip3",
     "xelatex", "lualatex", "pdflatex",
@@ -29,21 +41,21 @@ ALLOWED_COMMANDS = {
 }
 
 
-class BashTool(Tool):
+class ExecTool(Tool):
     """Tool for executing shell commands."""
 
-    name = "bash"
-    description = (
-        "Execute a command in a Bash shell (NOT Windows cmd.exe or PowerShell). "
-        "The working directory is the project root. "
-        "All commands must use valid bash/Linux syntax:\n"
-        "- Use 'which' not 'where'\n"
-        "- Use 'cp' not 'copy'\n"
-        '- Use \'echo "" >> file\' not \'echo.>> file\'\n'
-        "- Paths use forward slashes, not backslashes\n"
-        "Commands that generate files must specify output paths explicitly. "
-        "You must provide both command and a short command_description."
-    )
+    name = "exec"
+
+    @property
+    def description(self) -> str:
+        """Dynamic description based on current platform."""
+        shell_info = _get_shell_info()
+        return (
+            f"Execute shell commands on {shell_info}. "
+            f"The working directory is the project root. "
+            "Commands that generate files must specify output paths explicitly. "
+            "Provide both command and a short command_description."
+        )
 
     def __init__(
         self,
