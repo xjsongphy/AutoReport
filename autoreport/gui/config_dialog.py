@@ -137,7 +137,7 @@ class ConfigCard(QFrame):
         self.test_btn = TextButton(
             text="测试连接",
             tooltip="测试连接",
-            color=c["primaryBtnBg"],
+            color=c["buttonBlue"],
             object_name="testBtn",
             on_click=self._test_connection,
         )
@@ -343,7 +343,7 @@ class ConfigDialog(QDialog):
         self.sync_btn = TextButton(
             text="同步预设",
             tooltip="从 cc-switch 仓库同步最新预设模板",
-            color=c["primaryBtnBg"],
+            color=c["buttonBlue"],
             object_name="syncBtn",
             on_click=self._sync_presets,
         )
@@ -650,8 +650,8 @@ class ConfigDialog(QDialog):
         from PyQt6.QtGui import QPalette
         c = get_theme_colors()
         # Add/override colors specific to config dialog
-        c["addBtnBorder"] = c["primaryBtnBg"]  # 蓝色添加按钮边框
-        c["addBtnFg"] = c["primaryBtnBg"]
+        c["addBtnBorder"] = c["buttonBlue"]  # 蓝色添加按钮边框
+        c["addBtnFg"] = c["buttonBlue"]
         c["deleteFg"] = c["fg"]  # 使用主题前景色
         c["deleteHoverBg"] = c["warningBg"]
         c["deleteHoverFg"] = c["warningFg"]
@@ -662,20 +662,20 @@ class ConfigDialog(QDialog):
 
         self.setStyleSheet(f"""
             ConfigDialog {{
-                background-color: {c["bodyBg"]};
+                background-color: {c["bg"]};
             }}
             #dialogHeader {{
-                background-color: {c["headerBg"]};
-                border-bottom: 1px solid {c["headerBorder"]};
+                background-color: {c["surface"]};
+                border-bottom: 1px solid {c["border"]};
             }}
             #dialogTitle {{
                 font-size: 20px;
                 font-weight: {c["fw_semibold"]};
-                color: {c["titleFg"]};
+                color: {c["fg"]};
             }}
             #dialogSubtitle {{
                 font-size: 13px;
-                color: {c["subtitleFg"]};
+                color: {c["muted"]};
                 margin-top: 4px;
             }}
             #apiWarning {{
@@ -689,7 +689,7 @@ class ConfigDialog(QDialog):
             }}
             #emptyHint {{
                 font-size: 14px;
-                color: {c["subtitleFg"]};
+                color: {c["muted"]};
                 padding: 40px 20px;
             }}
             #activeLabel {{
@@ -698,26 +698,26 @@ class ConfigDialog(QDialog):
                 color: {c["activeFg"]};
             }}
             #dialogFooter {{
-                background-color: {c["footerBg"]};
-                border-top: 1px solid {c["footerBorder"]};
+                background-color: {c["surface"]};
+                border-top: 1px solid {c["border"]};
             }}
             #providerCard {{
-                background-color: {c["cardBg"]};
-                border: 1px solid {c["cardBorder"]};
+                background-color: {c["surface"]};
+                border: 1px solid {c["border"]};
                 border-radius: {c["radius_lg"]};
             }}
             #categoryLabel {{
                 font-size: 12px;
                 font-weight: {c["fw_semibold"]};
-                color: {c["categoryFg"]};
+                color: {c["fg"]};
                 text-transform: uppercase;
                 margin-top: 4px;
             }}
             {filled_button_qss(
                 "#saveBtn",
-                bg=c["primaryBtnBg"],
+                bg=c["buttonBlue"],
                 fg=c["primaryBtnFg"],
-                hover_bg=c["primaryBtnHover"],
+                hover_bg=c["buttonBlue"],
                 disabled_bg=c["border"],
                 disabled_fg=c["muted"],
                 radius=c["radius_md"],
@@ -725,7 +725,7 @@ class ConfigDialog(QDialog):
                 font_size=13,
             )}
             QPushButton#saveBtn:pressed {{
-                background-color: {c["primaryBtnPressed"]};
+                background-color: {c["buttonBlue"]};
             }}
             {secondary_filled_button_qss(
                 "#addBtn",
@@ -775,11 +775,11 @@ class ConfigDialog(QDialog):
             }}
             {dashed_button_qss(
                 "#blankBtn",
-                fg=c["subtitleFg"],
+                fg=c["muted"],
                 border=c["inputBorder"],
                 hover_bg="transparent",
-                hover_fg=c["primaryBtnBg"],
-                hover_border=c["primaryBtnBg"],
+                hover_fg=c["buttonBlue"],
+                hover_border=c["buttonBlue"],
                 radius=c["radius_sm"],
                 padding="6px 14px",
                 font_size=12,
@@ -787,7 +787,7 @@ class ConfigDialog(QDialog):
             {line_edit_qss(
                 "",
                 border_color=c["inputBorder"],
-                focus_border_color=c["inputFocusBorder"],
+                focus_border_color=c["buttonBlue"],
                 background_color=c["inputBg"],
                 foreground_color=c["inputFg"],
                 disabled_bg=c["inputDisabledBg"],
@@ -802,8 +802,8 @@ class ConfigDialog(QDialog):
                 border_color=c["inputBorder"],
                 background_color=c["inputBg"],
                 foreground_color=c["inputFg"],
-                hover_border_color=c["inputFocusBorder"],
-                selection_bg=c["selection"],
+                hover_border_color=c["buttonBlue"],
+                selection_bg=c["selectionBlue"],
                 selection_fg=c["fg"],
                 font_size=13,
                 padding="6px 30px 6px 10px",
@@ -821,11 +821,11 @@ class ConfigDialog(QDialog):
                 background-color: {c["hover"]};
             }}
             QScrollArea {{
-                background-color: {c["bodyBg"]};
+                background-color: {c["bg"]};
                 border: none;
             }}
             QScrollArea > QWidget {{
-                background-color: {c["bodyBg"]};
+                background-color: {c["bg"]};
             }}
         """)
 

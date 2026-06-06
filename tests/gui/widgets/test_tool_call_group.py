@@ -11,7 +11,7 @@ def test_collapsed_shows_summary(qtbot):
     qtbot.addWidget(widget)
 
     widget.add_tool_call("bash", {"command": "echo ok", "command_description": "show output"}, success=True, duration_ms=1200)
-    widget.add_tool_call("read_file", {"path": "data.csv"}, success=True, duration_ms=100)
+    widget.add_tool_call("read", {"path": "data.csv"}, success=True, duration_ms=100)
 
     # Initially collapsed
     assert not widget.is_expanded()
@@ -56,8 +56,8 @@ def test_multiple_tool_calls_render_on_separate_lines(qtbot):
     widget = ToolCallGroup()
     qtbot.addWidget(widget)
 
-    widget.add_tool_call("read_file", {"path": "a.txt"}, success=True, duration_ms=10)
-    widget.add_tool_call("read_file", {"path": "b.txt"}, success=True, duration_ms=10)
+    widget.add_tool_call("read", {"path": "a.txt"}, success=True, duration_ms=10)
+    widget.add_tool_call("read", {"path": "b.txt"}, success=True, duration_ms=10)
 
     summary = widget.get_summary_text()
     assert "Read" in summary

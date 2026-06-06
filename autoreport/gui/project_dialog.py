@@ -206,7 +206,7 @@ class ProjectDialog(QDialog):
             }}
             #subtitle {{
                 font-size: 13px;
-                color: {colors["subtitleFg"]};
+                color: {colors["muted"]};
                 line-height: 1.5;
             }}
             #actionBar {{
@@ -214,9 +214,9 @@ class ProjectDialog(QDialog):
             }}
             {filled_button_qss(
                 "#primaryBtn",
-                bg=colors["primaryBtnBg"],
+                bg=colors["buttonBlue"],
                 fg=colors["primaryBtnFg"],
-                hover_bg=colors["primaryBtnHover"],
+                hover_bg=colors["buttonBlue"],
                 disabled_bg=colors["border"],
                 disabled_fg=colors["muted"],
                 radius=colors["radius_sm"],
@@ -231,7 +231,7 @@ class ProjectDialog(QDialog):
             #sectionLabel {{
                 font-size: 12px;
                 font-weight: {colors["fw_semibold"]};
-                color: {colors["sectionFg"]};
+                color: {colors["fg"]};
                 text-transform: uppercase;
                 letter-spacing: 0.5px;
             }}

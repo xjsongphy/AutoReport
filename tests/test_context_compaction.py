@@ -23,7 +23,7 @@ class TestEstimateTokens:
 
     def test_tool_calls_add_overhead(self):
         from autoreport.core.providers.base import ToolCall
-        tc = ToolCall(id="call_1", name="read_file", arguments={"path": "test.txt"})
+        tc = ToolCall(id="call_1", name="read", arguments={"path": "test.txt"})
         msgs = [LLMMessage(role="assistant", content="", tool_calls=[tc])]
         tokens = _estimate_tokens(msgs)
         # 4 overhead + 20 tool call overhead + arguments tokens

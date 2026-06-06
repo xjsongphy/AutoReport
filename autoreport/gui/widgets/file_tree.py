@@ -604,10 +604,10 @@ class FileTreeWidget(QWidget):
                 border: 1px solid {c["border"]};
                 border-radius: {c["radius_sm"]};
                 padding: 2px 2px;
-                selection-background-color: {c["accent"]};
+                selection-background-color: {c["buttonBlue"]};
             }}
             #fileTree QLineEdit:focus {{
-                border: 1px solid {c["accent"]};
+                border: 1px solid {c["buttonBlue"]};
             }}
 
             /* Scrollbar */

@@ -54,6 +54,11 @@ class ToolCallGroup(QWidget):
     def _display_name(name: str) -> str:
         return name.replace("_", " ").replace("/", " ").title()
 
+    @staticmethod
+    def _normalize_summary_html(summary: str) -> str:
+        """Preserve explicit newlines inside rich-text headers."""
+        return str(summary or "").replace("\r\n", "\n").replace("\n", "<br/>")
+
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._calls: list[ToolCall] = []
@@ -191,27 +196,41 @@ class ToolCallGroup(QWidget):
 
     def _extract_file_names(self, arguments: dict[str, Any]) -> list[str]:
         names: list[str] = []
+
+        def _display_token(path_text: str) -> str:
+            token = str(path_text or "").strip()
+            if not token:
+                return ""
+            if token in {".", "./"}:
+                return "."
+            normalized = token.rstrip("/\\")
+            if not normalized:
+                return "."
+            leaf = Path(normalized).name
+            return leaf or normalized
+
         for key in ("path", "file_path", "output_path"):
             val = arguments.get(key)
             if isinstance(val, str) and val.strip():
-                names.append(Path(val).name)
+                display = _display_token(val)
+                if display:
+                    names.append(display)
         multi = arguments.get("file_paths")
         if isinstance(multi, list):
             for p in multi:
                 if isinstance(p, str) and p.strip():
-                    names.append(Path(p).name)
+                    display = _display_token(p)
+                    if display:
+                        names.append(display)
         return names
 
     def _header_text_for_call(self, call: ToolCall) -> str:
         if call.summary:
-            return call.summary
+            return self._normalize_summary_html(call.summary)
         sep = "&nbsp;&nbsp;"
-        if call.name == "read_file":
+        if call.name == "read":
             files = " ".join(call.file_names) if call.file_names else ""
             return f"<b>Read</b>{sep}{files}".strip()
-        if call.name == "list_dir":
-            files = " ".join(call.file_names) if call.file_names else "."
-            return f"<b>List</b>{sep}{files}".strip()
         if call.name == "parse_pdf":
             files = " ".join(call.file_names) if call.file_names else ""
             return f"<b>Parse</b>{sep}{files}".strip()

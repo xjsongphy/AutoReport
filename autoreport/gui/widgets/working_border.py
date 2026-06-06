@@ -74,7 +74,7 @@ class WorkingBorder(QWidget):
 
         r = max(w, h) * 0.8
 
-        beam_color = QColor(get_theme_colors()["accent"])
+        beam_color = QColor(get_theme_colors()["buttonBlue"])
         transparent = QColor(0, 0, 0, 0)
 
         grad = QConicalGradient(cx, cy, self._angle)

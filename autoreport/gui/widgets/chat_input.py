@@ -3,7 +3,9 @@
 from pathlib import Path
 from typing import override
 
-from PyQt6.QtCore import QPoint, QTimer, Qt, pyqtSignal
+from math import ceil
+
+from PyQt6.QtCore import QMimeData, QPoint, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QInputMethodEvent, QKeyEvent, QTextCursor
 from PyQt6.QtWidgets import QPlainTextEdit
 
@@ -122,17 +124,23 @@ class ChatInput(QPlainTextEdit):
     def _update_height(self) -> None:
         metrics = self.fontMetrics()
         line_h = metrics.lineSpacing()
-        doc_lines = max(self._MIN_LINES, self.document().blockCount())
-        visible_lines = min(self._MAX_LINES, doc_lines)
         frame = self.frameWidth() * 2
         doc_margin = int(self.document().documentMargin() * 2)
         pad_v = 12  # matches vertical padding in stylesheet (6 top + 6 bottom)
+        layout = self.document().documentLayout()
+        doc_height = layout.documentSize().height() if layout is not None else 0.0
+        wrapped_lines = ceil(max(0.0, doc_height) / max(1, line_h))
+        explicit_lines = self.document().blockCount()
+        logical_lines = max(self._MIN_LINES, explicit_lines, wrapped_lines)
+        visible_lines = min(self._MAX_LINES, logical_lines)
         target = (visible_lines * line_h) + frame + doc_margin + pad_v
         self.setFixedHeight(target)
-        if doc_lines > self._MAX_LINES:
-            self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-        else:
-            self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        max_visible_doc_h = (self._MAX_LINES * line_h) + doc_margin
+        content_doc_h = max(0.0, doc_height)
+        needs_scroll = logical_lines > self._MAX_LINES or (content_doc_h > (max_visible_doc_h + 0.5))
+        self.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOn if needs_scroll else Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
 
     @override
     def keyPressEvent(self, event: QKeyEvent) -> None:
@@ -175,6 +183,10 @@ class ChatInput(QPlainTextEdit):
 
         if event.text():
             self._check_current_token()
+
+    def insertFromMimeData(self, source: QMimeData | None) -> None:  # noqa: N802
+        super().insertFromMimeData(source)
+        self._schedule_sync()
 
     def _check_current_token(self) -> None:
         """Check for @ or / prefix token and emit appropriate signal."""

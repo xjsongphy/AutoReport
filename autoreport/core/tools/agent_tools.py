@@ -24,7 +24,10 @@ class SendToAgentTool(Tool):
     name = "send_to_agent"
     description = (
         "Send a task instruction to a sub-agent. Use this to dispatch work to: "
-        "theory, data_analysis, plotting, report. "
+        "theory, data_analysis, plotting, report. Keep the message minimal: "
+        "task goal, input file locations, dependency, and explicit user constraints only. "
+        "Do not include formulas, implementation steps, copied source content, "
+        "output filenames, or quality rules the sub-agent already owns. "
         "Modes (choose one):\n"
         "- blocking=True (default): Wait for response, no task tracking.\n"
         "- blocking=False with task_items: Non-blocking, creates tracked tasks for waitlist/todolist.\n"
@@ -212,7 +215,7 @@ class SendToAgentTool(Tool):
                 "status": "timeout",
                 "agent_type": target.value,
                 "error": f"Sub-agent did not respond within {self._timeout}s. "
-                         "It may still be processing. Try again or use read_file to check its output.",
+                         "It may still be processing. Try again or use read to check its output.",
             }
             if feedback_items:
                 result["feedback"] = feedback_items
