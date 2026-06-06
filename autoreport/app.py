@@ -209,6 +209,10 @@ class AutoReportApp:
         # QApplication already created in main(), get the instance
         app = QApplication.instance()
 
+        # ── Phase 1: Pre-project welcome guide ──
+        from .gui.onboarding import show_pre_project_guide
+        wants_tutorial = show_pre_project_guide()
+
         # Show project selection dialog first
         from .gui.project_dialog import ProjectDialog
 
@@ -270,6 +274,11 @@ class AutoReportApp:
         self.main_window.set_async_loop(self._async_loop)
         self.main_window.prepare_initial_render()
         self.main_window.show()
+
+        # ── Phase 2: Post-project tutorial (only if user chose "new user" in Phase 1) ──
+        if wants_tutorial:
+            from .gui.onboarding import show_onboarding
+            show_onboarding(self.main_window)
 
         exit_code = app.exec()
 
