@@ -130,6 +130,55 @@ def _file_format(record):
     return base + "\n"
 
 
+def add_project_logging(workspace: Path) -> None:
+    """Add project-bound log handlers, writing to {workspace}/logs/.
+
+    This is called in addition to setup_logging() — the global logs (./logs/)
+    remain active.  The project logs follow the same format and retention policy
+    but live inside the project workspace directory so they stay with the project.
+    """
+    log_dir = workspace / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    # Main project log
+    logger.add(
+        log_dir / "autoreport_{time:YYYY-MM-DD_HH-mm-ss}.log",
+        level="DEBUG",
+        format=_file_format,
+        rotation="100 MB",
+        retention="10 days",
+        compression="zip",
+        encoding="utf-8",
+    )
+
+    # Error project log
+    logger.add(
+        log_dir / "errors_{time:YYYY-MM-DD_HH-mm-ss}.log",
+        level="ERROR",
+        format=_file_format,
+        rotation="50 MB",
+        retention="30 days",
+        compression="zip",
+        encoding="utf-8",
+        backtrace=True,
+        diagnose=True,
+    )
+
+    # UI actions project log
+    logger.add(
+        log_dir / "ui_actions_{time:YYYY-MM-DD_HH-mm-ss}.log",
+        level="DEBUG",
+        format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>UI_ACTION</level> | {message}",
+        rotation="50 MB",
+        retention="7 days",
+        compression="zip",
+        encoding="utf-8",
+        filter=lambda record: "ui_action" in record["extra"],
+    )
+
+    logger.info("Project logging added: {}", log_dir)
+
+
 def log_exception(
     message: str,
     exc: Exception,

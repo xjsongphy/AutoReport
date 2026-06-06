@@ -1,8 +1,7 @@
 """Agent tools for AutoReport."""
 
 from .agent_tools import ReportIssueTool, SendToAgentTool
-from .builtin_template_tool import BuiltinTemplateTool
-from .exec_tools import BashTool
+from .exec_tools import ExecTool
 from .file_state import FileStateManager
 from .file_tools import DeleteFileTool, EditFileTool, ReadTool, WriteFileTool
 from .manifest_tool import ManifestManager, ManifestTool
@@ -23,12 +22,11 @@ __all__ = [
     "DeleteFileTool",
     "ManifestManager",
     "ManifestTool",
-    "BashTool",
+    "ExecTool",
     "PDFParseTool",
     "SendToAgentTool",
     "ReportIssueTool",
     "FileStateManager",
-    "BuiltinTemplateTool",
     "SkillLoader",
     "LoadSkillTool",
 ]

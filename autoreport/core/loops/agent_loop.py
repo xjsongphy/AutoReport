@@ -101,11 +101,32 @@ def _trim_messages_to_budget(
         else:
             break
 
-    # Ensure the boundary is legal: first kept message should be user role
-    if kept and kept[0].role != "user":
-        # Find the next user message backwards from the trim point
-        # If none, keep the system prompt only
-        logger.debug("Adjusting trim boundary to user-turn alignment")
+    # Ensure the boundary is legal.
+    # 1. Strip orphan 'tool' messages whose 'assistant(tool_calls)' was trimmed.
+    # 2. Strip orphan 'assistant' messages whose preceding 'user' was trimmed.
+    # 3. The first real message after system must be 'user'.
+    # 4. Anthropic-style tool results (role="user", is_tool_result=True) whose
+    #    'assistant(tool_calls)' was trimmed.
+    while kept:
+        role = kept[0].role
+        has_tool_calls = bool(getattr(kept[0], "tool_calls", None))
+        is_tool_result = getattr(kept[0], "is_tool_result", False)
+        if role == "tool":
+            logger.debug("Stripping orphan tool message at trim boundary")
+            kept.pop(0)
+        elif role == "assistant":
+            logger.debug("Stripping orphan assistant message at trim boundary")
+            kept.pop(0)
+        elif role == "user" and is_tool_result:
+            # Anthropic-style orphan: tool result disguised as user message.
+            # Without its preceding assistant(tool_calls), this would cause
+            # an API error (tool result without tool_use).
+            logger.debug(
+                "Stripping orphan user/tool_result message at trim boundary"
+            )
+            kept.pop(0)
+        else:
+            break
 
     # Always prepend system prompt
     result = [system_msg] + kept
@@ -425,7 +446,6 @@ class AgentLoop:
                     description=f"pre:{source}",
                     source="pre_message",
                     conversation_history=history_dicts,
-                    message_id=message.message_id,
                 )
                 logger.debug("{} checkpoint created: {}", agent_str, cp_id)
             except Exception as e:
@@ -580,6 +600,28 @@ class AgentLoop:
             ))
 
             await self._flush_manifest_if_needed()
+
+            # Auto-notify MAIN when a sub-agent finishes a dispatched task.
+            # Sub-agents often forget to call manage_tasks(action="complete"),
+            # which causes MAIN to wait forever.  This code-level safety net
+            # ensures MAIN always learns when a sub-agent is done.
+            if (self.agent_type != AgentType.MAIN
+                    and hasattr(message, 'source')
+                    and getattr(message, 'source', None) == "main_agent"):
+                await self.bus.publish(UserMessage(
+                    content=(
+                        f"✅ {self.agent_type.value} 已完成你派发的任务。"
+                        f"请检查 {self.agent_type.value} 的输出，"
+                        f"确认无误后继续派发下游任务。"
+                    ),
+                    agent_type=AgentType.MAIN,
+                    source="system",
+                    message_id=getattr(message, 'message_id', None),
+                ))
+                logger.info(
+                    "Auto-notified MAIN of {} completion", self.agent_type.value
+                )
+
             await self._set_status(AgentStatus.IDLE)
 
         except Exception as e:
@@ -997,9 +1039,21 @@ class AgentLoop:
         is used by both the initial streaming call *and* tool-call iterations, so
         the system prompt is never accidentally dropped.
         """
+        sanitized_history = [
+            LLMMessage(
+                role=msg.role,
+                content=msg.content or "",
+                tool_calls=msg.tool_calls,
+                tool_call_id=msg.tool_call_id,
+                is_tool_result=msg.is_tool_result,
+                thinking=msg.thinking,
+                cache_control=msg.cache_control,
+            )
+            for msg in self._conversation_history
+        ]
         return [
             LLMMessage(role="system", content=await self._get_system_prompt(), cache_control=True),
-            *self._conversation_history,
+            *sanitized_history,
         ]
 
     def _build_task_state_section(self) -> str:

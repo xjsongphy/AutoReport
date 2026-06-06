@@ -189,7 +189,7 @@ class ReadTool(Tool):
             return {
                 "error": f"Cannot read '{file_path.name}' as text: it appears to be a {detected_type} file (not UTF-8 encoded text). "
                          f"The read tool only supports UTF-8 text files. If you need to work with this file type, "
-                         f"please use a different approach (e.g., bash for file analysis).",
+                         f"please use a different approach (e.g., exec for file analysis).",
                 "path": str(file_path),
                 "is_binary": True,
                 "detected_type": detected_type,
@@ -233,11 +233,54 @@ class ReadTool(Tool):
             raise
 
 
+def _validate_plotting_script(content: str, workspace: Path) -> str | None:
+    """Minimal validation for plotting scripts before saving.
+
+    Only checks that are absolutely reliable (no regex guessing of Python semantics):
+      1. unicode_minus — text match, 0% false positive
+      2. plt.close pairing — count comparison, straightforward
+
+    All other quality checks (x-monotonicity, data completeness, space utilization,
+    curve overlap, discontinuities) are the Plotting Agent's own responsibility
+    via the mandatory self-check protocol in its system prompt.
+    """
+    # Fast path: not a plotting script → skip all checks
+    if "matplotlib" not in content and "savefig" not in content:
+        return None
+
+    errors: list[str] = []
+
+    # 1. unicode_minus — Windows TNR fonts cannot render Unicode minus (U+2212)
+    if "'axes.unicode_minus': False" not in content:
+        errors.append(
+            "Missing plt.rcParams['axes.unicode_minus'] = False — "
+            "minus signs may display as boxes on Windows"
+        )
+
+    # 2. Every savefig should have a corresponding plt.close
+    savefig_count = len(re.findall(r'\.savefig\(', content))
+    close_count = len(re.findall(r'plt\.close\(', content))
+    if savefig_count > close_count:
+        errors.append(
+            f"Found {savefig_count} savefig calls but only {close_count} plt.close calls — "
+            "each fig.savefig() must be followed by plt.close(fig) to free memory"
+        )
+
+    if errors:
+        header = f"Validation failed ({len(errors)} issue(s)):\n"
+        return header + "\n".join(f"  [{i+1}] {e}" for i, e in enumerate(errors))
+    return None
+
+
 class WriteFileTool(WriteEnabledTool):
     """Tool for writing files."""
 
     name = "write_file"
     description = "Write content to a file. Creates parent directories if needed."
+
+    def __init__(self, content_validator=None, **kwargs):
+        super().__init__(**kwargs)
+        self._content_validator = content_validator
 
     async def __call__(
         self,
@@ -263,6 +306,13 @@ class WriteFileTool(WriteEnabledTool):
         logger.debug("Writing file: {}", file_path)
 
         self._check_write_permission(file_path)
+
+        # Content validation for plotting scripts
+        if self._content_validator and file_path.suffix == '.py':
+            error = self._content_validator(content, self.workspace)
+            if error:
+                logger.warning("Plotting script validation failed: {}", error)
+                return {"error": error, "path": str(file_path), "validation_failed": True}
 
         # Check read-before-write safety for existing files
         if file_path.exists():

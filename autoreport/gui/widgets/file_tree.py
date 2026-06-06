@@ -40,7 +40,7 @@ from ..theme import get_theme_colors
 from .ui_utils import UI_HOVER_DELAY_MS, IconActionButton, compact_tooltip_qss, create_isolated_context_menu, render_svg_icon
 
 # Fixed directory structure
-FIXED_DIRECTORIES = ["Data", "References", "Theory", "Code", "Tex"]
+FIXED_DIRECTORIES = ["Data", "References", "Theory", "Code", "Outline", "Tex"]
 _FILE_TEXT_ICON_GAP_ADJUST = 28
 _FILE_EDITOR_LEFT_ADJUST = -26
 _DIRECTORY_EDITOR_LEFT_ADJUST = 4
@@ -152,6 +152,7 @@ DIR_LABELS = {
     "References": "References",
     "Theory": "Theory",
     "Code": "Code",
+    "Outline": "Outline",
     "Tex": "Tex",
     "Processed": "Processed",
 }
@@ -162,6 +163,7 @@ DIR_DESCRIPTIONS = {
     "References": "参考资料",
     "Theory": "理论推导",
     "Code": "代码与图像",
+    "Outline": "协调大纲",
     "Tex": "报告",
     "Processed": "分析结果",
 }

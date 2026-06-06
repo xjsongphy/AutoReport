@@ -65,6 +65,41 @@ class OpenAICompatProvider(LLMProvider):
 
             # Tool result message
             if msg.is_tool_result:
+                # Guard: find the most recent assistant(tool_calls) by walking
+                # backwards in the already-converted messages.  Multiple tool
+                # results can follow a single assistant(tool_calls), so we
+                # cannot just check openai_messages[-1] — it will be another
+                # tool message for all but the first result.
+                parent_assistant = None
+                for m in reversed(openai_messages):
+                    if m.get("role") == "assistant" and "tool_calls" in m:
+                        parent_assistant = m
+                        break
+
+                if parent_assistant is None:
+                    logger.warning(
+                        "Dropping orphan tool result (tool_call_id=%s): "
+                        "no preceding assistant message with tool_calls. "
+                        "This usually means the conversation was trimmed at a "
+                        "tool-call boundary.",
+                        msg.tool_call_id,
+                    )
+                    continue
+
+                # Verify this tool result belongs to the parent assistant
+                matching = any(
+                    tc["id"] == msg.tool_call_id
+                    for tc in parent_assistant.get("tool_calls", [])
+                )
+                if not matching:
+                    logger.warning(
+                        "Dropping orphan tool result (tool_call_id=%s): "
+                        "does not match any tool_call_id in the preceding "
+                        "assistant message.  Likely trimmed.",
+                        msg.tool_call_id,
+                    )
+                    continue
+
                 openai_messages.append({
                     "role": "tool",
                     "tool_call_id": msg.tool_call_id,

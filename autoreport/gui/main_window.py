@@ -606,26 +606,26 @@ class MainWindow(QMainWindow):
                 font-size: {px(11)};
                 padding: {px(1)} 0 {px(2)} {px(12)};
             }}
-            #bashDetailCard {{
+            #execDetailCard {{
                 background-color: #23272f;
                 border: 1px solid #353b46;
                 border-radius: {px(8)};
             }}
-            #bashDetailRow {{
+            #execDetailRow {{
                 background-color: transparent;
             }}
-            #bashDetailTag {{
+            #execDetailTag {{
                 color: #9aa3b2;
                 font-size: {px(10)};
                 font-weight: {c["fw_semibold"]};
                 min-width: {px(20)};
             }}
-            #bashDetailText {{
+            #execDetailText {{
                 color: #d5dbe5;
                 font-family: "Cascadia Code", "SF Mono", "Consolas", monospace;
                 font-size: {px(11)};
             }}
-            #bashDetailDivider {{
+            #execDetailDivider {{
                 background-color: #353b46;
                 border: none;
             }}
@@ -660,14 +660,14 @@ class MainWindow(QMainWindow):
                 background-color: #353b46;
                 border: none;
             }}
-            #bashCopyBtn {{
+            #execCopyBtn {{
                 background-color: transparent;
                 border: none;
                 color: #9aa3b2;
                 font-size: {px(10)};
                 padding: {px(2)} {px(4)};
             }}
-            #bashCopyBtn:hover {{
+            #execCopyBtn:hover {{
                 color: #e2e8f0;
             }}
 

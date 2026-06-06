@@ -1,6 +1,8 @@
 """Main application entry point."""
 
 import asyncio
+import importlib.resources
+import shutil
 import signal
 import sys
 from pathlib import Path
@@ -26,7 +28,7 @@ from .core.loops import LoopManager, MessageBus
 from .gui import MainWindow
 from .interfaces.protocol import BackendAPI
 from .utils.editor_context import build_editor_context_prompt
-from .utils import log_exception, setup_exception_handler, setup_logging
+from .utils import add_project_logging, log_exception, setup_exception_handler, setup_logging
 
 console = Console()
 app = typer.Typer(
@@ -79,6 +81,71 @@ def _install_stderr_filter() -> None:
     sys.stderr = _FilteredStderr(sys.stderr)
 
 
+def _copy_builtin_templates(workspace: Path) -> None:
+    """Copy built-in LaTeX template files to Tex/ on first project open.
+
+    Only copies files that don't already exist — user or agent modifications
+    are never overwritten.  User-provided templates in References/ are
+    handled by the Report Agent at writing time (see report_agent.md).
+
+    Args:
+        workspace: Project workspace path.
+
+    Raises:
+        RuntimeError: If critical template file (main.tex) fails to copy.
+    """
+    tex_dir = workspace / "tex"
+    template_root = importlib.resources.files("autoreport.templates.reports")
+
+    # main.tex (PKUMpLtX-based template) - CRITICAL for LaTeX compilation
+    dst_tex = tex_dir / "main.tex"
+    if not dst_tex.exists():
+        src = template_root / "template_mpl.tex"
+        if src.is_file():
+            try:
+                shutil.copy2(str(src), str(dst_tex))
+                logger.info("Copied built-in template → Tex/main.tex")
+            except OSError as e:
+                logger.error("Failed to copy built-in template: {}", e)
+                raise RuntimeError(
+                    f"Failed to copy critical template file main.tex: {e}. "
+                    "LaTeX compilation will not work without this file."
+                ) from e
+        else:
+            logger.warning("Built-in template template_mpl.tex not found in package")
+
+    # mpltx.cls (document class, must be alongside main.tex for xelatex) - CRITICAL
+    dst_cls = tex_dir / "mpltx.cls"
+    if not dst_cls.exists():
+        src = template_root / "template_mpl.cls"
+        if src.is_file():
+            try:
+                shutil.copy2(str(src), str(dst_cls))
+                logger.info("Copied built-in .cls → Tex/mpltx.cls")
+            except OSError as e:
+                logger.error("Failed to copy built-in .cls: {}", e)
+                raise RuntimeError(
+                    f"Failed to copy critical class file mpltx.cls: {e}. "
+                    "LaTeX compilation will not work without this file."
+                ) from e
+        else:
+            logger.warning("Built-in class template_mpl.cls not found in package")
+
+    # requirements.md (writing style guide, built-in only) - OPTIONAL
+    dst_req = tex_dir / "requirements.md"
+    if not dst_req.exists():
+        src = template_root / "requirements.md"
+        if src.is_file():
+            try:
+                shutil.copy2(str(src), str(dst_req))
+                logger.debug("Copied built-in requirements.md")
+            except OSError as e:
+                logger.warning("Failed to copy requirements.md: {}", e)
+                # Non-critical, don't raise exception
+        else:
+            logger.debug("Built-in requirements.md not found in package")
+
+
 class AutoReportApp:
     """Main AutoReport application."""
 
@@ -115,6 +182,9 @@ class AutoReportApp:
         # Use provided workspace
         workspace = Path(workspace).resolve()
 
+        # Add project-bound logging (in addition to global ./logs/)
+        add_project_logging(workspace)
+
         # Create project structure if needed
         self._ensure_project_structure(workspace)
 
@@ -149,11 +219,16 @@ class AutoReportApp:
             workspace / "references",
             workspace / "theory",
             workspace / "code",
+            workspace / "Outline",
             workspace / "tex",
         ]
 
         for dir_path in project_dirs:
             dir_path.mkdir(parents=True, exist_ok=True)
+
+        # Copy built-in LaTeX template files to tex/ (only if not already present).
+        # mpltx.cls must be in the same directory as main.tex for xelatex to find it.
+        _copy_builtin_templates(workspace)
 
         logger.debug("Ensured project structure in: {}", workspace)
 
@@ -208,6 +283,10 @@ class AutoReportApp:
 
         # QApplication already created in main(), get the instance
         app = QApplication.instance()
+
+        # ── Phase 1: Pre-project welcome guide ──
+        from .gui.onboarding import show_pre_project_guide
+        wants_tutorial = show_pre_project_guide()
 
         # Show project selection dialog first
         from .gui.project_dialog import ProjectDialog
@@ -270,6 +349,11 @@ class AutoReportApp:
         self.main_window.set_async_loop(self._async_loop)
         self.main_window.prepare_initial_render()
         self.main_window.show()
+
+        # ── Phase 2: Post-project tutorial (only if user chose "new user" in Phase 1) ──
+        if wants_tutorial:
+            from .gui.onboarding import show_onboarding
+            show_onboarding(self.main_window)
 
         exit_code = app.exec()
 
