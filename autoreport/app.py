@@ -219,7 +219,7 @@ class AutoReportApp:
             workspace / "references",
             workspace / "theory",
             workspace / "code",
-            workspace / "outline",
+            workspace / "Outline",
             workspace / "tex",
         ]
 
