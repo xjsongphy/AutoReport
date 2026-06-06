@@ -28,7 +28,8 @@ class PromptLoader:
                        Defaults to autoreport/templates/agents/.
         """
         self._agents_dir = Path(agents_dir) if agents_dir else self._AGENTS_DIR
-        self._cache: dict[str, str] = {}
+        self._cache: dict[str, tuple[int | None, str]] = {}
+        self._shared_cache: tuple[int | None, str | None] | None = None
 
     def load_prompt(self, agent_type: str) -> str:
         """Load complete agent prompt.
@@ -42,11 +43,13 @@ class PromptLoader:
         Raises:
             FileNotFoundError: If prompt file not found.
         """
-        if agent_type in self._cache:
-            return self._cache[agent_type]
-
         filename = self._get_filename(agent_type)
         filepath = self._agents_dir / filename
+        mtime_ns = filepath.stat().st_mtime_ns if filepath.exists() else None
+
+        cached = self._cache.get(agent_type)
+        if cached and cached[0] == mtime_ns:
+            return cached[1]
 
         if not filepath.exists():
             logger.warning("Prompt file not found: {}, using fallback", filepath)
@@ -55,7 +58,7 @@ class PromptLoader:
             content = filepath.read_text(encoding="utf-8")
             prompt = content.strip()
 
-        self._cache[agent_type] = prompt
+        self._cache[agent_type] = (mtime_ns, prompt)
         return prompt
 
     def load_shared_context(self) -> str | None:
@@ -65,12 +68,29 @@ class PromptLoader:
             Shared context content, or None if file not found.
         """
         path = self._agents_dir / "Common.md"
+        mtime_ns = path.stat().st_mtime_ns if path.exists() else None
+
+        if self._shared_cache and self._shared_cache[0] == mtime_ns:
+            return self._shared_cache[1]
+
         if not path.exists():
             logger.debug("Shared context file not found: {}", path)
+            self._shared_cache = (None, None)
             return None
 
         content = path.read_text(encoding="utf-8").strip()
-        return content or None
+        shared = content or None
+        self._shared_cache = (mtime_ns, shared)
+        return shared
+
+    def get_signature(self, agent_type: str) -> tuple[int | None, int | None]:
+        """Return a file-based signature for prompt cache invalidation."""
+        filename = self._get_filename(agent_type)
+        prompt_path = self._agents_dir / filename
+        shared_path = self._agents_dir / "Common.md"
+        prompt_sig = prompt_path.stat().st_mtime_ns if prompt_path.exists() else None
+        shared_sig = shared_path.stat().st_mtime_ns if shared_path.exists() else None
+        return prompt_sig, shared_sig
 
     def _get_filename(self, agent_type: str) -> str:
         normalized = agent_type.lower().replace("-", "_").replace(" ", "_")
@@ -99,4 +119,5 @@ class PromptLoader:
     def reload(self) -> None:
         """Clear cache — useful when prompts are modified at runtime."""
         self._cache.clear()
+        self._shared_cache = None
         logger.info("Prompt cache cleared")

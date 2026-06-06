@@ -183,6 +183,7 @@ class AgentLoop:
 
         self._prompt_loader = prompt_loader or PromptLoader()
         self._cached_system_prompt: str | None = None
+        self._cached_system_prompt_signature: tuple[Any, ...] | None = None
 
         self._status = AgentStatus.IDLE
         self._running = False
@@ -977,18 +978,31 @@ class AgentLoop:
         )
 
     async def _get_cached_system_prompt(self) -> str:
-        """Return the cached system prompt, building it on first call.
+        """Return the cached system prompt, rebuilding it when sources change.
 
-        The prompt is assembled once from the agent template, shared context
+        The prompt is assembled from the agent template, shared context
         (Common.md), and — for the Report agent only — an on-demand skills
-        summary.  Callers should *not* mutate the result; treat it as
-        immutable cached text.
+        summary. The assembled text is cached, but the cache is invalidated
+        automatically when the underlying prompt files change.
         """
-        if self._cached_system_prompt is not None:
-            return self._cached_system_prompt
-
         agent_type_str = self._get_agent_type_str()
         logger.debug("Loading system prompt for agent: {}", self.agent_type)
+        prompt_signature = self._prompt_loader.get_signature(agent_type_str)
+        skills_summary = None
+        if self.agent_type == AgentType.REPORT and self._skill_loader:
+            skills_summary = self._skill_loader.build_skills_summary()
+        current_signature = (
+            agent_type_str,
+            prompt_signature,
+            skills_summary,
+            bool(self._manifest_manager and self.agent_type != AgentType.MAIN),
+        )
+
+        if (
+            self._cached_system_prompt is not None
+            and self._cached_system_prompt_signature == current_signature
+        ):
+            return self._cached_system_prompt
 
         parts: list[str] = [self._prompt_loader.load_prompt(agent_type_str)]
 
@@ -997,15 +1011,13 @@ class AgentLoop:
             parts.append(shared)
 
         # Skills summary — Report agent only (others don't need skill guidance)
-        if self.agent_type == AgentType.REPORT and self._skill_loader:
-            skills_summary = self._skill_loader.build_skills_summary()
-            if skills_summary:
-                parts.append(
-                    "\n## Available Skills\n\n"
-                    "The following skills are available. Use `load_skill` tool to get "
-                    "full content when needed:\n\n" + skills_summary
-                )
-                logger.debug("Injected skills summary for report agent")
+        if skills_summary:
+            parts.append(
+                "\n## Available Skills\n\n"
+                "The following skills are available. Use `load_skill` tool to get "
+                "full content when needed:\n\n" + skills_summary
+            )
+            logger.debug("Injected skills summary for report agent")
 
         # Manifest hint — sub-agents only
         if self._manifest_manager and self.agent_type != AgentType.MAIN:
@@ -1017,6 +1029,7 @@ class AgentLoop:
             )
 
         self._cached_system_prompt = "\n\n".join(parts)
+        self._cached_system_prompt_signature = current_signature
         return self._cached_system_prompt
 
     async def _get_system_prompt(self) -> str:
