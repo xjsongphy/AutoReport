@@ -16,7 +16,6 @@ from ..tools import (
     EditFileTool,
     ExecTool,
     FileStateManager,
-    ListDirTool,
     LoadSkillTool,
     ManageTasksTool,
     ManifestManager,
