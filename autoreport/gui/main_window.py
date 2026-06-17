@@ -426,16 +426,16 @@ class MainWindow(QMainWindow):
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             #messageExpandBtn {{
-                background-color: rgba(32, 33, 36, 0.92);
-                color: #f3f4f6;
-                border: 1px solid rgba(255, 255, 255, 0.08);
+                background-color: {c["message_expand_bg"]};
+                color: {c["message_expand_fg"]};
+                border: 1px solid {c["message_expand_border"]};
                 border-radius: {px(9)};
                 padding: {px(3)} {px(8)};
                 font-size: {px(11)};
                 font-weight: {c["fw_medium"]};
             }}
             #messageExpandBtn:hover {{
-                background-color: rgba(48, 50, 56, 0.96);
+                background-color: {c["message_expand_hover_bg"]};
             }}
             #userMessageBubbleContainer {{
                 background-color: transparent;
@@ -607,68 +607,68 @@ class MainWindow(QMainWindow):
                 padding: {px(1)} 0 {px(2)} {px(12)};
             }}
             #execDetailCard {{
-                background-color: #23272f;
-                border: 1px solid #353b46;
+                background-color: {c["detail_card_bg"]};
+                border: 1px solid {c["detail_card_border"]};
                 border-radius: {px(8)};
             }}
             #execDetailRow {{
                 background-color: transparent;
             }}
             #execDetailTag {{
-                color: #9aa3b2;
+                color: {c["detail_muted"]};
                 font-size: {px(10)};
                 font-weight: {c["fw_semibold"]};
                 min-width: {px(20)};
             }}
             #execDetailText {{
-                color: #d5dbe5;
+                color: {c["detail_fg"]};
                 font-family: "Cascadia Code", "SF Mono", "Consolas", monospace;
                 font-size: {px(11)};
             }}
             #execDetailDivider {{
-                background-color: #353b46;
+                background-color: {c["detail_card_border"]};
                 border: none;
             }}
             #manageDetailCard {{
-                background-color: #23272f;
-                border: 1px solid #353b46;
+                background-color: {c["detail_card_bg"]};
+                border: 1px solid {c["detail_card_border"]};
                 border-radius: {px(8)};
             }}
             #manageDetailTitle {{
-                color: #9aa3b2;
+                color: {c["detail_muted"]};
                 font-size: {px(10)};
                 font-weight: {c["fw_semibold"]};
             }}
             #manageDetailItem {{
-                color: #d5dbe5;
+                color: {c["detail_fg"]};
                 font-size: {px(11)};
                 line-height: 1.6;
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             #manageDetailDone {{
-                color: #9aa3b2;
+                color: {c["detail_muted"]};
                 font-size: {px(11)};
                 line-height: 1.6;
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
                 text-decoration: line-through;
             }}
             #manageDetailEmpty {{
-                color: #9aa3b2;
+                color: {c["detail_muted"]};
                 font-size: {px(11)};
             }}
             #manageDetailDivider {{
-                background-color: #353b46;
+                background-color: {c["detail_card_border"]};
                 border: none;
             }}
             #execCopyBtn {{
                 background-color: transparent;
                 border: none;
-                color: #9aa3b2;
+                color: {c["detail_muted"]};
                 font-size: {px(10)};
                 padding: {px(2)} {px(4)};
             }}
             #execCopyBtn:hover {{
-                color: #e2e8f0;
+                color: {c["detail_hover_fg"]};
             }}
 
             /* ---- Status Indicator ---- */

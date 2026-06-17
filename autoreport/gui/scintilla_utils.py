@@ -6,11 +6,10 @@ Provides consistent styling for all QScintilla editors including:
 - Font configuration
 """
 
-from PyQt6.Qsci import QsciScintilla, QsciLexer
+from PyQt6.Qsci import QsciLexer, QsciScintilla
 from PyQt6.QtGui import QColor, QFont, QFontDatabase
-from loguru import logger
 
-from .theme import get_theme_colors, is_dark_mode
+from .theme import get_theme_colors
 
 LINE_NUMBER_RIGHT_PADDING = 6
 LINE_NUMBER_MARGIN_MIN_WIDTH = 26
@@ -48,16 +47,16 @@ def _set_style_if_present(lexer: QsciLexer, style_name: str, color: str) -> None
 
 def _apply_vscode_token_palette(lexer: QsciLexer) -> None:
     """Apply VSCode-like token palette with separate dark/light variants."""
-    dark = is_dark_mode()
+    c = get_theme_colors()
     palette = {
-        "keyword": "#C586C0" if dark else "#AF00DB",
-        "string": "#CE9178" if dark else "#A31515",
-        "comment": "#6A9955" if dark else "#008000",
-        "number": "#B5CEA8" if dark else "#098658",
-        "operator": "#D4D4D4" if dark else "#000000",
-        "identifier": "#9CDCFE" if dark else "#001080",
-        "class_name": "#4EC9B0" if dark else "#267F99",
-        "function": "#DCDCAA" if dark else "#795E26",
+        "keyword": c["syntax_keyword"],
+        "string": c["syntax_string"],
+        "comment": c["syntax_comment"],
+        "number": c["syntax_number"],
+        "operator": c["syntax_operator"],
+        "identifier": c["syntax_identifier"],
+        "class_name": c["syntax_class_name"],
+        "function": c["syntax_function"],
     }
 
     # Python
