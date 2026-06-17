@@ -117,7 +117,7 @@ def _copy_builtin_templates(workspace: Path) -> None:
     # mpltx.cls (document class, must be alongside main.tex for xelatex) - CRITICAL
     dst_cls = tex_dir / "mpltx.cls"
     if not dst_cls.exists():
-        src = template_root / "template_mpl.cls"
+        src = template_root / "mpltx.cls"
         if src.is_file():
             try:
                 shutil.copy2(str(src), str(dst_cls))
@@ -129,7 +129,7 @@ def _copy_builtin_templates(workspace: Path) -> None:
                     "LaTeX compilation will not work without this file."
                 ) from e
         else:
-            logger.warning("Built-in class template_mpl.cls not found in package")
+            logger.warning("Built-in class mpltx.cls not found in package")
 
     # requirements.md (writing style guide, built-in only) - OPTIONAL
     dst_req = tex_dir / "requirements.md"
