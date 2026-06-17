@@ -12,7 +12,7 @@ from pathlib import Path
 import json
 
 from loguru import logger
-from PyQt6.QtCore import QFileInfo, QFileSystemWatcher, QMimeData, QPoint, QRect, QSize, QSignalBlocker, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QFileInfo, QFileSystemWatcher, QPoint, QRect, QSize, QSignalBlocker, Qt, QTimer, pyqtSignal
 
 from autoreport.utils.logging_config import ui_logger
 from PyQt6.QtGui import QColor, QCursor, QDrag, QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QDropEvent, QIcon, QPalette, QPainter, QPen, QPixmap
@@ -157,17 +157,6 @@ DIR_LABELS = {
     "Processed": "Processed",
 }
 
-# Directory descriptions (for tooltips)
-DIR_DESCRIPTIONS = {
-    "Data": "实验数据",
-    "References": "参考资料",
-    "Theory": "理论推导",
-    "Code": "代码与图像",
-    "Outline": "协调大纲",
-    "Tex": "报告",
-    "Processed": "分析结果",
-}
-
 
 class _DragDropTreeWidget(QTreeWidget):
     """QTreeWidget with drag-drop support for external file import and internal file moving."""
@@ -290,7 +279,6 @@ class _DragDropTreeWidget(QTreeWidget):
         icon = current_item.icon(0)
         if icon.isNull():
             # Create a default icon if none exists
-            from PyQt6.QtWidgets import QApplication
             from PyQt6.QtGui import QPainter
             pixmap = QPixmap(16, 16)
             pixmap.fill(Qt.GlobalColor.transparent)
@@ -384,7 +372,6 @@ class _DragDropTreeWidget(QTreeWidget):
 def _get_file_icon(ext: str, style: QStyle = None, file_path: Path | None = None) -> QIcon:
     """Get file icon by extension, preferring system file-type icons."""
     if style is None:
-        from PyQt6.QtWidgets import QApplication
         style = QApplication.style()
     provider = QFileIconProvider()
     if file_path is not None:
@@ -1160,7 +1147,6 @@ class FileTreeWidget(QWidget):
                 item.setText(0, DIR_LABELS.get(dir_name, dir_name))
 
     def _on_item_expanded(self, item: QTreeWidgetItem) -> None:
-        from PyQt6.QtWidgets import QApplication
         style = QApplication.style()
 
         dir_name = item.data(0, Qt.ItemDataRole.UserRole)
@@ -1725,7 +1711,6 @@ class FileTreeWidget(QWidget):
         self._new_folder_in_dir(self._get_selected_dir())
 
     def _new_file_in_dir(self, dir_name: str) -> None:
-        from PyQt6.QtWidgets import QApplication
         style = QApplication.style()
 
         dir_path = self.workspace / dir_name
@@ -1923,26 +1908,6 @@ class FileTreeWidget(QWidget):
         self._set_editing_item(item)
         self.tree.editItem(item, 0)
 
-    def _delete_directory(self, dir_path: Path, item: QTreeWidgetItem) -> None:
-        reply = QMessageBox.question(
-            self,
-            "删除文件夹",
-            f"确定要删除 '{dir_path.name}' 及其所有内容吗?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                shutil.rmtree(dir_path)
-                parent = item.parent()
-                if parent:
-                    parent.removeChild(item)
-                else:
-                    root = self.tree.invisibleRootItem()
-                    root.removeChild(item)
-                logger.info("Deleted directory: {}", dir_path)
-            except Exception as e:
-                QMessageBox.warning(self, "删除失败", f"无法删除文件夹:\n{e}")
-
     def _handle_tree_key(self, event) -> bool:
         if self.tree.state() == QAbstractItemView.State.EditingState:
             return False
@@ -1975,15 +1940,6 @@ class FileTreeWidget(QWidget):
             return
         if dir_name and dir_name not in FIXED_DIRECTORIES:
             self._rename_directory(self.workspace / dir_name, item)
-
-    def _delete_item_from_shortcut(self, item: QTreeWidgetItem) -> None:
-        dir_name = item.data(0, Qt.ItemDataRole.UserRole)
-        file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
-        if file_path_str:
-            self._delete_file(Path(file_path_str), item)
-            return
-        if dir_name and dir_name not in FIXED_DIRECTORIES:
-            self._delete_directory(self.workspace / dir_name, item)
 
     def _styled_message_box(
         self,

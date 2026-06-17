@@ -4,9 +4,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon
-from PyQt6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (
+    QApplication,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
+
 from ..theme import get_theme_colors
 from .timeline import TimelineRail
 from .ui_utils import install_compact_tooltip, render_svg_icon
@@ -187,9 +197,10 @@ class ToolCallGroup(QWidget):
             self._tick_timer.stop()
 
     def _status_dot_color(self, success: bool | None) -> str:
+        c = get_theme_colors()
         if success is None:
-            return "#3B82F6"
-        return "#22C55E" if success else "#EF4444"
+            return c["status_running"]
+        return c["status_success"] if success else c["status_error"]
 
     def _timer_text(self, call: ToolCall) -> str:
         return ""

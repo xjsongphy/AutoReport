@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMessageBox,
     QFrame,
+    QHeaderView,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -29,7 +30,6 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ..scale import scaled, scaled_size
 from ..scintilla_utils import apply_scintilla_style, configure_lexer_colors
 from ..theme import get_theme_colors
 from .ui_utils import IconActionButton, create_isolated_context_menu, render_svg_icon
@@ -355,7 +355,6 @@ def _tab_key(path: Path) -> str:
 class EditorPanel(QWidget):
     """Single editor panel with a tab bar and stacked content viewers."""
 
-    split_requested = pyqtSignal(str)  # file path string
     panel_emptied = pyqtSignal()  # emitted when last tab is closed
     tab_changed = pyqtSignal()  # emitted when tabs are opened/closed/switched
 
@@ -513,40 +512,6 @@ class EditorPanel(QWidget):
         if self._active_key and self._active_key in self._tabs:
             return self._tabs[self._active_key].viewer
         return None
-
-    def move_tab_to(self, path: Path, other: "EditorPanel") -> None:
-        """Move a tab from this panel to another panel."""
-        key = _tab_key(path)
-        if key not in self._tabs:
-            return
-        state = self._tabs.pop(key)
-        old_index = self._tab_order.index(key)
-        self._tab_order.remove(key)
-
-        # Remove from our stack and tab bar
-        self._tab_bar.removeTab(old_index)
-        self._stack.removeWidget(state.viewer)
-
-        # Add to other panel
-        other._tabs[key] = state
-        other._tab_order.append(key)
-        other._stack.addWidget(state.viewer)
-        tab_idx = other._tab_bar.addTab(other._tab_label_for_state(state))
-        other._tab_bar.setCurrentIndex(tab_idx)
-        other._tab_bar.setTabData(tab_idx, key)
-        other._tab_bar.setVisible(False)
-        other._active_key = key
-
-        # Emit signals for both panels
-        self.tab_changed.emit()
-        other.tab_changed.emit()
-
-        # Check if we're empty
-        if not self._tabs:
-            self._active_key = None
-            self._tab_bar.setVisible(False)
-            self._stack.setCurrentIndex(0)
-            self.panel_emptied.emit()
 
     def close_all_tabs(self) -> None:
         """Close all tabs."""
@@ -721,7 +686,6 @@ class PreviewWidget(QWidget):
         self._unified_tab_bar.setDrawBase(False)
         self._unified_tab_bar.setExpanding(False)
         self._unified_tab_bar.setMovable(True)
-        self._unified_tab_bar.setTabsClosable(True)
         self._unified_tab_bar.setUsesScrollButtons(False)
         self._unified_tab_bar.setElideMode(Qt.TextElideMode.ElideNone)
         self._unified_tab_bar.setDocumentMode(True)
@@ -807,7 +771,6 @@ class PreviewWidget(QWidget):
 
         # Left panel (always present)
         left = EditorPanel()
-        left.panel_emptied.connect(self._on_panel_emptied)
         left.tab_changed.connect(self._sync_tabs_from_panels)
         self._panels.append(left)
         self._general_splitter.addWidget(left)
@@ -1470,13 +1433,6 @@ class PreviewWidget(QWidget):
         super().resizeEvent(event)
         self._sync_unified_tab_bar_width()
 
-    def _on_panel_emptied(self) -> None:
-        pass
-
-    def _on_split_requested(self, _file_path: str) -> None:
-        # Split mode was removed; keep a no-op handler for signal compatibility.
-        return
-
     def _update_file_actions(self) -> None:
         c = get_theme_colors()
         self._active_action_kind = ""
@@ -1642,10 +1598,6 @@ class PreviewWidget(QWidget):
             panel.tab_changed.emit()
             return True
         return False
-
-    def refresh_pdf(self) -> None:
-        # Kept for API compatibility; unified editor has no dedicated PDF refresh path.
-        return
 
     @property
     def current_file(self) -> Path | None:

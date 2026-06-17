@@ -8,7 +8,7 @@
 import re
 from functools import lru_cache
 
-from PyQt6.QtCore import QEvent, QObject, QPoint, QRect, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QMargins, QObject, QRect, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import (
     QClipboard,
     QColor,
@@ -20,7 +20,6 @@ from PyQt6.QtGui import (
     QPen,
     QWheelEvent,
 )
-from PyQt6.QtCore import QMargins
 
 from ..scale import scaled_size
 from PyQt6.QtWidgets import (
@@ -1219,7 +1218,6 @@ class MessageRow(QWidget):
         self._refresh_bubble_header()
 
     def _refresh_bubble_header(self) -> None:
-        can_expand = self._can_toggle_bubble()
         self._sync_timeline_dot_alignment()
         self._apply_thinking_text_style()
 
@@ -1230,37 +1228,26 @@ class MessageRow(QWidget):
             return False
         return self._body_content_widget.can_toggle()
 
-    def _sync_summary_arrow_alignment(self) -> None:
-        """Align disclosure arrow center to the first summary text line center."""
-        if (
-            self._summary_arrow_host is None
-            or self._summary_text_label is None
-            or self._summary_arrow_widget is None
-        ):
+    def _align_arrow_to_first_line(self, arrow_host, text_label, arrow_widget) -> None:
+        """Align disclosure arrow center to the first text line center."""
+        if arrow_host is None or text_label is None or arrow_widget is None:
             return
-        metrics = self._summary_text_label.fontMetrics()
-        line_height = max(1, metrics.height())
-        arrow_height = max(1, self._summary_arrow_widget.height())
+        line_height = max(1, text_label.fontMetrics().height())
+        arrow_height = max(1, arrow_widget.height())
         top_offset = max(0, (line_height - arrow_height) // 2)
-        host_layout = self._summary_arrow_host.layout()
+        host_layout = arrow_host.layout()
         if isinstance(host_layout, QVBoxLayout):
             host_layout.setContentsMargins(0, top_offset, 0, 0)
 
+    def _sync_summary_arrow_alignment(self) -> None:
+        self._align_arrow_to_first_line(
+            self._summary_arrow_host, self._summary_text_label, self._summary_arrow_widget
+        )
+
     def _sync_bubble_arrow_alignment(self) -> None:
-        """Align disclosure arrow center to the first summary text line center."""
-        if (
-            self._bubble_arrow_host is None
-            or self._bubble_title_label is None
-            or self._bubble_arrow_widget is None
-        ):
-            return
-        metrics = self._bubble_title_label.fontMetrics()
-        line_height = max(1, metrics.height())
-        arrow_height = max(1, self._bubble_arrow_widget.height())
-        top_offset = max(0, (line_height - arrow_height) // 2)
-        host_layout = self._bubble_arrow_host.layout()
-        if isinstance(host_layout, QVBoxLayout):
-            host_layout.setContentsMargins(0, top_offset, 0, 0)
+        self._align_arrow_to_first_line(
+            self._bubble_arrow_host, self._bubble_title_label, self._bubble_arrow_widget
+        )
 
     @staticmethod
     def _first_line_center_y(top_offset: int, line_height: int) -> float:
@@ -1307,35 +1294,16 @@ class MessageRow(QWidget):
 
     def _apply_thinking_text_style(self) -> None:
         color = get_theme_colors()["muted"] if self._is_thinking_row else ""
-        if self._summary_text_label is not None:
-            if color:
-                self._summary_text_label.setStyleSheet(
-                    f"color: {color}; background-color: transparent;"
-                )
-            else:
-                self._summary_text_label.setStyleSheet("")
-        if self._detail_label is not None:
-            if color:
-                self._detail_label.setStyleSheet(
-                    f"color: {color}; background-color: transparent;"
-                )
-            else:
-                self._detail_label.setStyleSheet("")
-        if self._bubble_title_label is not None:
-            if color:
-                self._bubble_title_label.setStyleSheet(
-                    f"color: {color}; background-color: transparent;"
-                )
-            else:
-                self._bubble_title_label.setStyleSheet("")
+        sheet = f"color: {color}; background-color: transparent;" if color else ""
+        for label in (
+            self._summary_text_label,
+            self._detail_label,
+            self._bubble_title_label,
+        ):
+            if label is not None:
+                label.setStyleSheet(sheet)
         if self._body_content_widget is not None:
-            label = self._body_content_widget.label()
-            if color:
-                label.setStyleSheet(
-                    f"color: {color}; background-color: transparent;"
-                )
-            else:
-                label.setStyleSheet("")
+            self._body_content_widget.label().setStyleSheet(sheet)
 
     def mark_complete(self) -> None:
         """Mark streaming complete — enable hover-triggered actions."""
@@ -1447,7 +1415,6 @@ class MessageRow(QWidget):
                 QSizePolicy.Policy.Preferred,
             )
             self._user_bubble_container.setMinimumWidth(max(80, self.width() - 32))
-            self._user_bubble_container.setMaximumWidth(16777215)
             self._user_bubble_container.setMaximumWidth(max(80, self.width() - 32))
         self._update_edit_widget_height()
         self._edit_widget.setFocus()
@@ -1736,15 +1703,18 @@ class MessageRow(QWidget):
         self._sync_summary_arrow_alignment()
         self._sync_bubble_arrow_alignment()
         self._sync_timeline_dot_alignment()
-        if self._is_outbound_message() and self._user_bubble_container is not None:
-            if self._editing:
-                width = max(80, self.width() - 32)
-                self._user_bubble_container.setMinimumWidth(width)
-            else:
-                width = self._target_user_bubble_width()
-                self._user_bubble_container.setMinimumWidth(width)
-            self._user_bubble_container.setMaximumWidth(width)
-            self._sync_context_chip_width()
+        self._update_user_bubble_width()
+
+    def _update_user_bubble_width(self) -> None:
+        if not self._is_outbound_message() or self._user_bubble_container is None:
+            return
+        if self._editing:
+            width = max(80, self.width() - 32)
+        else:
+            width = self._target_user_bubble_width()
+        self._user_bubble_container.setMinimumWidth(width)
+        self._user_bubble_container.setMaximumWidth(width)
+        self._sync_context_chip_width()
 
     def _is_outbound_message(self) -> bool:
         """Right-side messages sent to an agent share the user bubble layout."""
@@ -1806,15 +1776,7 @@ class MessageRow(QWidget):
         self._apply_text_width_constraints()
         self._sync_bubble_arrow_alignment()
         self._sync_timeline_dot_alignment()
-        if self._is_outbound_message() and self._user_bubble_container is not None:
-            if self._editing:
-                width = max(80, self.width() - 32)
-                self._user_bubble_container.setMinimumWidth(width)
-            else:
-                width = self._target_user_bubble_width()
-                self._user_bubble_container.setMinimumWidth(width)
-            self._user_bubble_container.setMaximumWidth(width)
-            self._sync_context_chip_width()
+        self._update_user_bubble_width()
 
     def _sync_context_chip_width(self) -> None:
         if self._context_chip_widget is None:
