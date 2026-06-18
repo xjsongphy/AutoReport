@@ -1,11 +1,10 @@
 """Configuration dialog with multi-provider support and cc-switch presets."""
 
 from loguru import logger
-from PyQt6.QtCore import QPointF, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QApplication,
-    QCheckBox,
     QDialog,
     QFrame,
     QGridLayout,
@@ -405,15 +404,6 @@ class ConfigDialog(QDialog):
         self._update_empty_hint_visibility()
         self.scroll_layout.addWidget(self._empty_hint)
 
-        # Add config button
-        add_row = QHBoxLayout()
-        add_row.setContentsMargins(20, 4, 20, 4)
-        add_btn = QPushButton("+ 添加配置")
-        add_btn.setObjectName("addBtn")
-        add_btn.clicked.connect(self._add_config)
-        add_row.addWidget(add_btn)
-        add_row.addStretch()
-
         # Footer
         footer = QWidget(self)
         footer.setObjectName("dialogFooter")
@@ -636,15 +626,6 @@ class ConfigDialog(QDialog):
 
         logger.info("Configuration reset to defaults")
         QMessageBox.information(self, "重置完成", "配置已恢复为默认值。请重新配置 API Key。")
-
-    def _is_dark_mode(self) -> bool:
-        hints = QApplication.styleHints()
-        if hasattr(hints, "colorScheme"):
-            return hints.colorScheme() == Qt.ColorScheme.Dark
-        app = QApplication.instance()
-        if app:
-            return app.palette().color(Qt.ColorRole.Window).lightness() < 128
-        return False
 
     def _apply_style(self) -> None:
         from PyQt6.QtGui import QPalette

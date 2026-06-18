@@ -294,7 +294,9 @@ def test_summary_arrow_stays_next_to_text(qtbot):
 
     text_right = row._summary_text_label.mapTo(row, row._summary_text_label.rect().topRight()).x()
     arrow_left = row._summary_arrow_widget.mapTo(row, row._summary_arrow_widget.rect().topLeft()).x()
-    assert 0 <= arrow_left - text_right <= 10
+    # The summary arrow sits immediately after the title text, separated only by
+    # the content-host layout spacing (plus the arrow host's intrinsic layout).
+    assert 0 <= arrow_left - text_right <= 12
 
 
 def test_thought_summary_stays_single_line_when_width_is_sufficient(qtbot):

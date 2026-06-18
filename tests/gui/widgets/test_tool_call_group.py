@@ -66,7 +66,7 @@ def test_multiple_tool_calls_render_on_separate_lines(qtbot):
     assert "<br/>" in summary
 
 
-def test_bash_detail_text_shrinks_in_narrow_panel(qtbot):
+def test_exec_detail_text_shrinks_in_narrow_panel(qtbot):
     widget = ToolCallGroup()
     qtbot.addWidget(widget)
     widget.resize(260, 180)
@@ -74,7 +74,7 @@ def test_bash_detail_text_shrinks_in_narrow_panel(qtbot):
     qtbot.waitExposed(widget)
 
     widget.add_tool_call(
-        "bash",
+        "exec",
         {
             "command": "python -c \"print('x'*500)\" --very-long-arg --very-long-arg --very-long-arg",
             "command_description": "long command",
@@ -85,18 +85,18 @@ def test_bash_detail_text_shrinks_in_narrow_panel(qtbot):
     qtbot.wait(20)
 
     labels = widget.findChildren(type(widget._header_text))
-    bash_labels = [lab for lab in labels if lab.objectName() == "bashDetailText"]
-    assert bash_labels
-    for lab in bash_labels:
+    exec_labels = [lab for lab in labels if lab.objectName() == "execDetailText"]
+    assert exec_labels
+    for lab in exec_labels:
         assert lab.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Ignored
         assert lab.minimumWidth() == 0
 
 
-def test_bash_out_preview_is_limited_to_three_lines(qtbot):
+def test_exec_out_preview_is_limited_to_three_lines(qtbot):
     widget = ToolCallGroup()
     qtbot.addWidget(widget)
     widget.add_tool_call(
-        "bash",
+        "exec",
         {"command": "printf many", "command_description": "many lines"},
         success=True,
         duration_ms=80,
@@ -104,16 +104,16 @@ def test_bash_out_preview_is_limited_to_three_lines(qtbot):
     )
 
     labels = widget.findChildren(type(widget._header_text))
-    out_labels = [lab for lab in labels if lab.objectName() == "bashDetailText" and "one" in lab.text()]
+    out_labels = [lab for lab in labels if lab.objectName() == "execDetailText" and "one" in lab.text()]
     assert out_labels
     assert out_labels[0].text() == "one\ntwo\nthree"
 
 
-def test_bash_copy_button_reserves_width_by_default(qtbot):
+def test_exec_copy_button_reserves_width_by_default(qtbot):
     widget = ToolCallGroup()
     qtbot.addWidget(widget)
     widget.add_tool_call(
-        "bash",
+        "exec",
         {"command": "echo ok", "command_description": "show output"},
         success=True,
         duration_ms=10,

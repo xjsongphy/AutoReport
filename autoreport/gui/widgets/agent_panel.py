@@ -1196,9 +1196,6 @@ class AgentPanel(QWidget):
     def _on_history_session_selected(self, session_id: str) -> None:
         self.session_selected_from_dropdown.emit(session_id)
 
-    def _on_history_new_conversation(self) -> None:
-        self.new_conversation_requested.emit()
-
     def _on_history_delete(self, session_id: str) -> None:
         self.delete_session_requested.emit(session_id)
 

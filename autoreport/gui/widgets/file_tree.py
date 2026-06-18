@@ -1883,26 +1883,6 @@ class FileTreeWidget(QWidget):
         self._set_editing_item(item)
         self.tree.editItem(item, 0)
 
-    def _delete_file(self, file_path: Path, item: QTreeWidgetItem) -> None:
-        reply = QMessageBox.question(
-            self,
-            "删除文件",
-            f"确定要删除 '{file_path.name}' 吗?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                file_path.unlink()
-                parent = item.parent()
-                if parent:
-                    parent.removeChild(item)
-                else:
-                    root = self.tree.invisibleRootItem()
-                    root.removeChild(item)
-                logger.info("Deleted file: {}", file_path)
-            except Exception as e:
-                QMessageBox.warning(self, "删除失败", f"无法删除文件:\n{e}")
-
     def _rename_directory(self, dir_path: Path, item: QTreeWidgetItem) -> None:
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
         self._set_editing_item(item)

@@ -1,3 +1,5 @@
+import sys
+
 from PyQt6.QtCore import QPoint
 from PyQt6.QtWidgets import QMainWindow
 
@@ -22,11 +24,19 @@ def test_title_bar_keeps_right_gap_draggable(qtbot) -> None:
     qtbot.waitExposed(title_bar)
     qtbot.wait(50)
 
-    controls_left = title_bar._controls_widget.geometry().left()
     menu_right = menu_bar.geometry().right()
 
-    assert menu_right < controls_left - 1
+    if sys.platform == "darwin":
+        # On macOS the window controls are native (left-side traffic lights); the
+        # title bar has no embedded _controls_widget. The draggable gap is the
+        # empty space to the right of the menu bar.
+        right_anchor = title_bar.rect().right() - 8
+        assert menu_right < right_anchor - 1
+        gap_x = (menu_right + right_anchor) // 2
+    else:
+        controls_left = title_bar._controls_widget.geometry().left()
+        assert menu_right < controls_left - 1
+        gap_x = (menu_right + controls_left) // 2
 
-    gap_x = (menu_right + controls_left) // 2
     gap_pos = QPoint(gap_x, title_bar.rect().center().y())
     assert title_bar._can_start_drag_at(gap_pos)

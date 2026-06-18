@@ -302,6 +302,16 @@ class MessagesArea(QScrollArea):
         widgets = self._timeline_widgets()
         return widgets[-1] if widgets else None
 
+    def previous_timeline_widget(self, target: QWidget) -> QWidget | None:
+        widgets = self._timeline_widgets()
+        try:
+            index = widgets.index(target)
+        except ValueError:
+            return None
+        if index <= 0:
+            return None
+        return widgets[index - 1]
+
     def _is_chainable_timeline_item(self, widget: QWidget) -> bool:
         if isinstance(widget, ToolCallGroup):
             return True
@@ -421,6 +431,19 @@ class MessagesArea(QScrollArea):
                 break
 
         # Auto-scroll if enabled
+        if self._auto_scroll_enabled:
+            self._schedule_scroll_to_bottom()
+
+    def remove_tool_group(self, group: ToolCallGroup) -> None:
+        """Remove a specific tool group from the container."""
+        for i in range(self._layout.count() - 1):  # Exclude stretch spacer
+            item = self._layout.itemAt(i)
+            if item and item.widget() == group:
+                self._layout.removeWidget(group)
+                group.deleteLater()
+                self._update_timeline_chains()
+                break
+
         if self._auto_scroll_enabled:
             self._schedule_scroll_to_bottom()
 

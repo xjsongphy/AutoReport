@@ -381,3 +381,17 @@ class ToolCallGroup(QWidget):
 
     def get_summary_text(self) -> str:
         return self._header_text.text()
+
+    def tool_names(self) -> list[str]:
+        return [call.name for call in self._calls]
+
+    def is_complete(self) -> bool:
+        return bool(self._calls) and all(call.success is not None for call in self._calls)
+
+    def visual_summary_key(self) -> str:
+        text = self.get_summary_text()
+        return "\n".join(
+            line.strip()
+            for line in text.replace("\r\n", "\n").replace("<br/>", "\n").splitlines()
+            if line.strip()
+        )

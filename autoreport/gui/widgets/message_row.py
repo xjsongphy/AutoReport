@@ -628,7 +628,8 @@ class _ExpandableContentWidget(QWidget):
             overlay_rect.width(),
             fade_height,
         )
-        btn_size = self._toggle_btn.sizeHint()
+        self._toggle_btn.adjustSize()
+        btn_size = self._toggle_btn.size()
         toggle_host_rect = self._toggle_host.rect()
         btn_x = max(
             self._toggle_host_margins.left(),
