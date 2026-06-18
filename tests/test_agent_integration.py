@@ -145,9 +145,11 @@ class TestSubAgentInteraction:
             collector.start()
 
             await b.send("data_analysis", "请分析 data/experiment.csv 的数据结构")
-            responses = await collector.wait_for(AgentResponse, timeout=60)
+            # Wait for the first response to confirm it reacts, then wait for
+            # IDLE so get_full_agent_text captures the final non-streaming text.
+            await collector.wait_for(AgentResponse, timeout=60)
+            await collector.wait_for_idle(AgentType.DATA_ANALYSIS, timeout=90)
 
-            assert len(responses) >= 1
             text = collector.get_full_agent_text(AgentType.DATA_ANALYSIS)
             assert len(text) > 0
 
@@ -167,8 +169,9 @@ class TestSubAgentInteraction:
             # Should have tool calls (read or python_exec)
             assert len(collector.tool_calls) >= 1
 
-            # Should eventually produce a response
-            await collector.wait_for(AgentResponse, timeout=60)
+            # Wait for the agent loop to finish so the final non-streaming
+            # response has been published before reading the accumulated text.
+            await collector.wait_for_idle(AgentType.DATA_ANALYSIS, timeout=90)
             text = collector.get_full_agent_text(AgentType.DATA_ANALYSIS)
             assert len(text) > 10
 
@@ -189,6 +192,9 @@ class TestAgentCoordination:
             )
             # Wait for any agent response (main or sub-agent) with generous timeout
             await collector.wait_for(AgentResponse, timeout=120)
+            # Wait for MAIN to finish so its final non-streaming text is captured.
+            # (Delegation may take longer, so allow a generous idle timeout.)
+            await collector.wait_for_idle(AgentType.MAIN, timeout=180)
 
             # Should have at least a response from main or sub agent
             all_text = (
@@ -213,6 +219,9 @@ class TestErrorHandling:
 
             await b.send("main", "请读取 nonexistent_file.txt")
             await collector.wait_for(AgentResponse, timeout=60)
+            # Wait for the loop to finish so the final (post-tool-call) text is
+            # captured — the first AgentResponse is just a streaming chunk.
+            await collector.wait_for_idle(AgentType.MAIN, timeout=90)
 
             # Agent should respond (either with error message or gracefully)
             text = collector.get_full_agent_text(AgentType.MAIN)

@@ -422,11 +422,6 @@ class EditFileTool(WriteEnabledTool):
         content_lines = content.splitlines(keepends=False)
         old_lines = old_text.splitlines(keepends=False)
 
-        stripped_content = self._strip_line_whitespace(content)
-        stripped_old = self._strip_line_whitespace(old_text)
-        stripped_content_lines = stripped_content.splitlines(keepends=False)
-        stripped_old_lines = stripped_old.splitlines(keepends=False)
-
         idx = self._sliding_window_search(
             content_lines,
             old_lines,

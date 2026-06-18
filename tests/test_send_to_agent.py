@@ -9,7 +9,6 @@ from autoreport.core.tools.agent_tools import ReportIssueTool, SendToAgentTool
 from autoreport.core.tools.task_board import TaskBoard
 from autoreport.interfaces.types import (
     AgentFeedback,
-    AgentResponse,
     AgentType,
     TaskUpdateMessage,
     UserMessage,
@@ -37,12 +36,16 @@ class TestSendToAgentTool:
             while True:
                 msg = await asyncio.wait_for(bus._queue.get(), timeout=2)
                 await bus._notify_subscribers(msg)
+                # The tool now resolves on a system UserMessage to MAIN that
+                # echoes the dispatch message_id (auto-notify contract from
+                # agent_loop._process_message), not on AgentResponse.
                 if isinstance(msg, UserMessage) and msg.agent_type == AgentType.THEORY:
-                    resp = AgentResponse(
-                        agent_type=AgentType.THEORY,
+                    await bus._notify_subscribers(UserMessage(
                         content="theory done",
-                    )
-                    await bus._notify_subscribers(resp)
+                        agent_type=AgentType.MAIN,
+                        source="system",
+                        message_id=msg.message_id,
+                    ))
                     break
 
         task = asyncio.create_task(respond())
@@ -75,11 +78,14 @@ class TestSendToAgentTool:
                         feedback_type="quality",
                     )
                     await bus._notify_subscribers(fb)
-                    resp = AgentResponse(
-                        agent_type=AgentType.THEORY,
+                    # Resolution signal is a system UserMessage to MAIN echoing
+                    # the dispatch message_id, not an AgentResponse.
+                    await bus._notify_subscribers(UserMessage(
                         content="done",
-                    )
-                    await bus._notify_subscribers(resp)
+                        agent_type=AgentType.MAIN,
+                        source="system",
+                        message_id=msg.message_id,
+                    ))
                     break
 
         task = asyncio.create_task(respond_with_feedback())

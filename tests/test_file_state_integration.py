@@ -57,7 +57,7 @@ def read_tool(workspace: Path, fsm: FileStateManager) -> ReadTool:
 @pytest.fixture
 def write_tool(workspace: Path, allowed_dir: Path, fsm: FileStateManager, manifest: ManifestManager) -> WriteFileTool:
     return WriteFileTool(
-        workspace,
+        workspace=workspace,
         write_allowed_dir=allowed_dir,
         manifest_manager=manifest,
         agent_type="test",
@@ -68,7 +68,7 @@ def write_tool(workspace: Path, allowed_dir: Path, fsm: FileStateManager, manife
 @pytest.fixture
 def edit_tool(workspace: Path, allowed_dir: Path, fsm: FileStateManager, manifest: ManifestManager) -> EditFileTool:
     return EditFileTool(
-        workspace,
+        workspace=workspace,
         write_allowed_dir=allowed_dir,
         manifest_manager=manifest,
         agent_type="test",
@@ -79,7 +79,7 @@ def edit_tool(workspace: Path, allowed_dir: Path, fsm: FileStateManager, manifes
 @pytest.fixture
 def delete_tool(workspace: Path, allowed_dir: Path, fsm: FileStateManager, manifest: ManifestManager) -> DeleteFileTool:
     return DeleteFileTool(
-        workspace,
+        workspace=workspace,
         write_allowed_dir=allowed_dir,
         manifest_manager=manifest,
         agent_type="test",

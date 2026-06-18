@@ -43,11 +43,14 @@ class TestAgentFeedbackCapture:
                         feedback_type="quality",
                     )
                     await bus._notify_subscribers(fb)
-                    resp = AgentResponse(
-                        agent_type=AgentType.DATA_ANALYSIS,
+                    # Completion signal: system UserMessage to MAIN echoing the
+                    # dispatch message_id (matches agent_loop auto-notify).
+                    await bus._notify_subscribers(UserMessage(
                         content="analysis complete",
-                    )
-                    await bus._notify_subscribers(resp)
+                        agent_type=AgentType.MAIN,
+                        source="system",
+                        message_id=msg.message_id,
+                    ))
                     break
 
         task = asyncio.create_task(respond())
@@ -74,9 +77,11 @@ class TestAgentFeedbackCapture:
                             content=content,
                             feedback_type="quality",
                         ))
-                    await bus._notify_subscribers(AgentResponse(
-                        agent_type=AgentType.PLOTTING,
+                    await bus._notify_subscribers(UserMessage(
                         content="done",
+                        agent_type=AgentType.MAIN,
+                        source="system",
+                        message_id=msg.message_id,
                     ))
                     break
 
@@ -102,9 +107,11 @@ class TestAgentFeedbackCapture:
                         content="not for you",
                         feedback_type="quality",
                     ))
-                    await bus._notify_subscribers(AgentResponse(
-                        agent_type=AgentType.THEORY,
+                    await bus._notify_subscribers(UserMessage(
                         content="theory done",
+                        agent_type=AgentType.MAIN,
+                        source="system",
+                        message_id=msg.message_id,
                     ))
                     break
 
@@ -127,9 +134,11 @@ class TestEmptyResponsePath:
                 msg = await asyncio.wait_for(bus._queue.get(), timeout=2)
                 await bus._notify_subscribers(msg)
                 if isinstance(msg, UserMessage):
-                    await bus._notify_subscribers(AgentResponse(
-                        agent_type=AgentType.THEORY,
+                    await bus._notify_subscribers(UserMessage(
                         content="",  # Empty content
+                        agent_type=AgentType.MAIN,
+                        source="system",
+                        message_id=msg.message_id,
                     ))
                     break
 
@@ -143,7 +152,10 @@ class TestEmptyResponsePath:
 
     @pytest.mark.asyncio
     async def test_streaming_chunks_ignored(self, bus):
-        """Streaming chunks should not resolve the future — only final message."""
+        """Streaming chunks should not resolve the future — only the system
+        completion UserMessage does. AgentResponse messages (streaming or not)
+        are no longer the resolution signal after the loop-completion refactor.
+        """
         tool = SendToAgentTool(bus=bus, timeout=5)
 
         async def respond():
@@ -151,17 +163,25 @@ class TestEmptyResponsePath:
                 msg = await asyncio.wait_for(bus._queue.get(), timeout=2)
                 await bus._notify_subscribers(msg)
                 if isinstance(msg, UserMessage) and msg.agent_type == AgentType.REPORT:
-                    # Streaming chunks
+                    # Streaming chunks must NOT resolve the future.
                     await bus._notify_subscribers(AgentResponse(
                         agent_type=AgentType.REPORT,
                         content="chunk",
                         streaming=True,
                     ))
-                    # Final response
+                    # Non-streaming AgentResponse also no longer resolves —
+                    # only the system UserMessage to MAIN does.
                     await bus._notify_subscribers(AgentResponse(
                         agent_type=AgentType.REPORT,
-                        content="final response",
+                        content="ignored",
                         streaming=False,
+                    ))
+                    # Real completion signal.
+                    await bus._notify_subscribers(UserMessage(
+                        content="final response",
+                        agent_type=AgentType.MAIN,
+                        source="system",
+                        message_id=msg.message_id,
                     ))
                     break
 

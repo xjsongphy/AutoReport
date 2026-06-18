@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from autoreport.core.tools.exec_tools import BashTool
+from autoreport.core.tools.exec_tools import ExecTool
 from autoreport.core.tools.file_tools import ReadTool, WriteFileTool
 from autoreport.core.tools.registry import ToolRegistry
 
@@ -125,7 +125,7 @@ class TestBashTool:
     @pytest.mark.asyncio
     async def test_simple_calculation(self):
         ws = _workspace()
-        tool = BashTool(working_dir=ws)
+        tool = ExecTool(working_dir=ws)
         result = await tool(command="python -c \"print(2+2)\"", command_description="Show simple calculation")
         output = result.get("stdout", str(result)) if isinstance(result, dict) else str(result)
         assert "4" in output
@@ -133,7 +133,7 @@ class TestBashTool:
     @pytest.mark.asyncio
     async def test_git_command_runs(self):
         ws = _workspace()
-        tool = BashTool(working_dir=ws)
+        tool = ExecTool(working_dir=ws)
         result = await tool(command="pwd", command_description="Show current directory")
         text = result.get("stdout", "") if isinstance(result, dict) else str(result)
         assert str(ws) in text
@@ -141,13 +141,13 @@ class TestBashTool:
     @pytest.mark.asyncio
     async def test_nonzero_exit(self):
         ws = _workspace()
-        tool = BashTool(working_dir=ws)
+        tool = ExecTool(working_dir=ws)
         result = await tool(command="python -c \"exit(2)\"", command_description="Exit with nonzero code")
         assert result.get("returncode") == 2
 
     @pytest.mark.asyncio
     async def test_missing_description(self):
         ws = _workspace()
-        tool = BashTool(working_dir=ws)
+        tool = ExecTool(working_dir=ws)
         with pytest.raises(ValueError):
             await tool(command="echo hi", command_description="")

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -387,7 +388,6 @@ class AgentLoop:
         if not isinstance(message, AgentFeedback):
             return
 
-        from enum import Enum
         agent_str = message.agent_type.value if isinstance(message.agent_type, Enum) else str(message.agent_type)
         issue_type = message.feedback_type or "issue"
 

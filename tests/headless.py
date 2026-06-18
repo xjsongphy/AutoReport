@@ -139,6 +139,37 @@ class MessageCollector:
                 parts.append(m.content)
         return "".join(parts)
 
+    async def wait_for_idle(
+        self,
+        agent_type: AgentType | str = AgentType.MAIN,
+        timeout: float = 120.0,
+    ) -> None:
+        """Wait until ``agent_type`` returns to IDLE status.
+
+        The first ``AgentResponse`` is usually a streaming chunk that arrives
+        before the final non-streaming content. Waiting for IDLE guarantees the
+        agent loop has finished processing and the final content has been
+        published, so ``get_full_agent_text`` returns the complete text.
+        """
+        at = agent_type if isinstance(agent_type, AgentType) else AgentType(agent_type)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while True:
+            # Scan status changes from most recent backwards for this agent.
+            statuses = [
+                s.status for s in self.status_changes if s.agent_type == at
+            ]
+            if statuses and statuses[-1] == "idle":
+                return
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"{at.value} did not return to idle within {timeout}s. "
+                    f"Last statuses: {statuses[-5:]}. "
+                    f"Messages: {[type(m).__name__ for m in self._messages]}"
+                )
+            await asyncio.sleep(0.2)
+
     def clear(self) -> None:
         self._messages.clear()
 
