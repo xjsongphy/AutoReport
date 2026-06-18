@@ -867,6 +867,31 @@ class AgentPanel(QWidget):
                 duration_ms=100,
                 summary=summary,
             )
+            self._dedupe_repeated_tool_group(target_group)
+
+    def _dedupe_repeated_tool_group(self, target_group: QWidget) -> None:
+        """Hide adjacent duplicate task-board renders without dropping history."""
+        tool_names = getattr(target_group, "tool_names", lambda: [])()
+        if tool_names != ["manage_tasks"]:
+            return
+        if not getattr(target_group, "is_complete", lambda: False)():
+            return
+
+        previous = self._messages_area.previous_timeline_widget(target_group)
+        if previous is None:
+            return
+        previous_tool_names = getattr(previous, "tool_names", lambda: [])()
+        if previous_tool_names != ["manage_tasks"]:
+            return
+        if not getattr(previous, "is_complete", lambda: False)():
+            return
+
+        current_key = getattr(target_group, "visual_summary_key", lambda: "")()
+        previous_key = getattr(previous, "visual_summary_key", lambda: "")()
+        if current_key and current_key == previous_key:
+            self._messages_area.remove_tool_group(target_group)
+            if self._current_tool_group is target_group:
+                self._current_tool_group = previous
 
     def start_thinking(self) -> None:
         if self._thinking_row is not None:

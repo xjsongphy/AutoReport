@@ -181,6 +181,19 @@ def test_add_tool_result_updates_pending_group_item(agent_panel):
     assert "Theory replied: first line" in groups[0].get_summary_text()
 
 
+def test_repeated_manage_tasks_summary_is_deduped(agent_panel):
+    task_summary = "<b>Task</b>\nTodo\n☐ DATA_ANALYSIS: Process all measurements\n\nWait\n☐ DATA_ANALYSIS: Process all measurements"
+
+    agent_panel.add_tool_call("manage_tasks", {"action": "add"})
+    agent_panel.add_tool_result("manage_tasks", task_summary, summary=task_summary)
+    agent_panel.add_tool_call("manage_tasks", {"action": "start", "task_id": "tk007"})
+    agent_panel.add_tool_result("manage_tasks", task_summary, summary=task_summary)
+
+    groups = agent_panel._messages_area.get_tool_groups()
+    assert len(groups) == 1
+    assert groups[0].visual_summary_key().count("DATA_ANALYSIS: Process all measurements") == 2
+
+
 def test_batch_tool_calls_render_as_separate_timeline_items(agent_panel):
     agent_panel.add_tool_call("write_file", {"path": "a.txt"})
     agent_panel.add_tool_call("write_file", {"path": "b.txt"})
