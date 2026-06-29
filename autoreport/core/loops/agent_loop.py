@@ -27,19 +27,19 @@ from ...interfaces.types import (
     ApiDebugMessage,
     Error,
     Message,
+    QueueUpdateMessage,
     StatusChange,
     TaskStatus,
     TaskUpdateMessage,
-    QueueUpdateMessage,
     UserMessage,
 )
-from ...utils.agent_labels import get_agent_badge
 from ...interfaces.types import (
     ToolCall as ToolCallMsg,
 )
 from ...interfaces.types import (
     ToolResult as ToolResultMsg,
 )
+from ...utils.agent_labels import get_agent_badge
 from ..tools import SkillLoader
 from ..tools.manifest_tool import ManifestManager, ManifestTool
 from ..tools.registry import ToolRegistry
@@ -110,7 +110,6 @@ def _trim_messages_to_budget(
     #    'assistant(tool_calls)' was trimmed.
     while kept:
         role = kept[0].role
-        has_tool_calls = bool(getattr(kept[0], "tool_calls", None))
         is_tool_result = getattr(kept[0], "is_tool_result", False)
         if role == "tool":
             logger.debug("Stripping orphan tool message at trim boundary")
@@ -323,6 +322,14 @@ class AgentLoop:
         am_source = self.agent_type == src_enum
         am_target = self.agent_type == tgt_enum
         is_local = src_enum == tgt_enum
+
+        if is_local:
+            logger.debug(
+                "Local task update kept out of {} LLM queue: {}",
+                self.agent_type,
+                message.task_id,
+            )
+            return
 
         if message.action == "created":
             if am_source and self.agent_type == AgentType.MAIN:
@@ -677,7 +684,7 @@ class AgentLoop:
                 )
                 if undescribed:
                     hint += (
-                        f"以下文件尚无描述，请在方便时通过 manifest 工具补全：\n"
+                        "以下文件尚无描述，请在方便时通过 manifest 工具补全：\n"
                         + "\n".join(f"  - {f['path']}" for f in undescribed)
                     )
                 if not notes.strip():

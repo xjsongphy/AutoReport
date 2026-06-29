@@ -9,7 +9,13 @@ from autoreport.config.schema import AgentDefaults
 from autoreport.core.loops.agent_loop import AgentLoop
 from autoreport.core.loops.bus import MessageBus
 from autoreport.core.providers.base import LLMResponse, ToolCall
-from autoreport.interfaces.types import AgentStatus, AgentType, QueueUpdateMessage, UserMessage
+from autoreport.interfaces.types import (
+    AgentStatus,
+    AgentType,
+    QueueUpdateMessage,
+    TaskUpdateMessage,
+    UserMessage,
+)
 
 
 @pytest.fixture
@@ -222,6 +228,38 @@ async def test_handle_user_message_publishes_queue_update(agent_loop):
 
     published = list(agent_loop.bus._queue._queue)
     assert any(isinstance(item, QueueUpdateMessage) for item in published)
+
+
+@pytest.mark.asyncio
+async def test_local_task_update_does_not_queue_llm_turn(agent_loop):
+    msg = TaskUpdateMessage(
+        task_id="tk001",
+        action="completed",
+        source_agent=AgentType.MAIN,
+        target_agent=AgentType.MAIN,
+        brief="local bookkeeping",
+    )
+
+    await agent_loop._handle_task_update(msg)
+
+    assert agent_loop._message_queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_delegated_task_update_still_queues_relevant_llm_turn(agent_loop):
+    msg = TaskUpdateMessage(
+        task_id="tk002",
+        action="completed",
+        source_agent=AgentType.MAIN,
+        target_agent=AgentType.REPORT,
+        brief="delegated report",
+    )
+
+    await agent_loop._handle_task_update(msg)
+
+    queued = await agent_loop._message_queue.get()
+    assert queued.source == "system"
+    assert "report 已完成" in queued.content
 
 
 def test_format_tool_result_dict(agent_loop):

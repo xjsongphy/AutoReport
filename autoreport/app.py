@@ -258,7 +258,7 @@ class AutoReportApp:
             QApplication.closeAllWindows()
             self._qt_app.quit()
 
-    def run_gui(self, qt_app: QApplication) -> None:
+    def run_gui(self, qt_app: QApplication, project: Path | None = None) -> None:
         """Run GUI application."""
         import threading
 
@@ -284,34 +284,40 @@ class AutoReportApp:
         # QApplication already created in main(), get the instance
         app = QApplication.instance()
 
-        # ── Phase 1: Pre-project welcome guide ──
-        from .gui.onboarding import show_pre_project_guide
-        wants_tutorial = show_pre_project_guide()
-
-        # Show project selection dialog first
-        from .gui.project_dialog import ProjectDialog
-
-        project_dialog = ProjectDialog(self.config_manager)
-
-        # Store workspace path
+        wants_tutorial = False
         workspace: Path | None = None
 
-        def on_project_selected(path: Path):
-            nonlocal workspace
-            workspace = path
+        if project is not None:
+            # Direct project open (e.g. workspace switch relaunch):
+            # skip welcome guide and project selection dialog.
+            workspace = Path(project).expanduser().resolve()
+            logger.info("Opening project directly: {}", workspace)
+        else:
+            # ── Phase 1: Pre-project welcome guide ──
+            from .gui.onboarding import show_pre_project_guide
+            wants_tutorial = show_pre_project_guide()
 
-        project_dialog.project_selected.connect(on_project_selected)
+            # Show project selection dialog first
+            from .gui.project_dialog import ProjectDialog
 
-        # Show project dialog
-        result = project_dialog.exec()
+            project_dialog = ProjectDialog(self.config_manager)
 
-        if result != QDialog.DialogCode.Accepted:
-            logger.info("Project selection cancelled")
-            sys.exit(0)
+            def on_project_selected(path: Path):
+                nonlocal workspace
+                workspace = path
 
-        if workspace is None:
-            logger.error("No workspace selected")
-            sys.exit(1)
+            project_dialog.project_selected.connect(on_project_selected)
+
+            # Show project dialog
+            result = project_dialog.exec()
+
+            if result != QDialog.DialogCode.Accepted:
+                logger.info("Project selection cancelled")
+                sys.exit(0)
+
+            if workspace is None:
+                logger.error("No workspace selected")
+                sys.exit(1)
 
         # Create a dedicated async event loop for the backend
         self._async_loop = asyncio.new_event_loop()
@@ -651,6 +657,13 @@ def main(
             help="输出 DEBUG 级别调试信息",
         ),
     ] = False,
+    project: Annotated[
+        Path | None,
+        typer.Option(
+            "--project", "-p",
+            help="直接打开指定项目目录（跳过项目选择对话框，用于切换工作区）",
+        ),
+    ] = None,
 ) -> None:
     """AutoReport - 基于 Agent 的自动化物理实验报告撰写系统"""
     _install_stderr_filter()
@@ -718,7 +731,7 @@ def main(
             raise typer.Exit(code=1)
 
     # Run GUI (includes project selection and startup)
-    app_inst.run_gui(qt_app)
+    app_inst.run_gui(qt_app, project=project)
 
     # Shutdown
     try:
