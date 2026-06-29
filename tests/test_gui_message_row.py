@@ -56,11 +56,13 @@ class TestMarkdownRenderer:
         assert "A" in html
         assert "1" in html
 
-    def test_table_header_is_white_in_light_mode(self, monkeypatch):
+    def test_table_header_uses_surface_color_in_light_mode(self, monkeypatch):
         monkeypatch.setattr(theme, "is_dark_mode", lambda: False)
         md = "| A | B |\n|---|---|\n| 1 | 2 |"
         html = render_markdown(md)
-        assert 'bgcolor="#ffffff"' in html
+        # Light-mode header uses the surface color (#f8f8f8) for a subtle
+        # distinction from the white page background (no longer pure white).
+        assert 'bgcolor="#f8f8f8"' in html
 
 
 class TestMessageRowCopyButton:
