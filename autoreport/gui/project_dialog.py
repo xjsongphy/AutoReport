@@ -30,6 +30,25 @@ from .widgets.ui_utils import (
 
 PROJECT_DIRECTORIES = ["Data", "Data/Processed", "References", "Theory", "Code", "Outline", "Tex"]
 
+# Markers whose presence indicates an existing AutoReport project workspace.
+_PROJECT_MARKERS = ["data", "references", "theory", "code", "tex"]
+
+
+def is_valid_project(path: Path) -> bool:
+    """True if ``path`` looks like an AutoReport project workspace."""
+    for dir_name in _PROJECT_MARKERS:
+        if (path / dir_name).exists():
+            return True
+    return False
+
+
+def create_project_structure(path: Path) -> None:
+    """Create the fixed project directory layout under ``path``."""
+    for dir_name in PROJECT_DIRECTORIES:
+        (path / dir_name).mkdir(parents=True, exist_ok=True)
+    logger.debug("Created project structure in: {}", path)
+
+
 
 class _RecentItem(QWidget):
     """Single recent project row — VSCode button-link style."""
@@ -182,11 +201,16 @@ class ProjectDialog(QDialog):
         footer.setObjectName("footer")
         footer_layout = QHBoxLayout(footer)
         footer_layout.setContentsMargins(40, 12, 40, 16)
+        tutorial_btn = QPushButton("新手提示")
+        tutorial_btn.setObjectName("tutorialBtn")
+        tutorial_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        tutorial_btn.clicked.connect(self._on_show_tutorial)
+        footer_layout.addWidget(tutorial_btn)
+        footer_layout.addStretch()
         cancel_btn = QPushButton("退出")
         cancel_btn.setObjectName("cancelBtn")
         cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         cancel_btn.clicked.connect(self.reject)
-        footer_layout.addStretch()
         footer_layout.addWidget(cancel_btn)
         root.addWidget(footer)
 
@@ -277,6 +301,7 @@ class ProjectDialog(QDialog):
                 background-color: {colors["surface"]};
             }}
             {ghost_button_qss("#cancelBtn")}
+            {ghost_button_qss("#tutorialBtn")}
             QScrollArea {{
                 border: none;
             }}
@@ -290,10 +315,7 @@ class ProjectDialog(QDialog):
             self._add_project(path)
 
     def _is_valid_project(self, path: Path) -> bool:
-        for dir_name in ["data", "references", "theory", "code", "tex"]:
-            if (path / dir_name).exists():
-                return True
-        return False
+        return is_valid_project(path)
 
     def _add_project(self, path: Path) -> None:
         for i in range(self._list_layout.count()):
@@ -329,6 +351,12 @@ class ProjectDialog(QDialog):
 
         dialog = ConfigDialog(self.config_manager, parent=self)
         dialog.exec()
+
+    def _on_show_tutorial(self) -> None:
+        """Re-open the pre-project welcome guide on user request."""
+        from .onboarding import show_pre_project_guide
+
+        show_pre_project_guide(parent=self, force=True)
 
     def _on_new_project(self) -> None:
         dialog = QFileDialog(self)
@@ -390,9 +418,7 @@ class ProjectDialog(QDialog):
             self._select_project(path)
 
     def _create_project_structure(self, path: Path) -> None:
-        for dir_name in PROJECT_DIRECTORIES:
-            (path / dir_name).mkdir(parents=True, exist_ok=True)
-        logger.debug("Created project structure in: {}", path)
+        create_project_structure(path)
 
     def get_selected_project(self) -> Path | None:
         return self._selected_project

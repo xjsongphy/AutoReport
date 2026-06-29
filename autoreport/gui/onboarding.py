@@ -289,6 +289,9 @@ class PreProjectGuide(QDialog):
         self.accept()
 
     def _on_skip(self) -> None:
+        # "我用过了" — record that onboarding has been seen so the welcome
+        # guide is not shown again on subsequent launches.
+        UserSettings().has_seen_onboarding = True
         self._wants_tutorial = False
         self.accept()
 
@@ -535,7 +538,7 @@ class OnboardingDialog(QDialog):
 
 # ── Public API ───────────────────────────────────────────────────────
 
-def show_pre_project_guide(parent=None) -> bool:
+def show_pre_project_guide(parent=None, *, force: bool = False) -> bool:
     """Show the pre-project welcome guide.
 
     Returns True if the user wants the full tutorial,
@@ -543,14 +546,15 @@ def show_pre_project_guide(parent=None) -> bool:
 
     Args:
         parent: Parent widget.
+        force: If True, show the guide even if the user has dismissed it before
+            (used by the "新手提示" button on the project selection page).
 
     Returns:
         bool: True → show full tutorial later; False → skip.
     """
-    # TODO: 调试结束后恢复此检查
-    # settings = UserSettings()
-    # if settings.has_seen_onboarding:
-    #     return False
+    settings = UserSettings()
+    if settings.has_seen_onboarding and not force:
+        return False
 
     dialog = PreProjectGuide(parent)
     dialog.exec()

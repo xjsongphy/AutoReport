@@ -41,7 +41,7 @@ from ..utils.agent_labels import get_agent_badge, get_agent_title
 from ..utils.editor_context import build_editor_context_message, build_editor_context_prompt
 from ..utils.logging_config import ui_logger
 from .scale import dpi_scale
-from .theme import get_theme_colors
+from .theme import get_theme_colors, scrollbar_stylesheet
 from .title_bar import TitleBar
 from .widgets.agent_panel import AgentPanel
 from .widgets.file_tree import FileTreeWidget
@@ -198,44 +198,22 @@ class MainWindow(QMainWindow):
                 margin: 0;
                 padding: 0;
             }}
-            QScrollBar:vertical {{
-                background-color: transparent;
-                width: {px(8)};
-                border: none;
-            }}
-            QScrollBar::handle:vertical {{
-                background-color: {c["scrollbar"]};
-                min-height: {px(30)};
-                border-radius: {px(4)};
-            }}
-            QScrollBar::handle:vertical:hover {{
-                background-color: {c["scrollbar_hover"]};
-            }}
-            QScrollBar::handle:vertical:pressed {{
-                background-color: {c["scrollbar_hover"]};
-            }}
-            QScrollBar::add-line:vertical,
-            QScrollBar::sub-line:vertical {{
-                height: 0;
-            }}
-            QScrollBar:horizontal {{
-                background-color: transparent;
-                height: {px(8)};
-                border: none;
-            }}
-            QScrollBar::handle:horizontal {{
-                background-color: {c["scrollbar"]};
-                min-width: {px(30)};
-                border-radius: {px(4)};
-            }}
-            QScrollBar::handle:horizontal:hover,
-            QScrollBar::handle:horizontal:pressed {{
-                background-color: {c["scrollbar_hover"]};
-            }}
-            QScrollBar::add-line:horizontal,
-            QScrollBar::sub-line:horizontal {{
-                width: 0;
-            }}
+            {scrollbar_stylesheet(
+                orientation="vertical",
+                background_color="transparent",
+                thickness=px(8),
+                min_handle_extent=px(30),
+                radius=px(4),
+                colors=c,
+            )}
+            {scrollbar_stylesheet(
+                orientation="horizontal",
+                background_color="transparent",
+                thickness=px(8),
+                min_handle_extent=px(30),
+                radius=px(4),
+                colors=c,
+            )}
             {compact_tooltip_qss("QToolTip")}
 
             /* ---- Panel Header ---- */
@@ -766,13 +744,48 @@ class MainWindow(QMainWindow):
             logger.info("Open file requested: {}", file_path)
 
     def _on_open_folder(self) -> None:
-        """Handle open folder action."""
+        """Handle open folder action — switch workspace to the selected folder.
+
+        The workspace is bound at startup (LoopManager, async loop, conversation
+        stores all key off it), so switching means relaunching the app into the
+        new project via ``--project``. The new process is started detached and
+        this window is closed.
+        """
+        from PyQt6.QtCore import QProcess
         from PyQt6.QtWidgets import QFileDialog
 
-        folder_path = QFileDialog.getExistingDirectory(self, "打开文件夹")
-        if folder_path:
-            # TODO: Switch workspace
-            logger.info("Open folder requested: {}", folder_path)
+        from ..core.recent_projects import RecentProjects
+        from .project_dialog import create_project_structure, is_valid_project
+
+        folder_path = QFileDialog.getExistingDirectory(self, "打开文件夹（切换工作区）")
+        if not folder_path:
+            return
+
+        folder = Path(folder_path).expanduser().resolve()
+
+        # Validate it looks like an AutoReport project; offer to scaffold if not.
+        if not is_valid_project(folder):
+            reply = QMessageBox.question(
+                self,
+                "不是有效的项目",
+                f"'{folder.name}' 不是 AutoReport 项目。是否在该目录创建项目结构并打开？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            create_project_structure(folder)
+
+        RecentProjects().add(folder)
+
+        # Relaunch detached into the new workspace so the new window survives
+        # after this process quits.
+        QProcess.startDetached(
+            sys.executable,
+            ["-m", "autoreport", "--project", str(folder)],
+        )
+        logger.info("Switching workspace to {} (relaunching)", folder)
+        QApplication.closeAllWindows()
 
     def _on_save_file(self) -> None:
         """Save the active file in the preview panel."""
@@ -1541,8 +1554,13 @@ class MainWindow(QMainWindow):
                     break
                 status = str(item.get("status", "pending")).lower()
                 brief = str(item.get("brief", "")).strip() or "task"
-                done = status in {"completed", "cancelled", "failed"}
-                marker = "☑" if done else "☐"
+                marker = {
+                    "pending": "☐",
+                    "in_progress": "●",
+                    "completed": "☑",
+                    "failed": "⚠",
+                    "cancelled": "✗",
+                }.get(status, "☐")
                 lines.append(f"{marker} {brief}")
                 shown += 1
             if shown == 0:
