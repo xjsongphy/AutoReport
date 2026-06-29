@@ -113,23 +113,6 @@ def test_scroll_state_can_be_manually_toggled(qtbot):
     assert widget.auto_scroll_enabled()
 
 
-def test_scroll_to_bottom_method(qtbot):
-    """scroll_to_bottom method should work without errors."""
-    widget = MessagesArea()
-    qtbot.addWidget(widget)
-
-    # Add some messages
-    for i in range(5):
-        widget.add_message_row(
-            role="agent",
-            content=f"Message {i}",
-            timestamp=f"12:{i:02d}"
-        )
-
-    # Should not raise any errors
-    widget.scroll_to_bottom()
-
-
 def test_clear_messages(qtbot):
     """Clear should remove all messages."""
     widget = MessagesArea()

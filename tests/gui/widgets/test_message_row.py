@@ -1,10 +1,9 @@
 """Tests for MessageRow component — Cline-style flat timeline."""
 
-import pytest
-from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
-from PyQt6.QtGui import QColor, QKeyEvent, QPainter, QPixmap, QWheelEvent
+from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
+from PyQt6.QtGui import QKeyEvent, QWheelEvent
 from PyQt6.QtWidgets import QApplication, QVBoxLayout, QWidget
-from autoreport.gui.widgets.message_row import MessageRow, _opaque_bounds, _raw_markdown_for_selected_text
+from autoreport.gui.widgets.message_row import MessageRow, _raw_markdown_for_selected_text
 from autoreport.gui.widgets.messages_area import MessagesArea
 from autoreport.gui.widgets.ui_utils import compact_tooltip_qss
 
@@ -64,17 +63,6 @@ def test_selected_agent_markdown_copy_preserves_inline_markup():
     assert _raw_markdown_for_selected_text(raw, "Bold") == "**Bold**"
     assert _raw_markdown_for_selected_text(raw, "code") == "`code`"
     assert _raw_markdown_for_selected_text(raw, "Bold and code") == raw
-
-
-def test_opaque_bounds_detects_nontransparent_region():
-    pixmap = QPixmap(10, 10)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    painter.fillRect(2, 1, 4, 5, QColor("#ffffff"))
-    painter.end()
-
-    bounds = _opaque_bounds(pixmap)
-    assert bounds == QRect(2, 1, 4, 5)
 
 
 def test_message_row_emits_rollback_checkpoint(qtbot):
@@ -178,6 +166,21 @@ def test_agent_message_can_render_collapsed_summary(qtbot):
     qtbot.mouseClick(widget._body_content_widget._toggle_btn, Qt.MouseButton.LeftButton)
     assert widget.is_expanded()
     assert "more" in widget._body_content_widget.label().text()
+
+
+def test_agent_summary_bubble_without_body_shows_title_immediately(qtbot):
+    widget = MessageRow(
+        role="agent",
+        content="",
+        display_mode="bubble",
+        bubble_title="Data Analysis replied",
+        bubble_align="left",
+        bubble_on_timeline=True,
+    )
+    qtbot.addWidget(widget)
+
+    assert widget._body_content_widget is not None
+    assert widget._body_content_widget.label().text() == "Data Analysis replied"
 
 
 def test_summary_bubble_reserves_space_for_toggle_button(qtbot):

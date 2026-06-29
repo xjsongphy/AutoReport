@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import QAbstractItemDelegate, QTreeWidgetItem
 from autoreport.gui.theme import get_theme_colors
 from autoreport.gui.widgets.file_tree import (
     FIXED_DIRECTORIES,
+    FILE_TREE_CONTENT_LEFT_INSET,
     FileTreeWidget,
     _DragDropTreeWidget,
     _INDICATOR_PLACEHOLDER_ROLE,
@@ -110,6 +111,13 @@ def test_file_tree_enables_extended_selection() -> None:
 
     setup_source = inspect.getsource(FileTreeWidget._setup_ui)
     assert "SelectionMode.ExtendedSelection" in setup_source
+
+
+def test_top_level_tree_content_has_left_inset(qtbot, tmp_path: Path) -> None:
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    assert widget.tree.indentation() == FILE_TREE_CONTENT_LEFT_INSET
 
 
 def test_drag_guard_does_not_reference_class_constant() -> None:

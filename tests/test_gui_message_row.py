@@ -1,14 +1,7 @@
 """Tests for markdown rendering, code blocks, and copy button behavior."""
 
-import pytest
-
-from autoreport.gui.widgets.message_row import (
-    MessageRow,
-    _CodeBlockWidget,
-    _parse_code_blocks,
-)
+from autoreport.gui.widgets.message_row import MessageRow
 from autoreport.gui.widgets.markdown_renderer import render_markdown
-import autoreport.gui.widgets.markdown_renderer as markdown_renderer
 import autoreport.gui.theme as theme
 
 
@@ -70,45 +63,6 @@ class TestMarkdownRenderer:
         assert 'bgcolor="#ffffff"' in html
 
 
-class TestCodeBlockParsing:
-    """Parse markdown text into text/code segments."""
-
-    def test_plain_text_only(self):
-        parts = _parse_code_blocks("Just text")
-        assert parts == [("Just text", None)]
-
-    def test_single_code_block(self):
-        parts = _parse_code_blocks("```python\nprint('hi')\n```")
-        assert parts == [("print('hi')", "python")]
-
-    def test_text_before_code(self):
-        parts = _parse_code_blocks("Text\n```js\nconsole.log(1)\n```")
-        assert parts[0] == ("Text\n", None)
-        assert parts[1] == ("console.log(1)", "js")
-
-    def test_text_after_code(self):
-        parts = _parse_code_blocks("```sh\nls\n```\nAfter")
-        assert parts == [("ls", "sh"), ("\nAfter", None)]
-
-    def test_multiple_code_blocks(self):
-        parts = _parse_code_blocks("```a\n1\n```\nMid\n```b\n2\n```")
-        assert len(parts) == 3
-        assert parts[0] == ("1", "a")
-        assert parts[2] == ("2", "b")
-
-    def test_no_language(self):
-        parts = _parse_code_blocks("```\nraw\n```")
-        assert parts[0] == ("raw", None)
-
-    def test_empty_code_block(self):
-        parts = _parse_code_blocks("```py\n\n```")
-        assert parts == [("", "py")]
-
-    def test_empty_input(self):
-        parts = _parse_code_blocks("")
-        assert parts == [("", None)]
-
-
 class TestMessageRowCopyButton:
     """Copy button visibility and mark_complete behavior."""
 
@@ -149,18 +103,3 @@ class TestMessageRowCopyButton:
         qtbot.addWidget(row)
         assert row._agent_content_layout is not None
         assert "x = 1" in row._wrapping_labels[0].text()
-
-
-class TestCodeBlockWidget:
-    """Code block widget rendering."""
-
-    def test_creates_code_block(self, qtbot):
-        widget = _CodeBlockWidget("print(1)", "python")
-        qtbot.addWidget(widget)
-        assert widget._code == "print(1)"
-        assert widget._language == "python"
-
-    def test_no_language_shows_code(self, qtbot):
-        widget = _CodeBlockWidget("raw", None)
-        qtbot.addWidget(widget)
-        assert widget._code == "raw"

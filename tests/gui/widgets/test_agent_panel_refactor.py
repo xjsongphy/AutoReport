@@ -181,17 +181,81 @@ def test_add_tool_result_updates_pending_group_item(agent_panel):
     assert "Theory replied: first line" in groups[0].get_summary_text()
 
 
-def test_repeated_manage_tasks_summary_is_deduped(agent_panel):
-    task_summary = "<b>Task</b>\nTodo\n☐ DATA_ANALYSIS: Process all measurements\n\nWait\n☐ DATA_ANALYSIS: Process all measurements"
+def test_adjacent_manage_tasks_status_change_updates_in_place(agent_panel):
+    created_summary = "<b>Task</b>\nTodo\n☐ DATA_ANALYSIS: Process all measurements\n\nWait\n☐ DATA_ANALYSIS: Process all measurements"
+    started_summary = "<b>Task</b>\nTodo\n● DATA_ANALYSIS: Process all measurements\n\nWait\n● DATA_ANALYSIS: Process all measurements"
 
-    agent_panel.add_tool_call("manage_tasks", {"action": "add"})
+    agent_panel.add_tool_call(
+        "manage_tasks",
+        {
+            "action": "add",
+            "description": "Process calibration, C-V curves, Phi-V, 2ω, and noise data",
+            "brief": "DATA_ANALYSIS: Process all measurements",
+        },
+    )
+    agent_panel.add_tool_result("manage_tasks", created_summary, summary=created_summary)
+    first_group = agent_panel._messages_area.get_tool_groups()[0]
+
+    agent_panel.add_tool_call(
+        "manage_tasks",
+        {
+            "action": "start",
+            "task_id": "tk007",
+            "brief": "DATA_ANALYSIS: Process all measurements",
+        },
+    )
+    agent_panel.add_tool_result("manage_tasks", started_summary, summary=started_summary)
+
+    groups = agent_panel._messages_area.get_tool_groups()
+    assert groups == [first_group]
+    assert "● DATA_ANALYSIS: Process all measurements" in groups[0].get_summary_text()
+    assert "☐ DATA_ANALYSIS: Process all measurements" not in groups[0].get_summary_text()
+
+
+def test_manage_tasks_status_change_does_not_merge_across_other_events(agent_panel):
+    task_summary = "<b>Task</b>\nTodo\n☐ DATA_ANALYSIS: Process all measurements"
+
+    agent_panel.add_tool_call(
+        "manage_tasks",
+        {"action": "add", "brief": "DATA_ANALYSIS: Process all measurements"},
+    )
     agent_panel.add_tool_result("manage_tasks", task_summary, summary=task_summary)
-    agent_panel.add_tool_call("manage_tasks", {"action": "start", "task_id": "tk007"})
+    agent_panel.add_tool_call("read", {"path": "."})
+    agent_panel.add_tool_result("read", "content")
+    agent_panel.add_tool_call(
+        "manage_tasks",
+        {
+            "action": "start",
+            "task_id": "tk007",
+            "brief": "DATA_ANALYSIS: Process all measurements",
+        },
+    )
     agent_panel.add_tool_result("manage_tasks", task_summary, summary=task_summary)
 
     groups = agent_panel._messages_area.get_tool_groups()
-    assert len(groups) == 1
-    assert groups[0].visual_summary_key().count("DATA_ANALYSIS: Process all measurements") == 2
+    assert len(groups) == 3
+    assert [group.tool_names() for group in groups] == [["manage_tasks"], ["read"], ["manage_tasks"]]
+
+
+def test_manage_tasks_different_task_content_does_not_merge(agent_panel):
+    first_summary = "<b>Task</b>\nTodo\n☐ DATA_ANALYSIS: Process all measurements"
+    second_summary = "<b>Task</b>\nTodo\n☐ PLOTTING: Generate all figures"
+
+    agent_panel.add_tool_call(
+        "manage_tasks",
+        {"action": "add", "brief": "DATA_ANALYSIS: Process all measurements"},
+    )
+    agent_panel.add_tool_result("manage_tasks", first_summary, summary=first_summary)
+    agent_panel.add_tool_call(
+        "manage_tasks",
+        {"action": "add", "brief": "PLOTTING: Generate all figures"},
+    )
+    agent_panel.add_tool_result("manage_tasks", second_summary, summary=second_summary)
+
+    groups = agent_panel._messages_area.get_tool_groups()
+    assert len(groups) == 2
+    assert "DATA_ANALYSIS: Process all measurements" in groups[0].get_summary_text()
+    assert "PLOTTING: Generate all figures" in groups[1].get_summary_text()
 
 
 def test_batch_tool_calls_render_as_separate_timeline_items(agent_panel):
