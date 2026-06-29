@@ -27,8 +27,8 @@ from .config import ConfigManager
 from .core.loops import LoopManager, MessageBus
 from .gui import MainWindow
 from .interfaces.protocol import BackendAPI
-from .utils.editor_context import build_editor_context_prompt
 from .utils import add_project_logging, log_exception, setup_exception_handler, setup_logging
+from .utils.editor_context import build_editor_context_prompt
 
 console = Console()
 app = typer.Typer(
@@ -477,7 +477,7 @@ class BackendAPIImpl(BackendAPI):
         agent_type: str,
     ) -> None:
         """Send file context to an agent as system message (invisible to user)."""
-        from .interfaces.types import AgentType
+        from .interfaces.types import AgentType, UserMessage
 
         # Map string to AgentType enum
         agent_type_map = {

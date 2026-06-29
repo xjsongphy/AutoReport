@@ -1,9 +1,9 @@
 """Tool call group matching the chat timeline tool-call style."""
 
-from dataclasses import dataclass, field
 import html
-from pathlib import Path
 import re
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
