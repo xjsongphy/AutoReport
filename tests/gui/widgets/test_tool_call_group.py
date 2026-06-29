@@ -1,6 +1,6 @@
 """Tests for ToolCallGroup widget."""
 
-from PyQt6.QtWidgets import QPushButton, QSizePolicy
+from PyQt6.QtWidgets import QLabel, QPushButton, QSizePolicy
 
 from autoreport.gui.widgets.tool_call_group import ToolCallGroup
 
@@ -64,6 +64,33 @@ def test_multiple_tool_calls_render_on_separate_lines(qtbot):
     assert "a.txt" in summary
     assert "b.txt" in summary
     assert "<br/>" in summary
+
+
+def test_manage_tasks_summary_uses_status_controls(qtbot):
+    widget = ToolCallGroup()
+    qtbot.addWidget(widget)
+
+    widget.add_tool_call(
+        "manage_tasks",
+        {},
+        success=True,
+        duration_ms=10,
+        summary="<b>Task</b>\nTodo\n● running task\n☑ finished task\n☐ pending task",
+    )
+
+    controls = [
+        label
+        for label in widget.findChildren(QLabel)
+        if label.objectName() == "taskStatusControl"
+    ]
+    texts = [
+        label.text()
+        for label in widget.findChildren(QLabel)
+        if label.objectName() == "taskTextLabel"
+    ]
+
+    assert [control.text() for control in controls] == ["*", "✓", ""]
+    assert texts == ["running task", "finished task", "pending task"]
 
 
 def test_exec_detail_text_shrinks_in_narrow_panel(qtbot):
