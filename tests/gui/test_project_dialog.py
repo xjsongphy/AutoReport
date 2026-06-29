@@ -69,3 +69,32 @@ def test_project_dialog_has_tutorial_button(qtbot, tmp_path: Path, monkeypatch) 
 
     # The handler exists and is callable (button is wired to it in _setup_ui).
     assert callable(getattr(dialog, "_on_show_tutorial", None))
+
+
+def test_tutorial_button_overrides_persistence_and_propagates_choice(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    """Clicking "新手提示" clears has_seen_onboarding and propagates the choice.
+
+    The button overrides persistence (re-enables the guide for next launch) and,
+    if the user picks the full tutorial there, signals run_gui to show Phase 2.
+    """
+    monkeypatch.setattr(UserSettings, "STORAGE_FILE", tmp_path / "user_settings.json")
+    UserSettings().has_seen_onboarding = True  # already seen → would normally skip
+
+    monkeypatch.chdir(tmp_path)
+    cm = ConfigManager(config_path=tmp_path / "autoreport.config.yaml")
+    dialog = ProjectDialog(cm)
+    qtbot.addWidget(dialog)
+
+    # Stub the modal guide so it doesn't block; report "wants full tutorial".
+    import autoreport.gui.onboarding as onboarding
+
+    monkeypatch.setattr(onboarding, "show_pre_project_guide", lambda *a, **k: True)
+
+    dialog._on_show_tutorial()
+
+    # Persistence is overridden (cleared) so the guide shows again by default.
+    assert UserSettings().has_seen_onboarding is False
+    # The tutorial choice propagates for the Phase 2 post-project tutorial.
+    assert dialog.wants_tutorial is True

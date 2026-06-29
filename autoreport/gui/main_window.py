@@ -401,7 +401,7 @@ class MainWindow(QMainWindow):
             #userMessageText {{
                 color: {c["editor_fg"]};
                 font-size: {px(13)};
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
+                font-family: "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             #messageExpandBtn {{
                 background-color: {c["message_expand_bg"]};
@@ -487,7 +487,7 @@ class MainWindow(QMainWindow):
                 font-size: {px(13)};
                 font-weight: {c["fw_semibold"]};
                 color: {c["fg"]};
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
+                font-family: "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             #agentMessageRow {{
                 background-color: transparent;
@@ -497,7 +497,7 @@ class MainWindow(QMainWindow):
                 font-size: {px(13)};
                 line-height: 1.5;
                 background-color: transparent;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
+                font-family: "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             #msgCoordination {{
                 font-size: {px(11)};
@@ -573,14 +573,14 @@ class MainWindow(QMainWindow):
             }}
             #toolCallHeaderText {{
                 color: {c["tool_fg"]};
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
+                font-family: "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
                 font-size: {px(13)};
                 line-height: 1.7;
                 font-weight: {c["fw_medium"]};
             }}
             #toolCallDetail {{
                 color: {c["tool_detail"]};
-                font-family: "Segoe UI", "SF Pro", -apple-system, sans-serif;
+                font-family: "Segoe UI", "SF Pro", sans-serif;
                 font-size: {px(11)};
                 padding: {px(1)} 0 {px(2)} {px(12)};
             }}
@@ -621,13 +621,13 @@ class MainWindow(QMainWindow):
                 color: {c["detail_fg"]};
                 font-size: {px(11)};
                 line-height: 1.6;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
+                font-family: "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             #manageDetailDone {{
                 color: {c["detail_muted"]};
                 font-size: {px(11)};
                 line-height: 1.6;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
+                font-family: "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
                 text-decoration: line-through;
             }}
             #manageDetailEmpty {{

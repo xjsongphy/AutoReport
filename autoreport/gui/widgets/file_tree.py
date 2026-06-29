@@ -559,7 +559,7 @@ class FileTreeWidget(QWidget):
                 border: none;
                 outline: none;
                 show-decoration-selected: 0;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                font-family: "Segoe UI", Roboto, sans-serif;
                 font-size: 13px;
                 alternate-background-color: {c["surface"]};
             }}

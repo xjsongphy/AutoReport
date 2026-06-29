@@ -2,6 +2,7 @@
 
 import asyncio
 import importlib.resources
+import os
 import shutil
 import signal
 import sys
@@ -11,7 +12,6 @@ from typing import Annotated, Any, Dict
 # Force UTF-8 encoding for all I/O operations
 # This fixes Chinese character display issues on Windows systems
 if sys.platform == "win32":
-    import os
     os.environ["PYTHONIOENCODING"] = "utf-8"
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -39,46 +39,74 @@ app = typer.Typer(
 )
 
 
-class _FilteredStderr:
-    """Filter known noisy platform stderr lines while preserving real errors."""
-
-    _BLOCK_PATTERNS = (
-        "IMKCFRunLoopWakeUpReliable",
-    )
-
-    def __init__(self, wrapped):
-        self._wrapped = wrapped
-        self._buf = ""
-
-    def write(self, data):
-        if not isinstance(data, str):
-            data = str(data)
-        self._buf += data
-        while "\n" in self._buf:
-            line, self._buf = self._buf.split("\n", 1)
-            if any(pat in line for pat in self._BLOCK_PATTERNS):
-                continue
-            self._wrapped.write(line + "\n")
-        return len(data)
-
-    def flush(self):
-        if self._buf:
-            line = self._buf
-            self._buf = ""
-            if not any(pat in line for pat in self._BLOCK_PATTERNS):
-                self._wrapped.write(line)
-        self._wrapped.flush()
-
-    def isatty(self):
-        return self._wrapped.isatty() if hasattr(self._wrapped, "isatty") else False
+# Known noisy macOS platform lines (byte patterns) to drop from stderr.
+_BLOCK_STDERR_PATTERNS = (b"IMKCFRunLoopWakeUpReliable",)
 
 
 def _install_stderr_filter() -> None:
+    """Redirect OS-level stderr through a line filter on macOS.
+
+    Qt (``qWarning``) and macOS system frameworks (IMK / ``NSLog``) write
+    directly to the stderr file descriptor, bypassing Python's ``sys.stderr``
+    object — so wrapping ``sys.stderr`` cannot suppress them.  We instead point
+    fd 2 at a pipe and filter the byte stream on a background thread, dropping
+    known noisy platform lines before forwarding survivors to the real stderr.
+
+    Tool subprocesses capture their own stderr (``stderr=PIPE``), so they are
+    unaffected.  A detached relaunch child inherits fd 2 (this pipe); once the
+    parent exits the child's forward target is gone — on that broken-pipe error
+    the pump keeps draining-and-discarding so the child never blocks on a full
+    pipe (it simply stops forwarding, which is harmless for a relaunched app).
+    """
+    import os
+    import threading
+
     if sys.platform != "darwin":
         return
-    if isinstance(sys.stderr, _FilteredStderr):
-        return
-    sys.stderr = _FilteredStderr(sys.stderr)
+
+    try:
+        real_stderr_fd = os.dup(2)
+        read_fd, write_fd = os.pipe()
+        os.dup2(write_fd, 2)
+        os.close(write_fd)
+    except OSError:
+        return  # Don't let filter setup break app startup.
+
+    def _pump() -> None:
+        buf = b""
+        forward_dead = False
+        while True:
+            try:
+                chunk = os.read(read_fd, 4096)
+            except OSError:
+                break
+            if not chunk:
+                break
+            if forward_dead:
+                continue  # keep draining so the pipe can never fill / block.
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                if any(pat in line for pat in _BLOCK_STDERR_PATTERNS):
+                    continue
+                try:
+                    os.write(real_stderr_fd, line + b"\n")
+                except OSError:
+                    forward_dead = True
+                    buf = b""
+                    break
+        # Flush any trailing partial line that lacks a newline.
+        if buf and not forward_dead and not any(pat in buf for pat in _BLOCK_STDERR_PATTERNS):
+            try:
+                os.write(real_stderr_fd, buf)
+            except OSError:
+                pass
+        try:
+            os.close(read_fd)
+        except OSError:
+            pass
+
+    threading.Thread(target=_pump, daemon=True, name="stderr-filter").start()
 
 
 def _copy_builtin_templates(workspace: Path) -> None:
@@ -310,6 +338,10 @@ class AutoReportApp:
 
             # Show project dialog
             result = project_dialog.exec()
+
+            # The "新手提示" button may have re-enabled the tutorial from inside
+            # the project dialog; honor that choice for the Phase 2 tutorial.
+            wants_tutorial = wants_tutorial or project_dialog.wants_tutorial
 
             if result != QDialog.DialogCode.Accepted:
                 logger.info("Project selection cancelled")

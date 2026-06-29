@@ -105,10 +105,19 @@ class ProjectDialog(QDialog):
         self.config_manager = config_manager
         self._selected_project: Path | None = None
         self._recent = RecentProjects()
+        # Set True when the user re-opens the welcome guide via the "新手提示"
+        # button and chooses the full tutorial there.  Propagated to run_gui so
+        # the post-project tutorial (Phase 2) still shows in that case.
+        self._wants_tutorial = False
 
         self._setup_ui()
         self._apply_style()
         self._load_recent_projects()
+
+    @property
+    def wants_tutorial(self) -> bool:
+        """True if the user requested the full tutorial from this dialog."""
+        return self._wants_tutorial
 
     def _setup_ui(self) -> None:
         self.setWindowTitle("AutoReport")
@@ -353,10 +362,20 @@ class ProjectDialog(QDialog):
         dialog.exec()
 
     def _on_show_tutorial(self) -> None:
-        """Re-open the pre-project welcome guide on user request."""
+        """Re-open the pre-project welcome guide on user request.
+
+        Clicking "新手提示" overrides persistence: it clears the
+        ``has_seen_onboarding`` flag so the welcome guide shows again by default
+        on subsequent launches — until the user clicks "我用过了" inside it,
+        which re-sets the flag.  If the user then picks the full tutorial, the
+        post-project tutorial (Phase 2) will also run after a project opens.
+        """
+        from ..core.user_settings import UserSettings
         from .onboarding import show_pre_project_guide
 
-        show_pre_project_guide(parent=self, force=True)
+        UserSettings().has_seen_onboarding = False
+        if show_pre_project_guide(parent=self, force=True):
+            self._wants_tutorial = True
 
     def _on_new_project(self) -> None:
         dialog = QFileDialog(self)

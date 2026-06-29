@@ -35,20 +35,84 @@ def _code_font(size: int = 13) -> QFont:
     return font
 
 
-def _set_style_if_present(lexer: QsciLexer, style_name: str, color: str) -> None:
-    style = getattr(lexer, style_name, None)
-    if style is None:
-        return
-    try:
-        lexer.setColor(QColor(color), style)
-    except Exception:
-        return
+# Map lexer style *names* (QsciLexer.description()) to palette keys.
+# Any style not listed falls back to the editor foreground. This matters
+# because QScintilla lexers ship with hardcoded per-style colors meant for a
+# light background — markdown's bright-magenta ``\\`` escapes, orange headers,
+# JSON's neon cyan/purple, etc. Walking every style and defaulting the unknown
+# ones to foreground neutralizes that crude rainbow so markdown/TeX/JSON/YAML
+# stay as calm as VSCode instead of harsher than it.
+_ACCENT_BY_NAME: dict[str, str] = {
+    # Comments
+    "Comment": "comment",
+    "Comment block": "comment",
+    "Comment line": "comment",
+    "Line comment": "comment",
+    "Block comment": "comment",
+    # Strings (Python / JSON / YAML variants)
+    "String": "string",
+    "Double-quoted string": "string",
+    "Single-quoted string": "string",
+    "Triple single-quoted string": "string",
+    "Triple double-quoted string": "string",
+    "Double-quoted f-string": "string",
+    "Single-quoted f-string": "string",
+    "Triple single-quoted f-string": "string",
+    "Triple double-quoted f-string": "string",
+    "Unclosed string": "string",
+    # Numbers (and JSON escape sequences like ``\n``)
+    "Number": "number",
+    "Escape sequence": "number",
+    # Keywords
+    "Keyword": "keyword",
+    "JSON keyword": "keyword",
+    "JSON-LD keyword": "keyword",
+    "Document delimiter": "keyword",
+    # Operators stay calm
+    "Operator": "fg",
+    # Structural keys (JSON properties / YAML keys): targeted soft blue
+    "Property": "identifier",
+    # Definitions
+    "Class name": "class_name",
+    "Function or method name": "function",
+    "Decorator": "class_name",
+    # Markdown — matches VSCode dark-modern / light-modern token colors.
+    # Headings/bold keep their lexer bold via per-style font (see below).
+    "Level 1 header": "md_heading",
+    "Level 2 header": "md_heading",
+    "Level 3 header": "md_heading",
+    "Level 4 header": "md_heading",
+    "Level 5 header": "md_heading",
+    "Level 6 header": "md_heading",
+    "Strong emphasis using double asterisks": "md_bold",
+    "Strong emphasis using double underscores": "md_bold",
+    "Code between backticks": "string",  # markup.inline.raw
+    "Code between double backticks": "string",
+    "Link": "md_link",
+    "Horizontal rule": "muted",
+    # Emphasis (italic), list items, block quotes, escapes → calm foreground;
+    # structure is carried by the lexer's italic/bold, not by loud color.
+}
 
 
 def _apply_vscode_token_palette(lexer: QsciLexer) -> None:
-    """Apply VSCode-like token palette with separate dark/light variants."""
+    """Apply VSCode-like token palette with separate dark/light variants.
+
+    Iterates *every* lexer style (by index) so none retain QScintilla's harsh
+    built-in colors. Plain text, plain identifiers, prose and unrecognized
+    markdown structures use the editor foreground — exactly like VSCode, where
+    markdown source is nearly monochrome — while recognized code tokens get a
+    VSCode accent. Variables/identifiers in Python render as foreground rather
+    than cyan, so the body reads as calm gray with tasteful accents.
+    """
+    # Test doubles may not implement description(); nothing to theme then.
+    if not hasattr(lexer, "description"):
+        return
+
     c = get_theme_colors()
     palette = {
+        "fg": c["editor_fg"],
+        "muted": c["muted"],
         "keyword": c["syntax_keyword"],
         "string": c["syntax_string"],
         "comment": c["syntax_comment"],
@@ -57,31 +121,27 @@ def _apply_vscode_token_palette(lexer: QsciLexer) -> None:
         "identifier": c["syntax_identifier"],
         "class_name": c["syntax_class_name"],
         "function": c["syntax_function"],
+        "md_heading": c["md_heading"],
+        "md_bold": c["md_bold"],
+        "md_link": c["md_link"],
     }
+    fg = palette["fg"]
 
-    # Python
-    _set_style_if_present(lexer, "Keyword", palette["keyword"])
-    _set_style_if_present(lexer, "DoubleQuotedString", palette["string"])
-    _set_style_if_present(lexer, "SingleQuotedString", palette["string"])
-    _set_style_if_present(lexer, "TripleDoubleQuotedString", palette["string"])
-    _set_style_if_present(lexer, "TripleSingleQuotedString", palette["string"])
-    _set_style_if_present(lexer, "Comment", palette["comment"])
-    _set_style_if_present(lexer, "CommentBlock", palette["comment"])
-    _set_style_if_present(lexer, "Number", palette["number"])
-    _set_style_if_present(lexer, "Operator", palette["operator"])
-    _set_style_if_present(lexer, "Identifier", palette["identifier"])
-    _set_style_if_present(lexer, "ClassName", palette["class_name"])
-    _set_style_if_present(lexer, "FunctionMethodName", palette["function"])
-    _set_style_if_present(lexer, "Decorator", palette["class_name"])
+    # Lexer-level default color used for the STYLE_DEFAULT fallback.
+    try:
+        lexer.setDefaultColor(QColor(fg))
+    except Exception:
+        pass
 
-    # JSON / YAML / Markdown / TeX lexers share some generic style names.
-    _set_style_if_present(lexer, "Default", palette["identifier"])
-    _set_style_if_present(lexer, "KeywordSet2", palette["keyword"])
-    _set_style_if_present(lexer, "CommentLine", palette["comment"])
-    _set_style_if_present(lexer, "Comment", palette["comment"])
-    _set_style_if_present(lexer, "String", palette["string"])
-    _set_style_if_present(lexer, "Number", palette["number"])
-    _set_style_if_present(lexer, "Operator", palette["operator"])
+    for style in range(128):
+        name = lexer.description(style)
+        if not name:  # lexers return "" past their last defined style
+            break
+        color = palette[_ACCENT_BY_NAME[name]] if name in _ACCENT_BY_NAME else fg
+        try:
+            lexer.setColor(QColor(color), style)
+        except Exception:
+            continue
 
 
 def apply_scintilla_style(
@@ -183,14 +243,31 @@ def configure_lexer_colors(lexer: QsciLexer, paper_color: str | None = None) -> 
     c = get_theme_colors()
     paper = QColor(paper_color or c["editor_bg"])
     font = _code_font()
-    # Set paper + font without forcing a single foreground color, otherwise
-    # lexer token colors are flattened and syntax highlighting disappears.
+    # Set paper + default font without forcing a single foreground color,
+    # otherwise lexer token colors are flattened and syntax highlighting dies.
     lexer.setDefaultPaper(paper)
     lexer.setPaper(paper)
     lexer.setDefaultFont(font)
-    # Apply to all styles via style=-1 to avoid per-style metric drift/overlap.
-    lexer.setFont(font, -1)
-    lexer.setPaper(paper, -1)
+    if hasattr(lexer, "description"):
+        # Force a uniform monospace family/size on every style (avoids the
+        # per-style metric drift/overlap that mismatched fonts cause), but
+        # PRESERVE each style's own weight/italic so markdown keeps its bold
+        # headers and italic emphasis — exactly how VSCode renders it.
+        for style in range(128):
+            if not lexer.description(style):
+                break
+            style_font = QFont(lexer.font(style))
+            style_font.setFamily(font.family())
+            style_font.setPointSize(font.pointSize())
+            style_font.setFixedPitch(True)
+            style_font.setStyleHint(QFont.StyleHint.Monospace)
+            style_font.setKerning(False)
+            lexer.setFont(style_font, style)
+            lexer.setPaper(paper, style)
+    else:
+        # Test doubles: no per-style API — fall back to global assignment.
+        lexer.setFont(font, -1)
+        lexer.setPaper(paper, -1)
     _apply_vscode_token_palette(lexer)
 
 
