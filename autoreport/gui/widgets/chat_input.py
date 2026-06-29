@@ -9,7 +9,7 @@ from PyQt6.QtCore import QMimeData, QPoint, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QInputMethodEvent, QKeyEvent, QTextCursor
 from PyQt6.QtWidgets import QPlainTextEdit
 
-from ..theme import get_theme_colors
+from ..theme import get_theme_colors, scrollbar_stylesheet
 
 
 class ChatInput(QPlainTextEdit):
@@ -63,23 +63,15 @@ class ChatInput(QPlainTextEdit):
             QPlainTextEdit:focus {{
                 border: none;
             }}
-            QPlainTextEdit QScrollBar:vertical {{
-                background-color: transparent;
-                width: 8px;
-                border: none;
-            }}
-            QPlainTextEdit QScrollBar::handle:vertical {{
-                background-color: {c["scrollbar"]};
-                min-height: 20px;
-                border-radius: 4px;
-            }}
-            QPlainTextEdit QScrollBar::handle:vertical:hover {{
-                background-color: {c["scrollbar_hover"]};
-            }}
-            QPlainTextEdit QScrollBar::add-line:vertical,
-            QPlainTextEdit QScrollBar::sub-line:vertical {{
-                height: 0;
-            }}
+            {scrollbar_stylesheet(
+                selector="QPlainTextEdit QScrollBar",
+                orientation="vertical",
+                background_color="transparent",
+                thickness="8px",
+                min_handle_extent="20px",
+                radius="4px",
+                colors=c,
+            )}
         """)
         self.textChanged.connect(self._sync_after_text_change)
         layout = self.document().documentLayout()
