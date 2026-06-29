@@ -31,7 +31,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..scintilla_utils import apply_scintilla_style, configure_lexer_colors
-from ..theme import get_theme_colors
+from ..theme import get_theme_colors, scrollbar_stylesheet
 from .ui_utils import IconActionButton, create_isolated_context_menu, render_svg_icon
 
 
@@ -525,6 +525,32 @@ class EditorPanel(QWidget):
             if key != keep_key:
                 self._close_tab(key)
 
+    def apply_tab_order(self, new_order: list[str]) -> None:
+        """Apply a new tab ordering (e.g. after a drag-reorder).
+
+        Reorders ``_tab_order`` and rebuilds the (hidden) per-panel tab bar so
+        its indices stay aligned with ``_tab_order`` — many operations look up a
+        key's position in ``_tab_order`` and feed it back into the tab bar.
+        ``new_order`` must be a permutation of the current keys.  This is silent:
+        it does not emit ``tab_changed``, so the caller is responsible for any
+        follow-up sync/persistence.
+        """
+        if not new_order or set(new_order) != set(self._tab_order):
+            return
+        if list(new_order) == self._tab_order:
+            return
+        self._tab_order = list(new_order)
+        active_key = self._active_key
+        with QSignalBlocker(self._tab_bar):
+            while self._tab_bar.count():
+                self._tab_bar.removeTab(0)
+            for key in self._tab_order:
+                state = self._tabs[key]
+                idx = self._tab_bar.addTab(self._tab_label_for_state(state))
+                self._tab_bar.setTabData(idx, key)
+            if active_key in self._tab_order:
+                self._tab_bar.setCurrentIndex(self._tab_order.index(active_key))
+
     def _close_tab(self, key: str) -> None:
         if key not in self._tabs:
             return
@@ -693,6 +719,7 @@ class PreviewWidget(QWidget):
         self._unified_tab_bar.currentChanged.connect(self._on_unified_tab_changed)
         self._unified_tab_bar.tabCloseRequested.connect(self._on_unified_tab_close)
         self._unified_tab_bar.tabBarDoubleClicked.connect(self._on_unified_tab_double_click)
+        self._unified_tab_bar.tabMoved.connect(self._on_unified_tab_moved)
         self._unified_tab_bar.customContextMenuRequested.connect(self._on_unified_tab_context_menu)
         self._unified_tab_bar.setTabsClosable(False)
         self._unified_tab_bar.setMouseTracking(True)
@@ -859,29 +886,15 @@ class PreviewWidget(QWidget):
             QScrollArea#previewTabScrollArea > QWidget > QWidget {{
                 background: transparent;
             }}
-            QScrollArea#previewTabScrollArea QScrollBar:horizontal {{
-                height: 6px;
-                background: transparent;
-            }}
-            QScrollArea#previewTabScrollArea QScrollBar::handle:horizontal {{
-                background-color: {c["scrollbar"]};
-                min-width: 24px;
-                border-radius: 0px;
-            }}
-            QScrollArea#previewTabScrollArea QScrollBar::handle:horizontal:hover {{
-                background-color: {c["scrollbar_hover"]};
-            }}
-            QScrollArea#previewTabScrollArea QScrollBar::add-line:horizontal,
-            QScrollArea#previewTabScrollArea QScrollBar::sub-line:horizontal {{
-                width: 0px;
-                margin: 0;
-                border: none;
-                background: transparent;
-            }}
-            QScrollArea#previewTabScrollArea QScrollBar::add-page:horizontal,
-            QScrollArea#previewTabScrollArea QScrollBar::sub-page:horizontal {{
-                background: transparent;
-            }}
+            {scrollbar_stylesheet(
+                selector="QScrollArea#previewTabScrollArea QScrollBar",
+                orientation="horizontal",
+                background_color="transparent",
+                thickness="6px",
+                min_handle_extent="24px",
+                radius="0px",
+                colors=c,
+            )}
             #explorerToolbarBtn {{
                 background-color: transparent;
                 border: none;
@@ -1034,6 +1047,28 @@ class PreviewWidget(QWidget):
             self._current_file = Path(current_key) if current_key else None
         elif self._unified_tab_bar.count() == 0:
             self._current_file = None
+
+    def _on_unified_tab_moved(self, from_index: int, to_index: int) -> None:
+        """Persist a drag-reorder back into the panels' ``_tab_order``.
+
+        ``QTabBar`` moves the tab visually on drag, but ``_tab_order`` is the
+        source of truth — without this handler the next ``_sync_tabs_from_panels``
+        rebuild would snap the tab back to its old position.  We read the new
+        arrangement straight off the unified bar (Qt carries ``tabData`` with the
+        moved tab) and mirror it into each owning panel, then persist.
+        """
+        global_order = [
+            self._unified_tab_bar.tabData(i)
+            for i in range(self._unified_tab_bar.count())
+        ]
+        global_order = [k for k in global_order if k]
+        if not global_order:
+            return
+        for panel in self._panels:
+            new_order = [k for k in global_order if k in panel._tabs]
+            panel.apply_tab_order(new_order)
+        if not self._restoring_tabs:
+            self.save_open_tabs()
 
     def _on_unified_tab_changed(self, index: int) -> None:
         """Handle unified tab bar change."""
@@ -1604,4 +1639,3 @@ class PreviewWidget(QWidget):
         if self._panels:
             return self._panels[-1].active_path()
         return None
-

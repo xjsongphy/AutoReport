@@ -463,6 +463,7 @@ class _ExpandableContentWidget(QWidget):
         if self._toggle_host not in {self, self._overlay_host}:
             self._toggle_host.setMouseTracking(True)
             self._toggle_host.installEventFilter(self)
+        self._refresh_clamp()
 
     def enterEvent(self, event) -> None:  # noqa: N802
         super().enterEvent(event)

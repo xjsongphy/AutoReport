@@ -36,11 +36,12 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ..theme import get_theme_colors
+from ..theme import get_theme_colors, scrollbar_stylesheet
 from .ui_utils import UI_HOVER_DELAY_MS, IconActionButton, compact_tooltip_qss, create_isolated_context_menu, render_svg_icon
 
 # Fixed directory structure
 FIXED_DIRECTORIES = ["Data", "References", "Theory", "Code", "Outline", "Tex"]
+FILE_TREE_CONTENT_LEFT_INSET = 22
 _FILE_TEXT_ICON_GAP_ADJUST = 28
 _FILE_EDITOR_LEFT_ADJUST = -26
 _DIRECTORY_EDITOR_LEFT_ADJUST = 4
@@ -486,7 +487,7 @@ class FileTreeWidget(QWidget):
         # Enable both internal move and external drag-drop
         self.tree.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.tree.setDefaultDropAction(Qt.DropAction.MoveAction)
-        self.tree.setIndentation(14)
+        self.tree.setIndentation(FILE_TREE_CONTENT_LEFT_INSET)
         self.tree.setRootIsDecorated(True)
         self.tree.setItemsExpandable(True)
         self.tree.setAnimated(False)
@@ -505,7 +506,8 @@ class FileTreeWidget(QWidget):
         self.tree.itemDelegate().closeEditor.connect(self._on_close_editor)
         layout.addWidget(self.tree)
 
-        # Use native margins to keep top-level branch spacing consistent.
+        # Keep top-level disclosure arrows off the panel edge while moving the
+        # folder and file rows as a single tree structure.
         self.tree.setContentsMargins(0, 0, 0, 0)
 
         self.tree.header().hide()
@@ -599,27 +601,14 @@ class FileTreeWidget(QWidget):
                 border: 1px solid {c["buttonBlue"]};
             }}
 
-            /* Scrollbar */
-            QScrollBar:vertical {{
-                background-color: {c["surface"]};
-                width: 10px;
-                border: none;
-            }}
-
-            QScrollBar::handle:vertical {{
-                background-color: {c["scrollbar"]};
-                min-height: 30px;
-                border-radius: {c["radius_md"]};
-            }}
-
-            QScrollBar::handle:vertical:hover {{
-                background-color: {c["scrollbar_hover"]};
-            }}
-
-            QScrollBar::add-line:vertical,
-            QScrollBar::sub-line:vertical {{
-                height: 0px;
-            }}
+            {scrollbar_stylesheet(
+                orientation="vertical",
+                background_color=c["surface"],
+                thickness="10px",
+                min_handle_extent="30px",
+                radius=c["radius_md"],
+                colors=c,
+            )}
 
             /* Tooltips */
             {compact_tooltip_qss("QToolTip")}

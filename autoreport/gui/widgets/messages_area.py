@@ -3,7 +3,7 @@
 from PyQt6.QtCore import QTimer, Qt, pyqtSignal
 from PyQt6.QtWidgets import QScrollArea, QVBoxLayout, QWidget
 
-from ..theme import get_theme_colors
+from ..theme import get_theme_colors, scrollbar_stylesheet
 from .message_row import MessageRow
 from .tool_call_group import ToolCallGroup
 
@@ -74,26 +74,14 @@ class MessagesArea(QScrollArea):
             QWidget#messagesContainer {{
                 background-color: {c["messages_bg"]};
             }}
-            QScrollBar:vertical {{
-                background-color: {c["messages_bg"]};
-                width: 8px;
-                border: none;
-            }}
-            QScrollBar::handle:vertical {{
-                background-color: {c["scrollbar"]};
-                min-height: 30px;
-                border-radius: 4px;
-            }}
-            QScrollBar::handle:vertical:hover {{
-                background-color: {c["scrollbar_hover"]};
-            }}
-            QScrollBar::handle:vertical:pressed {{
-                background-color: {c["scrollbar_hover"]};
-            }}
-            QScrollBar::add-line:vertical,
-            QScrollBar::sub-line:vertical {{
-                height: 0;
-            }}
+            {scrollbar_stylesheet(
+                orientation="vertical",
+                background_color=c["messages_bg"],
+                thickness="8px",
+                min_handle_extent="30px",
+                radius="4px",
+                colors=c,
+            )}
         """)
 
 

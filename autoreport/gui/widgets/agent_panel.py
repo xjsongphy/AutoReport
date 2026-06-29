@@ -867,10 +867,10 @@ class AgentPanel(QWidget):
                 duration_ms=100,
                 summary=summary,
             )
-            self._dedupe_repeated_tool_group(target_group)
+            self._merge_adjacent_task_status_update(target_group)
 
-    def _dedupe_repeated_tool_group(self, target_group: QWidget) -> None:
-        """Hide adjacent duplicate task-board renders without dropping history."""
+    def _merge_adjacent_task_status_update(self, target_group: QWidget) -> None:
+        """Render adjacent same-task status changes as one in-place update."""
         tool_names = getattr(target_group, "tool_names", lambda: [])()
         if tool_names != ["manage_tasks"]:
             return
@@ -886,9 +886,11 @@ class AgentPanel(QWidget):
         if not getattr(previous, "is_complete", lambda: False)():
             return
 
-        current_key = getattr(target_group, "visual_summary_key", lambda: "")()
-        previous_key = getattr(previous, "visual_summary_key", lambda: "")()
-        if current_key and current_key == previous_key:
+        has_status_change = getattr(target_group, "has_status_change_from", lambda _other: False)
+        if has_status_change(previous):
+            replace_with_group = getattr(previous, "replace_with_group", None)
+            if callable(replace_with_group):
+                replace_with_group(target_group)
             self._messages_area.remove_tool_group(target_group)
             if self._current_tool_group is target_group:
                 self._current_tool_group = previous
@@ -1049,29 +1051,28 @@ class AgentPanel(QWidget):
         )
 
     def add_task_block(self, todolist: list[dict], waitlist: list[dict]) -> None:
-        """Render full Task block with Todo/Wait sections."""
-        lines = ["Task", "", "Todo"]
-        if todolist:
-            for item in todolist[:10]:
-                brief = str(item.get("brief", "")).strip() or "task"
-                status = str(item.get("status", "pending")).lower()
-                done = status in {"completed", "cancelled", "failed"}
-                marker = "☑" if done else "☐"
-                lines.append(f"- {marker} {brief}")
-        else:
-            lines.append("- —")
+        """Render Task block with Todo/Wait sections (empty sections omitted)."""
+        lines = ["Task"]
 
-        lines.append("")
-        lines.append("Wait")
-        if waitlist:
-            for item in waitlist[:10]:
+        def render_items(items: list[dict]) -> list[str]:
+            rows = []
+            for item in items[:10]:
                 brief = str(item.get("brief", "")).strip() or "task"
                 status = str(item.get("status", "pending")).lower()
                 done = status in {"completed", "cancelled", "failed"}
                 marker = "☑" if done else "☐"
-                lines.append(f"- {marker} {brief}")
-        else:
-            lines.append("- —")
+                rows.append(f"- {marker} {brief}")
+            return rows
+
+        if todolist:
+            lines.append("")
+            lines.append("Todo")
+            lines.extend(render_items(todolist))
+
+        if waitlist:
+            lines.append("")
+            lines.append("Wait")
+            lines.extend(render_items(waitlist))
 
         ts = datetime.now().strftime("%H:%M")
         self._messages_area.add_message_row(
