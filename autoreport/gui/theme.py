@@ -187,6 +187,13 @@ def get_theme_colors() -> dict[str, str]:
         "syntax_class_name": "#4EC9B0" if dark else "#267F99",
         "syntax_function": "#DCDCAA" if dark else "#795E26",
 
+        # === Markdown tokens (VSCode dark-modern / light-modern) ===
+        # markup.heading / markup.bold — bold blue (dark) vs navy/maroon (light).
+        "md_heading": "#569CD6" if dark else "#800000",
+        "md_bold": "#569CD6" if dark else "#000080",
+        # string.other.link — link titles.
+        "md_link": "#569CD6" if dark else "#0451A5",
+
         # === Dialog/Config Specific ===
         "activeFg": "#ffffff" if dark else "#202020",
         "checkFg": success,

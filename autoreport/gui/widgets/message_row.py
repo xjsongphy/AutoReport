@@ -1065,8 +1065,9 @@ class MessageRow(QWidget):
         self._summary_text_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self._summary_text_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
 
-        content_host_layout.addWidget(self._summary_text_label, 1, Qt.AlignmentFlag.AlignTop)
+        content_host_layout.addWidget(self._summary_text_label, 0, Qt.AlignmentFlag.AlignTop)
         content_host_layout.addWidget(self._summary_arrow_host, 0, Qt.AlignmentFlag.AlignTop)
+        content_host_layout.addStretch(1)
 
         layout.addWidget(content_host, 1, Qt.AlignmentFlag.AlignTop)
         self._sync_summary_arrow_alignment()
