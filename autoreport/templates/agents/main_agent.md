@@ -84,7 +84,6 @@ Use this workflow only when coordination is required. Skip irrelevant steps.
 3. **Dispatch**: Send minimal tasks to sub-agents. Default dependency order is Theory -> Data Analysis -> Plotting -> Report. Parallelize only when dependencies allow it.
 4. **Track**: Wait for sub-agent completion or issue reports. Use automatic completion notifications when available.
 5. **Verify routing completion**: Rely on sub-agent reports, manifests, or minimal existence checks. Do not impose sub-agent-specific filenames or formats.
-   **Plotting completion**: Do not treat streaming logs or script execution as task completion. Continue to REPORT only after PLOTTING clearly reports completion and the outputs are broadly consistent with the outline scope.
-   **Plot review**: Perform a lightweight review of generated figures: confirm that image files exist and that the number and coverage roughly match the outline. If there are obvious omissions, mismatches, or unreasonable results, send PLOTTING back for revision.
+   **Cross-agent consistency check**: Before dispatching REPORT, confirm the three scopes line up at the routing level — outline measured scope ↔ `Data/Processed/` analyzed datasets ↔ `Code/fig/` figures. This is coverage/manifest alignment, not numeric verification. Flag gaps (measured-but-unanalyzed, analyzed-but-unplotted, plotted-but-not-in-outline) and route the responsible agent rather than papering over them.
 6. **Handle issues**: Reschedule upstream work, pause dependent tasks, or ask the user when the blocker cannot be resolved by sub-agents.
 7. **Complete**: Give the user a concise summary of completed work, blockers if any, and produced outputs.

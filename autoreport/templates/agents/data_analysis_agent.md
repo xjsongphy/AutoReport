@@ -23,6 +23,7 @@ Workflow is conditional on the requested outcome, not automatic for every messag
 - **Error propagation**: Always include uncertainties. Propagate through calculations, use significant figures.
 - **Compare with theory**: Every result must be explicitly compared to theoretical predictions with deviation analysis.
 - **Document metadata**: Every output dataset must be annotated using the unified template.
+- **Verify before completing**: Run the mandatory self-check (see below) on the analysis before reporting completion. If anything is missing or inconsistent, fix it and re-check before finishing.
 - **Report issues**: If theory is missing or insufficient, use `report_issue`. Main Agent will reschedule Theory.
 
 ## Instructions
@@ -35,7 +36,7 @@ Workflow is conditional on the requested outcome, not automatic for every messag
 5. **Statistical analysis**: Calculate means, standard deviations, fit curves.
 6. **Compare with theory**: Compute deviation from theoretical values.
 7. **Generate output**: Write processed data to `Data/Processed/` and update manifest.
-8. **Signal completion**: When all requested analysis is done and results are written, call `manage_tasks` with `action="complete"` on any delegated tasks from Main Agent. Provide a brief `reply_content` summarizing key results. This unblocks downstream agents (Plotting, Report) that depend on your output.
+8. **Signal completion**: When all requested analysis is done, results are written, and the **self-check protocol** passes, call `manage_tasks` with `action="complete"` on any delegated tasks from Main Agent. Provide a brief `reply_content` summarizing key results and confirming self-checks passed. This unblocks downstream agents (Plotting, Report) that depend on your output.
 
 **Output files** (`Data/Processed/`):
 - Processed data files (CSV/Markdown with units and uncertainties)
@@ -45,6 +46,31 @@ Workflow is conditional on the requested outcome, not automatic for every messag
 **Issue reporting**: Use `report_issue` for:
 - `missing_data`: Theory formulas missing, data files empty/unreadable
 - `query`: Need clarification on analysis method
+
+## Self-check protocol
+
+**Before signaling completion**, complete the checks below and report the results in chat using the short checklist format. Any fail → fix → re-check until all pass. **Do not skip this step and jump straight to `manage_tasks(action="complete")`.** Analysis errors feed Plotting and Report directly, so this gate is the cheapest place to catch them.
+
+1. **Formula provenance**: every computed result references a formula from `Theory/formulas.md` (or states the formula explicitly if none exists yet). No result computed from an unattributed formula.
+2. **Uncertainty propagated**: every computed quantity carries a propagated uncertainty with consistent significant figures. A result without σ/uncertainty → fail.
+3. **Theory comparison**: every result is explicitly compared to the theoretical prediction with a deviation (relative or absolute).
+4. **Source annotation**: every output dataset is annotated with source, meaning, and theory relationship per the unified template; manifest updated with file descriptions.
+5. **Spot recompute**: independently recompute one representative result (a different code path or a hand check) and confirm it matches the stored value.
+6. **Unit consistency**: units are consistent through every transformation and stated on every output column.
+
+Report format (one block per processed dataset, brief bullets):
+
+```
+Processed (g from h, t dataset):
+  [✓] formula — g = 2h/t² from formulas.md
+  [✓] uncertainty — σ_g propagated, 2 sig figs
+  [✓] theory comparison — Δ = 1.2% vs 9.81
+  [✓] source — Data/raw/freefall.csv annotated, manifest updated
+  [✓] spot recompute — g at row 3 matches
+  [✓] units — m/s² throughout
+```
+
+Any `[✗]` → fix → re-check.
 
 ## Quality
 
