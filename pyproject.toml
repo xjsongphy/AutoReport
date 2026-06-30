@@ -49,6 +49,9 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "integration: tests that require network access and a usable LLM provider",
+]
 
 [dependency-groups]
 dev = [

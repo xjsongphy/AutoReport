@@ -18,12 +18,16 @@ Usage in tests::
 """
 
 import asyncio
+import importlib.util
+import os
 from pathlib import Path
 
 from loguru import logger
+import pytest
 
 from autoreport.config import ConfigManager
 from autoreport.core.loops import LoopManager, MessageBus
+from autoreport.core.providers.factory import ProviderFactory
 from autoreport.interfaces.types import (
     AgentFeedback,
     AgentResponse,
@@ -197,6 +201,7 @@ class HeadlessBackend:
         self._loop_manager: LoopManager | None = None
         self._debug_agents = debug_agents or []
         self._started = False
+        self._bus_task: asyncio.Task | None = None
 
     async def __aenter__(self):
         await self.start()
@@ -210,6 +215,7 @@ class HeadlessBackend:
         if self._started:
             return
 
+        self._require_usable_provider()
         self._ensure_project_structure()
 
         self._loop_manager = LoopManager(
@@ -218,11 +224,9 @@ class HeadlessBackend:
             bus=self.bus,
         )
 
-        # Start message bus processing
-        asyncio.create_task(self.bus.process_queue())
-
         # Start all agent loops
         await self._loop_manager.start()
+        self._bus_task = asyncio.create_task(self.bus.process_queue())
 
         # Activate debug mode for specified agents
         for agent in self._debug_agents:
@@ -242,6 +246,11 @@ class HeadlessBackend:
         if self._loop_manager:
             await self._loop_manager.stop()
 
+        if self._bus_task is not None:
+            self._bus_task.cancel()
+            await asyncio.gather(self._bus_task, return_exceptions=True)
+            self._bus_task = None
+
         await asyncio.sleep(0.3)
 
         # Cancel remaining tasks
@@ -252,6 +261,63 @@ class HeadlessBackend:
 
         self._started = False
         logger.info("HeadlessBackend stopped")
+
+    def _require_usable_provider(self) -> None:
+        """Skip integration tests when no configured provider can be constructed."""
+        config = self.config_manager.config
+        candidates = [
+            cfg for cfg in config.providers.configurations
+            if cfg.enabled and cfg.api_key
+        ]
+        socks_issue = self._socks_proxy_issue()
+        if candidates and socks_issue:
+            pytest.skip(
+                "No usable LLM provider for integration tests: "
+                f"{socks_issue}"
+            )
+
+        errors: list[str] = []
+
+        for cfg in candidates:
+            try:
+                ProviderFactory.create_provider(
+                    cfg.provider,
+                    cfg.api_key,
+                    cfg.api_base,
+                    cfg.default_model,
+                )
+            except Exception as exc:
+                errors.append(f"{cfg.name} ({cfg.provider}): {exc}")
+                continue
+            return
+
+        if errors:
+            detail = "; ".join(errors)
+            pytest.skip(f"No usable LLM provider for integration tests: {detail}")
+
+        pytest.skip(
+            "No usable LLM provider for integration tests: "
+            "configure at least one enabled provider with a working API key."
+        )
+
+    def _socks_proxy_issue(self) -> str | None:
+        """Return a skip reason when SOCKS proxy support is missing."""
+        proxies = [
+            os.getenv("ALL_PROXY"),
+            os.getenv("all_proxy"),
+            os.getenv("HTTP_PROXY"),
+            os.getenv("http_proxy"),
+            os.getenv("HTTPS_PROXY"),
+            os.getenv("https_proxy"),
+        ]
+        if not any(p and p.lower().startswith("socks") for p in proxies):
+            return None
+        if importlib.util.find_spec("socksio") is not None:
+            return None
+        return (
+            "SOCKS proxy is configured but `socksio` is not installed. "
+            "Install `httpx[socks]` or disable the SOCKS proxy for integration tests."
+        )
 
     async def send(
         self,
