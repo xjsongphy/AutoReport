@@ -1687,7 +1687,7 @@ class MainWindow(QMainWindow):
     # ---- Conversation History ----
 
     def _on_history_requested(self, agent_type: str) -> None:
-        sessions = self._conv_store.get_sessions()
+        sessions = self._conv_store.get_sessions(agent_type)
         current_id = self._conv_store.get_current_session_id(agent_type)
         panel = self._get_panel_for_agent(agent_type)
         panel.show_history_dropdown(sessions, current_id)

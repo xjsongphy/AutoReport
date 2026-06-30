@@ -459,3 +459,45 @@ class TestGetSessionsStaleFilter:
         store = ConversationStore(tmp_path)
         sessions = store.get_sessions()
         assert sessions == []
+
+
+class TestAgentScopedHistory:
+    """get_sessions(agent_type) filters the dropdown to one agent's own conversations."""
+
+    def test_unfiltered_shows_every_agent(self, store: ConversationStore):
+        """Without a filter, sessions from any agent are all visible."""
+        store.append_message("main", "user", "hello from main")
+        store.append_message("theory", "user", "hello from theory")
+
+        ids = {s["id"] for s in store.get_sessions()}
+        assert len(ids) == 2
+
+    def test_scoped_to_current_agent_only(self, store: ConversationStore):
+        """Each agent's dropdown sees only its own sessions."""
+        store.append_message("main", "user", "hello from main")
+        store.append_message("theory", "user", "hello from theory")
+
+        main_sessions = store.get_sessions("main")
+        theory_sessions = store.get_sessions("theory")
+
+        # Main sees exactly its own session, named from its own message.
+        assert len(main_sessions) == 1
+        assert main_sessions[0]["name"] == "hello from main"
+        # Theory sees exactly its own session; name derives from theory's
+        # messages (metadata name stays '新对话' for non-main agents).
+        assert len(theory_sessions) == 1
+        assert theory_sessions[0]["name"] == "hello from theory"
+
+    def test_shared_session_only_for_participating_agent(self, store: ConversationStore):
+        """A session both agents point to appears only for agents that wrote to it."""
+        # Main writes → session persisted.
+        store.append_message("main", "user", "main wrote here")
+        shared_id = store.get_current_session_id("main")
+        # Point theory at the same session id, but do NOT let theory write.
+        assert store.switch_session(shared_id, agent_type="theory") is True
+
+        # Main participated → visible; theory did not → hidden from theory.
+        assert [s["id"] for s in store.get_sessions("main")] == [shared_id]
+        assert store.get_sessions("theory") == []
+        # Unfiltered still sees it because main has messages.
+        assert [s["id"] for s in store.get_sessions()] == [shared_id]
