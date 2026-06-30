@@ -10,12 +10,13 @@ Uses native QTreeWidget styling with:
 import shutil
 from pathlib import Path
 import json
+import sys
 
 from loguru import logger
 from PyQt6.QtCore import QFileInfo, QFileSystemWatcher, QPoint, QRect, QSize, QSignalBlocker, Qt, QTimer, pyqtSignal
 
 from autoreport.utils.logging_config import ui_logger
-from PyQt6.QtGui import QColor, QCursor, QDrag, QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QDropEvent, QIcon, QPalette, QPainter, QPen, QPixmap
+from PyQt6.QtGui import QColor, QCursor, QDrag, QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QDropEvent, QIcon, QMouseEvent, QPalette, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemDelegate,
     QAbstractItemView,
@@ -41,7 +42,7 @@ from .ui_utils import UI_HOVER_DELAY_MS, IconActionButton, compact_tooltip_qss, 
 
 # Fixed directory structure
 FIXED_DIRECTORIES = ["Data", "References", "Theory", "Code", "Outline", "Tex"]
-FILE_TREE_CONTENT_LEFT_INSET = 22
+FILE_TREE_CONTENT_LEFT_INSET = 16
 _FILE_TEXT_ICON_GAP_ADJUST = 28
 _FILE_EDITOR_LEFT_ADJUST = -26
 _DIRECTORY_EDITOR_LEFT_ADJUST = 4
@@ -191,6 +192,37 @@ class _DragDropTreeWidget(QTreeWidget):
                 event.accept()
                 return
         super().mouseMoveEvent(event)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        """Allow Cmd-click (macOS) to toggle multi-selection.
+
+        QAbstractItemView decides toggle-selection on Qt::ControlModifier.
+        On macOS the Cmd key surfaces as Qt::MetaModifier, which Qt does NOT
+        remap, so Cmd-click silently replaces the selection instead of toggling.
+        Translate Meta -> Control on macOS so the platform-native modifier
+        works; Ctrl already maps to ControlModifier everywhere.
+        """
+        if (
+            sys.platform == "darwin"
+            and event.button() == Qt.MouseButton.LeftButton
+            and (event.modifiers() & Qt.KeyboardModifier.MetaModifier)
+            and not (event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        ):
+            new_mods = (
+                event.modifiers() & ~Qt.KeyboardModifier.MetaModifier
+                | Qt.KeyboardModifier.ControlModifier
+            )
+            translated = QMouseEvent(
+                event.type(),
+                event.position(),
+                event.globalPosition(),
+                event.button(),
+                event.buttons(),
+                new_mods,
+            )
+            super().mousePressEvent(translated)
+            return
+        super().mousePressEvent(event)
 
     def _row_background_color(self, item: QTreeWidgetItem | None) -> QColor | None:
         if item is None:

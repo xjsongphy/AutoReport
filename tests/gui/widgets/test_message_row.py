@@ -183,6 +183,27 @@ def test_agent_summary_bubble_without_body_shows_title_immediately(qtbot):
     assert widget._body_content_widget.label().text() == "Data Analysis replied"
 
 
+def test_left_summary_bubble_without_body_keeps_readable_width(qtbot):
+    widget = MessageRow(
+        role="agent",
+        content="",
+        display_mode="bubble",
+        bubble_title="Plotting replied: ✅ plotting 已完成你派发的任务。请检查 plotting 的输出，确认无误后继续派发下游任务。",
+        bubble_align="left",
+        bubble_on_timeline=True,
+    )
+    qtbot.addWidget(widget)
+    widget.resize(520, 220)
+    widget.show()
+    qtbot.waitExposed(widget)
+    qtbot.wait(20)
+
+    assert widget._user_bubble_widget is not None
+    assert widget._body_content_widget is not None
+    assert widget._user_bubble_widget.width() >= 300
+    assert widget._body_content_widget.label().width() >= 260
+
+
 def test_summary_bubble_reserves_space_for_toggle_button(qtbot):
     widget = MessageRow(
         role="agent",

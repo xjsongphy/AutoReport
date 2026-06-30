@@ -607,6 +607,7 @@ class _ExpandableContentWidget(QWidget):
             self._has_overflow = False
             self._label.setMinimumHeight(0)
             self._label.setMaximumHeight(16777215)
+        self._label.setMaximumWidth(label_width)
 
         self._fade.setVisible(self._clamp_collapsed and self._has_overflow and not self._expanded)
         self._toggle_btn.setText("Show less" if self._expanded else "Show More")
@@ -876,6 +877,7 @@ class MessageRow(QWidget):
                 self._populate_bubble_content(bubble_layout, bubble_type="left")
                 host_layout.addWidget(bubble, 0, Qt.AlignmentFlag.AlignLeft)
                 self._agent_content_layout.addWidget(bubble_host)
+                self._update_left_bubble_width()
             else:
                 self._rebuild_agent_content()
             self._update_agent_chain()
@@ -1707,6 +1709,7 @@ class MessageRow(QWidget):
         self._sync_bubble_arrow_alignment()
         self._sync_timeline_dot_alignment()
         self._update_user_bubble_width()
+        self._update_left_bubble_width()
 
     def _update_user_bubble_width(self) -> None:
         if not self._is_outbound_message() or self._user_bubble_container is None:
@@ -1718,6 +1721,19 @@ class MessageRow(QWidget):
         self._user_bubble_container.setMinimumWidth(width)
         self._user_bubble_container.setMaximumWidth(width)
         self._sync_context_chip_width()
+
+    def _update_left_bubble_width(self) -> None:
+        if not (self._uses_bubble_layout() and self._bubble_align == "left"):
+            return
+        if self._user_bubble_widget is None:
+            return
+        width = max(80, self.width() - 56)
+        self._user_bubble_widget.setMinimumWidth(width)
+        self._user_bubble_widget.setMaximumWidth(width)
+        if self._body_content_widget is not None:
+            self._body_content_widget.setMaximumContentWidth(
+                self._user_bubble_content_width_limit()
+            )
 
     def _is_outbound_message(self) -> bool:
         """Right-side messages sent to an agent share the user bubble layout."""
@@ -1780,6 +1796,7 @@ class MessageRow(QWidget):
         self._sync_bubble_arrow_alignment()
         self._sync_timeline_dot_alignment()
         self._update_user_bubble_width()
+        self._update_left_bubble_width()
 
     def _sync_context_chip_width(self) -> None:
         if self._context_chip_widget is None:

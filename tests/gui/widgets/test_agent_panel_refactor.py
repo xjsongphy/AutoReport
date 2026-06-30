@@ -143,6 +143,25 @@ def test_add_tool_call_creates_group(agent_panel):
     assert len(rows) == 0
 
 
+def test_empty_thinking_row_is_removed_when_finished(agent_panel):
+    agent_panel.start_thinking()
+
+    agent_panel.finish_thinking()
+
+    assert agent_panel._messages_area.message_count() == 0
+    assert agent_panel._thinking_row is None
+
+
+def test_tool_call_after_empty_thinking_does_not_leave_phantom_thought(agent_panel):
+    agent_panel.start_thinking()
+
+    agent_panel.add_tool_call("read", {"path": "Processed"})
+
+    assert agent_panel._messages_area.message_count() == 1
+    assert agent_panel._messages_area.get_message_rows() == []
+    assert len(agent_panel._messages_area.get_tool_groups()) == 1
+
+
 def test_add_tool_result_adds_to_group(agent_panel):
     """add_tool_result should add to the current tool group."""
     # First add a tool call

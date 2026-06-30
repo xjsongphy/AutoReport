@@ -498,11 +498,18 @@ class OnboardingDialog(QDialog):
             self._update_navigation()
 
     def _finish(self) -> None:
-        """Complete onboarding and persist settings."""
+        """Complete onboarding.
+
+        Note: we intentionally do NOT set ``has_seen_onboarding`` here.  That
+        flag controls whether the Phase 1 welcome guide reappears on future
+        launches, and its contract is: the guide shows until the user clicks
+        "我用过了" (``_on_skip``).  Completing the Phase 2 tutorial must not
+        silently re-suppress the welcome guide — otherwise clicking "新手提示"
+        would not stick.
+        """
         if self._current_page >= 0:
             self._was_new_user = True
 
-        self._user_settings.has_seen_onboarding = True
         self.completed.emit()
         self.accept()
 

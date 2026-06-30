@@ -94,6 +94,29 @@ def test_manage_tasks_summary_uses_status_controls(qtbot):
     assert texts == ["running task", "finished task", "pending task"]
 
 
+def test_manage_tasks_task_title_is_bold(qtbot):
+    widget = ToolCallGroup()
+    qtbot.addWidget(widget)
+
+    widget.add_tool_call(
+        "manage_tasks",
+        {},
+        success=True,
+        duration_ms=10,
+        summary="<b>Task</b>\nTodo\n☐ pending task",
+    )
+
+    section_labels = [
+        label
+        for label in widget.findChildren(QLabel)
+        if label.objectName() == "taskSectionLabel"
+    ]
+
+    assert section_labels[0].text() == "Task"
+    assert section_labels[0].font().bold()
+    assert not section_labels[1].font().bold()
+
+
 def test_exec_detail_text_shrinks_in_narrow_panel(qtbot):
     widget = ToolCallGroup()
     qtbot.addWidget(widget)

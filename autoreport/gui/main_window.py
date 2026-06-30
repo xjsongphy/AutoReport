@@ -40,6 +40,7 @@ from ..interfaces.types import (
 from ..utils.agent_labels import get_agent_badge, get_agent_title
 from ..utils.editor_context import build_editor_context_message, build_editor_context_prompt
 from ..utils.logging_config import ui_logger
+from .dialogs import question_box, warning_box
 from .scale import dpi_scale
 from .theme import get_theme_colors, scrollbar_stylesheet
 from .title_bar import TitleBar
@@ -765,12 +766,11 @@ class MainWindow(QMainWindow):
 
         # Validate it looks like an AutoReport project; offer to scaffold if not.
         if not is_valid_project(folder):
-            reply = QMessageBox.question(
+            reply = question_box(
                 self,
                 "不是有效的项目",
                 f"'{folder.name}' 不是 AutoReport 项目。是否在该目录创建项目结构并打开？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.Yes,
+                default=QMessageBox.StandardButton.Yes,
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return
@@ -1180,12 +1180,11 @@ class MainWindow(QMainWindow):
         self._submit_coroutine(self.backend.interrupt_current_message(agent_type))
 
     def _on_rollback_requested(self, agent_type: str, checkpoint_id: str, row) -> None:
-        reply = QMessageBox.question(
+        reply = question_box(
             self,
             "Rollback",
             "Rollback files and conversation to before this message?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            default=QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
@@ -1201,7 +1200,7 @@ class MainWindow(QMainWindow):
             future.result()
         except Exception as exc:
             logger.warning("Rollback failed for {}: {}", agent_type, exc)
-            QMessageBox.warning(self, "Rollback Failed", str(exc))
+            warning_box(self, "Rollback Failed", str(exc))
             return
 
         self.file_tree.refresh()
@@ -1547,6 +1546,8 @@ class MainWindow(QMainWindow):
             return (None, None, None)
 
         def _rows(items: list[dict], title: str) -> list[str]:
+            if not items:
+                return []
             lines = [title]
             shown = 0
             for item in items:
@@ -1563,14 +1564,20 @@ class MainWindow(QMainWindow):
                 }.get(status, "☐")
                 lines.append(f"{marker} {brief}")
                 shown += 1
-            if shown == 0:
-                lines.append("—")
             return lines
 
         todolist = result.get("todolist")
         waitlist = result.get("waitlist")
         if isinstance(todolist, list) and isinstance(waitlist, list):
-            summary = "\n".join(["<b>Task</b>", *(_rows(todolist, "Todo")), "", *(_rows(waitlist, "Wait"))])
+            sections = [_rows(todolist, "Todo"), _rows(waitlist, "Wait")]
+            lines = ["<b>Task</b>"]
+            for section in sections:
+                if not section:
+                    continue
+                if len(lines) > 1:
+                    lines.append("")
+                lines.extend(section)
+            summary = "\n".join(lines)
             return (summary, None, False)
 
         ui_summary = str(result.get("_ui_summary", "") or "").strip()
@@ -1740,10 +1747,23 @@ class MainWindow(QMainWindow):
         self._conv_store.delete_session(session_id)
         self._clear_all_panels()
         self._load_conversations()
+        self._refresh_history_dropdown_if_open()
         logger.info("Deleted session: {}", session_id)
+
+    def _refresh_history_dropdown_if_open(self) -> None:
+        """Repopulate the history dropdown with fresh data if it is open.
+
+        Deleting a session mutates the store but the open dropdown is a static
+        snapshot, so it would otherwise still show the removed entry.
+        """
+        if self.agent_panel.is_history_dropdown_visible():
+            sessions = self._conv_store.get_sessions(self.current_agent_type)
+            current_id = self._conv_store.get_current_session_id(self.current_agent_type)
+            self.agent_panel.show_history_dropdown(sessions, current_id)
 
     def _on_rename_session(self, session_id: str, new_name: str) -> None:
         self._conv_store.rename_session(session_id, new_name)
+        self._refresh_history_dropdown_if_open()
         logger.info("Renamed session {} to {}", session_id, new_name)
 
     def _clear_all_panels(self) -> None:

@@ -946,12 +946,12 @@ class AgentPanel(QWidget):
         elapsed = self._thinking_elapsed_seconds()
         summary = f"Thought for {elapsed}s"
         detail = (self._thinking_detail or "").strip()
-        # Always complete the thinking row, even if empty
-        # This preserves timeline order and prevents spacing issues
-        row.set_bubble_title(summary)
-        row.mark_complete()
         if detail:
+            row.set_bubble_title(summary)
+            row.mark_complete()
             self.thinking_finished.emit(summary, detail, True)
+        else:
+            self._messages_area.remove_message_row(row)
         self._thinking_row = None
         self._thinking_started_at = None
         self._thinking_detail = ""
@@ -1212,6 +1212,9 @@ class AgentPanel(QWidget):
         self._history_dropdown.populate(sessions, current_id)
         self._history_show_pending = True
         QTimer.singleShot(0, self._show_history_dropdown_now)
+
+    def is_history_dropdown_visible(self) -> bool:
+        return self._history_dropdown.isVisible() or self._history_show_pending
 
     def _show_history_dropdown_now(self) -> None:
         if not self._history_show_pending:

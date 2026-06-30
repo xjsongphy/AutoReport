@@ -363,6 +363,10 @@ class ToolCallGroup(QWidget):
         label.setObjectName("taskSectionLabel")
         label.setTextFormat(Qt.TextFormat.PlainText)
         label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        if text.strip().lower() == "task":
+            font = label.font()
+            font.setBold(True)
+            label.setFont(font)
         self._task_board_layout.addWidget(label)
 
     def _add_task_row(self, status: str, text: str) -> None:
