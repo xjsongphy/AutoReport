@@ -1,4 +1,5 @@
-﻿from pathlib import Path
+﻿import json
+from pathlib import Path
 
 from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
 from PyQt6.QtGui import QColor, QPixmap, QWheelEvent
@@ -456,6 +457,56 @@ def test_horizontal_pixel_delta_on_tab_bar_scrolls_tabs(qtbot, tmp_path: Path) -
     assert widget._unified_tab_bar.currentIndex() == before_index
     assert scroll_bar.value() != before_scroll
 
+
+
+def test_drag_reordering_tab_persists_and_does_not_snap_back(qtbot, tmp_path: Path) -> None:
+    first = tmp_path / "first.txt"
+    second = tmp_path / "second.txt"
+    third = tmp_path / "third.txt"
+    for f in (first, second, third):
+        f.write_text(f.name, encoding="utf-8")
+
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+    for f in (first, second, third):
+        widget.load_file(f)
+
+    bar = widget._unified_tab_bar
+    assert [bar.tabData(i) for i in range(bar.count())] == [
+        str(first.resolve()),
+        str(second.resolve()),
+        str(third.resolve()),
+    ]
+
+    # Simulate a drag that moves tab 0 to the end. QTabBar.emit tabIndexMoved
+    # fires the `tabMoved` signal just like a real mouse drag does.
+    bar.moveTab(0, bar.count() - 1)
+
+    # The owning panel's source-of-truth order must mirror the new arrangement…
+    assert widget._panels[0]._tab_order == [
+        str(second.resolve()),
+        str(third.resolve()),
+        str(first.resolve()),
+    ]
+    # …and so must the hidden per-panel tab bar (index alignment).
+    assert [widget._panels[0]._tab_bar.tabData(i) for i in range(widget._panels[0]._tab_bar.count())] == [
+        str(second.resolve()),
+        str(third.resolve()),
+        str(first.resolve()),
+    ]
+
+    # A subsequent sync (the thing that used to snap the tab back) must preserve
+    # the reordered arrangement.
+    widget._sync_tabs_from_panels()
+    assert [bar.tabData(i) for i in range(bar.count())] == [
+        str(second.resolve()),
+        str(third.resolve()),
+        str(first.resolve()),
+    ]
+
+    # And the new order is persisted to disk.
+    saved = json.loads(widget._tab_state_path.read_text(encoding="utf-8"))
+    assert [Path(p).name for p in saved["tabs"]] == ["second.txt", "third.txt", "first.txt"]
 
 
 def test_embedded_image_label_does_not_upscale_small_source(qtbot) -> None:

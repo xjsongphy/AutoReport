@@ -60,7 +60,7 @@ class StatusIndicator(QPushButton):
         c = get_theme_colors()
         colors = {
             "idle": (c["secondaryBtnBg"], c["status_idle"]),
-            "thinking": (c["surface"], c["status_think"]),
+            "thinking": (c["surface"], c["buttonBlue"]),
             "tool": (c["surface"], c["status_tool"]),
             "error": (c["warningBg"], c["status_error"]),
             "debug": (c["surface"], c["status_debug"]),

@@ -183,7 +183,7 @@ class TitleBar(QWidget):
                 min-height: {max(14, self._menu_height - int(10 * s))}px;
             }}
             #titleBarMenuBar::item:selected {{
-                background-color: {c["selection"]};
+                background-color: {c["selectionBlue"]};
             }}
             #titleBarMenuBar QMenu {{
                 background-color: {c["context_bg"]};
@@ -197,7 +197,7 @@ class TitleBar(QWidget):
                 color: {c["fg"]};
             }}
             #titleBarMenuBar QMenu::item:selected {{
-                background-color: {c["selection"]};
+                background-color: {c["selectionBlue"]};
             }}
             #titleBarControls {{
                 background-color: {c["titlebar_bg"]};

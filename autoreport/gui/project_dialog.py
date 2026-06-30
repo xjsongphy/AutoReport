@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 
 from ..config import ConfigManager
 from ..core.recent_projects import RecentProjects
+from .dialogs import critical_box, question_box
 from .theme import format_stylesheet, get_theme_colors, is_dark_mode
 from .widgets.ui_utils import (
     filled_button_qss,
@@ -28,7 +29,26 @@ from .widgets.ui_utils import (
     secondary_filled_button_qss,
 )
 
-PROJECT_DIRECTORIES = ["data", "data/processed", "references", "theory", "code", "tex"]
+PROJECT_DIRECTORIES = ["Data", "Data/Processed", "References", "Theory", "Code", "Outline", "Tex"]
+
+# Markers whose presence indicates an existing AutoReport project workspace.
+_PROJECT_MARKERS = ["data", "references", "theory", "code", "tex"]
+
+
+def is_valid_project(path: Path) -> bool:
+    """True if ``path`` looks like an AutoReport project workspace."""
+    for dir_name in _PROJECT_MARKERS:
+        if (path / dir_name).exists():
+            return True
+    return False
+
+
+def create_project_structure(path: Path) -> None:
+    """Create the fixed project directory layout under ``path``."""
+    for dir_name in PROJECT_DIRECTORIES:
+        (path / dir_name).mkdir(parents=True, exist_ok=True)
+    logger.debug("Created project structure in: {}", path)
+
 
 
 class _RecentItem(QWidget):
@@ -86,10 +106,19 @@ class ProjectDialog(QDialog):
         self.config_manager = config_manager
         self._selected_project: Path | None = None
         self._recent = RecentProjects()
+        # Set True when the user re-opens the welcome guide via the "新手提示"
+        # button and chooses the full tutorial there.  Propagated to run_gui so
+        # the post-project tutorial (Phase 2) still shows in that case.
+        self._wants_tutorial = False
 
         self._setup_ui()
         self._apply_style()
         self._load_recent_projects()
+
+    @property
+    def wants_tutorial(self) -> bool:
+        """True if the user requested the full tutorial from this dialog."""
+        return self._wants_tutorial
 
     def _setup_ui(self) -> None:
         self.setWindowTitle("AutoReport")
@@ -182,11 +211,16 @@ class ProjectDialog(QDialog):
         footer.setObjectName("footer")
         footer_layout = QHBoxLayout(footer)
         footer_layout.setContentsMargins(40, 12, 40, 16)
+        tutorial_btn = QPushButton("新手提示")
+        tutorial_btn.setObjectName("tutorialBtn")
+        tutorial_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        tutorial_btn.clicked.connect(self._on_show_tutorial)
+        footer_layout.addWidget(tutorial_btn)
+        footer_layout.addStretch()
         cancel_btn = QPushButton("退出")
         cancel_btn.setObjectName("cancelBtn")
         cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         cancel_btn.clicked.connect(self.reject)
-        footer_layout.addStretch()
         footer_layout.addWidget(cancel_btn)
         root.addWidget(footer)
 
@@ -206,7 +240,7 @@ class ProjectDialog(QDialog):
             }}
             #subtitle {{
                 font-size: 13px;
-                color: {colors["subtitleFg"]};
+                color: {colors["muted"]};
                 line-height: 1.5;
             }}
             #actionBar {{
@@ -214,9 +248,9 @@ class ProjectDialog(QDialog):
             }}
             {filled_button_qss(
                 "#primaryBtn",
-                bg=colors["primaryBtnBg"],
+                bg=colors["buttonBlue"],
                 fg=colors["primaryBtnFg"],
-                hover_bg=colors["primaryBtnHover"],
+                hover_bg=colors["buttonBlue"],
                 disabled_bg=colors["border"],
                 disabled_fg=colors["muted"],
                 radius=colors["radius_sm"],
@@ -231,7 +265,7 @@ class ProjectDialog(QDialog):
             #sectionLabel {{
                 font-size: 12px;
                 font-weight: {colors["fw_semibold"]};
-                color: {colors["sectionFg"]};
+                color: {colors["fg"]};
                 text-transform: uppercase;
                 letter-spacing: 0.5px;
             }}
@@ -277,6 +311,7 @@ class ProjectDialog(QDialog):
                 background-color: {colors["surface"]};
             }}
             {ghost_button_qss("#cancelBtn")}
+            {ghost_button_qss("#tutorialBtn")}
             QScrollArea {{
                 border: none;
             }}
@@ -290,10 +325,7 @@ class ProjectDialog(QDialog):
             self._add_project(path)
 
     def _is_valid_project(self, path: Path) -> bool:
-        for dir_name in ["data", "references", "theory", "code", "tex"]:
-            if (path / dir_name).exists():
-                return True
-        return False
+        return is_valid_project(path)
 
     def _add_project(self, path: Path) -> None:
         for i in range(self._list_layout.count()):
@@ -330,6 +362,22 @@ class ProjectDialog(QDialog):
         dialog = ConfigDialog(self.config_manager, parent=self)
         dialog.exec()
 
+    def _on_show_tutorial(self) -> None:
+        """Re-open the pre-project welcome guide on user request.
+
+        Clicking "新手提示" overrides persistence: it clears the
+        ``has_seen_onboarding`` flag so the welcome guide shows again by default
+        on subsequent launches — until the user clicks "我用过了" inside it,
+        which re-sets the flag.  If the user then picks the full tutorial, the
+        post-project tutorial (Phase 2) will also run after a project opens.
+        """
+        from ..core.user_settings import UserSettings
+        from .onboarding import show_pre_project_guide
+
+        UserSettings().has_seen_onboarding = False
+        if show_pre_project_guide(parent=self, force=True):
+            self._wants_tutorial = True
+
     def _on_new_project(self) -> None:
         dialog = QFileDialog(self)
         dialog.setFileMode(QFileDialog.FileMode.Directory)
@@ -338,11 +386,10 @@ class ProjectDialog(QDialog):
         if dialog.exec():
             path = Path(dialog.selectedFiles()[0])
             if any(path.iterdir()):
-                reply = QMessageBox.question(
+                reply = question_box(
                     self, "目录不为空",
                     f"'{path.name}' 不为空。是否在此目录中创建项目结构？",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.Yes,
+                    default=QMessageBox.StandardButton.Yes,
                 )
                 if reply != QMessageBox.StandardButton.Yes:
                     return
@@ -351,7 +398,7 @@ class ProjectDialog(QDialog):
                 self._create_project_structure(path)
             except OSError as e:
                 logger.error("Failed to create project: {}", e)
-                QMessageBox.critical(self, "创建失败", f"无法创建项目结构：\n{e}")
+                critical_box(self, "创建失败", f"无法创建项目结构：\n{e}")
                 return
 
             self._recent.add(path)
@@ -367,18 +414,17 @@ class ProjectDialog(QDialog):
             path = Path(dialog.selectedFiles()[0])
 
             if not self._is_valid_project(path):
-                reply = QMessageBox.question(
+                reply = question_box(
                     self, "不是有效的项目",
                     f"'{path.name}' 不是 AutoReport 项目。是否创建项目结构？",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.Yes,
+                    default=QMessageBox.StandardButton.Yes,
                 )
                 if reply == QMessageBox.StandardButton.Yes:
                     try:
                         self._create_project_structure(path)
                     except OSError as e:
                         logger.error("Failed to create project: {}", e)
-                        QMessageBox.critical(self, "创建失败", f"无法创建项目结构：\n{e}")
+                        critical_box(self, "创建失败", f"无法创建项目结构：\n{e}")
                         return
                     self._recent.add(path)
                     self._add_project(path)
@@ -390,9 +436,7 @@ class ProjectDialog(QDialog):
             self._select_project(path)
 
     def _create_project_structure(self, path: Path) -> None:
-        for dir_name in PROJECT_DIRECTORIES:
-            (path / dir_name).mkdir(parents=True, exist_ok=True)
-        logger.debug("Created project structure in: {}", path)
+        create_project_structure(path)
 
     def get_selected_project(self) -> Path | None:
         return self._selected_project

@@ -19,7 +19,7 @@ from PyQt6.QtCore import QEvent, QPoint, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QPainterPath, QPalette, QRegion
 from PyQt6.QtWidgets import QApplication, QAbstractItemView, QFrame, QListWidget, QWidget
 
-from ..theme import get_theme_colors
+from ..theme import get_theme_colors, scrollbar_stylesheet
 
 
 class BasePopupDropdown(QListWidget):
@@ -160,7 +160,7 @@ class BasePopupDropdown(QListWidget):
                 border-radius: {item_radius};
             }}
             QListWidget#{self.objectName()}::item:selected {{
-                background-color: {c["selection"]};
+                background-color: {c["selectionBlue"]};
                 color: {c["fg"]};
             }}
             QListWidget#{self.objectName()}::item:hover {{
@@ -168,38 +168,21 @@ class BasePopupDropdown(QListWidget):
                 color: {c["fg"]};
             }}
             QListWidget#{self.objectName()}::item:selected:hover {{
-                background-color: {c["selection"]};
+                background-color: {c["selectionBlue"]};
                 color: {c["fg"]};
                 border-radius: {item_radius};
             }}
-            QListWidget#{self.objectName()} QScrollBar:vertical {{
-                background: transparent;
-                width: 10px;
-                margin: 4px 2px 4px 0px;
-                border: none;
-                border-radius: 0;
-            }}
-            QListWidget#{self.objectName()} QScrollBar::handle:vertical {{
-                background: {c["scrollbar"]};
-                border: none;
-                min-height: 28px;
-                border-radius: {item_radius};
-                margin: 2px 2px;
-            }}
-            QListWidget#{self.objectName()} QScrollBar::handle:vertical:hover {{
-                background: {c["scrollbar_hover"]};
-                border: none;
-                border-radius: {item_radius};
-            }}
-            QListWidget#{self.objectName()} QScrollBar::add-line:vertical,
-            QListWidget#{self.objectName()} QScrollBar::sub-line:vertical,
-            QListWidget#{self.objectName()} QScrollBar::add-page:vertical,
-            QListWidget#{self.objectName()} QScrollBar::sub-page:vertical {{
-                background: transparent;
-                border: none;
-                border-radius: 0;
-                height: 0px;
-            }}
+            {scrollbar_stylesheet(
+                selector=f"QListWidget#{self.objectName()} QScrollBar",
+                orientation="vertical",
+                background_color="transparent",
+                thickness="10px",
+                min_handle_extent="28px",
+                radius=item_radius,
+                margin="4px 2px 4px 0px",
+                handle_margin="2px 2px",
+                colors=c,
+            )}
         """)
         self._update_rounded_mask()
 

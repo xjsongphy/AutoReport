@@ -67,31 +67,38 @@ def test_subscribes_to_restart(manager):
 def test_create_tools_for_main(manager):
     tools = manager._create_tools_for_agent(AgentType.MAIN)
     tool_names = {t.name for t in tools.get_all().values()}
-    assert "read_file" in tool_names
+    assert "read" in tool_names
     assert "write_file" in tool_names
-    assert "bash" in tool_names
+    # MAIN delegates — it does not get the exec/shell tool.
+    assert "exec" not in tool_names
+    # MAIN is the only agent that can dispatch to sub-agents.
+    assert "send_to_agent" in tool_names
+    assert "report_issue" not in tool_names
 
 
 def test_create_tools_for_data_analysis(manager):
     tools = manager._create_tools_for_agent(AgentType.DATA_ANALYSIS)
     tool_names = {t.name for t in tools.get_all().values()}
-    assert "bash" in tool_names
+    # Shell execution tool is now named "exec" (formerly "bash").
+    assert "exec" in tool_names
     assert "parse_pdf" in tool_names
 
 
 def test_create_tools_for_theory(manager):
     tools = manager._create_tools_for_agent(AgentType.THEORY)
     tool_names = {t.name for t in tools.get_all().values()}
-    assert "read_file" in tool_names
+    assert "read" in tool_names
     assert "write_file" in tool_names
-    assert "bash" not in tool_names
+    # THEORY has no shell execution tool.
+    assert "exec" not in tool_names
     assert "parse_pdf" in tool_names
 
 
 def test_create_tools_for_plotting(manager):
     tools = manager._create_tools_for_agent(AgentType.PLOTTING)
     tool_names = {t.name for t in tools.get_all().values()}
-    assert "bash" in tool_names
+    assert "exec" in tool_names
+    # PLOTTING never reads reference PDFs directly.
     assert "parse_pdf" not in tool_names
 
 

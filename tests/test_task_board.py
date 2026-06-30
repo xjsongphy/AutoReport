@@ -49,6 +49,17 @@ class TestTaskBoard:
         assert board.get_task(t2.task_id, target_agent=AgentType.PLOTTING).status == TaskStatus.COMPLETED
         assert board.get_task(t1.task_id, target_agent=AgentType.MAIN).status == TaskStatus.COMPLETED
 
+    def test_local_todo_not_in_own_waitlist(self):
+        """A local todo (source == target) must not appear in the agent's own
+        waitlist — otherwise the agent sees 'waiting on myself' forever."""
+        board = TaskBoard()
+        local = board.create_task(AgentType.MAIN, AgentType.MAIN, "audit project")
+        assert local in board.get_todolist(AgentType.MAIN)
+        assert local not in board.get_waitlist(AgentType.MAIN)
+        # A genuinely delegated task still waits correctly
+        delegated = board.create_task(AgentType.MAIN, AgentType.THEORY, "write theory")
+        assert delegated in board.get_waitlist(AgentType.MAIN)
+
     def test_completed_waitlist_item_becomes_source_todo_view(self):
         board = TaskBoard()
         delegated = board.create_task(AgentType.MAIN, AgentType.PLOTTING, "create plot")

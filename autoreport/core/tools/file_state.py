@@ -113,7 +113,7 @@ class FileStateManager:
                 "is_stale": False,
                 "warning": (
                     f"⚠️ You are about to modify '{file_path.name}' without having read it first. "
-                    f"Use read_file('{display_path}') first to "
+                    f"Use read('{display_path}') first to "
                     f"see the current content and avoid accidentally overwriting changes."
                 ),
                 "state": None,
@@ -128,7 +128,7 @@ class FileStateManager:
                     "warning": (
                         f"⚠️ '{file_path.name}' has changed since you last read it "
                         f"(mtime or content hash differ). "
-                        f"Use read_file to see the latest version before editing."
+                        f"Use read to see the latest version before editing."
                     ),
                     "state": recorded,
                 }
@@ -138,7 +138,7 @@ class FileStateManager:
                 "is_stale": True,
                 "warning": (
                     f"⚠️ '{file_path.name}' no longer exists on disk since you read it. "
-                    f"Use list_dir or read_file to verify current state."
+                    f"Use read to verify current state."
                 ),
                 "state": recorded,
             }

@@ -95,28 +95,71 @@ def user_visible_content(content: str) -> str:
     return str(content or "")
 
 
-def build_editor_context_message(context: dict[str, Any] | None, bubble_text: str) -> str:
-    """Build wrapped user text from structured editor context metadata."""
+def _build_editor_context_text(
+    context: dict[str, Any] | None,
+    bubble_text: str,
+    *,
+    include_relevance_note: bool,
+    body_separator: str,
+) -> str:
     text = str(bubble_text or "").strip()
     if not context:
         return text
 
     context_type = str(context.get("type", "")).strip().lower()
     file_path = str(context.get("file", "")).strip()
+    relevance_note = (
+        "This may or may not be related to the current task.\n"
+        if include_relevance_note else ""
+    )
+
     if context_type == "selection":
-        selected = str(context.get("selected_lines", "")).strip()
+        selected = str(
+            context.get("selected_lines")
+            or context.get("start_line")
+            or ""
+        ).strip()
         if file_path and selected:
+            body = f"{body_separator}{text}" if text else ""
             return (
                 "Editor context: selection\n"
                 f"File: {file_path}\n"
-                f"Selected lines: {selected}\n\n"
-                f"{text}"
+                f"Selected lines: {selected}\n"
+                f"{relevance_note}"
+                f"{body}"
             ).strip()
     elif context_type == "file":
         if file_path:
+            body = f"{body_separator}{text}" if text else ""
             return (
                 "Editor context: file\n"
-                f"Current file: {file_path}\n\n"
-                f"{text}"
+                f"Current file: {file_path}\n"
+                f"{relevance_note}"
+                f"{body}"
             ).strip()
     return text
+
+
+def build_editor_context_message(context: dict[str, Any] | None, bubble_text: str) -> str:
+    """Build wrapped user text from structured editor context metadata."""
+    return _build_editor_context_text(
+        context,
+        bubble_text,
+        include_relevance_note=False,
+        body_separator="\n\n",
+    )
+
+
+def build_editor_context_prompt(
+    context: dict[str, Any] | None,
+    bubble_text: str = "",
+    *,
+    include_relevance_note: bool = True,
+) -> str:
+    """Build the backend-facing editor-context prompt from structured metadata."""
+    return _build_editor_context_text(
+        context,
+        bubble_text,
+        include_relevance_note=include_relevance_note,
+        body_separator="\n",
+    )

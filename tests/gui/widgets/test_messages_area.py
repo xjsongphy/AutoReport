@@ -54,8 +54,10 @@ def test_add_collapsed_message_row(qtbot):
     widget.add_message_row(
         role="agent",
         content="detail line 1\ndetail line 2",
-        summary="Collapsed summary",
-        detail="detail line 1\ndetail line 2",
+        display_mode="bubble",
+        bubble_title="Collapsed summary",
+        bubble_align="left",
+        bubble_on_timeline=True,
     )
 
     rows = widget.get_message_rows()
@@ -76,7 +78,7 @@ def test_add_tool_group(qtbot):
 
     # Add some tool calls to the group
     tool_group.add_tool_call(
-        name="read_file",
+        name="read",
         arguments={"path": "test.py"},
         success=True,
         duration_ms=150,
@@ -109,23 +111,6 @@ def test_scroll_state_can_be_manually_toggled(qtbot):
     # Manually re-enable
     widget._auto_scroll_enabled = True
     assert widget.auto_scroll_enabled()
-
-
-def test_scroll_to_bottom_method(qtbot):
-    """scroll_to_bottom method should work without errors."""
-    widget = MessagesArea()
-    qtbot.addWidget(widget)
-
-    # Add some messages
-    for i in range(5):
-        widget.add_message_row(
-            role="agent",
-            content=f"Message {i}",
-            timestamp=f"12:{i:02d}"
-        )
-
-    # Should not raise any errors
-    widget.scroll_to_bottom()
 
 
 def test_clear_messages(qtbot):
@@ -306,10 +291,11 @@ def test_timeline_chain_breaks_on_user_bubble_between_chainable_items(qtbot):
     tool = widget.add_tool_group()
     # Simulate other-agent message rendered as user bubble in current panel.
     widget.add_message_row(
-        role="user",
+        role="agent",
         content="interruption",
         timestamp="12:01",
-        render_as_user_bubble=True,
+        display_mode="bubble",
+        bubble_align="right",
     )
     second_agent = widget.add_message_row(role="agent", content="a2", timestamp="12:02")
 

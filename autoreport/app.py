@@ -1,6 +1,9 @@
 """Main application entry point."""
 
 import asyncio
+import importlib.resources
+import os
+import shutil
 import signal
 import sys
 from pathlib import Path
@@ -9,7 +12,6 @@ from typing import Annotated, Any, Dict
 # Force UTF-8 encoding for all I/O operations
 # This fixes Chinese character display issues on Windows systems
 if sys.platform == "win32":
-    import os
     os.environ["PYTHONIOENCODING"] = "utf-8"
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -25,7 +27,8 @@ from .config import ConfigManager
 from .core.loops import LoopManager, MessageBus
 from .gui import MainWindow
 from .interfaces.protocol import BackendAPI
-from .utils import log_exception, setup_exception_handler, setup_logging
+from .utils import add_project_logging, log_exception, setup_exception_handler, setup_logging
+from .utils.editor_context import build_editor_context_prompt
 
 console = Console()
 app = typer.Typer(
@@ -36,46 +39,139 @@ app = typer.Typer(
 )
 
 
-class _FilteredStderr:
-    """Filter known noisy platform stderr lines while preserving real errors."""
-
-    _BLOCK_PATTERNS = (
-        "IMKCFRunLoopWakeUpReliable",
-    )
-
-    def __init__(self, wrapped):
-        self._wrapped = wrapped
-        self._buf = ""
-
-    def write(self, data):
-        if not isinstance(data, str):
-            data = str(data)
-        self._buf += data
-        while "\n" in self._buf:
-            line, self._buf = self._buf.split("\n", 1)
-            if any(pat in line for pat in self._BLOCK_PATTERNS):
-                continue
-            self._wrapped.write(line + "\n")
-        return len(data)
-
-    def flush(self):
-        if self._buf:
-            line = self._buf
-            self._buf = ""
-            if not any(pat in line for pat in self._BLOCK_PATTERNS):
-                self._wrapped.write(line)
-        self._wrapped.flush()
-
-    def isatty(self):
-        return self._wrapped.isatty() if hasattr(self._wrapped, "isatty") else False
+# Known noisy macOS platform lines (byte patterns) to drop from stderr.
+_BLOCK_STDERR_PATTERNS = (b"IMKCFRunLoopWakeUpReliable",)
 
 
 def _install_stderr_filter() -> None:
+    """Redirect OS-level stderr through a line filter on macOS.
+
+    Qt (``qWarning``) and macOS system frameworks (IMK / ``NSLog``) write
+    directly to the stderr file descriptor, bypassing Python's ``sys.stderr``
+    object — so wrapping ``sys.stderr`` cannot suppress them.  We instead point
+    fd 2 at a pipe and filter the byte stream on a background thread, dropping
+    known noisy platform lines before forwarding survivors to the real stderr.
+
+    Tool subprocesses capture their own stderr (``stderr=PIPE``), so they are
+    unaffected.  A detached relaunch child inherits fd 2 (this pipe); once the
+    parent exits the child's forward target is gone — on that broken-pipe error
+    the pump keeps draining-and-discarding so the child never blocks on a full
+    pipe (it simply stops forwarding, which is harmless for a relaunched app).
+    """
+    import os
+    import threading
+
     if sys.platform != "darwin":
         return
-    if isinstance(sys.stderr, _FilteredStderr):
-        return
-    sys.stderr = _FilteredStderr(sys.stderr)
+
+    try:
+        real_stderr_fd = os.dup(2)
+        read_fd, write_fd = os.pipe()
+        os.dup2(write_fd, 2)
+        os.close(write_fd)
+    except OSError:
+        return  # Don't let filter setup break app startup.
+
+    def _pump() -> None:
+        buf = b""
+        forward_dead = False
+        while True:
+            try:
+                chunk = os.read(read_fd, 4096)
+            except OSError:
+                break
+            if not chunk:
+                break
+            if forward_dead:
+                continue  # keep draining so the pipe can never fill / block.
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                if any(pat in line for pat in _BLOCK_STDERR_PATTERNS):
+                    continue
+                try:
+                    os.write(real_stderr_fd, line + b"\n")
+                except OSError:
+                    forward_dead = True
+                    buf = b""
+                    break
+        # Flush any trailing partial line that lacks a newline.
+        if buf and not forward_dead and not any(pat in buf for pat in _BLOCK_STDERR_PATTERNS):
+            try:
+                os.write(real_stderr_fd, buf)
+            except OSError:
+                pass
+        try:
+            os.close(read_fd)
+        except OSError:
+            pass
+
+    threading.Thread(target=_pump, daemon=True, name="stderr-filter").start()
+
+
+def _copy_builtin_templates(workspace: Path) -> None:
+    """Copy built-in LaTeX template files to Tex/ on first project open.
+
+    Only copies files that don't already exist — user or agent modifications
+    are never overwritten.  User-provided templates in References/ are
+    handled by the Report Agent at writing time (see report_agent.md).
+
+    Args:
+        workspace: Project workspace path.
+
+    Raises:
+        RuntimeError: If critical template file (main.tex) fails to copy.
+    """
+    tex_dir = workspace / "tex"
+    template_root = importlib.resources.files("autoreport.templates.reports")
+
+    # main.tex (PKUMpLtX-based template) - CRITICAL for LaTeX compilation
+    dst_tex = tex_dir / "main.tex"
+    if not dst_tex.exists():
+        src = template_root / "template_mpl.tex"
+        if src.is_file():
+            try:
+                shutil.copy2(str(src), str(dst_tex))
+                logger.info("Copied built-in template → Tex/main.tex")
+            except OSError as e:
+                logger.error("Failed to copy built-in template: {}", e)
+                raise RuntimeError(
+                    f"Failed to copy critical template file main.tex: {e}. "
+                    "LaTeX compilation will not work without this file."
+                ) from e
+        else:
+            logger.warning("Built-in template template_mpl.tex not found in package")
+
+    # mpltx.cls (document class, must be alongside main.tex for xelatex) - CRITICAL
+    dst_cls = tex_dir / "mpltx.cls"
+    if not dst_cls.exists():
+        src = template_root / "mpltx.cls"
+        if src.is_file():
+            try:
+                shutil.copy2(str(src), str(dst_cls))
+                logger.info("Copied built-in .cls → Tex/mpltx.cls")
+            except OSError as e:
+                logger.error("Failed to copy built-in .cls: {}", e)
+                raise RuntimeError(
+                    f"Failed to copy critical class file mpltx.cls: {e}. "
+                    "LaTeX compilation will not work without this file."
+                ) from e
+        else:
+            logger.warning("Built-in class mpltx.cls not found in package")
+
+    # requirements.md (writing style guide, built-in only) - OPTIONAL
+    dst_req = tex_dir / "requirements.md"
+    if not dst_req.exists():
+        src = template_root / "requirements.md"
+        if src.is_file():
+            try:
+                shutil.copy2(str(src), str(dst_req))
+                logger.debug("Copied built-in requirements.md")
+            except OSError as e:
+                logger.warning("Failed to copy requirements.md: {}", e)
+                # Non-critical, don't raise exception
+        else:
+            logger.debug("Built-in requirements.md not found in package")
 
 
 class AutoReportApp:
@@ -114,6 +210,9 @@ class AutoReportApp:
         # Use provided workspace
         workspace = Path(workspace).resolve()
 
+        # Add project-bound logging (in addition to global ./logs/)
+        add_project_logging(workspace)
+
         # Create project structure if needed
         self._ensure_project_structure(workspace)
 
@@ -148,11 +247,16 @@ class AutoReportApp:
             workspace / "references",
             workspace / "theory",
             workspace / "code",
+            workspace / "Outline",
             workspace / "tex",
         ]
 
         for dir_path in project_dirs:
             dir_path.mkdir(parents=True, exist_ok=True)
+
+        # Copy built-in LaTeX template files to tex/ (only if not already present).
+        # mpltx.cls must be in the same directory as main.tex for xelatex to find it.
+        _copy_builtin_templates(workspace)
 
         logger.debug("Ensured project structure in: {}", workspace)
 
@@ -182,7 +286,7 @@ class AutoReportApp:
             QApplication.closeAllWindows()
             self._qt_app.quit()
 
-    def run_gui(self, qt_app: QApplication) -> None:
+    def run_gui(self, qt_app: QApplication, project: Path | None = None) -> None:
         """Run GUI application."""
         import threading
 
@@ -208,30 +312,44 @@ class AutoReportApp:
         # QApplication already created in main(), get the instance
         app = QApplication.instance()
 
-        # Show project selection dialog first
-        from .gui.project_dialog import ProjectDialog
-
-        project_dialog = ProjectDialog(self.config_manager)
-
-        # Store workspace path
+        wants_tutorial = False
         workspace: Path | None = None
 
-        def on_project_selected(path: Path):
-            nonlocal workspace
-            workspace = path
+        if project is not None:
+            # Direct project open (e.g. workspace switch relaunch):
+            # skip welcome guide and project selection dialog.
+            workspace = Path(project).expanduser().resolve()
+            logger.info("Opening project directly: {}", workspace)
+        else:
+            # ── Phase 1: Pre-project welcome guide ──
+            from .gui.onboarding import show_pre_project_guide
+            wants_tutorial = show_pre_project_guide()
 
-        project_dialog.project_selected.connect(on_project_selected)
+            # Show project selection dialog first
+            from .gui.project_dialog import ProjectDialog
 
-        # Show project dialog
-        result = project_dialog.exec()
+            project_dialog = ProjectDialog(self.config_manager)
 
-        if result != QDialog.DialogCode.Accepted:
-            logger.info("Project selection cancelled")
-            sys.exit(0)
+            def on_project_selected(path: Path):
+                nonlocal workspace
+                workspace = path
 
-        if workspace is None:
-            logger.error("No workspace selected")
-            sys.exit(1)
+            project_dialog.project_selected.connect(on_project_selected)
+
+            # Show project dialog
+            result = project_dialog.exec()
+
+            # The "新手提示" button may have re-enabled the tutorial from inside
+            # the project dialog; honor that choice for the Phase 2 tutorial.
+            wants_tutorial = wants_tutorial or project_dialog.wants_tutorial
+
+            if result != QDialog.DialogCode.Accepted:
+                logger.info("Project selection cancelled")
+                sys.exit(0)
+
+            if workspace is None:
+                logger.error("No workspace selected")
+                sys.exit(1)
 
         # Create a dedicated async event loop for the backend
         self._async_loop = asyncio.new_event_loop()
@@ -269,6 +387,11 @@ class AutoReportApp:
         self.main_window.set_async_loop(self._async_loop)
         self.main_window.prepare_initial_render()
         self.main_window.show()
+
+        # ── Phase 2: Post-project tutorial (only if user chose "new user" in Phase 1) ──
+        if wants_tutorial:
+            from .gui.onboarding import show_onboarding
+            show_onboarding(self.main_window)
 
         exit_code = app.exec()
 
@@ -354,7 +477,7 @@ class BackendAPIImpl(BackendAPI):
         agent_type: str,
     ) -> None:
         """Send file context to an agent as system message (invisible to user)."""
-        from .interfaces.types import AgentType
+        from .interfaces.types import AgentType, UserMessage
 
         # Map string to AgentType enum
         agent_type_map = {
@@ -370,22 +493,30 @@ class BackendAPIImpl(BackendAPI):
         # Format file context as system message.
         # Keep context strictly scoped to the attachment shown in agent composer.
         if file_context.get("type") == "selection":
-            fp = file_context.get("file", "")
-            s = file_context.get("start_line", "")
-            e = file_context.get("end_line", "")
+            context_msg = build_editor_context_prompt(
+                {
+                    "type": "selection",
+                    "file": file_context.get("file", ""),
+                    "selected_lines": f"{file_context.get('start_line', '')}-{file_context.get('end_line', '')}",
+                },
+                "",
+            )
             context_msg = (
-                "Editor context: selection\n"
-                f"File: {fp}\n"
-                f"Selected lines: {s}-{e}\n"
+                f"{context_msg}\n"
                 "Constraint: selected text is not attached; do not infer or list other open tabs.\n"
-            )
+            ).strip()
         elif file_context.get("type") == "file":
-            fp = file_context.get("file", "")
-            context_msg = (
-                "Editor context: file\n"
-                f"Current file: {fp}\n"
-                "Constraint: do not infer or list other open tabs.\n"
+            context_msg = build_editor_context_prompt(
+                {
+                    "type": "file",
+                    "file": file_context.get("file", ""),
+                },
+                "",
             )
+            context_msg = (
+                f"{context_msg}\n"
+                "Constraint: do not infer or list other open tabs.\n"
+            ).strip()
         else:
             return
 
@@ -558,6 +689,13 @@ def main(
             help="输出 DEBUG 级别调试信息",
         ),
     ] = False,
+    project: Annotated[
+        Path | None,
+        typer.Option(
+            "--project", "-p",
+            help="直接打开指定项目目录（跳过项目选择对话框，用于切换工作区）",
+        ),
+    ] = None,
 ) -> None:
     """AutoReport - 基于 Agent 的自动化物理实验报告撰写系统"""
     _install_stderr_filter()
@@ -625,7 +763,7 @@ def main(
             raise typer.Exit(code=1)
 
     # Run GUI (includes project selection and startup)
-    app_inst.run_gui(qt_app)
+    app_inst.run_gui(qt_app, project=project)
 
     # Shutdown
     try:

@@ -580,8 +580,6 @@ def _apply_unified_diff(original: str, diff_text: str | None) -> str:
 
     diff_lines = diff_text.splitlines(keepends=True)
     # Parse unified diff and apply
-    # Using difflib's built-in patch capability
-    patches: list[tuple[int, int, list[str]]] = []  # (start, end, new_lines)
 
     i = 0
     while i < len(diff_lines):
@@ -601,7 +599,6 @@ def _apply_unified_diff(original: str, diff_text: str | None) -> str:
                 from_count = int(from_parts[1]) if len(from_parts) > 1 else 0
 
                 # Read hunk body
-                hunk_remove: list[str] = []
                 hunk_add: list[str] = []
                 i += 1
                 while i < len(diff_lines) and not diff_lines[i].startswith("@@"):
@@ -610,12 +607,11 @@ def _apply_unified_diff(original: str, diff_text: str | None) -> str:
                         i += 1
                         continue
                     if dl.startswith("-"):
-                        hunk_remove.append(dl[1:])  # strip leading '-'
+                        pass  # removal line — strip handled by range below
                     elif dl.startswith("+"):
                         hunk_add.append(dl[1:])  # strip leading '+'
                     else:
                         # Context line - strip leading space before appending
-                        hunk_remove.append(dl[1:] if len(dl) > 0 else dl)
                         hunk_add.append(dl[1:] if len(dl) > 0 else dl)
                     i += 1
 

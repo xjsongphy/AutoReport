@@ -176,9 +176,15 @@ class TaskBoard:
         return merged
 
     def get_waitlist(self, agent_type: AgentType, session_id: str | None = None) -> list[TaskItem]:
+        # Waitlist = tasks this agent delegated to *another* agent and is still
+        # waiting on. A local todo (source == target == self) is the agent's own
+        # work and belongs only in the todolist — never in its own waitlist,
+        # otherwise the agent sees "waiting on myself" and can never clear it.
         return [
             t for t in self._tasks
-            if t.source_agent == agent_type and t.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS)
+            if t.source_agent == agent_type
+            and t.target_agent != agent_type
+            and t.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS)
             and (session_id is None or t.session_id == session_id)
         ]
 

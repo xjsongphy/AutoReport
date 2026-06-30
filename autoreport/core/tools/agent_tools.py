@@ -5,6 +5,7 @@ ReportIssueTool: Sub-agents report issues back to the Main Agent.
 """
 
 import asyncio
+import uuid
 from typing import Any
 
 from loguru import logger
@@ -24,7 +25,10 @@ class SendToAgentTool(Tool):
     name = "send_to_agent"
     description = (
         "Send a task instruction to a sub-agent. Use this to dispatch work to: "
-        "theory, data_analysis, plotting, report. "
+        "theory, data_analysis, plotting, report. Keep the message minimal: "
+        "task goal, input file locations, dependency, and explicit user constraints only. "
+        "Do not include formulas, implementation steps, copied source content, "
+        "output filenames, or quality rules the sub-agent already owns. "
         "Modes (choose one):\n"
         "- blocking=True (default): Wait for response, no task tracking.\n"
         "- blocking=False with task_items: Non-blocking, creates tracked tasks for waitlist/todolist.\n"
@@ -157,17 +161,27 @@ class SendToAgentTool(Tool):
                 result["task_ids"] = created_task_ids
             return result
 
+        # Blocking path — wait for sub-agent to truly finish.
+        # We used to listen for AgentResponse(streaming=False), but that
+        # fires after every LLM call — not after the agent loop finishes.
+        # Now we correlate with the auto-notify that agent_loop.py publishes
+        # when _process_message() completes, which is the real "done" signal.
+        dispatch_id = str(uuid.uuid4())
+
         # Create future to wait for response
         loop = asyncio.get_running_loop()
         future: asyncio.Future[str] = loop.create_future()
         feedback_items: list[dict[str, str]] = []
 
-        def _on_response(msg: Any) -> None:
-            if not isinstance(msg, AgentResponse):
+        def _on_completion(msg: Any) -> None:
+            if not isinstance(msg, UserMessage):
                 return
-            if msg.agent_type != target.value and msg.agent_type != target:
+            if getattr(msg, 'source', None) != "system":
                 return
-            if msg.streaming:
+            if msg.agent_type != AgentType.MAIN:
+                return
+            # Only match the auto-notify for *this* dispatch
+            if msg.message_id != dispatch_id:
                 return
             if not future.done():
                 future.set_result(msg.content)
@@ -183,13 +197,14 @@ class SendToAgentTool(Tool):
             })
 
         # Subscribe BEFORE publishing to avoid race condition
-        self._bus.subscribe(AgentResponse, _on_response)
+        self._bus.subscribe(UserMessage, _on_completion)
         self._bus.subscribe(AgentFeedback, _on_feedback)
 
         await self._bus.publish(UserMessage(
             content=content,
             agent_type=target,
             source="main_agent",
+            message_id=dispatch_id,
         ))
 
         logger.info("Main Agent dispatched task to {}", target)
@@ -212,13 +227,13 @@ class SendToAgentTool(Tool):
                 "status": "timeout",
                 "agent_type": target.value,
                 "error": f"Sub-agent did not respond within {self._timeout}s. "
-                         "It may still be processing. Try again or use read_file to check its output.",
+                         "It may still be processing. Try again or use read to check its output.",
             }
             if feedback_items:
                 result["feedback"] = feedback_items
             return result
         finally:
-            self._bus.unsubscribe(AgentResponse, _on_response)
+            self._bus.unsubscribe(UserMessage, _on_completion)
             self._bus.unsubscribe(AgentFeedback, _on_feedback)
 
 
