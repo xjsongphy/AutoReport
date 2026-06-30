@@ -1039,9 +1039,21 @@ class AgentLoop:
         is used by both the initial streaming call *and* tool-call iterations, so
         the system prompt is never accidentally dropped.
         """
+        sanitized_history = [
+            LLMMessage(
+                role=msg.role,
+                content=msg.content or "",
+                tool_calls=msg.tool_calls,
+                tool_call_id=msg.tool_call_id,
+                is_tool_result=msg.is_tool_result,
+                thinking=msg.thinking,
+                cache_control=msg.cache_control,
+            )
+            for msg in self._conversation_history
+        ]
         return [
             LLMMessage(role="system", content=await self._get_system_prompt(), cache_control=True),
-            *self._conversation_history,
+            *sanitized_history,
         ]
 
     def _build_task_state_section(self) -> str:

@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import platform
 import shlex
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,51 @@ from loguru import logger
 from ..tools.registry import Tool
 from .path_utils import is_internal_metadata_rel
 
-# Allowed commands for BashTool (allowlist approach)
+
+def _get_default_shell_name() -> str:
+    """Detect the actual shell used by create_subprocess_shell().
+
+    Returns:
+        The detected shell name (e.g., '/bin/sh', '/bin/bash', 'cmd.exe').
+    """
+    system = platform.system()
+
+    if system == "Windows":
+        # On Windows, create_subprocess_shell() uses %COMSPEC% or defaults to cmd.exe
+        return os.environ.get("COMSPEC", "cmd.exe")
+
+    # On Unix systems (Linux, macOS, etc.), create_subprocess_shell() uses /bin/sh
+    # /bin/sh is guaranteed to exist on POSIX-compliant systems
+    try:
+        sh_path = os.path.realpath("/bin/sh")
+        if sh_path != "/bin/sh":
+            # /bin/sh is a symlink, show where it points
+            return f"/bin/sh → {sh_path}"
+        return "/bin/sh"
+    except (OSError, RuntimeError):
+        # Fallback if /bin/sh doesn't exist or can't be read
+        return "/bin/sh (unknown)"
+
+
+# Global cache for detected shell info
+_DETECTED_SHELL: str | None = None
+
+
+def get_shell_info() -> str:
+    """Get the detected shell information for this platform.
+
+    This returns the actual shell that will be used by asyncio.create_subprocess_shell().
+    Results are cached after first call.
+
+    Returns:
+        Human-readable shell description.
+    """
+    global _DETECTED_SHELL
+    if _DETECTED_SHELL is None:
+        _DETECTED_SHELL = _get_default_shell_name()
+    return _DETECTED_SHELL
+
+# Allowed commands for ExecTool (allowlist approach)
 ALLOWED_COMMANDS = {
     "python", "python3", "pip", "pip3",
     "xelatex", "lualatex", "pdflatex",
@@ -25,25 +70,25 @@ ALLOWED_COMMANDS = {
     "wc", "sort", "uniq", "cut",
     "fc-list",
     "mineru-open-api",
-    "which", "sed",  # Standard Unix tools for cross-platform bash usage
+    "which", "sed",  # Standard Unix tools for cross-platform shell usage
 }
 
 
-class BashTool(Tool):
+class ExecTool(Tool):
     """Tool for executing shell commands."""
 
-    name = "bash"
-    description = (
-        "Execute a command in a Bash shell (NOT Windows cmd.exe or PowerShell). "
-        "The working directory is the project root. "
-        "All commands must use valid bash/Linux syntax:\n"
-        "- Use 'which' not 'where'\n"
-        "- Use 'cp' not 'copy'\n"
-        '- Use \'echo "" >> file\' not \'echo.>> file\'\n'
-        "- Paths use forward slashes, not backslashes\n"
-        "Commands that generate files must specify output paths explicitly. "
-        "You must provide both command and a short command_description."
-    )
+    name = "exec"
+
+    @property
+    def description(self) -> str:
+        """Dynamic description based on detected shell."""
+        shell_info = get_shell_info()
+        return (
+            f"Execute shell commands using {shell_info}. "
+            f"The working directory is the project root. "
+            "Commands that generate files must specify output paths explicitly. "
+            "Provide both command and a short command_description."
+        )
 
     def __init__(
         self,
@@ -114,7 +159,7 @@ class BashTool(Tool):
                 if ".." in arg:
                     raise ValueError("Path traversal with '..' is not allowed")
 
-        logger.debug("Executing bash command: {} (in {})", command, self.working_dir)
+        logger.debug("Executing shell command: {} (in {})", command, self.working_dir)
 
         env = {}
         for key in self.allowed_env_keys:
@@ -165,7 +210,7 @@ class BashTool(Tool):
                 "timed_out": False,
             }
         except Exception as e:
-            logger.error("Failed to execute bash command: {}", e)
+            logger.error("Failed to execute shell command: {}", e)
             raise
 
     def _filter_ls_output(self, output: str) -> str:

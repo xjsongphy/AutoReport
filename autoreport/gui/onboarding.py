@@ -15,13 +15,14 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from ..core.user_settings import UserSettings
-from .theme import get_theme_colors
+from .theme import get_theme_colors, is_dark_mode
 from .widgets.ui_utils import filled_button_qss, ghost_button_qss
 
 
@@ -34,7 +35,7 @@ def _make_step_page(
     description: str,
     tips: list[str] | None = None,
 ) -> QWidget:
-    """Create a standard tutorial step page.
+    """Create a standard tutorial step page with scrollable content.
 
     Args:
         step: Current step number (1-based).
@@ -44,11 +45,29 @@ def _make_step_page(
         tips: Optional list of tip lines shown in a highlighted box.
 
     Returns:
-        Configured QWidget for this page.
+        Configured QWidget with scroll area for this page.
     """
     colors = get_theme_colors()
+
+    # Create outer container widget
     page = QWidget()
-    layout = QVBoxLayout(page)
+    page.setObjectName("onboardingPage")
+    page_layout = QVBoxLayout(page)
+    page_layout.setContentsMargins(0, 0, 0, 0)
+    page_layout.setSpacing(0)
+
+    # Create scroll area
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.Shape.NoFrame)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    scroll.setObjectName("pageScroll")
+
+    # Create content widget
+    content = QWidget()
+    content.setObjectName("pageContent")
+    layout = QVBoxLayout(content)
     layout.setContentsMargins(48, 36, 48, 28)
     layout.setSpacing(16)
 
@@ -86,15 +105,23 @@ def _make_step_page(
 
     # Tips box
     if tips:
-        tip_bg = colors["card"]
-        tip_border = colors["border"]
+        # Outer container - dark background
+        tip_outer = QWidget()
+        tip_outer.setStyleSheet(f"background-color: {colors['surface']};")
+        tip_outer_layout = QVBoxLayout(tip_outer)
+        tip_outer_layout.setContentsMargins(0, 0, 0, 0)
+        tip_outer_layout.setSpacing(0)
+
+        # Inner box - neutral gray background with subtle border
+        tip_bg = colors["secondaryBtnBg"]
+        tip_border = colors["secondaryBtnBorder"]
 
         tip_container = QWidget()
         tip_container.setStyleSheet(
             f"background-color: {tip_bg}; "
             f"border: 1px solid {tip_border}; "
             f"border-radius: {colors['radius_md']}; "
-            f"padding: 14px 18px;"
+            f"margin: 14px 18px;"
         )
         tip_layout = QVBoxLayout(tip_container)
         tip_layout.setContentsMargins(14, 12, 14, 12)
@@ -116,9 +143,15 @@ def _make_step_page(
             )
             tip_layout.addWidget(tip_line)
 
-        layout.addWidget(tip_container)
+        tip_outer_layout.addWidget(tip_container)
+        layout.addWidget(tip_outer)
 
     layout.addStretch()
+
+    # Set content as scroll widget
+    scroll.setWidget(content)
+    page_layout.addWidget(scroll)
+
     return page
 
 
@@ -152,13 +185,27 @@ class PreProjectGuide(QDialog):
         colors = get_theme_colors()
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(48, 40, 48, 32)
-        root.setSpacing(12)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # Create scroll area for content
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+        # Create content widget
+        content = QWidget()
+        content.setObjectName("guideContent")
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(48, 40, 48, 32)
+        content_layout.setSpacing(12)
 
         # Logo
         logo = QLabel("🧪")
         logo.setStyleSheet("font-size: 48px;")
-        root.addWidget(logo)
+        content_layout.addWidget(logo)
 
         # Title
         title = QLabel("欢迎使用 AutoReport")
@@ -167,9 +214,9 @@ class PreProjectGuide(QDialog):
         title_font.setBold(True)
         title.setFont(title_font)
         title.setStyleSheet(f"color: {colors['title']};")
-        root.addWidget(title)
+        content_layout.addWidget(title)
 
-        root.addSpacing(4)
+        content_layout.addSpacing(4)
 
         # Description
         desc = QLabel(
@@ -179,26 +226,26 @@ class PreProjectGuide(QDialog):
         )
         desc.setWordWrap(True)
         desc.setStyleSheet(f"font-size: 14px; color: {colors['fg']}; line-height: 1.6;")
-        root.addWidget(desc)
+        content_layout.addWidget(desc)
 
-        root.addSpacing(4)
+        content_layout.addSpacing(4)
 
         # Quick start guide
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setStyleSheet(f"background-color: {colors['border']}; max-height: 1px;")
-        root.addWidget(sep)
+        content_layout.addWidget(sep)
 
         guide_title = QLabel("📌 下一步您需要：")
         guide_title.setStyleSheet(
             f"font-size: 14px; font-weight: {colors['fw_semibold']}; color: {colors['title']};"
         )
-        root.addWidget(guide_title)
+        content_layout.addWidget(guide_title)
 
         steps = [
             "在弹出的项目选择窗口中，点击<b>「新建项目…」</b>",
             "选择一个位置，<b>新建一个空文件夹</b>，命名如 <code>C-V法测量杂质分布</code>",
-            "系统会自动创建 <code>data/</code>、<code>references/</code> 等子目录",
+            "系统会自动创建 <code>Data/</code>、<code>References/</code> 等子目录",
         ]
         for i, step_text in enumerate(steps, 1):
             step_label = QLabel(f"{i}. {step_text}")
@@ -206,12 +253,20 @@ class PreProjectGuide(QDialog):
             step_label.setStyleSheet(
                 f"font-size: 14px; color: {colors['fg']}; line-height: 1.5;"
             )
-            root.addWidget(step_label)
+            content_layout.addWidget(step_label)
 
-        root.addSpacing(12)
+        content_layout.addSpacing(12)
+        content_layout.addStretch()
 
-        # Buttons
-        btn_layout = QHBoxLayout()
+        # Set content as scroll widget
+        scroll.setWidget(content)
+        root.addWidget(scroll)
+
+        # Buttons (fixed at bottom, outside scroll)
+        btn_container = QWidget()
+        btn_container.setObjectName("btnBar")
+        btn_layout = QHBoxLayout(btn_container)
+        btn_layout.setContentsMargins(48, 12, 48, 20)
         btn_layout.setSpacing(12)
         btn_layout.addStretch()
 
@@ -227,7 +282,7 @@ class PreProjectGuide(QDialog):
         self._start_btn.clicked.connect(self._on_start)
         btn_layout.addWidget(self._start_btn)
 
-        root.addLayout(btn_layout)
+        root.addWidget(btn_container)
 
     def _on_start(self) -> None:
         self._wants_tutorial = True
@@ -241,7 +296,14 @@ class PreProjectGuide(QDialog):
         colors = get_theme_colors()
         self.setStyleSheet(f"""
             PreProjectGuide {{
-                background-color: {colors["bg"]};
+                background-color: {colors["surface"]};
+            }}
+            #guideContent {{
+                background-color: {colors["surface"]};
+            }}
+            #btnBar {{
+                background-color: {colors["surface"]};
+                border-top: 1px solid {colors["border"]};
             }}
             {filled_button_qss(
                 "#primaryBtn",
@@ -324,7 +386,7 @@ class OnboardingDialog(QDialog):
                 "例如：<br>"
                 "<blockquote>"
                 "请撰写'电容电压法测量半导体中的杂质分布'实验报告。"
-                "数据文件在 data/ 目录下，参考资料在 references/ 目录中。"
+                "数据文件在 Data/ 目录下，参考资料在 References/ 目录中。"
                 "</blockquote>"
                 "<br>"
                 "Main Agent 会自动分析任务，依次调度 Theory → Data Analysis → Plotting → Report "
@@ -339,10 +401,10 @@ class OnboardingDialog(QDialog):
                 3, total_steps,
                 "放入数据和参考资料",
                 "<b>这是最关键的一步！</b>在发送报告指令之前，先把文件放到正确的位置：<br><br>"
-                "📂 <b>data/</b> ← 放入<b>原始实验数据文件</b><br>"
+                "📂 <b>Data/</b> ← 放入<b>原始实验数据文件</b><br>"
                 "&nbsp;&nbsp;&nbsp;&nbsp;CSV、TXT、Excel 等数据文件<br>"
-                "&nbsp;&nbsp;&nbsp;&nbsp;（Data Analysis Agent 会将处理结果写入 data/processed/）<br><br>"
-                "📂 <b>references/</b> ← 放入<b>参考资料</b><br>"
+                "&nbsp;&nbsp;&nbsp;&nbsp;（Data Analysis Agent 会将处理结果写入 Data/Processed/）<br><br>"
+                "📂 <b>References/</b> ← 放入<b>参考资料</b><br>"
                 "&nbsp;&nbsp;&nbsp;&nbsp;实验讲义 PDF、实验要求等<br>"
                 "&nbsp;&nbsp;&nbsp;&nbsp;也可放入<b>自定义 LaTeX 模板</b>（.tex / .cls 文件）<br>"
                 "&nbsp;&nbsp;&nbsp;&nbsp;系统会<b>自动优先</b>使用你的模板，无需手动替换<br>"
@@ -358,10 +420,10 @@ class OnboardingDialog(QDialog):
                 "准备就绪！",
                 "你已经了解了 AutoReport 的基本工作流程。总结一下：<br><br>"
                 "✅ <b>1.</b> 创建项目文件夹<br>"
-                "✅ <b>2.</b> 把数据放入 <code>data/</code>，参考资料放入 <code>references/</code><br>"
+                "✅ <b>2.</b> 把数据放入 <code>Data/</code>，参考资料放入 <code>References/</code><br>"
                 "✅ <b>3.</b> 在 Main Agent 面板中输入报告需求<br>"
                 "✅ <b>4.</b> 等待 Agent 自动协作，查看进度<br>"
-                "✅ <b>5.</b> 最终报告 PDF 在 <code>tex/</code> 目录<br><br>"
+                "✅ <b>5.</b> 最终报告 PDF 在 <code>Tex/</code> 目录<br><br>"
                 "点击下方按钮开始你的第一个项目吧！",
                 tips=[
                     "任何时候都可以输入 /help 查看帮助",
@@ -447,7 +509,10 @@ class OnboardingDialog(QDialog):
         colors = get_theme_colors()
         self.setStyleSheet(f"""
             OnboardingDialog {{
-                background-color: {colors["bg"]};
+                background-color: {colors["surface"]};
+            }}
+            #onboardingPage, #pageScroll, #pageContent {{
+                background-color: {colors["surface"]};
             }}
             #navBar {{
                 background-color: {colors["surface"]};

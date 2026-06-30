@@ -28,7 +28,7 @@ from .widgets.ui_utils import (
     secondary_filled_button_qss,
 )
 
-PROJECT_DIRECTORIES = ["data", "data/processed", "references", "theory", "code", "tex"]
+PROJECT_DIRECTORIES = ["Data", "Data/Processed", "References", "Theory", "Code", "Outline", "Tex"]
 
 
 class _RecentItem(QWidget):
