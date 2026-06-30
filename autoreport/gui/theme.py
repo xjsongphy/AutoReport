@@ -191,8 +191,10 @@ def get_theme_colors() -> dict[str, str]:
         # markup.heading / markup.bold — bold blue (dark) vs navy/maroon (light).
         "md_heading": "#569CD6" if dark else "#800000",
         "md_bold": "#569CD6" if dark else "#000080",
-        # string.other.link — link titles.
-        "md_link": "#569CD6" if dark else "#0451A5",
+        # punctuation.definition.list.begin — list markers (-, *, 1.).
+        "md_list": "#6796E6" if dark else "#0451A5",
+        # punctuation.definition.quote.begin — block-quote marker (>).
+        "md_quote": "#6A9955" if dark else "#0451A5",
 
         # === Dialog/Config Specific ===
         "activeFg": "#ffffff" if dark else "#202020",
