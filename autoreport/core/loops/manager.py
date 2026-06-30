@@ -370,11 +370,21 @@ class LoopManager:
         cp = self.checkpoint_manager.get_checkpoint(agent_type, checkpoint_id)
         if cp:
             from ...interfaces.types import Checkpoint as CheckpointMsg
+            # For baseline: use file_states hashes directly.
+            # For subsequent: derive from file_diffs (sha256_after for each file).
+            if cp.file_states:
+                file_hashes = {path: state.hash for path, state in cp.file_states.items()}
+            else:
+                file_hashes = {
+                    path: d.sha256_after
+                    for path, d in cp.file_diffs.items()
+                    if d.sha256_after
+                }
             msg = CheckpointMsg(
                 agent_type=agent_type,
                 checkpoint_id=checkpoint_id,
                 description=cp.description,
-                file_states={path: state.hash for path, state in cp.file_states.items()},
+                file_states=file_hashes,
                 message_id=message_id,
             )
             await self.bus.publish(msg)

@@ -61,11 +61,11 @@ async def test_checkpoint_captures_files(temp_workspace):
 
     cp = manager.get_checkpoint("data_analysis", cp_id)
 
-    # data_analysis only watches data/processed/
-    assert "data/processed/result.json" in cp.file_states
+    # data_analysis only watches Data/Processed/
+    assert "Data/Processed/result.json" in cp.file_states
     # Should NOT include files from other agents' dirs
-    assert "theory/test.md" not in cp.file_states
-    assert "data/test.csv" not in cp.file_states
+    assert "Theory/test.md" not in cp.file_states
+    assert "Data/test.csv" not in cp.file_states
 
 
 @pytest.mark.asyncio
@@ -79,9 +79,9 @@ async def test_main_agent_captures_all(temp_workspace):
     )
 
     cp = manager.get_checkpoint("main", cp_id)
-    assert "data/processed/result.json" in cp.file_states
-    assert "theory/test.md" in cp.file_states
-    assert "data/test.csv" in cp.file_states
+    assert "Data/Processed/result.json" in cp.file_states
+    assert "Theory/test.md" in cp.file_states
+    assert "Data/test.csv" in cp.file_states
 
 
 @pytest.mark.asyncio
@@ -140,9 +140,12 @@ async def test_clear_old(temp_workspace):
         await manager.create_checkpoint(agent_type="theory", description=f"T{i}")
 
     removed = manager.clear_old("theory", keep=2)
-    assert removed == 3
+    # 5 checkpoints total, keep=2 newest, but baseline (epoch=1) is protected
+    # → removes 5 - 2 - 1 (protected baseline) = 2
+    assert removed == 2
     remaining = manager.list_checkpoints("theory")
-    assert len(remaining) == 2
+    # 2 kept + 1 protected baseline = 3
+    assert len(remaining) == 3
 
 
 @pytest.mark.asyncio
@@ -170,7 +173,7 @@ async def test_rollback_restores_files(temp_workspace):
     )
 
     # Modify a file
-    result_file = temp_workspace / "data" / "processed" / "result.json"
+    result_file = temp_workspace / "Data" / "Processed" / "result.json"
     original = result_file.read_text()
     result_file.write_text('{"modified": true}')
 

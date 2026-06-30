@@ -186,6 +186,8 @@ class RollbackStatus(Message):
     success: bool
     restored_files: int = 0
     error: str | None = None
+
+
 class Error(Message):
     """Error message."""
 
