@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 
 from ..config import ConfigManager
 from ..core.recent_projects import RecentProjects
+from .dialogs import critical_box, question_box
 from .theme import format_stylesheet, get_theme_colors, is_dark_mode
 from .widgets.ui_utils import (
     filled_button_qss,
@@ -385,11 +386,10 @@ class ProjectDialog(QDialog):
         if dialog.exec():
             path = Path(dialog.selectedFiles()[0])
             if any(path.iterdir()):
-                reply = QMessageBox.question(
+                reply = question_box(
                     self, "目录不为空",
                     f"'{path.name}' 不为空。是否在此目录中创建项目结构？",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.Yes,
+                    default=QMessageBox.StandardButton.Yes,
                 )
                 if reply != QMessageBox.StandardButton.Yes:
                     return
@@ -398,7 +398,7 @@ class ProjectDialog(QDialog):
                 self._create_project_structure(path)
             except OSError as e:
                 logger.error("Failed to create project: {}", e)
-                QMessageBox.critical(self, "创建失败", f"无法创建项目结构：\n{e}")
+                critical_box(self, "创建失败", f"无法创建项目结构：\n{e}")
                 return
 
             self._recent.add(path)
@@ -414,18 +414,17 @@ class ProjectDialog(QDialog):
             path = Path(dialog.selectedFiles()[0])
 
             if not self._is_valid_project(path):
-                reply = QMessageBox.question(
+                reply = question_box(
                     self, "不是有效的项目",
                     f"'{path.name}' 不是 AutoReport 项目。是否创建项目结构？",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.Yes,
+                    default=QMessageBox.StandardButton.Yes,
                 )
                 if reply == QMessageBox.StandardButton.Yes:
                     try:
                         self._create_project_structure(path)
                     except OSError as e:
                         logger.error("Failed to create project: {}", e)
-                        QMessageBox.critical(self, "创建失败", f"无法创建项目结构：\n{e}")
+                        critical_box(self, "创建失败", f"无法创建项目结构：\n{e}")
                         return
                     self._recent.add(path)
                     self._add_project(path)

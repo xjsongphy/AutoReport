@@ -23,6 +23,7 @@ from ..config.manager import ConfigManager
 from ..config.presets import ProviderPreset, get_presets_by_category, load_presets
 from ..config.schema import ApiConfig
 from ..core.preset_sync import is_cached, sync_presets
+from .dialogs import information_box, question_box, warning_box
 from .theme import get_theme_colors
 from .widgets.ui_utils import (
     IconActionButton,
@@ -198,9 +199,9 @@ class ConfigCard(QFrame):
     def _test_connection(self) -> None:
         api_key = self.key_input.text().strip()
         if not api_key:
-            QMessageBox.warning(self, "测试失败", "未配置 API Key。")
+            warning_box(self, "测试失败", "未配置 API Key。")
             return
-        QMessageBox.information(
+        information_box(
             self, "测试结果",
             f"API Key 已配置（{self.name_input.text()}，连接测试功能待实现）。",
         )
@@ -570,18 +571,18 @@ class ConfigDialog(QDialog):
         self.sync_btn.setText("同步预设")
 
         if error_msg:
-            QMessageBox.warning(
+            warning_box(
                 None, "同步失败",
                 f"预设同步出错：{error_msg}\n将使用内置预设模板。",
             )
         elif cached:
             count = len(load_presets())
-            QMessageBox.information(
+            information_box(
                 None, "同步完成",
                 f"成功同步 {n} 个文件。\n当前共 {count} 个预设模板可用。",
             )
         else:
-            QMessageBox.warning(
+            warning_box(
                 None, "同步失败",
                 "无法下载预设文件，请检查网络连接和代理设置。\n"
                 "将使用内置预设模板。",
@@ -600,16 +601,15 @@ class ConfigDialog(QDialog):
 
         self._config_manager.save_config()
         logger.info("Configuration saved: {} configs", len(new_configs))
-        QMessageBox.information(self, "保存成功", "API 配置已保存。")
+        information_box(self, "保存成功", "API 配置已保存。")
         self.accept()
 
     def _reset_config(self) -> None:
-        reply = QMessageBox.question(
+        reply = question_box(
             self,
             "确认重置",
             "确定要恢复默认配置吗？\n\n这将删除所有自定义配置并恢复默认设置。",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            default=QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
@@ -625,7 +625,7 @@ class ConfigDialog(QDialog):
         self._refresh_enabled_combo()
 
         logger.info("Configuration reset to defaults")
-        QMessageBox.information(self, "重置完成", "配置已恢复为默认值。请重新配置 API Key。")
+        information_box(self, "重置完成", "配置已恢复为默认值。请重新配置 API Key。")
 
     def _apply_style(self) -> None:
         from PyQt6.QtGui import QPalette
