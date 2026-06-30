@@ -1,5 +1,6 @@
 """Tests for ToolCallGroup widget."""
 
+import pytest
 from PyQt6.QtWidgets import QLabel, QPushButton, QSizePolicy
 
 from autoreport.gui.widgets.tool_call_group import ToolCallGroup
@@ -152,3 +153,131 @@ def test_exec_copy_button_reserves_width_by_default(qtbot):
         assert not btn.isEnabled()
         assert btn.minimumWidth() == 30
         assert btn.maximumWidth() == 30
+
+
+# ---------------------------------------------------------------------------
+# Task-board parsing edge cases.
+#
+# The status parser drives a user-visible timeline via regexes over agent
+# output (HTML + CJK status glyphs). These table-driven tests pin every
+# marker class — including the previously-untested `failed` markers — plus the
+# HTML-stripping / entity-unescaping path and the dedup key used to merge
+# in-place status updates.
+# ---------------------------------------------------------------------------
+
+_STATUS_CASES = [
+    # (line, expected_status) — every marker class, incl. failed (⚠ ✗ ✕).
+    ("☑ done", "completed"),
+    ("✓ done", "completed"),
+    ("✔ done", "completed"),
+    ("✅ done", "completed"),
+    ("● working", "running"),
+    ("⏳ working", "running"),
+    ("* working", "running"),
+    ("⚠ boom", "failed"),
+    ("✗ boom", "failed"),
+    ("✕ boom", "failed"),
+    ("☐ later", "pending"),
+    ("○ later", "pending"),
+    ("plain text with no marker", "pending"),  # default fallback
+    ("  ☑ leading whitespace", "completed"),     # leading ws tolerated
+]
+
+
+@pytest.mark.parametrize("line, expected", _STATUS_CASES)
+def test_task_status_from_line_all_markers(qtbot, line, expected):
+    widget = ToolCallGroup()
+    qtbot.addWidget(widget)
+    assert widget._task_status_from_line(line) == expected
+
+
+@pytest.mark.parametrize(
+    "status, control",
+    [
+        ("running", "*"),
+        ("completed", "✓"),
+        ("failed", "!"),  # the "!" control for failed was previously untested
+        ("pending", ""),
+        ("unknown", ""),
+    ],
+)
+def test_task_control_text_mapping(qtbot, status, control):
+    widget = ToolCallGroup()
+    qtbot.addWidget(widget)
+    assert widget._task_control_text(status) == control
+
+
+def test_plain_summary_text_strips_html_and_unescapes_entities():
+    # <br> variants collapse to newlines, tags are removed, entities decoded.
+    assert ToolCallGroup._plain_summary_text("a<br/>b<br>c<br />d") == "a\nb\nc\nd"
+    assert ToolCallGroup._plain_summary_text("<b>bold</b> &amp; <i>it</i>") == "bold & it"
+    assert ToolCallGroup._plain_summary_text("3 &lt; 4 &gt; 2") == "3 < 4 > 2"
+    assert ToolCallGroup._plain_summary_text(None) == ""
+    assert ToolCallGroup._plain_summary_text("win\r\nline") == "win\nline"
+
+
+def test_task_content_key_strips_status_prefix_and_ignores_sections():
+    # Same task text with DIFFERENT status markers must yield the SAME key
+    # (so an in-place status update is recognized as the same task).
+    running = ToolCallGroup._task_content_key_from_text("Task\nTodo\n● analyze data")
+    done = ToolCallGroup._task_content_key_from_text("Task\nTodo\n☑ analyze data")
+    failed = ToolCallGroup._task_content_key_from_text("Task\nTodo\n⚠ analyze data")
+    assert running == done == failed == "analyze data"
+
+    # Section labels (Task/Todo/Wait) and divider lines (—, -) are dropped.
+    assert ToolCallGroup._task_content_key_from_text("Task\n—\n☐ x") == "x"
+
+    # Duplicate task text is de-duplicated within one summary.
+    assert ToolCallGroup._task_content_key_from_text("● y\n☑ y") == "y"
+
+
+def test_task_content_key_distinguishes_different_tasks():
+    a = ToolCallGroup._task_content_key_from_text("● analyze data")
+    b = ToolCallGroup._task_content_key_from_text("● plot graph")
+    assert a != b
+    assert a == "analyze data"
+    assert b == "plot graph"
+
+
+def _manage_tasks_group(qtbot, summary: str) -> ToolCallGroup:
+    widget = ToolCallGroup()
+    qtbot.addWidget(widget)
+    widget.add_tool_call("manage_tasks", {}, success=True, duration_ms=10, summary=summary)
+    return widget
+
+
+def test_has_status_change_detects_status_flip(qtbot):
+    """Two manage_tasks groups with the same task but different status differ."""
+    running = _manage_tasks_group(qtbot, "Task\n● analyze data")
+    done = _manage_tasks_group(qtbot, "Task\n☑ analyze data")
+    # Same content key → comparable; visual summary differs → change detected.
+    assert running.task_content_key() == done.task_content_key()
+    assert running.has_status_change_from(done) is True
+    assert done.has_status_change_from(running) is True
+
+
+def test_has_status_change_false_for_different_tasks(qtbot):
+    a = _manage_tasks_group(qtbot, "Task\n● analyze data")
+    b = _manage_tasks_group(qtbot, "Task\n● plot graph")
+    # Different content keys → not comparable → no mergeable change.
+    assert a.task_content_key() != b.task_content_key()
+    assert a.has_status_change_from(b) is False
+
+
+def test_has_status_change_false_when_identical(qtbot):
+    a = _manage_tasks_group(qtbot, "Task\n● analyze data")
+    b = _manage_tasks_group(qtbot, "Task\n● analyze data")
+    assert a.has_status_change_from(b) is False
+
+
+def test_replace_with_group_swaps_calls_and_summary(qtbot):
+    target = _manage_tasks_group(qtbot, "Task\n● analyze data")
+    new_state = _manage_tasks_group(qtbot, "Task\n☑ analyze data")
+
+    target.replace_with_group(new_state)
+
+    # The target now reflects the replacement's calls/summary.
+    assert target.get_summary_text() == new_state.get_summary_text()
+    assert "☑ analyze data" in target.get_summary_text()
+    # And it is decoupled from the source (independent ToolCall instances).
+    assert target._calls is not new_state._calls
