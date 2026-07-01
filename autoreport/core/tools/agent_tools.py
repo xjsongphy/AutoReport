@@ -13,6 +13,7 @@ from loguru import logger
 from ...interfaces.types import AgentFeedback, AgentResponse, AgentType, TaskUpdateMessage, UserMessage
 from ..loops.bus import MessageBus
 from .registry import Tool
+from .session_utils import resolve_session_id
 
 
 class SendToAgentTool(Tool):
@@ -42,12 +43,7 @@ class SendToAgentTool(Tool):
         self._session_id_resolver = session_id_resolver
 
     def _session_id(self) -> str | None:
-        if callable(self._session_id_resolver):
-            try:
-                return self._session_id_resolver()
-            except Exception:
-                return None
-        return None
+        return resolve_session_id(self._session_id_resolver)
 
     async def __call__(
         self,
@@ -258,12 +254,7 @@ class ReportIssueTool(Tool):
         self._session_id_resolver = session_id_resolver
 
     def _session_id(self) -> str | None:
-        if callable(self._session_id_resolver):
-            try:
-                return self._session_id_resolver()
-            except Exception:
-                return None
-        return None
+        return resolve_session_id(self._session_id_resolver)
 
     async def __call__(
         self,

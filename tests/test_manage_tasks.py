@@ -198,7 +198,7 @@ class TestManageTasksToolComplete:
         messages = [await asyncio.wait_for(bus._queue.get(), timeout=1) for _ in range(2)]
         reply = next(msg for msg in messages if hasattr(msg, "source") and getattr(msg, "source", None) == "plotting")
         assert reply.agent_type == AgentType.MAIN
-        assert reply.content.startswith("✅ plotting 完成了任务：draw")
+        assert reply.content.startswith("✅ plotting completed task: draw")
         assert "plot done" in reply.content
 
     @pytest.mark.asyncio
@@ -241,7 +241,7 @@ class TestManageTasksToolComplete:
         assert result["status"] == "ok"
         messages = [await asyncio.wait_for(bus._queue.get(), timeout=1) for _ in range(2)]
         reply = next(msg for msg in messages if hasattr(msg, "source") and getattr(msg, "source", None) == "plotting")
-        assert reply.content.startswith("✅ plotting 完成了任务：draw")
+        assert reply.content.startswith("✅ plotting completed task: draw")
         assert "legacy alias" in reply.content
 
 

@@ -6,6 +6,7 @@ from loguru import logger
 
 from ...interfaces.types import AgentType, TaskUpdateMessage, UserMessage
 from .registry import Tool
+from .session_utils import resolve_session_id
 
 
 class ManageTasksTool(Tool):
@@ -35,12 +36,7 @@ class ManageTasksTool(Tool):
         self._session_id_resolver = session_id_resolver
 
     def _session_id(self) -> str | None:
-        if callable(self._session_id_resolver):
-            try:
-                return self._session_id_resolver()
-            except Exception:
-                return None
-        return None
+        return resolve_session_id(self._session_id_resolver)
 
     async def __call__(
         self,
@@ -436,7 +432,7 @@ class ManageTasksTool(Tool):
             return 0
 
         source = "main_agent" if leaf.target_agent == AgentType.MAIN else leaf.target_agent.value
-        completion_notice = f"✅ {leaf.target_agent.value} 完成了任务：{leaf.brief}"
+        completion_notice = f"✅ {leaf.target_agent.value} completed task: {leaf.brief}"
         content = completion_notice if not response else f"{completion_notice}\n\n{response}"
         await self._bus.publish(
             UserMessage(

@@ -10,7 +10,7 @@ from typing import Any
 from loguru import logger
 
 from ..tools.registry import Tool
-from .path_utils import is_internal_metadata_rel
+from .path_utils import is_internal_metadata_path, is_internal_metadata_rel
 
 
 def _get_default_shell_name() -> str:
@@ -214,64 +214,57 @@ class ExecTool(Tool):
             raise
 
     def _filter_ls_output(self, output: str) -> str:
-        """Filter .autoreport and .checkpoints from ls command output.
+        """Filter internal metadata directories (``.autoreport``/``.checkpoints``) from ``ls`` output.
 
-        This prevents agents from discovering internal metadata directories
-        through commands like 'ls -a' that list hidden files.
+        When stdout is a pipe (not a TTY), ``ls`` prints one entry per line,
+        either as a bare name (``ls -a``) or in long format (``ls -la``).  We
+        extract the entry name, resolve it against the working directory on the
+        *filesystem*, and drop it iff it resolves into an internal metadata
+        directory.  This is locale- and flag-independent: it does not parse the
+        permissions/user/date fields and follows symlinks to their real target.
         """
-        lines = output.splitlines()
-        filtered = []
-        for line in lines:
-            # Filter out lines that are exactly our protected directories
-            # or contain them as path components
-            should_filter = False
-            for protected in (".autoreport", ".checkpoints"):
-                # Check if line is exactly the directory name (ls -a format)
-                if line.strip() == protected:
-                    should_filter = True
-                    break
-                # Check if line contains protected/ (e.g., ".autoreport/file")
-                if f"{protected}/" in line.replace("\\", "/"):
-                    should_filter = True
-                    break
-                # Check if line ends with the protected directory name (ls -la format)
-                # The line format is: permissions links user group size date time name
-                # So we check if the last word is the protected directory name
-                parts = line.strip().split()
-                if parts and parts[-1] == protected:
-                    should_filter = True
-                    break
-                # Also check if last part is a symlink to protected directory
-                if parts and parts[-1].endswith(f" -> {protected}"):
-                    should_filter = True
-                    break
-            if not should_filter:
-                filtered.append(line)
-        return "\n".join(filtered)
+        workspace = Path(self.working_dir)
+        kept = []
+        for line in output.splitlines():
+            name = _ls_entry_name(line)
+            if name is not None:
+                resolved = (workspace / name).resolve()
+                if is_internal_metadata_path(resolved, workspace):
+                    continue
+            kept.append(line)
+        return "\n".join(kept)
 
     def _filter_find_output(self, output: str) -> str:
-        """Filter .autoreport and .checkpoints from find command output.
+        """Filter internal metadata directories from ``find`` output.
 
-        The find command outputs paths like "./.autoreport" or "./.checkpoints/file".
-        We need to filter these out.
+        ``find`` prints one relative path per line (e.g. ``./.autoreport/file``).
+        Normalize each to a POSIX relative path and drop it iff it falls under
+        an internal metadata directory.
         """
-        lines = output.splitlines()
-        filtered = []
-        for line in lines:
-            should_filter = False
+        kept = []
+        for line in output.splitlines():
             normalized = line.strip().replace("\\", "/")
-            for protected in (".autoreport", ".checkpoints"):
-                # Check for patterns like:
-                # ./.autoreport
-                # ./.autoreport/
-                # ./.autoreport/file
-                if (normalized == f"./{protected}" or
-                    normalized == f"./{protected}/" or
-                    normalized.startswith(f"./{protected}/") or
-                    normalized == protected or
-                    normalized.startswith(f"{protected}/")):
-                    should_filter = True
-                    break
-            if not should_filter:
-                filtered.append(line)
-        return "\n".join(filtered)
+            if normalized.startswith("./"):
+                normalized = normalized[2:]
+            normalized = normalized.rstrip("/")
+            if normalized and is_internal_metadata_rel(normalized):
+                continue
+            kept.append(line)
+        return "\n".join(kept)
+
+
+def _ls_entry_name(line: str) -> str | None:
+    """Extract the file/directory name from a single ``ls`` output line.
+
+    Handles both bare names (``ls``/``ls -a``) and long-format lines
+    (``ls -l``/``ls -la``), including symlink lines of the form
+    ``... name -> target`` (returns ``name``, so the link is resolved on the
+    filesystem to decide whether it points into a protected directory).
+    """
+    s = line.strip()
+    if not s:
+        return None
+    if " -> " in s:
+        s = s.split(" -> ", 1)[0]
+    parts = s.split()
+    return parts[-1] if parts else None

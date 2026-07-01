@@ -4,22 +4,13 @@ from loguru import logger
 
 from .anthropic_provider import AnthropicProvider
 from .base import LLMProvider
+from .defaults import DEFAULT_API_BASES, DEFAULT_MODELS
 from .openai_provider import OpenAICompatProvider
 
 # All supported provider types
 ALL_PROVIDER_TYPES = (
     "anthropic", "openai", "google", "deepseek", "openrouter", "groq", "custom",
 )
-
-_DEFAULT_MODELS: dict[str, str] = {
-    "anthropic": "claude-sonnet-4-20250514",
-    "openai": "gpt-4o",
-    "google": "gemini-2.0-flash-exp",
-    "deepseek": "deepseek-chat",
-    "openrouter": "anthropic/claude-sonnet-4.6",
-    "groq": "llama-3.3-70b-versatile",
-    "custom": "",
-}
 
 
 class ProviderFactory:
@@ -49,14 +40,18 @@ class ProviderFactory:
         if provider_type not in ALL_PROVIDER_TYPES:
             raise ValueError(f"Unknown provider type: {provider_type}")
 
-        default_model = model or _DEFAULT_MODELS.get(provider_type, "")
+        default_model = model or DEFAULT_MODELS.get(provider_type, "")
+        # Fall back to the canonical base for this provider type so runtime
+        # resolves the same endpoint the GUI pre-fills, even if the config
+        # omits an explicit base.
+        resolved_base = api_base or DEFAULT_API_BASES.get(provider_type)
 
         if provider_type == "anthropic":
-            return AnthropicProvider(api_key, api_base, default_model)
+            return AnthropicProvider(api_key, resolved_base, default_model)
         else:
             return OpenAICompatProvider(
                 api_key=api_key,
-                api_base=api_base,
+                api_base=resolved_base,
                 model=default_model,
                 provider_type=provider_type,
             )
