@@ -496,7 +496,8 @@ class EditorPanel(QWidget):
             return
         try:
             current = state.viewer.text()
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed reading viewer text for modified check: {}", e)
             return
         self._set_tab_modified(key, current != state.saved_text)
 

@@ -8,6 +8,8 @@ Provides consistent styling for all QScintilla editors including:
 
 import re
 
+from loguru import logger
+
 from PyQt6.Qsci import QsciLexer, QsciScintilla
 from PyQt6.QtGui import QColor, QFont, QFontDatabase
 
@@ -143,8 +145,8 @@ def _apply_vscode_token_palette(lexer: QsciLexer) -> None:
     # Lexer-level default color used for the STYLE_DEFAULT fallback.
     try:
         lexer.setDefaultColor(QColor(fg))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Scintilla lexer default color failed: {}", e)
 
     for style in range(128):
         name = lexer.description(style)
@@ -153,7 +155,8 @@ def _apply_vscode_token_palette(lexer: QsciLexer) -> None:
         color = palette[_ACCENT_BY_NAME[name]] if name in _ACCENT_BY_NAME else fg
         try:
             lexer.setColor(QColor(color), style)
-        except Exception:
+        except Exception as e:
+            logger.debug("Scintilla lexer color for style {} failed: {}", style, e)
             continue
 
 
