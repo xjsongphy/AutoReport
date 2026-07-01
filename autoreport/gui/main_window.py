@@ -33,14 +33,14 @@ from ..interfaces.types import (
     Message,
     QueueUpdateMessage,
     StatusChange,
-    ToolCall,
+    ToolCallMessage,
     ToolResult,
     UserMessage,
 )
 from ..utils.agent_labels import get_agent_badge, get_agent_title
 from ..utils.editor_context import build_editor_context_message, build_editor_context_prompt
 from ..utils.logging_config import ui_logger
-from .dialogs import question_box, warning_box
+from .dialogs import information_box, question_box, warning_box
 from .scale import dpi_scale
 from .theme import get_theme_colors, scrollbar_stylesheet
 from .title_bar import TitleBar
@@ -55,6 +55,11 @@ class _TurnState:
     message_id: str | None = None
     answer_started: bool = False
     phase: str = "idle"
+
+
+# File-tree panel sizing (logical px, DPI-scaled at use sites).
+_FILE_TREE_DEFAULT_WIDTH = 220  # initial width — the tree needs little room
+_FILE_TREE_MAX_WIDTH = 340      # cap so it can't hog the window when resized
 
 
 class MainWindow(QMainWindow):
@@ -681,6 +686,8 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
 
         open_file_act = file_menu.addAction("打开文件...")
+        open_file_act.setEnabled(False)
+        open_file_act.setToolTip("请通过左侧文件树添加文件（拖放或目录内右键新建）")
         open_file_act.triggered.connect(self._on_open_file)
 
         open_folder_act = file_menu.addAction("打开文件夹...")
@@ -695,6 +702,8 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
 
         new_window_act = file_menu.addAction("新建窗口")
+        new_window_act.setEnabled(False)
+        new_window_act.setToolTip("暂不支持多窗口；请新建/打开另一个项目")
         new_window_act.triggered.connect(self._on_new_window)
 
         file_menu.addSeparator()
@@ -736,13 +745,17 @@ class MainWindow(QMainWindow):
         self.file_tree._new_folder()
 
     def _on_open_file(self) -> None:
-        """Handle open file action."""
-        from PyQt6.QtWidgets import QFileDialog
+        """Handle open file action.
 
-        file_path, _ = QFileDialog.getOpenFileName(self, "打开文件")
-        if file_path:
-            # TODO: Import/open the file
-            logger.info("Open file requested: {}", file_path)
+        Currently unsupported — files are added via the file tree (drag-drop or
+        right-click within a directory). The menu entry is disabled; this
+        handler only guards against any future trigger path.
+        """
+        information_box(
+            self,
+            "暂不支持",
+            "请通过左侧文件树添加文件：将文件拖入对应目录，或在目录上右键新建。",
+        )
 
     def _on_open_folder(self) -> None:
         """Handle open folder action — switch workspace to the selected folder.
@@ -793,9 +806,12 @@ class MainWindow(QMainWindow):
             logger.debug("Save skipped: no editable active file")
 
     def _on_new_window(self) -> None:
-        """Handle new window action."""
-        # TODO: Launch new window
-        logger.info("New window requested")
+        """Handle new window action.
+
+        Currently unsupported — multi-window mode is not implemented. The menu
+        entry is disabled; this handler only guards against future triggers.
+        """
+        information_box(self, "暂不支持", "暂不支持多窗口，请新建或打开另一个项目。")
 
     def _setup_ui(self) -> None:
         # Create container
@@ -863,11 +879,16 @@ class MainWindow(QMainWindow):
         for index in range(main_splitter.count()):
             main_splitter.setCollapsible(index, False)
 
-        # Set stretch factors for proportional sizing
-        # file_tree: 20%, preview: 45%, agent_panel: 35%
-        main_splitter.setStretchFactor(0, 20)   # file_tree
-        main_splitter.setStretchFactor(1, 45)   # preview
-        main_splitter.setStretchFactor(2, 35)   # agent_panel
+        # Cap the file-tree width so it stays a narrow rail and never hogs the
+        # window — extra space should flow to the preview/agent panels.
+        s = dpi_scale()
+        self.file_tree.setMaximumWidth(round(_FILE_TREE_MAX_WIDTH * s))
+
+        # Set stretch factors: file_tree is non-stretching (it has a max width),
+        # extra space is split between preview and agent_panel.
+        main_splitter.setStretchFactor(0, 0)    # file_tree (fixed-ish rail)
+        main_splitter.setStretchFactor(1, 56)   # preview
+        main_splitter.setStretchFactor(2, 44)   # agent_panel
 
         # Store main_splitter for resize handling
         self._main_splitter = main_splitter
@@ -1219,7 +1240,7 @@ class MainWindow(QMainWindow):
             QueueUpdateMessage,
             StatusChange,
             TaskUpdateMessage,
-            ToolCall,
+            ToolCallMessage,
             ToolResult,
             UserMessage,
         )
@@ -1228,7 +1249,7 @@ class MainWindow(QMainWindow):
             self._handle_agent_response(message)
         elif isinstance(message, UserMessage):
             self._handle_user_message(message)
-        elif isinstance(message, ToolCall):
+        elif isinstance(message, ToolCallMessage):
             self._handle_tool_call(message)
         elif isinstance(message, ToolResult):
             self._handle_tool_result(message)
@@ -1366,7 +1387,7 @@ class MainWindow(QMainWindow):
     def _get_agent_display_name(self, agent_type: str) -> str:
         return get_agent_badge(agent_type)
 
-    def _handle_tool_call(self, message: ToolCall) -> None:
+    def _handle_tool_call(self, message: ToolCallMessage) -> None:
         agent_str = str(message.agent_type)
         state = self._state_for_agent(agent_str)
         if not self._is_visible_agent(agent_str):
@@ -1810,19 +1831,21 @@ class MainWindow(QMainWindow):
         if total_width <= 0:
             return
 
-        # Use the same proportions as stretch factors: 20%, 45%, 35%
-        # But respect minimum widths of each panel
-        total_factor = 20 + 45 + 35  # 100
-
-        # Calculate minimum widths
+        # file_tree gets a small fixed default (clamped to its min/max); the
+        # remaining width is split between preview and agent_panel.
+        s = dpi_scale()
+        file_tree_default = round(_FILE_TREE_DEFAULT_WIDTH * s)
         file_tree_min = self.file_tree.minimumWidth()
+        file_tree_max = self.file_tree.maximumWidth() or file_tree_default
+        file_tree_size = max(file_tree_min, min(file_tree_default, file_tree_max))
+
         preview_min = self.preview.minimumWidth()
         agent_panel_min = self.agent_panel.minimumWidth()
 
-        # Calculate sizes based on proportions
-        file_tree_size = max(file_tree_min, int(total_width * 20 / total_factor))
-        preview_size = max(preview_min, int(total_width * 45 / total_factor))
-        agent_panel_size = max(agent_panel_min, int(total_width * 35 / total_factor))
+        remaining = max(0, total_width - file_tree_size)
+        # Split remaining 56:44 (matches stretch factors), honoring minimums.
+        preview_size = max(preview_min, int(remaining * 56 / 100))
+        agent_panel_size = max(agent_panel_min, remaining - preview_size)
 
         # If sum exceeds total, scale down proportionally
         total_calculated = file_tree_size + preview_size + agent_panel_size

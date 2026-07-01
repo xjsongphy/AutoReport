@@ -34,7 +34,7 @@ from ...interfaces.types import (
     UserMessage,
 )
 from ...interfaces.types import (
-    ToolCall as ToolCallMsg,
+    ToolCallMessage,
 )
 from ...interfaces.types import (
     ToolResult as ToolResultMsg,
@@ -545,12 +545,11 @@ class AgentLoop:
                 # Calculate duration and publish debug info
                 duration_ms = int((time.time() - start_time) * 1000)
 
-                # Extract token usage if available
-                tokens_in = 0
-                tokens_out = 0
-
-                # TODO: Extract usage from provider response
-                # For now, estimate from message length
+                # Token usage: streaming chunks (LLMStreamChunk) do not carry
+                # usage, and the non-streaming LLMResponse.usage is not produced
+                # on this path, so fall back to a length-based estimate
+                # (~4 chars/token). Switch to real usage if a streaming usage
+                # field is added to LLMStreamChunk.
                 tokens_in = sum(len(m.content) // 4 for m in messages)
                 tokens_out = len(accumulated_content) // 4
 
@@ -738,7 +737,7 @@ class AgentLoop:
             for tool_call in response.tool_calls:
                 await self._set_status(AgentStatus.RUNNING_TOOL)
 
-                await self.bus.publish(ToolCallMsg(
+                await self.bus.publish(ToolCallMessage(
                     agent_type=self.agent_type,
                     tool_name=tool_call.name,
                     arguments=tool_call.arguments,

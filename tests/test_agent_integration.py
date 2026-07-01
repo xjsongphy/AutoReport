@@ -18,7 +18,7 @@ from autoreport.interfaces.types import (
     AgentType,
     Error,
     StatusChange,
-    ToolCall,
+    ToolCallMessage,
     ToolResult,
 )
 
@@ -34,7 +34,7 @@ def _workspace():
     ws = Path(tmpdir) / "test_project"
     ws.mkdir(parents=True)
 
-    for d in ["data", "data/processed", "references", "theory", "code", "tex"]:
+    for d in ["data", "data/processed", "references", "theory", "plots", "tex"]:
         (ws / d).mkdir(parents=True, exist_ok=True)
 
     (ws / "data" / "experiment.csv").write_text(
@@ -108,7 +108,7 @@ class TestMainAgentTools:
 
             await b.send("main", "请读取 data/test.txt 文件的内容")
             # Wait for at least one tool call
-            tool_calls = await collector.wait_for(ToolCall, timeout=60, count=1)
+            tool_calls = await collector.wait_for(ToolCallMessage, timeout=60, count=1)
 
             assert len(tool_calls) >= 1
             # Should have a read tool call
@@ -127,7 +127,7 @@ class TestMainAgentTools:
             collector.start()
 
             await b.send("main", "请列出 data/ 目录中的文件")
-            await collector.wait_for(ToolCall, timeout=60, count=1)
+            await collector.wait_for(ToolCallMessage, timeout=60, count=1)
 
             tool_names = [tc.tool_name for tc in collector.tool_calls]
             # Should use some directory/file listing tool
@@ -164,7 +164,7 @@ class TestSubAgentInteraction:
                 "data_analysis",
                 "读取 data/experiment.csv 文件，告诉我数据的基本统计信息",
             )
-            await collector.wait_for(ToolCall, timeout=60, count=1)
+            await collector.wait_for(ToolCallMessage, timeout=60, count=1)
 
             # Should have tool calls (read or python_exec)
             assert len(collector.tool_calls) >= 1

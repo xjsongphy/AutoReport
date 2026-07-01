@@ -8,7 +8,7 @@ import pytest
 from autoreport.config.schema import AgentDefaults
 from autoreport.core.loops.agent_loop import AgentLoop
 from autoreport.core.loops.bus import MessageBus
-from autoreport.core.providers.base import LLMResponse, ToolCall
+from autoreport.core.providers.base import LLMResponse, LLMToolCall
 from autoreport.interfaces.types import (
     AgentStatus,
     AgentType,
@@ -62,7 +62,7 @@ def workspace():
     import shutil
     import tempfile
     ws = Path(tempfile.mkdtemp()).resolve()
-    for d in ["data", "code", "theory", "tex", "references"]:
+    for d in ["data", "plots", "theory", "tex", "references"]:
         (ws / d).mkdir()
     yield ws
     shutil.rmtree(ws, ignore_errors=True)
@@ -150,7 +150,7 @@ async def test_process_message(agent_loop, mock_provider, mock_gui):
 
 @pytest.mark.asyncio
 async def test_process_message_with_tool_calls(agent_loop, mock_provider, mock_gui):
-    tc = ToolCall(id="call_1", name="read", arguments={"path": "test.txt"})
+    tc = LLMToolCall(id="call_1", name="read", arguments={"path": "test.txt"})
 
     # Mock streaming: first yields chunks, then tool calls at end
     async def mock_chat_stream_with_tools(*args, **kwargs):

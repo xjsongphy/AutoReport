@@ -10,11 +10,8 @@ from typing import Any
 from loguru import logger
 from openai import AsyncOpenAI
 
-from .base import LLMProvider, LLMResponse, LLMStreamChunk, Message, ToolCall
-
-_DEFAULT_API_BASES: dict[str, str] = {
-    "deepseek": "https://api.deepseek.com",
-}
+from .base import LLMProvider, LLMResponse, LLMStreamChunk, Message, LLMToolCall
+from .defaults import DEFAULT_API_BASES
 
 
 class OpenAICompatProvider(LLMProvider):
@@ -30,7 +27,7 @@ class OpenAICompatProvider(LLMProvider):
         super().__init__(api_key, api_base, model)
         self.provider_type = provider_type
         if api_base is None:
-            api_base = _DEFAULT_API_BASES.get(provider_type)
+            api_base = DEFAULT_API_BASES.get(provider_type)
         self.client = AsyncOpenAI(api_key=api_key, base_url=api_base)
 
     def _convert_messages(self, messages: list[Message]) -> list[dict]:
@@ -146,7 +143,7 @@ class OpenAICompatProvider(LLMProvider):
 
         if message.tool_calls:
             for call in message.tool_calls:
-                tool_calls.append(ToolCall(
+                tool_calls.append(LLMToolCall(
                     id=call.id,
                     name=call.function.name,
                     arguments=self._parse_arguments(call.function.arguments),
@@ -270,7 +267,7 @@ class OpenAICompatProvider(LLMProvider):
                                             "Failed to parse streamed tool args: {}",
                                             entry["args_buffer"][:200],
                                         )
-                                final_tool_calls.append(ToolCall(
+                                final_tool_calls.append(LLMToolCall(
                                     id=entry["id"],
                                     name=entry["name"],
                                     arguments=args,

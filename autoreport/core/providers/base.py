@@ -6,7 +6,7 @@ from typing import Any
 
 
 @dataclass
-class ToolCall:
+class LLMToolCall:
     """Tool call from LLM."""
 
     id: str
@@ -35,7 +35,7 @@ class Message:
 
     role: str  # "user", "assistant", "system"
     content: str
-    tool_calls: list[ToolCall] | None = None  # assistant messages with tool calls
+    tool_calls: list[LLMToolCall] | None = None  # assistant messages with tool calls
     tool_call_id: str | None = None  # tool result messages (role="tool" for OpenAI)
     is_tool_result: bool = False  # marks this as a tool result message
     thinking: str | None = None  # DeepSeek extended thinking blocks
@@ -47,7 +47,7 @@ class LLMResponse:
     """Response from LLM."""
 
     content: str | None
-    tool_calls: list[ToolCall] = field(default_factory=list)
+    tool_calls: list[LLMToolCall] = field(default_factory=list)
     usage: dict[str, int] | None = None
     streaming: bool = False  # Whether this is a streaming chunk
     thinking: str | None = None  # DeepSeek extended thinking
@@ -58,7 +58,7 @@ class LLMStreamChunk:
     """Single chunk from streaming LLM response."""
 
     delta: str | None = None  # Text content delta (None if no new text)
-    tool_calls: list[ToolCall] | None = None  # Final tool calls at end
+    tool_calls: list[LLMToolCall] | None = None  # Final tool calls at end
     done: bool = False  # Whether stream is complete
     thinking: str | None = None  # DeepSeek extended thinking
 

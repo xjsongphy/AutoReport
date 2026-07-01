@@ -13,7 +13,7 @@ from autoreport.interfaces.types import (
     AgentStatus,
     AgentType,
     StatusChange,
-    ToolCall as ToolCallMsg,
+    ToolCallMessage,
     ToolResult as ToolResultMsg,
     UserMessage,
 )
@@ -134,7 +134,7 @@ class TestMessageTypesForRouting:
         assert msg.agent_type == AgentType.PLOTTING
 
     def test_tool_call_has_agent_type(self):
-        msg = ToolCallMsg(
+        msg = ToolCallMessage(
             agent_type=AgentType.THEORY,
             tool_name="read",
             arguments={"path": "ref.pdf"},

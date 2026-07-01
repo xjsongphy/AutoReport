@@ -12,7 +12,7 @@ from autoreport.interfaces.types import (
     MessageType,
     RestartRequest,
     StatusChange,
-    ToolCall,
+    ToolCallMessage,
     ToolResult,
     UserMessage,
 )
@@ -73,7 +73,7 @@ def test_agent_response():
 
 
 def test_tool_call_message():
-    msg = ToolCall(
+    msg = ToolCallMessage(
         agent_type=AgentType.DATA_ANALYSIS,
         tool_name="read",
         arguments={"path": "data.csv"},

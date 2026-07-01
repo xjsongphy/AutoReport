@@ -6,7 +6,7 @@ from typing import Any
 from anthropic import AsyncAnthropic
 from loguru import logger
 
-from .base import LLMProvider, LLMResponse, Message, ToolCall
+from .base import LLMProvider, LLMResponse, Message, LLMToolCall
 
 
 class AnthropicProvider(LLMProvider):
@@ -257,7 +257,7 @@ class AnthropicProvider(LLMProvider):
             if block.type == "text":
                 content = block.text
             elif block.type == "tool_use":
-                tool_calls.append(ToolCall(
+                tool_calls.append(LLMToolCall(
                     id=block.id,
                     name=block.name,
                     arguments=block.input,
@@ -346,7 +346,7 @@ class AnthropicProvider(LLMProvider):
             final_thinking = None
             for block in final_message.content:
                 if block.type == "tool_use":
-                    final_tool_calls.append(ToolCall(
+                    final_tool_calls.append(LLMToolCall(
                         id=block.id,
                         name=block.name,
                         arguments=block.input,

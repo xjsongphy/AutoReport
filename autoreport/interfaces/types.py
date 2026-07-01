@@ -109,7 +109,7 @@ class AgentFeedback(Message):
     feedback_type: str = "missing_data"  # "missing_data", "quality", "query"
 
 
-class ToolCall(Message):
+class ToolCallMessage(Message):
     """Tool being executed by agent."""
 
     type: MessageType = MessageType.TOOL_CALL
