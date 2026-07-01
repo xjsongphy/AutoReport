@@ -568,21 +568,21 @@ def show_pre_project_guide(parent=None, *, force: bool = False) -> bool:
     return dialog.wants_tutorial
 
 
-def show_onboarding(parent=None) -> OnboardingDialog:
+def show_onboarding(parent=None) -> OnboardingDialog | None:
     """Show the post-project tutorial (agent intro + data placement).
 
-    Only call this if show_pre_project_guide() returned True.
+    Only call this if show_pre_project_guide() returned True.  Skipped silently
+    when the user has already completed onboarding.
 
     Args:
         parent: Parent widget.
 
     Returns:
-        The OnboardingDialog instance if shown.
+        The OnboardingDialog instance if shown, else ``None`` when already seen.
     """
-    # TODO: 调试结束后恢复此检查
-    # settings = UserSettings()
-    # if settings.has_seen_onboarding:
-    #     return None
+    settings = UserSettings()
+    if settings.has_seen_onboarding:
+        return None
 
     dialog = OnboardingDialog(parent)
     dialog.exec()
