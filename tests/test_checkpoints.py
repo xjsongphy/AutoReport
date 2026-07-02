@@ -15,7 +15,7 @@ def temp_workspace():
     workspace = Path(tempfile.mkdtemp())
 
     # Create project structure
-    for dir_name in ["data", "data/processed", "references", "theory", "code", "tex"]:
+    for dir_name in ["data", "data/processed", "references", "theory", "plots", "tex"]:
         (workspace / dir_name).mkdir(parents=True, exist_ok=True)
 
     # Create some test files

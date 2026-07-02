@@ -29,7 +29,7 @@ def test_create_project_structure_scaffolds_all_dirs(tmp_path: Path) -> None:
     create_project_structure(proj)
     # All fixed project directories must exist after scaffolding.
     assert is_valid_project(proj) is True
-    for sub in ("Data", "Data/Processed", "References", "Theory", "Code", "Outline", "Tex"):
+    for sub in ("Data", "Data/Processed", "References", "Theory", "Plots", "Outline", "Tex"):
         assert (proj / sub).is_dir()
 
 

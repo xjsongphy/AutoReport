@@ -5,14 +5,13 @@ These tests do NOT require API keys. They test:
 - Tool execution (read, write_file, bash, etc.)
 """
 
-import asyncio
 import tempfile
 from pathlib import Path
 
 import pytest
 
 from autoreport.core.tools.exec_tools import ExecTool
-from autoreport.core.tools.file_tools import ReadTool, WriteFileTool
+from autoreport.core.tools.file_tools import ApplyPatchTool, ReadTool
 from autoreport.core.tools.registry import ToolRegistry
 
 
@@ -21,7 +20,7 @@ def _workspace():
     tmpdir = tempfile.mkdtemp()
     ws = Path(tmpdir) / "project"
     ws.mkdir()
-    for d in ["data", "data/processed", "references", "theory", "code", "tex"]:
+    for d in ["data", "data/processed", "references", "theory", "plots", "tex"]:
         (ws / d).mkdir(parents=True)
     (ws / "data" / "sample.csv").write_text("x,y\n1,2\n3,4\n", encoding="utf-8")
     (ws / "data" / "test.txt").write_text("Hello World\nLine 2\nLine 3\nLine 4\nLine 5\n", encoding="utf-8")
@@ -107,16 +106,17 @@ class TestRead:
         assert result is not None
 
 
-class TestWriteFile:
-    """write_file tool tests."""
+class TestApplyPatch:
+    """apply_patch tool tests."""
 
     @pytest.mark.asyncio
-    async def test_write_new_file(self):
+    async def test_create_new_file(self):
         ws = _workspace()
-        tool = WriteFileTool(workspace=ws, write_allowed_dir=ws)
-        result = await tool(path="code/new_file.py", content="print('hello')")
+        tool = ApplyPatchTool(workspace=ws, write_allowed_dir=ws)
+        result = await tool(path="plots/new_file.py", patch="+print('hello')\n")
         assert result is not None
-        assert (ws / "code" / "new_file.py").read_text() == "print('hello')"
+        assert result["created"] is True
+        assert (ws / "plots" / "new_file.py").read_text() == "print('hello')\n"
 
 
 class TestBashTool:

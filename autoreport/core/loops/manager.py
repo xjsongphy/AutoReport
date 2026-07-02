@@ -12,8 +12,8 @@ from ...interfaces.types import AgentType, FileRollbackRequest, Message, Restart
 from ..checkpoints import CheckpointManager
 from ..tools import SkillLoader
 from ..tools import (
+    ApplyPatchTool,
     DeleteFileTool,
-    EditFileTool,
     ExecTool,
     FileStateManager,
     LoadSkillTool,
@@ -25,7 +25,6 @@ from ..tools import (
     SendToAgentTool,
     SkillLoader,
     TaskBoard,
-    WriteFileTool,
 )
 from ..tools.registry import ToolRegistry
 from .agent_loop import AgentLoop
@@ -241,7 +240,7 @@ class LoopManager:
         # Determine write allowed directory based on agent type
         write_dirs = {
             AgentType.DATA_ANALYSIS: self.workspace / "Data",
-            AgentType.PLOTTING: self.workspace / "Code",
+            AgentType.PLOTTING: self.workspace / "Plots",
             AgentType.THEORY: self.workspace / "Theory",
             AgentType.REPORT: self.workspace / "Tex",
             AgentType.MAIN: self.workspace / "Outline",  # MAIN only writes Outline/report_outline.md
@@ -261,14 +260,7 @@ class LoopManager:
             from ..tools.file_tools import _validate_plotting_script
             write_tool_kwargs["content_validator"] = _validate_plotting_script
 
-        registry.register(WriteFileTool(**write_tool_kwargs))
-        registry.register(EditFileTool(
-            workspace=self.workspace,
-            write_allowed_dir=write_dir,
-            manifest_manager=self.manifest_manager,
-            agent_type=agent_type.value,
-            file_state_manager=file_state_manager,
-        ))
+        registry.register(ApplyPatchTool(**write_tool_kwargs))
         registry.register(DeleteFileTool(
             workspace=self.workspace,
             write_allowed_dir=write_dir,

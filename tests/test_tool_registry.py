@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from autoreport.core.tools.file_tools import ReadTool, WriteFileTool
+from autoreport.core.tools.file_tools import ApplyPatchTool, ReadTool
 from autoreport.core.tools.registry import Tool, ToolRegistry
 
 
@@ -75,7 +75,7 @@ async def test_tool_registry_get_definitions():
     # Register file tools
     workspace = Path(tempfile.mkdtemp())
     registry.register(ReadTool(workspace=workspace))
-    registry.register(WriteFileTool(workspace=workspace))
+    registry.register(ApplyPatchTool(workspace=workspace))
 
     definitions = registry.get_definitions()
 

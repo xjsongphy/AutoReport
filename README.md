@@ -23,7 +23,7 @@ A multi-agent collaborative automated physics experiment report writing system. 
 - **Streaming Responses** — Real-time agent output, word-by-word streaming
 - **Side-by-Side Agent Panels** — Sub Agent and Main Agent panels arranged horizontally
 - **Recent Projects Cache** — VSCode-style recent projects list, cached in `~/.autoreport/recent_projects.json`
-- **File Explorer** — VSCode-style file tree with 22px row height, 16px icons, concise labels (Data, References, Theory, Code, Tex)
+- **File Explorer** — VSCode-style file tree with 22px row height, 16px icons, concise labels (Data, References, Theory, Plots, Tex)
 - **Context Chip Bar** — Visual indicator for file/line selections with toggle to include/exclude from messages
 - **Chat Interface** — Copilot-style conversation display with proper Markdown rendering and grouped tool calls
 - **Slash Commands** — `/clear`, `/new`, `/help`, `/compact`, `/init`
@@ -71,7 +71,7 @@ my_experiment/
 │   └── processed/   # Data Analysis Agent output only
 ├── references/      # Reference materials (PDF, images), custom templates
 ├── theory/          # Theory Agent output only
-├── code/            # Plotting Agent code and generated images
+├── plots/           # Plotting Agent plots and generated images
 └── tex/             # Report Agent LaTeX source and compiled output
 ```
 
@@ -81,7 +81,7 @@ my_experiment/
 |-------|----------------|------------|
 | Main Agent | coordinates only | All directories |
 | Data Analysis | `data/processed/` | All directories |
-| Plotting | `code/` | All directories |
+| Plotting | `plots/` | All directories |
 | Theory | `theory/` | All directories |
 | Report | `tex/` | All directories |
 | User | `data/`, `references/` | All directories |

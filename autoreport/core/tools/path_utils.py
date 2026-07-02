@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-_CANONICAL_TOP_DIRS = ("Data", "References", "Theory", "Code", "Tex")
+_CANONICAL_TOP_DIRS = ("Data", "References", "Theory", "Plots", "Tex")
 _INTERNAL_METADATA_DIRS = (".autoreport", ".checkpoints")
 
 

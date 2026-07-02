@@ -16,7 +16,7 @@ from autoreport.interfaces.types import AgentType
 def workspace():
     import shutil
     ws = Path(tempfile.mkdtemp()).resolve()
-    for d in ["data", "data/processed", "code", "theory", "tex", "references"]:
+    for d in ["data", "data/processed", "plots", "theory", "tex", "references"]:
         (ws / d).mkdir(parents=True, exist_ok=True)
     yield ws
     shutil.rmtree(ws, ignore_errors=True)
@@ -68,7 +68,7 @@ def test_create_tools_for_main(manager):
     tools = manager._create_tools_for_agent(AgentType.MAIN)
     tool_names = {t.name for t in tools.get_all().values()}
     assert "read" in tool_names
-    assert "write_file" in tool_names
+    assert "apply_patch" in tool_names
     # MAIN delegates — it does not get the exec/shell tool.
     assert "exec" not in tool_names
     # MAIN is the only agent that can dispatch to sub-agents.
@@ -88,7 +88,7 @@ def test_create_tools_for_theory(manager):
     tools = manager._create_tools_for_agent(AgentType.THEORY)
     tool_names = {t.name for t in tools.get_all().values()}
     assert "read" in tool_names
-    assert "write_file" in tool_names
+    assert "apply_patch" in tool_names
     # THEORY has no shell execution tool.
     assert "exec" not in tool_names
     assert "parse_pdf" in tool_names
@@ -104,7 +104,7 @@ def test_create_tools_for_plotting(manager):
 
 def test_create_tools_write_dirs_main(manager, workspace):
     tools = manager._create_tools_for_agent(AgentType.MAIN)
-    write_tool = tools.get("write_file")
+    write_tool = tools.get("apply_patch")
     assert write_tool is not None
 
 

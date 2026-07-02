@@ -3,7 +3,7 @@
 from .agent_tools import ReportIssueTool, SendToAgentTool
 from .exec_tools import ExecTool
 from .file_state import FileStateManager
-from .file_tools import DeleteFileTool, EditFileTool, ReadTool, WriteFileTool
+from .file_tools import ApplyPatchTool, DeleteFileTool, ReadTool
 from .manifest_tool import ManifestManager, ManifestTool
 from .pdf_tool import PDFParseTool
 from .registry import Tool, ToolRegistry
@@ -17,8 +17,7 @@ __all__ = [
     "TaskBoard",
     "ManageTasksTool",
     "ReadTool",
-    "WriteFileTool",
-    "EditFileTool",
+    "ApplyPatchTool",
     "DeleteFileTool",
     "ManifestManager",
     "ManifestTool",

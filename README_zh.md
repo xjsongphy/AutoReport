@@ -18,7 +18,7 @@
 - **流式传输** — 实时显示 Agent 输出，逐字流式呈现
 - **并排 Agent 面板** — 子 Agent 和主 Agent 面板水平排列，主 Agent 位于最右侧
 - **最近项目缓存** — VSCode 风格的最近项目列表，缓存于 `~/.autoreport/recent_projects.json`
-- **文件树** — VSCode 风格原生 Qt 实现，22px 行高、16px 图标，简洁标签（Data、References、Theory、Code、Tex）
+- **文件树** — VSCode 风格原生 Qt 实现，22px 行高、16px 图标，简洁标签（Data、References、Theory、Plots、Tex）
   - 原生 Qt 样式渲染选择、悬停、分支指示器
   - 支持内联重命名文件/文件夹
   - 拖放导入外部文件
@@ -94,7 +94,7 @@ my_experiment/
 │   └── processed/   # 数据分析 Agent 仅可写入此目录
 ├── references/      # 参考资料（PDF、图片）、自定义模板
 ├── theory/          # 理论推导 Agent 仅可写入此目录
-├── code/            # 图像绘制 Agent 仅可写入此目录
+├── plots/           # 图像绘制 Agent 仅可写入此目录
 └── tex/             # 报告 Agent 仅可写入此目录
 ```
 
@@ -104,7 +104,7 @@ my_experiment/
 |-------|----------------|------------|
 | 主 Agent | 仅协调 | 全部目录 |
 | 数据分析 | 仅 `data/processed/` | 全部目录 |
-| 图像绘制 | 仅 `code/` | 全部目录 |
+| 图像绘制 | 仅 `plots/` | 全部目录 |
 | 理论推导 | 仅 `theory/` | 全部目录 |
 | 报告撰写 | 仅 `tex/` | 全部目录 |
 | 用户 | `data/`、`references/` | 全部目录 |

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import difflib
 import json
 from datetime import datetime, timezone
 from fnmatch import fnmatch
@@ -11,33 +12,74 @@ from typing import Any
 
 from loguru import logger
 
+from .patch_engine import PatchError, apply_patch_to_text
 from .registry import Tool
+
+
+def _unified_diff(old: str, new: str) -> str:
+    """Build a compact unified diff between two notes blobs."""
+    diff = difflib.unified_diff(
+        (old or "").splitlines(keepends=True),
+        (new or "").splitlines(keepends=True),
+        fromfile="notes(before)",
+        tofile="notes(after)",
+        lineterm="",
+    )
+    return "\n".join(diff)
 
 
 # File patterns to ignore in manifests
 IGNORED_PATTERNS = [
     # Tex compilation intermediates
-    "*.aux", "*.log", "*.out", "*.toc", "*.lof", "*.lot",
-    "*.fls", "*.fdb_latexmk", "*.synctex.gz", "*.synctex.gz(busy)",
-    "*.bbl", "*.blg", "*.brf", "*.cb", "*.cb2", "*.bcf",
-    "*.dvi", "*.ps", "*.idx", "*.ilg", "*.ind",
-    "*.nav", "*.snm", "*.vrb",
+    "*.aux",
+    "*.log",
+    "*.out",
+    "*.toc",
+    "*.lof",
+    "*.lot",
+    "*.fls",
+    "*.fdb_latexmk",
+    "*.synctex.gz",
+    "*.synctex.gz(busy)",
+    "*.bbl",
+    "*.blg",
+    "*.brf",
+    "*.cb",
+    "*.cb2",
+    "*.bcf",
+    "*.dvi",
+    "*.ps",
+    "*.idx",
+    "*.ilg",
+    "*.ind",
+    "*.nav",
+    "*.snm",
+    "*.vrb",
     # Common junk files
-    ".DS_Store", "Thumbs.db", "*.bak", "*.tmp", "*~",
-    "*.swp", "*.swo", ".#*",
+    ".DS_Store",
+    "Thumbs.db",
+    "*.bak",
+    "*.tmp",
+    "*~",
+    "*.swp",
+    "*.swo",
+    ".#*",
     # Python cache
-    "__pycache__", "*.pyc", "*.pyo",
+    "__pycache__",
+    "*.pyc",
+    "*.pyo",
     # Git metadata (shouldn't appear but just in case)
-    ".git", ".gitignore",
+    ".git",
+    ".gitignore",
 ]
 IGNORED_DIRS = {".git", "__pycache__", ".autoreport", ".checkpoints"}
 
 AGENT_DIRECTORIES = {
     "data_analysis": ["Data"],
-    "plotting": ["Code"],
+    "plotting": ["Plots"],
     "theory": ["Theory"],
     "report": ["Tex"],
-    "main": ["Data", "Theory", "Code", "Tex", "References"],
+    "main": ["Data", "Theory", "Plots", "Tex", "References"],
 }
 
 
@@ -85,7 +127,9 @@ class ManifestManager:
     def now(self) -> str:
         return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-    async def _sync_with_filesystem(self, agent_type: str, manifest: dict[str, Any]) -> dict[str, Any]:
+    async def _sync_with_filesystem(
+        self, agent_type: str, manifest: dict[str, Any]
+    ) -> dict[str, Any]:
         """Sync manifest with actual filesystem state.
 
         Scans directories for this agent type and updates file list with:
@@ -140,12 +184,14 @@ class ManifestManager:
         # Add/update files from actual filesystem
         for path, file_data in actual_files.items():
             existing = existing_files.get(path, {})
-            merged_files.append({
-                "path": path,
-                "description": existing.get("description", ""),
-                "description_updated_at": existing.get("description_updated_at"),
-                "file_updated_at": file_data["file_updated_at"],
-            })
+            merged_files.append(
+                {
+                    "path": path,
+                    "description": existing.get("description", ""),
+                    "description_updated_at": existing.get("description_updated_at"),
+                    "file_updated_at": file_data["file_updated_at"],
+                }
+            )
 
         # Sort by path for consistency
         merged_files.sort(key=lambda f: f["path"])
@@ -212,7 +258,9 @@ class ManifestManager:
         """Update file timestamps in manifest (testing/helper API)."""
         manifest = await self.load(agent_type)
         now = self.now()
-        file_map = {item.get("path"): item for item in manifest.get("files", []) if item.get("path")}
+        file_map = {
+            item.get("path"): item for item in manifest.get("files", []) if item.get("path")
+        }
         for raw_path in paths:
             path = str(raw_path or "").strip()
             if not path:
@@ -250,6 +298,10 @@ class ManifestTool(Tool):
         "Read or update agent manifests. "
         "Use it to inspect available files (including other agents' files), "
         "update short file descriptions, and add free-form notes about file relationships. "
+        "The file list is driven by the local filesystem — you can only annotate files that already "
+        "exist in your manifest; the path you pass is a lookup key, never a way to register a new file. "
+        "Descriptions and notes are edited only via diffs (no full replacement): give "
+        "description_old/description_new per file, and notes_patch as a line-based patch (like apply_patch). "
         "Cross-agent viewing: specify agent='data_analysis', 'plotting', 'theory', or 'report' to read their manifests."
     )
 
@@ -265,7 +317,7 @@ class ManifestTool(Tool):
         action: str = "read",
         agent: str | None = None,
         files: list[dict[str, Any]] | None = None,
-        notes: str | None = None,
+        notes_patch: str | None = None,
     ) -> dict[str, Any]:
         """Read or update the manifest.
 
@@ -274,12 +326,21 @@ class ManifestTool(Tool):
             agent: Optional agent type to read manifest from (e.g., 'data_analysis', 'plotting').
                 Only applies to read action. Defaults to self (your own manifest).
                 Cannot be specified for update action (can only update your own manifest).
-            files: Optional list of file records. Each record may include:
-                path, description. Only description is agent-editable.
-            notes: Optional free-form notes for file relationships or context.
+            files: Optional list of file records. Each record has ``path`` plus
+                ``description_old`` and ``description_new``. The path is a lookup key only —
+                the file list is driven by the local filesystem, so only files already present
+                in your manifest can be annotated. Unknown paths are skipped and reported in
+                ``not_found``. ``description_old`` must equal the current description or the
+                change is rejected and reported in ``description_mismatches`` — this makes every
+                edit explicit (you state what you are changing).
+            notes_patch: Optional line-based patch body (same format as ``apply_patch``) applied
+                to the free-form notes. Use a pure-addition patch to populate empty notes.
+                On a failed match nothing is saved and the current notes are returned.
 
         Returns:
-            Manifest content or update status.
+            read -> manifest content.
+            update -> ``{status, manifest, not_found, description_changes,
+            description_mismatches, notes_diff}``.
         """
         action = (action or "read").lower()
 
@@ -291,7 +352,7 @@ class ManifestTool(Tool):
             if target_agent not in self.VALID_AGENTS:
                 return {
                     "status": "error",
-                    "error": f"Unknown agent type: {target_agent}. Valid agents: {', '.join(self.VALID_AGENTS)}"
+                    "error": f"Unknown agent type: {target_agent}. Valid agents: {', '.join(self.VALID_AGENTS)}",
                 }
             return await self._manifest_manager.load(target_agent)
 
@@ -302,17 +363,28 @@ class ManifestTool(Tool):
         if agent and agent != self._agent_type:
             return {
                 "status": "error",
-                "error": f"Cannot update other agent's manifest. You can only update your own manifest ({self._agent_type})."
+                "error": f"Cannot update other agent's manifest. You can only update your own manifest ({self._agent_type}).",
             }
 
         manifest = await self._manifest_manager.load(self._agent_type)
         now = self._manifest_manager.now()
-        file_map = {item.get("path"): item for item in manifest.get("files", []) if item.get("path")}
+        file_map = {
+            item.get("path"): item for item in manifest.get("files", []) if item.get("path")
+        }
 
         # Parse JSON string parameters (LLMs may serialize complex types as strings)
         files = _parse_json_param(files)
-        notes = _parse_json_param(notes)
+        notes_patch = _parse_json_param(notes_patch)
 
+        not_found: list[str] = []
+        description_changes: list[dict[str, str]] = []
+        description_mismatches: list[dict[str, str]] = []
+
+        # Annotate file descriptions via whole-field old -> new diff. The file
+        # list is determined by the local filesystem, so path is lookup-only:
+        # unknown paths are skipped (not registered) and surfaced so the agent
+        # can re-check its references. description_old must match the current
+        # value, so every change is explicit.
         if files:
             for record in files:
                 path = str(record.get("path", "")).strip()
@@ -320,20 +392,59 @@ class ManifestTool(Tool):
                     continue
                 item = file_map.get(path)
                 if item is None:
-                    item = {
-                        "path": path,
-                        "description": "",
-                        "description_updated_at": now,
-                        "file_updated_at": now,
-                    }
-                    manifest.setdefault("files", []).append(item)
-                    file_map[path] = item
-                desc = record.get("description")
-                if desc is not None:
-                    item["description"] = str(desc)
+                    not_found.append(path)
+                    continue
+                if "description_new" not in record:
+                    continue
+                old_val = record.get("description_old")
+                if old_val is None:
+                    old_val = item.get("description", "") or ""
+                else:
+                    old_val = str(old_val)
+                new_val = str(record.get("description_new"))
+                current_desc = item.get("description", "") or ""
+                if old_val != current_desc:
+                    description_mismatches.append(
+                        {"path": path, "expected": old_val, "actual": current_desc}
+                    )
+                    continue
+                if current_desc != new_val:
+                    item["description"] = new_val
                     item["description_updated_at"] = now
-        if notes is not None:
-            manifest["notes"] = str(notes)
-            manifest["notes_updated_at"] = now
+                    description_changes.append(
+                        {"path": path, "old": current_desc, "new": new_val}
+                    )
+
+        # Notes editing via the line-based patch engine (same format as apply_patch).
+        notes_diff: str | None = None
+        if notes_patch is not None and str(notes_patch).strip():
+            current = manifest.get("notes", "") or ""
+            try:
+                applied = apply_patch_to_text(current, str(notes_patch))
+            except PatchError as e:
+                return {
+                    "status": "error",
+                    "error": f"Failed to parse notes_patch: {e}",
+                    "notes": current,
+                }
+            if applied.error:
+                return {
+                    "status": "error",
+                    "error": applied.error,
+                    "notes": current,
+                }
+            new_notes = applied.new_lines[0] if applied.new_lines else ""
+            if new_notes != current:
+                manifest["notes"] = new_notes
+                manifest["notes_updated_at"] = now
+                notes_diff = _unified_diff(current, new_notes)
+
         await self._manifest_manager.save(self._agent_type, manifest)
-        return {"status": "ok", "manifest": manifest}
+        return {
+            "status": "ok",
+            "manifest": manifest,
+            "not_found": not_found,
+            "description_changes": description_changes,
+            "description_mismatches": description_mismatches,
+            "notes_diff": notes_diff,
+        }

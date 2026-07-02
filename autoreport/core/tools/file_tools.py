@@ -1,7 +1,6 @@
 """File operation tools."""
 
 import asyncio
-import difflib
 import re
 from pathlib import Path
 from typing import Any
@@ -11,7 +10,13 @@ from loguru import logger
 from ..tools.registry import Tool
 from .file_state import FileStateManager
 from .manifest_tool import ManifestManager
-from .path_utils import resolve_and_validate_path, suggest_canonical_path, is_internal_metadata_path, is_internal_metadata_rel
+from .patch_engine import ApplyResult, apply_patch_to_text
+from .path_utils import (
+    is_internal_metadata_path,
+    is_internal_metadata_rel,
+    resolve_and_validate_path,
+    suggest_canonical_path,
+)
 
 
 class FileSafetyMixin:
@@ -275,58 +280,121 @@ def _validate_plotting_script(content: str, workspace: Path) -> str | None:
     return None
 
 
-class WriteFileTool(WriteEnabledTool):
-    """Tool for writing files."""
+class ApplyPatchTool(WriteEnabledTool):
+    """Edit or create a file with a line-based patch (codex apply_patch style).
 
-    name = "write_file"
-    description = "Write content to a file. Creates parent directories if needed."
+    A patch is a line-oriented diff. Each hunk line is prefixed:
+      ``' '`` (space) = context line (must match the file, used to disambiguate),
+      ``'-'`` = line to remove (must match the file),
+      ``'+'`` = line to add.
+    A ``@@ <context>`` line optionally anchors a hunk: the engine locates that
+    single line first, then searches for the hunk's removed/context lines strictly
+    after it. Blank lines separate hunks.
 
-    def __init__(self, content_validator=None, **kwargs):
+    Matching is exact and whole-line. Repeated lines are disambiguated by the
+    sequential cursor (each hunk searches forward from where the previous one
+    ended) and by ``@@`` anchors. If a line cannot be located, nothing is written
+    and the current content is returned so the agent can re-aim.
+
+    If the file does not exist, a pure-addition patch creates it.
+    """
+
+    name = "apply_patch"
+    description = (
+        "Edit or create a file using a line-based patch. "
+        "Prefix each hunk line: ' ' (context, must match), '-' (remove, must match), '+' (add). "
+        "Use '@@ <line>' to anchor a hunk after a unique line (disambiguates repeats). "
+        "Blank line separates hunks. Matching is exact, whole-line; read the file first. "
+        "A pure-addition patch creates a new file."
+    )
+
+    def __init__(self, *, content_validator=None, **kwargs):
         super().__init__(**kwargs)
         self._content_validator = content_validator
 
-    async def __call__(
-        self,
-        path: str,
-        content: str,
-        create_backup: bool = True,
-    ) -> dict[str, Any]:
-        """Write to a file.
+    async def __call__(self, path: str, patch: str) -> dict[str, Any]:
+        """Apply a line-based patch to ``path``.
 
         Args:
-            path: Path to file (relative to workspace)
-            content: Content to write
-            create_backup: Whether to create backup before overwriting
+            path: Path to file (relative to workspace). Created if absent.
+            patch: Patch body - hunks of ' '/'-'/'+' lines, optional '@@' anchors,
+                blank-line-separated.
 
         Returns:
-            Dictionary with path and backup_path (if created)
+            Dictionary with path, replacements_applied, and backup_path when an
+            existing file was backed up. On failure (lines not found / parse
+            error) returns ``error`` plus ``current_content`` and writes nothing.
 
         Raises:
             ValueError: If path is outside workspace or contains path traversal.
             PermissionError: If write not allowed in target directory.
         """
         file_path = resolve_and_validate_path(path, self.workspace)
-        logger.debug("Writing file: {}", file_path)
+        logger.debug("Applying patch: {}", file_path)
 
         self._check_write_permission(file_path)
 
-        # Content validation for plotting scripts
+        if not str(patch or "").strip():
+            raise ValueError("patch must be non-empty")
+
+        file_exists = file_path.exists()
+
+        # read-before-edit safety only applies to existing files
+        if file_exists:
+            safety = self._check_file_safety(file_path)
+            if safety and safety["warning"]:
+                logger.warning("File safety warning suppressed patch: {}", safety["warning"])
+                return safety
+
+        try:
+            if file_exists:
+                content = await asyncio.to_thread(file_path.read_text, encoding="utf-8")
+            else:
+                content = ""
+        except UnicodeDecodeError:
+            logger.warning("Binary file detected (not UTF-8): {}", file_path)
+            return {
+                "error": f"Cannot patch '{file_path.name}': it appears to be a binary file (not UTF-8 encoded).",
+                "path": str(file_path),
+                "is_binary": True,
+            }
+
+        try:
+            result: ApplyResult = apply_patch_to_text(content, patch)
+        except Exception as e:
+            return {
+                "error": f"Failed to parse patch: {e}",
+                "path": str(file_path),
+                "current_content": content,
+            }
+
+        if result.error:
+            return {
+                "error": result.error,
+                "path": str(file_path),
+                "current_content": content,
+            }
+
+        new_content = result.new_lines[0] if result.new_lines else ""
+
+        # No-op: nothing changed.
+        if new_content == content:
+            return {
+                "path": str(file_path),
+                "replacements_applied": 0,
+                "info": "Patch produced no changes.",
+            }
+
+        # Content validation for plotting scripts (full resulting content).
         if self._content_validator and file_path.suffix == '.py':
-            error = self._content_validator(content, self.workspace)
+            error = self._content_validator(new_content, self.workspace)
             if error:
                 logger.warning("Plotting script validation failed: {}", error)
                 return {"error": error, "path": str(file_path), "validation_failed": True}
 
-        # Check read-before-write safety for existing files
-        if file_path.exists():
-            safety = self._check_file_safety(file_path)
-            if safety and safety["warning"]:
-                logger.warning("File safety warning suppressed write: {}", safety["warning"])
-                return safety
-
         try:
             backup_path = None
-            if create_backup:
+            if file_exists:
                 try:
                     backup_path = file_path.with_suffix(f"{file_path.suffix}.bak")
                     await asyncio.to_thread(backup_path.write_bytes, file_path.read_bytes())
@@ -334,291 +402,23 @@ class WriteFileTool(WriteEnabledTool):
                     pass
 
             file_path.parent.mkdir(parents=True, exist_ok=True)
-            await asyncio.to_thread(file_path.write_text, content, encoding="utf-8")
+            await asyncio.to_thread(file_path.write_text, new_content, encoding="utf-8")
 
-            result = {
+            # Record new file state after successful apply.
+            if self._file_state_manager:
+                self._file_state_manager.record_read(file_path)
+
+            out: dict[str, Any] = {
                 "path": str(file_path),
-                "success": True,
+                "replacements_applied": len(result.replacements),
+                "created": not file_exists,
             }
             if backup_path:
-                result["backup_path"] = str(backup_path)
-
-            return result
+                out["backup_path"] = str(backup_path)
+            return out
         except Exception as e:
-            logger.error("Failed to write file {}: {}", file_path, e)
+            logger.error("Failed to write patched file {}: {}", file_path, e)
             raise
-
-
-class EditFileTool(WriteEnabledTool):
-    """Tool for editing files by text replacement with fuzzy matching fallback."""
-
-    name = "edit_file"
-    description = (
-        "Replace text in a file. Finds old_text and replaces with new_text. "
-        "Always use read first to get the exact content before editing. "
-        "If exact match fails, the tool will attempt fuzzy matching and show a diff of the closest match."
-    )
-
-    def _normalize_quotes(self, text: str) -> str:
-        """Normalize various quote styles to ASCII double quotes for matching."""
-        return (
-            text.replace("'", '"')
-            .replace("`", '"')
-            .replace("\u2018", '"')   # '
-            .replace("\u2019", '"')   # '
-            .replace("\u201c", '"')   # "
-            .replace("\u201d", '"')   # "
-            .replace("\u00b4", '"')   # ´
-            .replace("\u02bc", '"')   # ʼ
-        )
-
-    def _strip_line_whitespace(self, text: str) -> str:
-        """Strip leading/trailing whitespace from each line."""
-        return "\n".join(line.strip() for line in text.splitlines())
-
-    def _sliding_window_search(self, content_lines, old_lines, match_fn) -> int | None:
-        """Slide a window over content_lines looking for the best match."""
-        n_old = len(old_lines)
-        if n_old == 0 or n_old > len(content_lines):
-            return None
-
-        # Collect all windows with their match score
-        candidates = []
-        for i in range(len(content_lines) - n_old + 1):
-            window = content_lines[i:i + n_old]
-            window_text = "\n".join(window)
-            old_text = "\n".join(old_lines)
-            try:
-                match = match_fn(window_text, old_text)
-                if match:
-                    score = difflib.SequenceMatcher(None, window_text, old_text).ratio()
-                    candidates.append((score, i, window_text))
-            except (ValueError, TypeError):
-                continue
-
-        if not candidates:
-            return None
-
-        # Return the best match position
-        candidates.sort(key=lambda x: -x[0])
-        best_score = candidates[0][0]
-        if best_score >= 0.6:  # Require at least 60% similarity
-            return candidates[0][1]
-        return None
-
-    def _try_exact_match(self, content: str, old_text: str) -> int | None:
-        """Level 1: Exact match."""
-        idx = content.find(old_text)
-        if idx >= 0:
-            return idx
-        return None
-
-    def _try_strip_window_match(self, content: str, old_text: str) -> tuple[int | None, str | None]:
-        """Level 2: Strip whitespace from each line, then sliding window match.
-
-        Returns:
-            (position_in_content, matched_text) or (None, None)
-        """
-        content_lines = content.splitlines(keepends=False)
-        old_lines = old_text.splitlines(keepends=False)
-
-        idx = self._sliding_window_search(
-            content_lines,
-            old_lines,
-            lambda w, o: self._strip_line_whitespace(w) == self._strip_line_whitespace(o),
-        )
-        if idx is not None:
-            matched_text = "\n".join(content_lines[idx:idx + len(old_lines)])
-            # Determine character position
-            char_pos = sum(len(line) + 1 for line in content_lines[:idx])
-            return char_pos, matched_text
-        return None, None
-
-    def _try_quote_normalize_match(self, content: str, old_text: str) -> tuple[int | None, str | None]:
-        """Level 3: Normalize quotes, then sliding window."""
-        content_lines = content.splitlines(keepends=False)
-        old_lines = old_text.splitlines(keepends=False)
-
-        idx = self._sliding_window_search(
-            content_lines,
-            old_lines,
-            lambda w, o: self._normalize_quotes(w) == self._normalize_quotes(o),
-        )
-        if idx is not None:
-            matched_text = "\n".join(content_lines[idx:idx + len(old_lines)])
-            char_pos = sum(len(line) + 1 for line in content_lines[:idx])
-            return char_pos, matched_text
-        return None, None
-
-    def _try_quote_normalize_strip_window(self, content: str, old_text: str) -> tuple[int | None, str | None]:
-        """Level 4: Normalize quotes AND strip whitespace, then sliding window.
-
-        This catches the combination of quote style + whitespace differences.
-        """
-        content_lines = content.splitlines(keepends=False)
-        old_lines = old_text.splitlines(keepends=False)
-
-        idx = self._sliding_window_search(
-            content_lines,
-            old_lines,
-            lambda w, o: (
-                self._normalize_quotes(self._strip_line_whitespace(w))
-                == self._normalize_quotes(self._strip_line_whitespace(o))
-            ),
-        )
-        if idx is not None:
-            matched_text = "\n".join(content_lines[idx:idx + len(old_lines)])
-            char_pos = sum(len(line) + 1 for line in content_lines[:idx])
-            return char_pos, matched_text
-        return None, None
-
-    def _make_diff_feedback(self, file_path: Path, old_text: str, matched_text: str) -> str:
-        """Generate unified diff between what the agent wanted and what was found.
-
-        This helps the agent correct its edit request.
-        """
-        old_lines = old_text.splitlines(keepends=True)
-        matched_lines = matched_text.splitlines(keepends=True)
-        diff = difflib.unified_diff(
-            old_lines,
-            matched_lines,
-            fromfile="your edit (old_text)",
-            tofile=f"file content ({file_path.name})",
-            lineterm="\n",
-        )
-        return "".join(diff)
-
-    async def __call__(
-        self,
-        path: str,
-        old_text: str,
-        new_text: str,
-        replace_all: bool = False,
-    ) -> dict[str, Any]:
-        """Edit a file by replacing text, with fuzzy matching fallback.
-
-        Args:
-            path: Path to file (relative to workspace)
-            old_text: Text to find and replace
-            new_text: Replacement text
-            replace_all: Replace all occurrences (default: False, replaces first only)
-
-        Returns:
-            Dictionary with path and replacements_made, or warning + diff feedback.
-
-        Raises:
-            ValueError: If path is outside workspace or contains path traversal.
-            PermissionError: If write not allowed in target directory.
-        """
-        file_path = resolve_and_validate_path(path, self.workspace)
-        logger.debug("Editing file: {}", file_path)
-
-        self._check_write_permission(file_path)
-
-        # Check read-before-edit safety
-        safety = self._check_file_safety(file_path)
-        if safety and safety["warning"]:
-            logger.warning("File safety warning suppressed edit: {}", safety["warning"])
-            return safety
-
-        if not old_text:
-            raise ValueError("old_text must be non-empty")
-
-        try:
-            content = await asyncio.to_thread(file_path.read_text, encoding="utf-8")
-        except UnicodeDecodeError:
-            logger.warning("Binary file detected (not UTF-8): {}", file_path)
-            return {
-                "error": f"Cannot edit '{file_path.name}' as text: it appears to be a binary file (not UTF-8 encoded). "
-                         f"The edit_file tool only supports UTF-8 text files.",
-                "path": str(file_path),
-                "is_binary": True,
-            }
-        except FileNotFoundError:
-            return {"error": f"File not found: {file_path}", "path": str(file_path)}
-
-        # --- Attempt matching in order of strictness ---
-
-        # Level 1: Exact match (fast path)
-        pos = self._try_exact_match(content, old_text)
-        matched_text = old_text
-
-        if pos is None:
-            # Level 2: Strip whitespace + sliding window
-            pos, matched_text = self._try_strip_window_match(content, old_text)
-
-        if pos is None:
-            # Level 3: Quote normalization + sliding window
-            pos, matched_text = self._try_quote_normalize_match(content, old_text)
-
-        if pos is None:
-            # Level 4: Quote normalization + strip whitespace + sliding window
-            pos, matched_text = self._try_quote_normalize_strip_window(content, old_text)
-
-        if pos is None:
-            # All levels failed — show diff feedback of the closest match
-            content_lines = content.splitlines(keepends=False)
-            old_lines = old_text.splitlines(keepends=False)
-            # Find the single best-scoring window for feedback
-            best_score = 0
-            best_window = None
-            for i in range(len(content_lines) - len(old_lines) + 1 if len(old_lines) <= len(content_lines) else 0):
-                window = "\n".join(content_lines[i:i + len(old_lines)])
-                score = difflib.SequenceMatcher(None, window, old_text).ratio()
-                if score > best_score:
-                    best_score = score
-                    best_window = window
-
-            feedback = ""
-            if best_window and best_score > 0:
-                diff_text = self._make_diff_feedback(file_path, old_text, best_window)
-                feedback = (
-                    f"\n\n--- Closest match (similarity: {best_score:.0%}) ---\n"
-                    f"{diff_text}\n"
-                    f"--- End diff ---\n"
-                )
-
-            return {
-                "error": (
-                    f"old_text not found in file after trying 4 levels of fuzzy matching "
-                    f"(exact, whitespace-tolerant, quote-normalized, combined). "
-                    f"Use read to get the current file content, then provide exact old_text.\n"
-                    f"Tip: edit_file uses SEARCH/REPLACE — copy-paste the exact lines from read output."
-                ),
-                "path": str(file_path),
-                "fuzzy_match_failed": True,
-                "diff_feedback": feedback,
-            }
-
-        # We have a match — perform the replacement
-        end_pos = pos + len(matched_text)
-        if replace_all:
-            # For replace_all, we need to replace ALL occurrences of the matched text
-            new_content = content.replace(matched_text, new_text)
-            replacements = content.count(matched_text)
-        else:
-            new_content = content[:pos] + new_text + content[end_pos:]
-            replacements = 1
-
-        # Check if this is a no-op (nothing changed)
-        if content == new_content:
-            return {
-                "path": str(file_path),
-                "replacements_made": 0,
-                "info": "old_text and new_text are identical — no changes made.",
-            }
-
-        await asyncio.to_thread(file_path.write_text, new_content, encoding="utf-8")
-
-        # Record new file state after edit
-        if self._file_state_manager:
-            self._file_state_manager.record_read(file_path)
-
-        return {
-            "path": str(file_path),
-            "replacements_made": replacements,
-            "fuzzy_matched": matched_text != old_text,
-        }
 
 
 class DeleteFileTool(WriteEnabledTool):

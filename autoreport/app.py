@@ -246,7 +246,7 @@ class AutoReportApp:
             workspace / "data" / "processed",
             workspace / "references",
             workspace / "theory",
-            workspace / "code",
+            workspace / "Plots",
             workspace / "Outline",
             workspace / "tex",
         ]

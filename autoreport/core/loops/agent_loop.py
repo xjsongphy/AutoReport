@@ -767,7 +767,7 @@ class AgentLoop:
 
                     result = await tool(**tool_call.arguments)
 
-                    if tool_call.name in ("write_file", "edit_file", "delete_file"):
+                    if tool_call.name in ("apply_patch", "delete_file"):
                         self._manifest_dirty = True
 
                     await self.bus.publish(ToolResultMsg(

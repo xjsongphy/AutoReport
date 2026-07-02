@@ -29,10 +29,10 @@ from .widgets.ui_utils import (
     secondary_filled_button_qss,
 )
 
-PROJECT_DIRECTORIES = ["Data", "Data/Processed", "References", "Theory", "Code", "Outline", "Tex"]
+PROJECT_DIRECTORIES = ["Data", "Data/Processed", "References", "Theory", "Plots", "Outline", "Tex"]
 
 # Markers whose presence indicates an existing AutoReport project workspace.
-_PROJECT_MARKERS = ["data", "references", "theory", "code", "tex"]
+_PROJECT_MARKERS = ["data", "references", "theory", "plots", "tex"]
 
 
 def is_valid_project(path: Path) -> bool:

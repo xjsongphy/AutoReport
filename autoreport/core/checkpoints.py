@@ -137,9 +137,9 @@ class FileState:
 # ==== Agent write directories ====
 
 _AGENT_WRITE_DIRS: dict[str, list[str]] = {
-    "main": ["Data", "Data/Processed", "References", "Theory", "Code", "Tex"],
+    "main": ["Data", "Data/Processed", "References", "Theory", "Plots", "Tex"],
     "data_analysis": ["Data/Processed"],
-    "plotting": ["Code"],
+    "plotting": ["Plots"],
     "theory": ["Theory"],
     "report": ["Tex"],
 }
