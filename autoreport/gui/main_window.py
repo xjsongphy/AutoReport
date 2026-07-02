@@ -58,8 +58,9 @@ class _TurnState:
 
 
 # File-tree panel sizing (logical px, DPI-scaled at use sites).
-_FILE_TREE_DEFAULT_WIDTH = 220  # initial width — the tree needs little room
-_FILE_TREE_MAX_WIDTH = 340      # cap so it can't hog the window when resized
+_FILE_TREE_DEFAULT_WIDTH = 440   # initial width — the tree needs little room
+_FILE_TREE_MAX_WIDTH = 1020      # cap so it can't hog the window when resized
+_FILE_TREE_MAX_FRACTION = 0.40   # never exceed 40% of the window width
 
 
 class MainWindow(QMainWindow):
@@ -377,12 +378,12 @@ class MainWindow(QMainWindow):
             }}
             #userMessageBubble {{
                 background-color: {c["bubble_bg"]};
-                border: 1px solid {c["border"]};
+                border: 1px solid {c["gray_white"]};
                 border-radius: {px(12)};
             }}
             #userContextChip {{
-                background-color: {c["hover"]};
-                border: 1px solid {c["border"]};
+                background-color: {c["secondaryBtnBg"]};
+                border: 1px solid {c["gray_white"]};
                 border-radius: {px(8)};
             }}
             #userContextChipIcon {{
@@ -604,10 +605,15 @@ class MainWindow(QMainWindow):
                 font-weight: {c["fw_semibold"]};
                 min-width: {px(20)};
             }}
+            #execDetailValueHost {{
+                background-color: {c["secondaryBtnBg"]};
+                border-radius: {px(6)};
+            }}
             #execDetailText {{
                 color: {c["detail_fg"]};
                 font-family: "Cascadia Code", "SF Mono", "Consolas", monospace;
                 font-size: {px(11)};
+                line-height: 1.45;
             }}
             #execDetailDivider {{
                 background-color: {c["detail_card_border"]};
@@ -881,8 +887,7 @@ class MainWindow(QMainWindow):
 
         # Cap the file-tree width so it stays a narrow rail and never hogs the
         # window — extra space should flow to the preview/agent panels.
-        s = dpi_scale()
-        self.file_tree.setMaximumWidth(round(_FILE_TREE_MAX_WIDTH * s))
+        self.file_tree.setMaximumWidth(_FILE_TREE_MAX_WIDTH)
 
         # Set stretch factors: file_tree is non-stretching (it has a max width),
         # extra space is split between preview and agent_panel.
@@ -1095,6 +1100,8 @@ class MainWindow(QMainWindow):
                     rec.get("result"),
                     rec.get("error"),
                     summary=rec.get("summary"),
+                    detail=rec.get("detail"),
+                    expandable=rec.get("expandable"),
                 )
             elif role == "error":
                 panel.add_error(rec.get("source", ""), content)
@@ -1420,38 +1427,38 @@ class MainWindow(QMainWindow):
         state = self._state_for_agent(agent_str)
         if not self._is_visible_agent(agent_str):
             result_str = str(message.result) if message.result else None
+            summary = None
+            detail = None
+            expandable = None
             if agent_str == "main" and message.tool_name == "send_to_agent":
-                bubble_title, bubble_body = self._format_send_to_agent_bubble(message.result, message.error)
-                if bubble_title:
-                    self._conv_store.append_message(
-                        agent_str,
-                        "agent",
-                        bubble_body or "",
-                        extra={
-                            "display_mode": "bubble",
-                            "bubble_title": bubble_title,
-                            "bubble_align": "left",
-                            "bubble_on_timeline": True,
-                            "bubble_collapsible": True,
-                        },
-                    )
+                summary, detail = self._format_send_to_agent_bubble(message.result, message.error)
+                expandable = bool(detail)
+                result_str = detail or summary
             self._conv_store.append_tool_result(
                 agent_str,
                 message.tool_name,
                 result_str,
                 message.error,
+                extra={
+                    "summary": summary,
+                    "detail": detail,
+                    "expandable": expandable,
+                } if summary or detail or expandable is not None else None,
             )
             return
         panel = self._get_panel_for_agent(agent_str)
         result_str = str(message.result) if message.result else None
         summary = None
+        detail = None
+        expandable = None
         safe_error = None
         if message.error:
             safe_error = "Tool execution failed"
 
         if agent_str == "main" and message.tool_name == "send_to_agent":
-            summary, bubble_body = self._format_send_to_agent_bubble(message.result, message.error)
-            result_str = bubble_body or summary
+            summary, detail = self._format_send_to_agent_bubble(message.result, message.error)
+            expandable = bool(detail)
+            result_str = detail or summary
         elif message.tool_name == "manage_tasks":
             message.result = self._augment_manage_tasks_result(agent_str, message.result)
             summary, _, _ = self._format_manage_tasks_result(message.result, message.error)
@@ -1463,32 +1470,9 @@ class MainWindow(QMainWindow):
             message.result,
             safe_error,
             summary=summary,
+            detail=detail,
+            expandable=expandable,
         )
-        if agent_str == "main" and message.tool_name == "send_to_agent":
-            bubble_title, bubble_body = self._format_send_to_agent_bubble(message.result, message.error)
-            if bubble_title:
-                if self._is_visible_agent(agent_str):
-                    panel.add_message(
-                        "agent",
-                        bubble_body or "",
-                        display_mode="bubble",
-                        bubble_title=bubble_title,
-                        bubble_align="left",
-                        bubble_on_timeline=True,
-                        bubble_collapsible=True,
-                    )
-                self._conv_store.append_message(
-                    agent_str,
-                    "agent",
-                    bubble_body or "",
-                    extra={
-                        "display_mode": "bubble",
-                        "bubble_title": bubble_title,
-                        "bubble_align": "left",
-                        "bubble_on_timeline": True,
-                        "bubble_collapsible": True,
-                    },
-                )
         state.phase = "tool"
         self._conv_store.append_tool_result(
             agent_str,
@@ -1497,6 +1481,8 @@ class MainWindow(QMainWindow):
             message.error,
             extra={
                 "summary": summary,
+                "detail": detail,
+                "expandable": expandable,
             },
         )
 
@@ -1831,13 +1817,18 @@ class MainWindow(QMainWindow):
         if total_width <= 0:
             return
 
-        # file_tree gets a small fixed default (clamped to its min/max); the
-        # remaining width is split between preview and agent_panel.
-        s = dpi_scale()
-        file_tree_default = round(_FILE_TREE_DEFAULT_WIDTH * s)
+        # file_tree gets a fixed default clamped on BOTH sides:
+        #  - lower bound: its own minimumWidth() and the default (never too small)
+        #  - upper bound: the default, the max cap, AND a fraction of the window
+        #    width (so it can never dominate on small/narrow screens).
+        file_tree_default = _FILE_TREE_DEFAULT_WIDTH
         file_tree_min = self.file_tree.minimumWidth()
         file_tree_max = self.file_tree.maximumWidth() or file_tree_default
-        file_tree_size = max(file_tree_min, min(file_tree_default, file_tree_max))
+        proportional_cap = int(total_width * _FILE_TREE_MAX_FRACTION)
+        file_tree_size = max(
+            file_tree_min,
+            min(file_tree_default, file_tree_max, proportional_cap),
+        )
 
         preview_min = self.preview.minimumWidth()
         agent_panel_min = self.agent_panel.minimumWidth()

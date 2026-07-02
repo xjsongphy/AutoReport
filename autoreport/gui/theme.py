@@ -110,6 +110,9 @@ def get_theme_colors() -> dict[str, str]:
         # === Chat/Agent Panel ===
         "bubble_bg": "#2a2a2a" if dark else "#ffffff",
         "bubble_hover": "#333333" if dark else "#ffffff",
+        # Neutral gray (R=G=B, no green/blue cast) for user-bubble and
+        # context-chip borders — light enough to read as ash-gray, not white.
+        "gray_white": "#a6a6a6" if dark else "#a6a6a6",
         "edit_bubble_bg": "#3c3c3c" if dark else "#ffffff",
         "edit_bubble_border": "transparent" if dark else "#cecece",
         "avatar_bg": "#3c3c3c" if dark else "#e0e0e0",
