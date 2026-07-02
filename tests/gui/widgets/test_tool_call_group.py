@@ -1,7 +1,8 @@
 """Tests for ToolCallGroup widget."""
 
 import pytest
-from PyQt6.QtWidgets import QLabel, QPushButton, QSizePolicy
+from PyQt6.QtCore import QRectF, Qt
+from PyQt6.QtWidgets import QLabel, QPushButton, QSizePolicy, QWidget
 
 from autoreport.gui.widgets.tool_call_group import ToolCallGroup
 
@@ -51,6 +52,35 @@ def test_pending_call_can_be_completed(qtbot):
     )
 
     assert "Theory replied: done" in widget.get_summary_text()
+
+
+def test_send_to_agent_result_can_expand_detail(qtbot):
+    widget = ToolCallGroup()
+    qtbot.addWidget(widget)
+    widget.resize(520, 180)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    widget.add_tool_call(
+        "send_to_agent",
+        {"agent_type": "plotting"},
+        success=None,
+        summary="Delegated To Plotting",
+    )
+    widget.complete_tool_call(
+        "send_to_agent",
+        result={"status": "delegated"},
+        summary="Delegated To Plotting",
+        detail="Plotting will continue in background",
+        expandable=True,
+    )
+
+    assert widget.is_expanded() is False
+    widget._header_btn.click()
+    assert widget.is_expanded() is True
+    assert widget._detail_host.isVisible() is True
+    assert widget._detail_label is not None
+    assert "Plotting will continue in background" in widget._detail_label.text()
 
 
 def test_multiple_tool_calls_render_on_separate_lines(qtbot):
@@ -117,6 +147,103 @@ def test_manage_tasks_task_title_is_bold(qtbot):
     assert not section_labels[1].font().bold()
 
 
+def test_manage_tasks_running_control_draws_centered_vector_star(qtbot):
+    widget = ToolCallGroup()
+    qtbot.addWidget(widget)
+    widget.resize(520, 140)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    widget.add_tool_call(
+        "manage_tasks",
+        {},
+        success=True,
+        duration_ms=10,
+        summary="<b>Task</b>\nTodo\n* running task",
+    )
+    qtbot.wait(20)
+
+    control = next(
+        label
+        for label in widget.findChildren(QLabel)
+        if label.objectName() == "taskStatusControl"
+    )
+
+    segments = control.running_segments()  # type: ignore[attr-defined]
+    center = QRectF(control.rect()).center()
+
+    assert len(segments) == 4
+    for segment in segments:
+        midpoint_x = (segment.p1().x() + segment.p2().x()) / 2.0
+        midpoint_y = (segment.p1().y() + segment.p2().y()) / 2.0
+        assert abs(midpoint_x - center.x()) <= 0.01
+        assert abs(midpoint_y - center.y()) <= 0.01
+
+
+def test_manage_tasks_completed_control_draws_simple_checkmark_with_narrower_width(qtbot):
+    widget = ToolCallGroup()
+    qtbot.addWidget(widget)
+    widget.resize(520, 140)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    widget.add_tool_call(
+        "manage_tasks",
+        {},
+        success=True,
+        duration_ms=10,
+        summary="<b>Task</b>\nTodo\n☑ finished task",
+    )
+    qtbot.wait(20)
+
+    control = next(
+        label
+        for label in widget.findChildren(QLabel)
+        if label.objectName() == "taskStatusControl"
+    )
+
+    segments = control.completed_segments()  # type: ignore[attr-defined]
+
+    assert control.width() == 16
+    assert control.height() == 16
+    assert len(segments) == 2
+    assert segments[0].p2() == segments[1].p1()
+
+
+def test_manage_tasks_status_control_uses_scaled_spacing_and_vertical_alignment(qtbot):
+    widget = ToolCallGroup()
+    qtbot.addWidget(widget)
+    widget.resize(520, 140)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    widget.add_tool_call(
+        "manage_tasks",
+        {},
+        success=True,
+        duration_ms=10,
+        summary="<b>Task</b>\nTodo\n☑ aligned task",
+    )
+    qtbot.wait(20)
+
+    row = next(
+        child
+        for child in widget.findChildren(QLabel)
+        if child.objectName() == "taskTextLabel"
+    ).parentWidget()
+    assert row is not None
+
+    control = row.findChild(QLabel, "taskStatusControl")
+    label = row.findChild(QLabel, "taskTextLabel")
+    layout = row.layout()
+
+    assert control is not None
+    assert label is not None
+    assert layout is not None
+    assert layout.spacing() == 7
+    assert control.geometry().center().y() == label.geometry().center().y()
+
+
 def test_exec_detail_text_shrinks_in_narrow_panel(qtbot):
     widget = ToolCallGroup()
     qtbot.addWidget(widget)
@@ -158,6 +285,49 @@ def test_exec_out_preview_is_limited_to_three_lines(qtbot):
     out_labels = [lab for lab in labels if lab.objectName() == "execDetailText" and "one" in lab.text()]
     assert out_labels
     assert out_labels[0].text() == "one\ntwo\nthree"
+
+
+def test_exec_out_preview_has_fade_mask_and_value_host(qtbot):
+    widget = ToolCallGroup()
+    qtbot.addWidget(widget)
+    widget.resize(420, 220)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    widget.add_tool_call(
+        "exec",
+        {"command": "printf many", "command_description": "many lines"},
+        success=True,
+        duration_ms=80,
+        result={"stdout": "one\ntwo\nthree\nfour\nfive", "stderr": ""},
+    )
+
+    assert widget.findChild(QWidget, "execOutFadeMask") is not None
+    assert widget.findChild(QWidget, "execDetailValueHost") is not None
+
+
+def test_exec_out_preview_is_top_aligned_and_wrapped(qtbot):
+    widget = ToolCallGroup()
+    qtbot.addWidget(widget)
+    widget.resize(320, 220)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    widget.add_tool_call(
+        "exec",
+        {"command": "printf many", "command_description": "many lines"},
+        success=True,
+        duration_ms=80,
+        result={"stdout": "one\ntwo\nthree\nfour\nfive", "stderr": ""},
+    )
+
+    out_labels = [
+        lab for lab in widget.findChildren(QLabel)
+        if lab.objectName() == "execDetailText" and "one" in lab.text()
+    ]
+    assert out_labels
+    assert out_labels[0].wordWrap() is True
+    assert out_labels[0].alignment() & Qt.AlignmentFlag.AlignTop
 
 
 def test_exec_copy_button_reserves_width_by_default(qtbot):
