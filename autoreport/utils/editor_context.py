@@ -17,6 +17,12 @@ def _display_filename(path_text: str) -> str:
         return normalized
 
 
+# Relevance note appended to the backend-facing editor-context prompt. It is
+# meant for the LLM only and must never appear in the user-visible bubble,
+# copied text, or stored conversation — parse_editor_context strips it.
+_RELEVANCE_NOTE_LINE = "This may or may not be related to the current task."
+
+
 def parse_editor_context(content: str) -> dict[str, Any]:
     """Parse an editor-context wrapped message.
 
@@ -75,6 +81,14 @@ def parse_editor_context(content: str) -> dict[str, Any]:
 
     if body_start is None:
         return result
+
+    # Strip the LLM-only relevance note that sits between the header fields
+    # and the real message body (added by build_editor_context_prompt).
+    if (
+        body_start < len(lines)
+        and lines[body_start].strip() == _RELEVANCE_NOTE_LINE
+    ):
+        body_start += 1
 
     while body_start < len(lines) and not lines[body_start].strip():
         body_start += 1

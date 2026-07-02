@@ -276,6 +276,32 @@ def _expand_inline_markdown_selection(raw_markdown: str, start: int, end: int) -
     return start, end
 
 
+_BLOCK_PREFIX_RE = re.compile(
+    r"[ \t]*(?:>{1,}\s*|#{1,6}\s+|[-*+]\s+|\d+[.)]\s+)"
+)
+
+
+def _expand_block_marker(raw: str, start: int, end: int) -> tuple[int, int]:
+    """Grow a raw range to include the leading block marker of its first line.
+
+    Rendered markdown drops line prefixes (``- ``, ``## ``, ``> ``, ``1. ``),
+    so a selection that starts at a line's content beginning maps to a raw
+    position just *after* the prefix \u2014 copying it would lose the prefix and
+    yield non-markdown text.  When the selection begins exactly at that
+    content start, pull ``start`` back over the prefix so the copied range is
+    valid markdown.
+    """
+    line_start = raw.rfind("\n", 0, start) + 1  # 0 when no preceding newline
+    m = _BLOCK_PREFIX_RE.match(raw, line_start)
+    if m and start <= m.end():
+        start = line_start
+    # Preserve the trailing newline when the selection ends at a line boundary,
+    # so multi-line copies keep their line breaks.
+    if end < len(raw) and raw[end] == "\n":
+        end += 1
+    return start, end
+
+
 def _raw_markdown_for_selected_text(raw_markdown: str, selected_text: str) -> str:
     selected = selected_text.replace("\u2029", "\n").replace("\u2028", "\n")
     if not selected:
@@ -292,6 +318,7 @@ def _raw_markdown_for_selected_text(raw_markdown: str, selected_text: str) -> st
     start_raw = raw_positions[start_plain]
     end_raw = raw_positions[end_plain - 1] + 1
     start_raw, end_raw = _expand_inline_markdown_selection(raw_markdown, start_raw, end_raw)
+    start_raw, end_raw = _expand_block_marker(raw_markdown, start_raw, end_raw)
     return raw_markdown[start_raw:end_raw]
 
 

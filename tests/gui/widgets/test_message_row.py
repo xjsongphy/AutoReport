@@ -65,6 +65,33 @@ def test_selected_agent_markdown_copy_preserves_inline_markup():
     assert _raw_markdown_for_selected_text(raw, "Bold and code") == raw
 
 
+def test_selected_agent_markdown_copy_preserves_block_markers():
+    """Selecting a whole list item / heading / blockquote keeps its marker."""
+    # List item: the "- " prefix must be restored.
+    assert _raw_markdown_for_selected_text(
+        "- first\n- second\n- third", "second"
+    ).startswith("- second")
+    # Heading: "## " restored.
+    assert _raw_markdown_for_selected_text(
+        "## Section\nbody", "Section"
+    ).startswith("## Section")
+    # Blockquote: "> " restored.
+    assert _raw_markdown_for_selected_text(
+        "> quoted\nbody", "quoted"
+    ).startswith("> quoted")
+    # Numbered list: "2. " restored.
+    assert _raw_markdown_for_selected_text(
+        "1. one\n2. two", "two"
+    ).startswith("2. two")
+
+
+def test_selected_agent_markdown_copy_partial_inline_stays_surgical():
+    """A partial selection inside a paragraph is NOT expanded to the whole line."""
+    raw = "Some **bold** text here."
+    # Selecting just "text" yields "text", not the whole paragraph.
+    assert _raw_markdown_for_selected_text(raw, "text") == "text"
+
+
 def test_message_row_emits_rollback_checkpoint(qtbot):
     widget = MessageRow(role="user", content="rollback me")
     qtbot.addWidget(widget)
