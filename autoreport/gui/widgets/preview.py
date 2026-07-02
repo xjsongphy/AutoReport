@@ -955,6 +955,20 @@ class PreviewWidget(QWidget):
             }}
         """)
 
+        # Force the tab-strip horizontal scrollbar to a transparent trough
+        # directly on the widget — the descendant-selector rule above is
+        # unreliable across QScrollArea's viewport boundary.
+        self._tab_scroll.horizontalScrollBar().setStyleSheet(
+            scrollbar_stylesheet(
+                orientation="horizontal",
+                background_color="transparent",
+                thickness="6px",
+                min_handle_extent="24px",
+                radius="0px",
+                colors=c,
+            )
+        )
+
         for panel in self._panels:
             panel.apply_style()
 
@@ -1340,26 +1354,32 @@ class PreviewWidget(QWidget):
             hl = QHBoxLayout(host)
             hl.setContentsMargins(0, 0, 2, 0)
             hl.setSpacing(2)
+            path_width = 0
+            path_height = 0
             if path_text:
                 path_label = QLabel(path_text, host)
                 path_label.setObjectName("tabDuplicatePath")
-                path_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                path_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                 path_label.setMinimumWidth(0)
-                path_label.setFixedWidth(96)
-                path_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+                path_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
                 path_label.setWordWrap(False)
                 path_label.setTextFormat(Qt.TextFormat.PlainText)
                 path_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
                 hl.addWidget(path_label)
+                path_width = path_label.sizeHint().width()
+                path_height = path_label.sizeHint().height()
+            missing_height = 0
             if missing:
                 missing_label = QLabel("D", host)
                 missing_label.setObjectName("tabMissingBadge")
                 missing_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 hl.addWidget(missing_label)
+                missing_height = missing_label.sizeHint().height()
             hl.addWidget(inner)
             inner_w = max(12, inner.sizeHint().width())
-            host_w = inner_w + (96 if path_text else 0) + (12 if missing else 0) + 4
-            host.setFixedSize(host_w, 12)
+            host_h = max(12, inner.sizeHint().height(), path_height, missing_height)
+            host_w = inner_w + path_width + (12 if missing else 0) + 4
+            host.setFixedSize(host_w, host_h)
             if hand_cursor:
                 host.setCursor(Qt.CursorShape.PointingHandCursor)
                 inner.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1411,7 +1431,10 @@ class PreviewWidget(QWidget):
         parent = rel.parent
         if str(parent) in ("", "."):
             return ""
-        return str(parent)
+        parts = parent.parts
+        if len(parts) == 1:
+            return parts[0]
+        return f".../{parts[-1]}"
 
     def eventFilter(self, obj, event):  # noqa: N802
         if obj is self._unified_tab_bar:

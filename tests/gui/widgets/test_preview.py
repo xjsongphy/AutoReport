@@ -289,6 +289,80 @@ def test_duplicate_tab_names_show_relative_parent_path(qtbot, tmp_path: Path) ->
     assert "second" in labels
 
 
+def test_duplicate_tab_names_show_ellipsis_and_last_parent_for_nested_paths(
+    qtbot, tmp_path: Path
+) -> None:
+    first = tmp_path / "alpha" / "one" / "note.txt"
+    second = tmp_path / "beta" / "two" / "note.txt"
+    first.parent.mkdir(parents=True)
+    second.parent.mkdir(parents=True)
+    first.write_text("first", encoding="utf-8")
+    second.write_text("second", encoding="utf-8")
+
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.load_file(first)
+    widget.load_file(second)
+
+    hosts = [
+        widget._unified_tab_bar.tabButton(i, QTabBar.ButtonPosition.RightSide)
+        for i in range(widget._unified_tab_bar.count())
+    ]
+    labels = [label.text() for host in hosts for label in host.findChildren(QLabel)]
+
+    assert ".../one" in labels
+    assert ".../two" in labels
+
+
+def test_duplicate_tab_path_label_does_not_use_fixed_width(qtbot, tmp_path: Path) -> None:
+    first = tmp_path / "first" / "note.txt"
+    second = tmp_path / "second" / "note.txt"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_text("first", encoding="utf-8")
+    second.write_text("second", encoding="utf-8")
+
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.load_file(first)
+    widget.load_file(second)
+
+    host = widget._unified_tab_bar.tabButton(0, QTabBar.ButtonPosition.RightSide)
+    path_label = next(
+        label
+        for label in host.findChildren(QLabel)
+        if label.objectName() == "tabDuplicatePath"
+    )
+
+    assert path_label.minimumWidth() == 0
+    assert path_label.maximumWidth() >= 16777215
+
+
+def test_duplicate_tab_path_label_uses_natural_height_for_alignment(
+    qtbot, tmp_path: Path
+) -> None:
+    first = tmp_path / "first" / "note.txt"
+    second = tmp_path / "second" / "note.txt"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_text("first", encoding="utf-8")
+    second.write_text("second", encoding="utf-8")
+
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.load_file(first)
+    widget.load_file(second)
+
+    host = widget._unified_tab_bar.tabButton(0, QTabBar.ButtonPosition.RightSide)
+    path_label = next(
+        label
+        for label in host.findChildren(QLabel)
+        if label.objectName() == "tabDuplicatePath"
+    )
+
+    assert host.height() >= path_label.sizeHint().height()
+
+
 def test_unified_tab_bar_disables_scroll_buttons(qtbot, tmp_path: Path) -> None:
     widget = PreviewWidget(tmp_path)
     qtbot.addWidget(widget)
