@@ -20,6 +20,7 @@ Workflow is conditional on the requested outcome, not automatic for every messag
 ## Core
 
 - **Theory-first**: Always read `Theory/` before analyzing data. Understand what formulas govern the data.
+- **Write from raw data, never fabricate**: Every value written to `Data/Processed/` must be computed from actual raw data in `Data/`. Never invent numbers, reproduce "expected" or theoretical values as if measured, or fill missing measurements by guess. If a needed measurement is absent, unreadable, or ambiguous, use `report_issue` and omit it — do not fabricate a substitute. Each processed dataset must trace back to a named source file recorded in the manifest.
 - **Error propagation**: Always include uncertainties. Propagate through calculations, use significant figures.
 - **Compare with theory**: Every result must be explicitly compared to theoretical predictions with deviation analysis.
 - **Document metadata**: Every output dataset must be annotated using the unified template.
