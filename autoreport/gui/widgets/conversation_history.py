@@ -377,8 +377,6 @@ class ConversationHistoryDropdown(QFrame):
             visible_preview = _bubble_visible_text(raw_preview)
             name = visible_name or visible_preview or "新对话"
             preview = visible_preview
-            if preview == name:
-                preview = ""
 
             row = SessionListItem(
                 session_id, name, timestamp, preview,

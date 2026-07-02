@@ -200,6 +200,31 @@ def test_add_tool_result_updates_pending_group_item(agent_panel):
     assert "Theory replied: first line" in groups[0].get_summary_text()
 
 
+def test_send_to_agent_result_stays_in_tool_group_without_agent_bubble(agent_panel):
+    before_rows = len(agent_panel._messages_area.get_message_rows())
+
+    agent_panel.add_tool_call(
+        "send_to_agent",
+        {"agent_type": "plotting"},
+        summary="Main To Plotting",
+        expandable=False,
+    )
+    agent_panel.add_tool_result(
+        "send_to_agent",
+        {"status": "delegated", "agent_type": "plotting", "message": "delegated"},
+        summary="Delegated To Plotting",
+        detail="delegated",
+        expandable=True,
+    )
+
+    after_rows = len(agent_panel._messages_area.get_message_rows())
+    groups = agent_panel._messages_area.get_tool_groups()
+
+    assert before_rows == after_rows
+    assert len(groups) == 1
+    assert groups[0].get_summary_text() == "Delegated To Plotting"
+
+
 def test_adjacent_manage_tasks_status_change_updates_in_place(agent_panel):
     created_summary = "<b>Task</b>\nTodo\n☐ DATA_ANALYSIS: Process all measurements\n\nWait\n☐ DATA_ANALYSIS: Process all measurements"
     started_summary = "<b>Task</b>\nTodo\n● DATA_ANALYSIS: Process all measurements\n\nWait\n● DATA_ANALYSIS: Process all measurements"

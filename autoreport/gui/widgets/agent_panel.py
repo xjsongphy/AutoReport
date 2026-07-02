@@ -842,6 +842,8 @@ class AgentPanel(QWidget):
             success=None,
             duration_ms=0,
             summary=summary,
+            detail=detail,
+            expandable=expandable,
         )
 
     def add_tool_result(
@@ -866,6 +868,8 @@ class AgentPanel(QWidget):
                 error=error,
                 duration_ms=100,
                 summary=summary,
+                detail=detail,
+                expandable=expandable,
             )
             self._merge_adjacent_task_status_update(target_group)
 
