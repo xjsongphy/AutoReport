@@ -14,7 +14,7 @@ verifying the API and methods exist and are callable, rather than full integrati
 from pathlib import Path
 
 import pytest
-from PyQt6.QtCore import QEvent, QPointF, Qt
+from PyQt6.QtCore import QEvent, QItemSelectionModel, QPointF, Qt
 from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtWidgets import QAbstractItemDelegate, QTreeWidgetItem
@@ -32,7 +32,7 @@ from autoreport.gui.widgets.file_tree import (
 def test_fixed_directories_constant() -> None:
     """Test that fixed directories are correctly defined."""
     assert isinstance(FIXED_DIRECTORIES, list)
-    assert set(FIXED_DIRECTORIES) == {"Data", "References", "Theory", "Code", "Outline", "Tex"}
+    assert set(FIXED_DIRECTORIES) == {"Data", "References", "Theory", "Plots", "Outline", "Tex"}
 
 
 def test_file_tree_class_has_required_methods() -> None:
@@ -187,6 +187,61 @@ def test_file_operations_use_correct_paths() -> None:
     assert "self.workspace" in new_folder_source
 
 
+def _make_multi_select_tree(qtbot, tmp_path: Path) -> tuple:
+    """Build a tree with Theory/a.tex and Theory/b.tex; return (widget, a_item, b_item)."""
+    theory = tmp_path / "Theory"
+    theory.mkdir()
+    (theory / "a.tex").write_text("a", encoding="utf-8")
+    (theory / "b.tex").write_text("b", encoding="utf-8")
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+    tree = widget.tree
+    # select_file forces the directory to be populated and selects a.tex.
+    widget.select_file(theory / "a.tex")
+    root = tree.topLevelItem(FIXED_DIRECTORIES.index("Theory"))
+    items = {root.child(i).text(0): root.child(i) for i in range(root.childCount())}
+    return widget, items["a.tex"], items["b.tex"]
+
+
+def _click_item(tree, item, modifier) -> None:
+    rect = tree.visualItemRect(item)
+    pt = rect.center()
+    ev = QMouseEvent(
+        QEvent.Type.MouseButtonPress,
+        QPointF(pt),
+        QPointF(tree.mapToGlobal(pt)),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        modifier,
+    )
+    tree.mousePressEvent(ev)
+
+
+def test_ctrl_click_toggles_multi_selection(qtbot, tmp_path: Path) -> None:
+    """Ctrl/Cmd-click toggles a file into the selection (shift already worked)."""
+    widget, a, b = _make_multi_select_tree(qtbot, tmp_path)
+    tree = widget.tree
+
+    assert {i.text(0) for i in tree.selectedItems()} == {"a.tex"}
+    _click_item(tree, b, Qt.KeyboardModifier.ControlModifier)
+    assert {i.text(0) for i in tree.selectedItems()} == {"a.tex", "b.tex"}
+
+
+def test_select_file_preserves_active_multi_selection(qtbot, tmp_path: Path) -> None:
+    """Preview feedback (select_file) must not collapse a Ctrl/Cmd multi-selection."""
+    widget, a, b = _make_multi_select_tree(qtbot, tmp_path)
+    tree = widget.tree
+
+    # Establish multi-selection (a selected, ctrl-toggle b).
+    sm = tree.selectionModel()
+    sm.select(tree.indexFromItem(b), QItemSelectionModel.SelectionFlag.Toggle)
+    assert {i.text(0) for i in tree.selectedItems()} == {"a.tex", "b.tex"}
+
+    # The preview's file-changed feedback calls select_file; selection survives.
+    widget.select_file((tmp_path / "Theory" / "b.tex"))
+    assert {i.text(0) for i in tree.selectedItems()} == {"a.tex", "b.tex"}
+
+
 def test_drag_drop_handles_multiple_files() -> None:
     """Test that drag-drop can handle multiple files."""
     import inspect
@@ -250,7 +305,7 @@ def test_hover_text_uses_tilde_prefixed_system_path(qtbot, tmp_path: Path) -> No
     qtbot.addWidget(widget)
 
     item = QTreeWidgetItem()
-    file_path = tmp_path / "code" / "plot.py"
+    file_path = tmp_path / "plots" / "plot.py"
     item.setData(0, 257, str(file_path))
 
     assert widget._hover_text_for_item(item) == FileTreeWidget._tilde_path(file_path)

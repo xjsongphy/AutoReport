@@ -13,7 +13,7 @@ import json
 import sys
 
 from loguru import logger
-from PyQt6.QtCore import QFileInfo, QFileSystemWatcher, QPoint, QRect, QSize, QSignalBlocker, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QFileInfo, QFileSystemWatcher, QItemSelectionModel, QPoint, QRect, QSize, QSignalBlocker, Qt, QTimer, pyqtSignal
 
 from autoreport.utils.logging_config import ui_logger
 from PyQt6.QtGui import QColor, QCursor, QDrag, QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QDropEvent, QIcon, QMouseEvent, QPalette, QPainter, QPen, QPixmap
@@ -41,7 +41,7 @@ from ..theme import get_theme_colors, scrollbar_stylesheet
 from .ui_utils import UI_HOVER_DELAY_MS, IconActionButton, compact_tooltip_qss, create_isolated_context_menu, render_svg_icon
 
 # Fixed directory structure
-FIXED_DIRECTORIES = ["Data", "References", "Theory", "Code", "Outline", "Tex"]
+FIXED_DIRECTORIES = ["Data", "References", "Theory", "Plots", "Outline", "Tex"]
 FILE_TREE_CONTENT_LEFT_INSET = 16
 _FILE_TEXT_ICON_GAP_ADJUST = 28
 _FILE_EDITOR_LEFT_ADJUST = -26
@@ -153,7 +153,7 @@ DIR_LABELS = {
     "Data": "Data",
     "References": "References",
     "Theory": "Theory",
-    "Code": "Code",
+    "Plots": "Plots",
     "Outline": "Outline",
     "Tex": "Tex",
     "Processed": "Processed",
@@ -1401,7 +1401,15 @@ class FileTreeWidget(QWidget):
         item = self._find_item_by_file(str(resolved))
         if item is None:
             return False
-        self.tree.setCurrentItem(item)
+        # Preserve an active multi-selection (Ctrl/Cmd-click). Setting the
+        # current item normally collapses the selection to just this file,
+        # which would wipe a user-driven multi-selection whenever the preview
+        # feeds a file-changed event back into the tree. When more than one
+        # item is already selected, only move the current item + scroll.
+        if len(self.tree.selectedItems()) > 1:
+            self.tree.setCurrentItem(item, 0, QItemSelectionModel.SelectionFlag.NoUpdate)
+        else:
+            self.tree.setCurrentItem(item)
         self.tree.scrollToItem(item)
         return True
 
