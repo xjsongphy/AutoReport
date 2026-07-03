@@ -85,11 +85,11 @@ def test_lexer_keeps_syntax_token_colors():
 
 
 def test_markdown_styles_match_vscode(qtbot):
-    """Markdown headings/bold/code get VSCode accent colors; links stay plain.
+    """Markdown headings/bold/code/links get VSCode accent colors.
 
-    VSCode dark-modern scopes markup.heading/markup.bold (#569CD6) and
-    markup.inline.raw (#CE9178), but defines NO link token color, so links and
-    math content render as plain foreground.
+    Verifies that the VSCode-inspired palette maps QScintilla's markdown
+    lexer style names to the correct theme keys.  Link references like
+    ``[label]`` are now coloured as md_link (#4CB9FF / #0451A5).
     """
     from PyQt6.Qsci import QsciLexerMarkdown, QsciScintilla
 
@@ -118,22 +118,25 @@ def test_markdown_styles_match_vscode(qtbot):
     # Heading marker '#' -> heading color; bold 'b' -> bold color.
     assert color_at(text.index("#")).lower() == colors["md_heading"].lower()
     assert color_at(text.index("**bold**") + 2).lower() == colors["md_bold"].lower()
-    # Inline code 'c' -> string (markup.inline.raw) color.
-    assert color_at(text.index("`code`") + 1).lower() == colors["syntax_string"].lower()
-    # Math brackets are plain foreground, NOT a link color.
-    assert color_at(text.index("[a,b]")).lower() == colors["editor_fg"].lower()
+    # Inline code 'c' -> md_code (markup.inline.raw) color — decoupled from
+    # syntax_string so light mode uses VSCode blue (#0451A5) instead of red.
+    assert color_at(text.index("`code`") + 1).lower() == colors["md_code"].lower()
+    # Link reference '[a,b]' is now styled as a link (md_link); previously
+    # fell through to fg because the Link style was unmapped.
+    assert color_at(text.index("[a,b]")).lower() == colors["md_link"].lower()
 
 
 def test_tex_commands_get_function_color(qtbot):
-    r"""LaTeX \commands render in VSCode's function color (#DCDCAA / #795E26).
+    r"""LaTeX \commands render in tex_command color (#DCDCAA / #624A16).
 
     QScintilla lumps \commands into the Text style; post-processing restyles
-    them into the Command bucket.
+    them into the Command bucket.  Uses tex_command (not syntax_function)
+    for darker light-mode readability on white backgrounds.
     """
     from PyQt6.Qsci import QsciLexerTeX, QsciScintilla
 
     from autoreport.gui.scintilla_utils import (
-        attach_tex_command_coloring,
+        attach_tex_post_styling,
         configure_lexer_colors,
     )
 
@@ -142,7 +145,7 @@ def test_tex_commands_get_function_color(qtbot):
     lexer = QsciLexerTeX(sci)
     sci.setLexer(lexer)
     configure_lexer_colors(lexer)
-    attach_tex_command_coloring(sci)
+    attach_tex_post_styling(sci)
 
     sci.setText(r"\section{Hi} and text")
     # setText triggers the attached textChanged -> command coloring.
@@ -152,10 +155,80 @@ def test_tex_commands_get_function_color(qtbot):
     colors = get_theme_colors()
     text = sci.text()
     command_style = lexer.color(sci.SendScintilla(sci.SCI_GETSTYLEAT, text.index("section")))
-    # '\section' tokens use the function color; surrounding plain text does not.
-    assert command_style.name().lower() == colors["syntax_function"].lower()
+    # '\section' tokens use the tex_command color; surrounding plain text does not.
+    assert command_style.name().lower() == colors["tex_command"].lower()
     plain = lexer.color(sci.SendScintilla(sci.SCI_GETSTYLEAT, text.index("and")))
     assert plain.name().lower() == colors["editor_fg"].lower()
+
+
+def test_tex_keyword_commands_get_keyword_color(qtbot):
+    r"""\begin, \end, \usepackage etc. render in tex_keyword color.
+
+    VSCode scopes \begin, \end as keyword.control.tex (keyword purple/pink)
+    while \section, \textbf are support.function.general.tex (function gold).
+    """
+    from PyQt6.Qsci import QsciLexerTeX, QsciScintilla
+
+    from autoreport.gui.scintilla_utils import (
+        attach_tex_post_styling,
+        configure_lexer_colors,
+    )
+
+    sci = QsciScintilla()
+    qtbot.addWidget(sci)
+    lexer = QsciLexerTeX(sci)
+    sci.setLexer(lexer)
+    configure_lexer_colors(lexer)
+    attach_tex_post_styling(sci)
+
+    sci.setText(r"\begin{document}\n\section{Hi}\n\end{document}")
+    # setText triggers the attached textChanged -> command coloring.
+
+    from autoreport.gui.theme import get_theme_colors
+
+    colors = get_theme_colors()
+    text = sci.text()
+
+    # \begin → keyword color
+    begin_style = lexer.color(sci.SendScintilla(sci.SCI_GETSTYLEAT, text.index("begin")))
+    assert begin_style.name().lower() == colors["tex_keyword"].lower()
+
+    # \end → keyword color
+    end_style = lexer.color(sci.SendScintilla(sci.SCI_GETSTYLEAT, text.index("end", text.index("section"))))
+    assert end_style.name().lower() == colors["tex_keyword"].lower()
+
+    # \section → still function color (not keyword)
+    sec_style = lexer.color(sci.SendScintilla(sci.SCI_GETSTYLEAT, text.index("section")))
+    assert sec_style.name().lower() == colors["tex_command"].lower()
+
+
+def test_markdown_hr_color_matches_vscode(qtbot):
+    """Horizontal rule color should differ between dark and light modes.
+
+    VSCode dark-modern uses comment green (#6A9955); light-modern uses
+    a lighter green (#008000) to match the light-mode comment token.
+    """
+    from PyQt6.Qsci import QsciLexerMarkdown, QsciScintilla
+
+    from autoreport.gui.scintilla_utils import configure_lexer_colors
+
+    sci = QsciScintilla()
+    qtbot.addWidget(sci)
+    lexer = QsciLexerMarkdown(sci)
+    sci.setLexer(lexer)
+    configure_lexer_colors(lexer)
+
+    sci.setText("text\n\n---\n")
+    sci.SendScintilla(sci.SCI_COLOURISE, 0, -1)
+
+    from autoreport.gui.theme import get_theme_colors
+
+    colors = get_theme_colors()
+    text = sci.text()
+    # "---" after a blank line → horizontal-rule style.
+    hr_pos = text.index("---")
+    hr_color = lexer.color(sci.SendScintilla(sci.SCI_GETSTYLEAT, hr_pos)).name()
+    assert hr_color.lower() == colors["md_hr"].lower()
 
 
 def test_markdown_fenced_code_block_has_syntax_colors(qtbot):
@@ -189,3 +262,123 @@ def test_markdown_fenced_code_block_has_syntax_colors(qtbot):
     }
     # Multiple distinct colors => the block is syntax-highlighted, not flat.
     assert len(seen) >= 2
+
+
+def test_tex_commands_inside_math_mode_keep_command_color(qtbot):
+    r"""\mathrm, \frac, \sqrt inside $...$ retain tex_command color.
+
+    After the ordering fix (math colour applied first, then command colour
+    on top), commands inside math mode must show tex_command (gold/brown),
+    not tex_math (orange/red).  This matches VSCode where support.function
+    scoping applies inside string.other.math.
+    """
+    from PyQt6.Qsci import QsciLexerTeX, QsciScintilla
+
+    from autoreport.gui.scintilla_utils import (
+        attach_tex_post_styling,
+        configure_lexer_colors,
+    )
+
+    sci = QsciScintilla()
+    qtbot.addWidget(sci)
+    lexer = QsciLexerTeX(sci)
+    sci.setLexer(lexer)
+    configure_lexer_colors(lexer)
+    attach_tex_post_styling(sci)
+
+    sci.setText(r"$\mathrm{p}^+\mathrm{n}$ and $\frac{a}{b}$")
+    # setText fires textChanged → post-styling.
+
+    from autoreport.gui.theme import get_theme_colors
+
+    colors = get_theme_colors()
+    text = sci.text()
+
+    # First \mathrm → tex_command (function gold), not tex_math
+    r1 = text.index("mathrm")
+    s1 = lexer.color(sci.SendScintilla(sci.SCI_GETSTYLEAT, r1))
+    assert s1.name().lower() == colors["tex_command"].lower(), (
+        f"\\mathrm inside $…$ should be tex_command, got {s1.name()}"
+    )
+
+    # Second \mathrm → tex_command
+    r2 = text.index("mathrm", r1 + 1)
+    s2 = lexer.color(sci.SendScintilla(sci.SCI_GETSTYLEAT, r2))
+    assert s2.name().lower() == colors["tex_command"].lower()
+
+    # \frac → tex_command
+    frac_pos = text.index("frac")
+    s3 = lexer.color(sci.SendScintilla(sci.SCI_GETSTYLEAT, frac_pos))
+    assert s3.name().lower() == colors["tex_command"].lower()
+
+    # Dollar signs (math delimiters) → tex_math (Symbol style)
+    dollar_pos = text.index("$")
+    s4 = lexer.color(sci.SendScintilla(sci.SCI_GETSTYLEAT, dollar_pos))
+    assert s4.name().lower() == colors["tex_math"].lower()
+
+
+def test_tex_comment_overrides_everything(qtbot):
+    r"""% comment lines should be solid green — math and commands inside
+    comments must not show their own colours.
+
+    The comment post-styling runs last, so it must overwrite any math or
+    command styling previously applied to the same range.
+    """
+    from PyQt6.Qsci import QsciLexerTeX, QsciScintilla
+
+    from autoreport.gui.scintilla_utils import (
+        attach_tex_post_styling,
+        configure_lexer_colors,
+    )
+
+    sci = QsciScintilla()
+    qtbot.addWidget(sci)
+    lexer = QsciLexerTeX(sci)
+    sci.setLexer(lexer)
+    configure_lexer_colors(lexer)
+    attach_tex_post_styling(sci)
+
+    sci.setText(r"real content\n% \textbf{not bold} $E=mc^2$ \begin{not}\nmore text")
+    # setText fires textChanged → post-styling.
+
+    from autoreport.gui.theme import get_theme_colors
+
+    colors = get_theme_colors()
+    text = sci.text()
+
+    # Everything after % on the comment line should be comment green.
+    pct = text.index("%")
+    # \textbf inside comment
+    tb = text.index("textbf")
+    assert tb > pct  # sanity: inside comment
+    s_tb = lexer.color(sci.SendScintilla(sci.SCI_GETSTYLEAT, tb))
+    # Virtual style indices have no description(); color() returns the QColor
+    # set via SCI_STYLESETFORE.  We compare the actual foreground colour.
+    fg_tb = sci.SendScintilla(sci.SCI_STYLEGETFORE,
+                              sci.SendScintilla(sci.SCI_GETSTYLEAT, tb))
+    expected_fg = QColor(colors["syntax_comment"])
+    assert QColor(
+        fg_tb & 0xFF, (fg_tb >> 8) & 0xFF, (fg_tb >> 16) & 0xFF
+    ).name().lower() == expected_fg.name().lower(), (
+        "\\textbf inside comment should be comment colour"
+    )
+
+    # $E=mc^2$ inside comment
+    math_in_comment = text.index("E=mc")
+    s_math = sci.SendScintilla(sci.SCI_STYLEGETFORE,
+                               sci.SendScintilla(sci.SCI_GETSTYLEAT, math_in_comment))
+    assert QColor(
+        s_math & 0xFF, (s_math >> 8) & 0xFF, (s_math >> 16) & 0xFF
+    ).name().lower() == expected_fg.name().lower(), (
+        "$math$ inside comment should be comment colour"
+    )
+
+    # \begin inside comment
+    begin_in_comment = text.index("begin")
+    s_begin = sci.SendScintilla(sci.SCI_STYLEGETFORE,
+                                sci.SendScintilla(sci.SCI_GETSTYLEAT, begin_in_comment))
+    assert QColor(
+        s_begin & 0xFF, (s_begin >> 8) & 0xFF, (s_begin >> 16) & 0xFF
+    ).name().lower() == expected_fg.name().lower(), (
+        "\\begin inside comment should be comment colour"
+    )

@@ -1,0 +1,138 @@
+% ======================================================================
+% 语法着色测试文件 — 覆盖所有 TeX 内容类型
+% 颜色注释格式:  ← 应显示为 XXX 色
+% ======================================================================
+
+% --- 0. 注释 (syntax_comment: 深色 #6A9955 / 浅色 #008000) -------------
+% 本行及上面所有 % 开头的行都应显示为绿色
+% 注释中的 \command 不应变黄，$E=mc^2$ 也不应变红
+% 注释中的 \begin \end \usepackage 也不应变粉
+
+% --- 1. 关键字命令 (tex_keyword: 深色 #C586C0 / 浅色 #AF00DB) ---------
+% 以下命令应显示为品红/粉色：
+\documentclass{article}     % ← \documentclass 是关键字命令 → tex_keyword 粉色
+\usepackage{amsmath}        % ← \usepackage 是关键字命令 → tex_keyword 粉色
+\usepackage{graphicx}       % ← \usepackage 是关键字命令 → tex_keyword 粉色
+
+% --- 2. 函数命令 (tex_command: 深色 #DCDCAA / 浅色 #795E26) -----------
+% 以下命令应显示为金色/棕色：
+\section{函数命令测试}      % ← \section 是函数命令 → tex_command 金色
+\subsection{小节标题}       % ← \subsection 是函数命令 → tex_command 金色
+\textbf{粗体文字}           % ← \textbf 是函数命令 → tex_command 金色
+\textit{斜体文字}           % ← \textit 是函数命令 → tex_command 金色
+\ref{tab:data}              % ← \ref 是函数命令 → tex_command 金色
+\cite{ref1}                 % ← \cite 是函数命令 → tex_command 金色
+\label{sec:intro}           % ← \label 是函数命令 → tex_command 金色
+\caption{表格标题}          % ← \caption 是函数命令 → tex_command 金色
+\centering                  % ← \centering 是函数命令 → tex_command 金色
+
+% --- 3. 带星号(*)的命令变体 --------------------------------------------
+% \section* 整体(含*) → tex_command 金色
+% \newcommand* 整体(含*) → tex_keyword 粉色
+\section*{不带编号的节}     % ← \section* 含 * → tex_command 金色
+\newcommand*{\mycmd}{foo}   % ← \newcommand* 含 * → tex_keyword 粉色（因为 \newcommand 是关键字）
+
+% --- 4. 关键字命令 — 环境与定义 ----------------------------------------
+% 以下都是 tex_keyword 粉色：
+\begin{document}            % ← \begin 是关键字命令 → tex_keyword 粉色
+\end{document}              % ← \end 是关键字命令 → tex_keyword 粉色
+
+\begin{equation}            % ← \begin 是关键字命令 → tex_keyword 粉色
+E = mc^{2}
+\label{eq:einstein}         % ← \label 是函数命令 → tex_command 金色
+\end{equation}              % ← \end 是关键字命令 → tex_keyword 粉色
+
+\begin{table}[H]             % ← \begin 是关键字命令 → tex_keyword 粉色
+\centering
+\caption{测试数据}
+\label{tab:data}
+\end{table}                 % ← \end 是关键字命令 → tex_keyword 粉色
+
+% --- 5. 文件包含类的关键字命令 -----------------------------------------
+% 以下应显示为 tex_keyword 粉色：
+\input{sections/intro}      % ← \input 是关键字命令 → tex_keyword 粉色
+\include{appendix}          % ← \include 是关键字命令 → tex_keyword 粉色
+\bibliography{refs}         % ← \bibliography 是关键字命令 → tex_keyword 粉色
+\bibliographystyle{plain}   % ← \bibliographystyle 是关键字命令 → tex_keyword 粉色
+
+% --- 6. 定义类的关键字命令 ---------------------------------------------
+% 以下应显示为 tex_keyword 粉色：
+\newcommand{\foo}{bar}      % ← \newcommand 是关键字命令 → tex_keyword 粉色
+\renewcommand{\foo}{baz}    % ← \renewcommand 是关键字命令 → tex_keyword 粉色
+\newenvironment{myenv}{}{}  % ← \newenvironment 是关键字命令 → tex_keyword 粉色
+\def\mydef{value}           % ← \def 是关键字命令 → tex_keyword 粉色
+\let\oldcmd\newcmd          % ← \let 是关键字命令 → tex_keyword 粉色
+\newif\ifmycond             % ← \newif 是关键字命令 → tex_keyword 粉色
+\providecommand{\foo}{bar}  % ← \providecommand 是关键字命令 → tex_keyword 粉色
+
+% --- 7. 数学模式 ($...$ / $$...$$: tex_math 深色 #CE9178 / 浅色 #A31515)
+% 整个 $...$ 和 $$...$$ 范围内的内容应显示为橙色/红色
+$V_{\rm out} = k C_{\rm nominal} + b$       % ← 整段 → tex_math 橙色
+$R^2 = 0.9999$                                % ← 整段 → tex_math 橙色
+$\phi = -171.93^\circ$                        % ← 整段 → tex_math 橙色
+$\sigma \propto 1 / \sqrt{T_c}$               % ← 整段 → tex_math 橙色
+
+% 行间公式（display math）—— 同样 tex_math 橙色：
+$$N(w) = \frac{2}{q\epsilon\epsilon_0 A^2 \, d(1/C^2)/dV}$$
+
+% --- 8. 分组括号 (tex_group: 深色 #D4D4D4 / 浅色 #000000) --------------
+% { 和 } 应显示为灰色/黑色（标点色）
+% 以下每一对 {} 中的括号：
+%   {article}   ← 括号 → tex_group 灰色  内容 → editor_fg 正文色
+%   {amsmath}   ← 括号 → tex_group 灰色
+%   [H]         ← 括号 → tex_group 灰色（方括号也是 group）
+% 下面这个命令被 { } 包围的参数括号都会用到 tex_group：
+\section{分组括号测试：\textbf{内层粗体}}  % ← 外层{}和内层{} → tex_group 灰色
+
+% --- 9. 特殊字符 (tex_special: 深色 #D4D4D4 / 浅色 #000000) ------------
+% 以下特殊字符应显示为灰色/黑色（与分组括号同色）：
+% 注意：这些字符必须出现在正文中，不能写在注释里！
+
+\section{特殊字符正文测试}
+
+% 在正文中使用特殊字符（通过 \texttt 或直接使用）：
+% $  #  %  &  ~  _  ^  \  {  }  |
+% 下面用 \verb 展示或实际嵌入：
+
+美元符号可以直接使用: \$        % ← \$ 中的 $ → tex_special 灰色
+井号: \#                         % ← \# 中的 # → tex_special 灰色
+百分号: \%                       % ← \% 中的 % → tex_special 灰色
+and符号: \&                      % ← \& 中的 & → tex_special 灰色
+波浪线: \~{}                     % ← \~{} 中的 ~ → tex_special 灰色
+下划线: \_                       % ← \_ 中的 _ → tex_special 灰色
+帽子: \^{}                       % ← \^{} 中的 ^ → tex_special 灰色
+反斜杠: \textbackslash           % ← 反斜杠 → tex_special 灰色
+竖线在数学模式: $|x|$            % ← | 在数学模式中 → tex_special 灰色
+
+% 直接出现在正文中的特殊字符（通过转义）：
+% 实际上在 LaTeX 中，$ # % & ~ _ ^ \ { } 这些字符大多需要通过命令或
+% 特定上下文才能出现。关键是它们在 QScintilla TeX lexer 中会被标记
+% 为 "Special" 样式 → tex_special 色。
+
+% --- 10. 混合场景测试 --------------------------------------------------
+\section{混合场景}
+
+根据公式 $V_{\rm out} \propto C_{\rm x}$，
+% ↑ $...$ → tex_math 橙色，\rm → tex_command 金色
+当 $C_0 \gg C_{\rm x}$ 时，锁定放大器输出与被测电容近似成正比。
+其中 \textbf{灵敏度} 由 \textit{最小二乘法} 确定（见表~\ref{tab:calibration}）。
+% ↑ \textbf → tex_command 金色，{} → tex_group 灰色
+
+% 嵌套命令中的颜色优先级：
+% \section{标题中的 \textbf{粗体} 和 $E=mc^2$}
+%   ↑ section → tex_command    ↑ textbf → tex_command   ↑ 数学 → tex_math
+%   ↑ { → tex_group            ↑ { → tex_group          ↑ { → tex_group
+
+% --- 11. 引用与文献命令 (函数命令 → tex_command 金色) ------------------
+引用表格第~\ref{tab:data}行，详见文献~\cite{key1,key2}。
+\href{https://example.com}{链接文字}
+% ↑ \ref, \cite, \href → tex_command 金色
+
+% --- 12. 注释中的颜色「隔离」测试 ---------------------------------------
+% 下面是关键测试：注释内的任何内容都应该是绿色，不能"泄露"其他颜色
+% \begin{document}  ← 即使写了关键字命令，在注释中也应显示绿色
+% $E=mc^2$          ← 数学模式在注释中应显示绿色
+% \textbf{粗体}     ← 函数命令在注释中应显示绿色
+
+\end{document}
+% ← \end 是关键字命令 → tex_keyword 粉色

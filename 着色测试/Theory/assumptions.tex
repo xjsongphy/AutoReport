@@ -1,0 +1,45 @@
+% === Assumptions and Approximations ===
+% This file documents all assumptions made in the theoretical derivations,
+% their justifications, validity conditions, and potential error sources.
+
+\subsection*{理论推导中的假设与近似}
+
+\paragraph{1. 单边突变结近似}
+假设pn结一侧掺杂浓度远高于另一侧（$N_{\mathrm{A}} \gg N_{\mathrm{D}}$），空间电荷区仅扩展至轻掺杂一侧（$w \approx x_{\mathrm{n}}$）。扩散工艺制备的浅结满足此条件。若两侧掺杂浓度可比，需采用双边的完整解。
+
+\paragraph{2. 耗尽层近似}
+假设空间电荷区内载流子完全耗尽，电荷仅由电离杂质贡献。忽略自由载流子对空间电荷的贡献（Debye尾部效应）。在反向偏压下此近似精度较高；零偏或小偏压下，Debye长度范围内的过渡区使实际电容略大于理论值。
+
+\paragraph{3. 小交流信号条件}
+假设交流测试信号 $v(t)$ 远小于pn结总直流压降 $V_{\mathrm{D}} + V_{\mathrm{R}}$，保证微分电容定义的线性条件满足。本实验中 $v(t) \approx 40\,\mathrm{mV}$，$V_{\mathrm{D}} \approx 0.6$--$0.8\,\mathrm{V}$，满足 $v(t) \ll V_{\mathrm{D}} + V_{\mathrm{R}}$。
+
+\paragraph{4. $C_{0} \gg C_{\mathrm{x}}$ 近似}
+测量线路中取 $C_{0} \gg C_{\mathrm{x}}$，使分压关系简化为 $v_{\mathrm{i}} \approx (C_{\mathrm{x}}/C_{0})\,v(t)$。本实验中 $C_{0} = 5\times 10^{3}\,\mathrm{pF}$，待测电容约几十 $\mathrm{pF}$。$C_{0}/C_{\mathrm{x}}$ 越大近似精度越高，但灵敏度 $v(t)/C_{0}$ 相应降低，需折中选取。
+
+\paragraph{5. 忽略串联电阻效应}
+假设pn结串联电阻（衬底电阻、接触电阻）远小于结的容抗 $1/(\omega C_{\mathrm{x}})$，交流信号几乎全部降落在结电容上。实际串联电阻会造成分压误差和额外的RC相移，表现为输出相位 $(\phi_{\mathrm{v}} - \phi_{0})$ 偏离理想值。
+
+\paragraph{6. 忽略反向漏电流}
+假设pn结反向漏电流可忽略（本实验要求 $V_{\mathrm{R}} = 10\,\mathrm{V}$ 时 $I_{\mathrm{R}} < 1\,\mu\mathrm{A}$），直流偏压经串联电阻 $R_{2} = 100\,\mathrm{k}\Omega$ 的压降可忽略。若二极管存在较大漏电，不仅引入直流压降误差，其并联电导分量还会改变交流分压关系，导致相位 $(\phi_{\mathrm{v}} - \phi_{0})$ 显著偏离预期值，使 $C$--$V$ 测量失效。
+
+\paragraph{7. 忽略深能级陷阱和界面态}
+假设pn结耗尽层内不存在显著的深能级陷阱中心或界面态。若存在（如掺金硅），陷阱充放电过程会贡献额外的电容分量，$C$--$V$ 关系偏离式(\ref{eq:C-V})，上述分析需修正 \cite{Schibli1968}。
+
+\paragraph{8. 一维近似}
+假设pn结为平面结，耗尽层边界平行，电场和电势仅沿垂直于结面的方向变化。实际器件边缘效应（曲率半径效应）会使边缘处电场增强、局部电容偏大。
+
+\paragraph{9. 室温恒定}
+假设测量在恒定室温下进行。温度影响本征载流子浓度 $n_{\mathrm{i}}$，从而影响自建势 $V_{\mathrm{D}} = (kT/q)\ln(N_{\mathrm{A}}N_{\mathrm{D}}/n_{\mathrm{i}}^{2})$。$C$--$V$ 曲线随温度有微小漂移。
+
+\paragraph{10. 均匀掺杂段判据}
+$1/C^{2}$--$V_{\mathrm{R}}$ 曲线的直线段对应均匀掺杂区；曲线弯曲处对应掺杂浓度变化区。此判据要求杂质分布在空间电荷区宽度尺度上变化足够平缓。
+
+
+\subsection*{未解决的或需验证的问题}
+
+\begin{itemize}
+  \item 各二极管的漏电流大小需实测验证，漏电超标的样品不适合 $C$--$V$ 法。
+  \item 标准电容标定的精度直接影响 $C$ 轴绝对定标。
+  \item 寄生电容（样品盒空挡 $1.4\,\mathrm{pF}$）需从测量值中扣除。
+  \item 锁定放大器时间常量的选取需在信噪比与测量速度之间折中。
+\end{itemize}

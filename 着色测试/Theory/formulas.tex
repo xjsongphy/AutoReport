@@ -1,0 +1,104 @@
+核心公式汇总见表~\ref{tab:formulas}。
+
+\begin{table}
+\caption{C--V法测量半导体杂质分布——核心公式汇总}
+\label{tab:formulas}
+\begin{ruledtabular}
+\begin{tabular}{cccc}
+\hline
+\multicolumn{1}{c}{\textbf{公式}} & \textbf{物理意义} & \textbf{适用条件} & \textbf{推导来源} \\
+\hline
+
+$w = \left[\dfrac{2\epsilon\epsilon_0}{qN_{\mathrm{D}}}(V_{\mathrm{D}} + V_{\mathrm{R}})\right]^{1/2}$
+& 空间电荷区宽度与偏压关系
+& 单边突变结，均匀掺杂，耗尽近似
+& \S1.1 \\
+\hline
+
+$C = \dfrac{\epsilon\epsilon_0 A}{w}$
+& pn结势垒电容（微分电容）
+& 单边突变结，均匀掺杂
+& \S1.1 \\
+\hline
+
+$\dfrac{1}{C^{2}} = \dfrac{2}{A^{2}q\epsilon\epsilon_0 N_{\mathrm{D}}}(V_{\mathrm{R}} + V_{\mathrm{D}})$
+& $1/C^{2}$--$V_{\mathrm{R}}$ 线性关系
+& 单边突变结，均匀掺杂
+& \S1.1 \\
+\hline
+
+$N(w) = \dfrac{2}{q\epsilon\epsilon_0 A^{2}\,\mathrm{d}(1/C^{2})/\mathrm{d}V_{\mathrm{R}}}$
+& 任意掺杂分布的杂质浓度
+& 单边突变结，耗尽近似
+& \S1.1 \\
+\hline
+
+$N(w) = \dfrac{C^{3}}{q\epsilon\epsilon_0 A^{2}\,|\mathrm{d}C/\mathrm{d}V_{\mathrm{R}}|}$
+& 杂质浓度(利用$C$--$V$斜率)
+& 单边突变结，耗尽近似
+& \S1.1 \\
+\hline
+
+$w = \dfrac{\epsilon\epsilon_0 A}{C}$
+& 空间电荷区宽度与电容关系
+& 普遍成立（耗尽近似）
+& \S1.1 \\
+\hline
+
+$v_{\mathrm{i}} \approx \dfrac{C_{\mathrm{x}}}{C_{0}}\,v(t)$
+& 测量线路输出与待测电容关系
+& $C_{0} \gg C_{\mathrm{x}}$
+& \S1.2 \\
+\hline
+
+$\Delta f_{\mathrm{N}} = \dfrac{1}{4RC}$
+& LPF等效噪声带宽
+& 一阶RC低通滤波器
+& \S1.3 \\
+\hline
+
+$\dfrac{\text{SNR}_{\text{out}}}{\text{SNR}_{\text{in}}} = \sqrt{\dfrac{\Delta f_{\text{in}}}{\Delta f_{\text{out}}}}$
+& 锁定放大器信噪比改善
+& 白噪声假设
+& \S1.3 \\
+\hline
+\end{tabular}
+\end{ruledtabular}
+\end{table}
+
+% === Additional formulas for data processing ===
+
+\subsection*{数据处理用公式}
+
+\paragraph{杂质浓度 $N(w)$ 的数值计算}
+
+由离散 $C$--$V_{\mathrm{R}}$ 数据，采用中心差分求导：
+\begin{equation}
+\left.\frac{\mathrm{d}(1/C^{2})}{\mathrm{d}V_{\mathrm{R}}}\right|_{i}
+\approx \frac{(1/C^{2})_{i+1} - (1/C^{2})_{i-1}}{V_{\mathrm{R},i+1} - V_{\mathrm{R},i-1}}
+\end{equation}
+
+则：
+\begin{equation}
+N(w_{i}) = \frac{2}{q\epsilon\epsilon_0 A^{2}}
+\cdot \frac{V_{\mathrm{R},i+1} - V_{\mathrm{R},i-1}}{(1/C^{2})_{i+1} - (1/C^{2})_{i-1}}
+\end{equation}
+
+其中 $w_{i} = \epsilon\epsilon_0 A / C_{i}$。
+
+\paragraph{均匀掺杂段 $N_{\mathrm{D}}$ 的线性拟合}
+
+对 $1/C^{2}$--$V_{\mathrm{R}}$ 曲线的直线段做线性回归 $y = kV_{\mathrm{R}} + b$：
+\begin{equation}
+N_{\mathrm{D}} = \frac{2}{A^{2}q\epsilon\epsilon_0 \cdot k},\qquad
+V_{\mathrm{D}} = -\frac{b}{k}
+\end{equation}
+
+\paragraph{已知常数}
+\begin{align}
+q &= 1.602 \times 10^{-19}\,\mathrm{C} \\
+\epsilon_0 &= 8.854 \times 10^{-14}\,\mathrm{F/cm} \\
+\epsilon &= 11.8 \quad (\text{硅}) \\
+\epsilon\epsilon_0 &= 1.045 \times 10^{-12}\,\mathrm{F/cm} \\
+A &= 5.03 \times 10^{-3}\,\mathrm{cm}^{2} \quad (\text{本实验})
+\end{align}

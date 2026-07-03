@@ -1,0 +1,13 @@
+{
+  "id": "cp_theory_0001_20260703_073441",
+  "agent_type": "theory",
+  "timestamp": "2026-07-03T07:34:41.977422+00:00",
+  "epoch": 1,
+  "description": "pre:main_agent",
+  "source": "pre_message",
+  "message_id": null,
+  "file_states": {},
+  "file_diffs": {},
+  "parent_id": null,
+  "conversation_history": []
+}
