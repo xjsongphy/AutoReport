@@ -122,6 +122,43 @@ class TestAgentFeedbackCapture:
         assert result["status"] == "success"
         assert "feedback" not in result or len(result.get("feedback", [])) == 0
 
+    @pytest.mark.asyncio
+    async def test_feedback_fallback_beats_completion_banner_when_final_response_empty(self, bus):
+        """If the sub-agent only reports feedback, MAIN should not see the
+        generic completion banner as the response text.
+        """
+        tool = SendToAgentTool(bus=bus, timeout=5)
+
+        async def respond():
+            while True:
+                msg = await asyncio.wait_for(bus._queue.get(), timeout=2)
+                await bus._notify_subscribers(msg)
+                if isinstance(msg, UserMessage) and msg.agent_type == AgentType.PLOTTING:
+                    await bus._notify_subscribers(AgentFeedback(
+                        agent_type=AgentType.PLOTTING,
+                        content="missing CV file",
+                        feedback_type="quality",
+                    ))
+                    await bus._notify_subscribers(AgentResponse(
+                        agent_type=AgentType.PLOTTING,
+                        content="",
+                        streaming=False,
+                    ))
+                    await bus._notify_subscribers(UserMessage(
+                        content="✅ plotting 已完成你派发的任务。请检查 plotting 的输出，确认无误后继续派发下游任务。",
+                        agent_type=AgentType.MAIN,
+                        source="system",
+                        message_id=msg.message_id,
+                    ))
+                    break
+
+        task = asyncio.create_task(respond())
+        result = await tool(agent_type="plotting", content="plot")
+        task.cancel()
+
+        assert result["status"] == "success"
+        assert result["response"] == "[quality] missing CV file"
+
 
 class TestEmptyResponsePath:
     @pytest.mark.asyncio
@@ -151,10 +188,12 @@ class TestEmptyResponsePath:
         assert result["response"] == ""
 
     @pytest.mark.asyncio
-    async def test_streaming_chunks_ignored(self, bus):
-        """Streaming chunks should not resolve the future — only the system
-        completion UserMessage does. AgentResponse messages (streaming or not)
-        are no longer the resolution signal after the loop-completion refactor.
+    async def test_streaming_chunks_do_not_resolve_but_final_agent_response_is_used(self, bus):
+        """Streaming chunks must not resolve the future.
+
+        Completion still gates resolution via the system UserMessage, but the
+        response payload should prefer the target agent's final non-streaming
+        AgentResponse over the generic completion banner.
         """
         tool = SendToAgentTool(bus=bus, timeout=5)
 
@@ -169,8 +208,9 @@ class TestEmptyResponsePath:
                         content="chunk",
                         streaming=True,
                     ))
-                    # Non-streaming AgentResponse also no longer resolves —
-                    # only the system UserMessage to MAIN does.
+                    # Final non-streaming AgentResponse supplies the payload,
+                    # but still should not resolve without the completion
+                    # signal below.
                     await bus._notify_subscribers(AgentResponse(
                         agent_type=AgentType.REPORT,
                         content="ignored",
@@ -189,4 +229,4 @@ class TestEmptyResponsePath:
         result = await tool(agent_type="report", content="compile")
         task.cancel()
 
-        assert result["response"] == "final response"
+        assert result["response"] == "ignored"

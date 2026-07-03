@@ -9,6 +9,7 @@ from autoreport.core.tools.agent_tools import ReportIssueTool, SendToAgentTool
 from autoreport.core.tools.task_board import TaskBoard
 from autoreport.interfaces.types import (
     AgentFeedback,
+    AgentResponse,
     AgentType,
     TaskUpdateMessage,
     UserMessage,
@@ -62,6 +63,35 @@ class TestSendToAgentTool:
         result = await tool(agent_type="plotting", content="draw plot")
         assert result["status"] == "timeout"
         assert result["agent_type"] == "plotting"
+
+    @pytest.mark.asyncio
+    async def test_blocking_success_prefers_final_agent_response_over_completion_banner(self, bus):
+        tool = SendToAgentTool(bus=bus, timeout=5)
+
+        async def respond():
+            while True:
+                msg = await asyncio.wait_for(bus._queue.get(), timeout=2)
+                await bus._notify_subscribers(msg)
+                if isinstance(msg, UserMessage) and msg.agent_type == AgentType.PLOTTING:
+                    await bus._notify_subscribers(AgentResponse(
+                        agent_type=AgentType.PLOTTING,
+                        content="plotting failed: missing CV file",
+                        streaming=False,
+                    ))
+                    await bus._notify_subscribers(UserMessage(
+                        content="✅ plotting 已完成你派发的任务。请检查 plotting 的输出，确认无误后继续派发下游任务。",
+                        agent_type=AgentType.MAIN,
+                        source="system",
+                        message_id=msg.message_id,
+                    ))
+                    break
+
+        task = asyncio.create_task(respond())
+        result = await tool(agent_type="plotting", content="draw plot")
+        task.cancel()
+
+        assert result["status"] == "success"
+        assert result["response"] == "plotting failed: missing CV file"
 
     @pytest.mark.asyncio
     async def test_captures_feedback(self, bus):

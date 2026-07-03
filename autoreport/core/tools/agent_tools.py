@@ -168,8 +168,18 @@ class SendToAgentTool(Tool):
         loop = asyncio.get_running_loop()
         future: asyncio.Future[str] = loop.create_future()
         feedback_items: list[dict[str, str]] = []
+        saw_final_response = False
+        final_response_content = ""
+
+        def _feedback_summary() -> str:
+            return "\n".join(
+                f"[{item['type']}] {item['content']}"
+                for item in feedback_items
+                if str(item.get("content") or "").strip()
+            )
 
         def _on_completion(msg: Any) -> None:
+            nonlocal saw_final_response, final_response_content
             if not isinstance(msg, UserMessage):
                 return
             if getattr(msg, 'source', None) != "system":
@@ -180,7 +190,27 @@ class SendToAgentTool(Tool):
             if msg.message_id != dispatch_id:
                 return
             if not future.done():
-                future.set_result(msg.content)
+                if saw_final_response and final_response_content.strip():
+                    future.set_result(final_response_content)
+                else:
+                    feedback_summary = _feedback_summary()
+                    if feedback_summary:
+                        future.set_result(feedback_summary)
+                    elif saw_final_response:
+                        future.set_result(final_response_content)
+                    else:
+                        future.set_result(msg.content)
+
+        def _on_agent_response(msg: Any) -> None:
+            nonlocal saw_final_response, final_response_content
+            if not isinstance(msg, AgentResponse):
+                return
+            if msg.agent_type != target:
+                return
+            if msg.streaming:
+                return
+            saw_final_response = True
+            final_response_content = msg.content
 
         def _on_feedback(msg: Any) -> None:
             if not isinstance(msg, AgentFeedback):
@@ -194,6 +224,7 @@ class SendToAgentTool(Tool):
 
         # Subscribe BEFORE publishing to avoid race condition
         self._bus.subscribe(UserMessage, _on_completion)
+        self._bus.subscribe(AgentResponse, _on_agent_response)
         self._bus.subscribe(AgentFeedback, _on_feedback)
 
         await self._bus.publish(UserMessage(
@@ -230,6 +261,7 @@ class SendToAgentTool(Tool):
             return result
         finally:
             self._bus.unsubscribe(UserMessage, _on_completion)
+            self._bus.unsubscribe(AgentResponse, _on_agent_response)
             self._bus.unsubscribe(AgentFeedback, _on_feedback)
 
 
