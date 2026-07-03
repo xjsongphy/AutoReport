@@ -173,7 +173,12 @@ class ChatInput(QPlainTextEdit):
 
         super().keyPressEvent(event)
 
-        if event.text():
+        if event.text() or key in (
+            Qt.Key.Key_Left,
+            Qt.Key.Key_Right,
+            Qt.Key.Key_Home,
+            Qt.Key.Key_End,
+        ):
             self._check_current_token()
 
     def insertFromMimeData(self, source: QMimeData | None) -> None:  # noqa: N802
@@ -252,13 +257,6 @@ class ChatInput(QPlainTextEdit):
         return "", -1, -1
 
     def insert_file_reference(self, file_path: Path) -> None:
-        text = self.toPlainText()
-        kind = getattr(self, "_popup_kind", "@")
-        at_idx = text.rfind(kind)
-        if at_idx < 0:
-            self._on_popup_closed()
-            return
-
         try:
             rel_path = file_path.relative_to(Path.cwd())
         except ValueError:
@@ -267,41 +265,37 @@ class ChatInput(QPlainTextEdit):
         filename = file_path.name
         link = f"[@{filename}](project://{rel_path})"
 
-        end = at_idx + 1
-        while end < len(text) and text[end] not in " \t\n\r":
-            end += 1
-
-        doc_len = self.document().characterCount()
-        cursor = self.textCursor()
-        cursor.setPosition(at_idx, QTextCursor.MoveMode.MoveAnchor)
-        cursor.setPosition(min(end, doc_len - 1), QTextCursor.MoveMode.KeepAnchor)
-        cursor.insertText(link)
-        self.setTextCursor(cursor)
+        if not self._replace_current_prefixed_token(link):
+            self._on_popup_closed()
+            return
         self._on_popup_closed()
 
     def insert_agent_reference(self, name: str) -> None:
-        text = self.toPlainText()
-        kind = getattr(self, "_popup_kind", "@")
-        at_idx = text.rfind(kind)
-        if at_idx < 0:
+        mention = f"@{name} "
+        if not self._replace_current_prefixed_token(mention):
             self._on_popup_closed()
             return
-
-        mention = f"@{name} "
-        end = at_idx + 1
-        while end < len(text) and text[end] not in " \t\n\r":
-            end += 1
-
-        doc_len = self.document().characterCount()
-        cursor = self.textCursor()
-        cursor.setPosition(at_idx, QTextCursor.MoveMode.MoveAnchor)
-        cursor.setPosition(min(end, doc_len - 1), QTextCursor.MoveMode.KeepAnchor)
-        cursor.insertText(mention)
-        self.setTextCursor(cursor)
         self._on_popup_closed()
+
+    def _replace_current_prefixed_token(self, replacement: str) -> bool:
+        token, start, end = self.current_prefixed_token()
+        if not token or start < 0 or end < 0:
+            return False
+
+        text = self.toPlainText()
+        if replacement.endswith(" ") and end < len(text) and text[end] in " \t\n\r":
+            replacement = replacement.rstrip(" ")
+
+        cursor = self.textCursor()
+        cursor.setPosition(start, QTextCursor.MoveMode.MoveAnchor)
+        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+        cursor.insertText(replacement)
+        self.setTextCursor(cursor)
+        return True
 
     def _on_popup_closed(self) -> None:
         self._popup_active = False
+        self._popup_kind = ""
 
     def set_popup_active(self, active: bool) -> None:
         self._popup_active = active

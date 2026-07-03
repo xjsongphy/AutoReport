@@ -711,6 +711,15 @@ def test_edit_saved_resends_plain_text_with_latest_file_context(qtbot, agent_pan
     assert context_blocker.args[0]["file"] == "latest.tex"
 
 
+def test_agent_selection_inserts_reference_without_property_error(agent_panel):
+    agent_panel._input_field.setPlainText("@rep")
+    agent_panel._input_field._popup_kind = "@"
+
+    agent_panel._on_agent_selected("report")
+
+    assert agent_panel._input_field.toPlainText() == "@Report Agent "
+
+
 def test_hide_conv_buttons(agent_panel):
     """hide_conv_buttons should hide both history and new-conv buttons."""
     agent_panel.hide_conv_buttons(True)

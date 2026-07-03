@@ -549,8 +549,7 @@ class AgentPanel(QWidget):
         self._file_search_popup.hide()
         self._close_popup()
         self._input_field.setFocus()
-        name = FileSearchPopup.AGENT_INFO.get(agent_type, (agent_type, ""))[0]
-        self._input_field.insert_agent_reference(name)
+        self._input_field.insert_agent_reference(get_agent_title(agent_type))
 
     def _on_popup_navigate(self, direction: str) -> None:
         """Forward popup navigation from ChatInput to active popup."""

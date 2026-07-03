@@ -1,8 +1,11 @@
 """Tests for ChatInput widget."""
 
+from pathlib import Path
+
 import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QInputMethodEvent, QKeyEvent
+
 from autoreport.gui.widgets.chat_input import ChatInput
 
 
@@ -110,3 +113,68 @@ def test_input_method_preedit_hides_placeholder(qtbot):
 
     widget.inputMethodEvent(QInputMethodEvent("", []))
     assert widget.placeholderText()
+
+
+def test_current_prefixed_token_tracks_token_under_cursor(qtbot):
+    widget = ChatInput()
+    qtbot.addWidget(widget)
+    widget.setPlainText("@plot and @rep")
+
+    cursor = widget.textCursor()
+    cursor.setPosition(2)
+    widget.setTextCursor(cursor)
+
+    token, start, end = widget.current_prefixed_token()
+
+    assert token == "@plot"
+    assert (start, end) == (0, 5)
+
+
+def test_insert_agent_reference_replaces_token_at_cursor(qtbot):
+    widget = ChatInput()
+    qtbot.addWidget(widget)
+    widget.setPlainText("@rep then @plot")
+    widget._popup_kind = "@"
+
+    cursor = widget.textCursor()
+    cursor.setPosition(2)
+    widget.setTextCursor(cursor)
+
+    widget.insert_agent_reference("Report Agent")
+
+    assert widget.toPlainText() == "@Report Agent then @plot"
+
+
+def test_insert_file_reference_replaces_token_at_cursor(qtbot):
+    widget = ChatInput()
+    qtbot.addWidget(widget)
+    widget.setPlainText("@rep then @plot")
+    widget._popup_kind = "@"
+
+    cursor = widget.textCursor()
+    cursor.setPosition(2)
+    widget.setTextCursor(cursor)
+
+    widget.insert_file_reference(Path("Tex/main.tex"))
+
+    assert widget.toPlainText() == "[@main.tex](project://Tex/main.tex) then @plot"
+
+
+def test_cursor_motion_rechecks_popup_token(qtbot):
+    widget = ChatInput()
+    qtbot.addWidget(widget)
+    widget.setPlainText("@rep x")
+    widget.set_popup_active(True)
+
+    cursor = widget.textCursor()
+    cursor.setPosition(4)
+    widget.setTextCursor(cursor)
+
+    key_event = QKeyEvent(
+        QKeyEvent.Type.KeyPress,
+        Qt.Key.Key_Right,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    widget.keyPressEvent(key_event)
+
+    assert widget._popup_active is False
