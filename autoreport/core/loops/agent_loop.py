@@ -839,6 +839,18 @@ class AgentLoop:
                     error=last_error,
                 ))
 
+            # This round is non-streaming, so thinking arrives as one block.
+            # Publish it so the thinking indicator fills between tool calls —
+            # without this the dots row is empty and gets removed on finish.
+            if getattr(response, "thinking", None):
+                await self.bus.publish(AgentResponse(
+                    agent_type=self.agent_type,
+                    content="",
+                    message_id=user_message_id,
+                    streaming=True,
+                    thinking=response.thinking,
+                ))
+
         # Update conversation history with final response
         if response.content:
             current_messages.append(

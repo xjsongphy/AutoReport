@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
 
 from ..theme import get_theme_colors
 from .markdown_renderer import render_markdown
-from .message_row import _DisclosureArrow, _FadeMask
+from .message_row import _DisclosureArrow, _DisclosureHeaderBar, _FadeMask
 from .timeline import TimelineRail
 from .ui_utils import install_compact_tooltip, render_svg_icon
 
@@ -56,18 +56,6 @@ class ToolCall:
     expandable: bool = False
     elapsed_seconds: int = 0
     file_names: list[str] = field(default_factory=list)
-
-
-class _ClickableHeaderWidget(QWidget):
-    clicked = pyqtSignal()
-
-    def mousePressEvent(self, event):  # noqa: N802
-        super().mousePressEvent(event)
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit()
-
-    def click(self) -> None:
-        self.clicked.emit()
 
 
 class _TaskStatusControl(QLabel):
@@ -163,6 +151,8 @@ class _TaskStatusControl(QLabel):
 class ToolCallGroup(QWidget):
     """Tool calls in a compact summary row."""
 
+    expanded_changed = pyqtSignal()
+
     @staticmethod
     def _task_control_text_for_status(status: str) -> str:
         if status == "running":
@@ -242,26 +232,18 @@ class ToolCallGroup(QWidget):
         content_layout.setSpacing(0)
         layout.addWidget(content, 1)
 
-        self._header_btn = _ClickableHeaderWidget()
+        self._header_btn = _DisclosureHeaderBar(
+            self,
+            text_format=Qt.TextFormat.RichText,
+            contents_margins=(0, 4, 0, 6),
+            spacing=4,
+        )
         self._header_btn.setObjectName("toolCallHeader")
         self._header_btn.setMinimumHeight(TIMELINE_EVENT_ROW_HEIGHT)
         self._header_btn.clicked.connect(self._toggle_expanded)
-        header_layout = QHBoxLayout(self._header_btn)
-        header_layout.setContentsMargins(0, 4, 0, 6)
-        header_layout.setSpacing(0)
-
-        self._header_text = QLabel()
-        self._header_text.setObjectName("toolCallHeaderText")
-        self._header_text.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        self._header_text.setWordWrap(True)
-        self._header_text.setTextFormat(Qt.TextFormat.RichText)
-        self._header_text.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self._header_text.setMinimumWidth(0)
-        header_layout.addWidget(self._header_text, 1, Qt.AlignmentFlag.AlignTop)
-
-        self._header_arrow = _DisclosureArrow(False, self._header_btn)
+        self._header_text = self._header_btn.text_label()
+        self._header_arrow = self._header_btn.arrow()
         self._header_arrow.setVisible(False)
-        header_layout.addWidget(self._header_arrow, 0, Qt.AlignmentFlag.AlignTop)
 
         self._task_board_host = QWidget(self._header_btn)
         self._task_board_host.setObjectName("taskBoardHost")
@@ -269,7 +251,7 @@ class ToolCallGroup(QWidget):
         self._task_board_layout.setContentsMargins(0, 0, 0, 0)
         self._task_board_layout.setSpacing(2)
         self._task_board_host.setVisible(False)
-        header_layout.addWidget(self._task_board_host, 1, Qt.AlignmentFlag.AlignTop)
+        self._header_btn.add(self._task_board_host, 1)
         content_layout.addWidget(self._header_btn)
 
         self._detail_host = QWidget(self)
@@ -763,3 +745,4 @@ class ToolCallGroup(QWidget):
             return
         self._expanded = not self._expanded
         self._update_display()
+        self.expanded_changed.emit()

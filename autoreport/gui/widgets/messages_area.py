@@ -220,6 +220,8 @@ class MessagesArea(QScrollArea):
             row.edit_cancelled.connect(self._on_edit_cancelled)
         if display_mode == "bubble" or (role == "user" and display_mode == "agent_markdown"):
             row.rollback_requested.connect(self.rollback_requested.emit)
+        # When a collapsible row expands, re-pin to bottom if the user was there.
+        row.expanded_changed.connect(self._schedule_scroll_to_bottom)
 
         # Handle editable state — only latest user message is editable
         if allow_edit:
@@ -278,6 +280,8 @@ class MessagesArea(QScrollArea):
         """
         # Insert before the stretch spacer
         group = ToolCallGroup(parent=self._container)
+        # When a collapsible tool group expands, re-pin to bottom if the user was there.
+        group.expanded_changed.connect(self._schedule_scroll_to_bottom)
 
         # Find the stretch item and insert before it
         stretch_index = self._layout.count() - 1

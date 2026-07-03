@@ -586,10 +586,10 @@ class MainWindow(QMainWindow):
                 font-weight: {c["fw_medium"]};
             }}
             #toolCallDetail {{
-                color: {c["tool_detail"]};
+                color: {c["fg"]};
                 font-family: "Segoe UI", "SF Pro", sans-serif;
-                font-size: {px(11)};
-                padding: {px(1)} 0 {px(2)} {px(12)};
+                font-size: {px(13)};
+                padding: 0;
             }}
             #execDetailCard {{
                 background-color: {c["detail_card_bg"]};
