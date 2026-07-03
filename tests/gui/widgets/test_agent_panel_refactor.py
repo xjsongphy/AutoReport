@@ -567,6 +567,55 @@ def test_pre_checkpoint_attaches_to_latest_user_bubble(agent_panel):
     assert agent_panel._messages_area.message_count() == 1
 
 
+def test_pre_checkpoint_attaches_to_matching_user_bubble_message_id(agent_panel):
+    agent_panel.add_message(role="user", content="first", message_id="msg-1")
+    first = agent_panel._messages_area.get_message_rows()[-1]
+    agent_panel.add_message(role="user", content="second", message_id="msg-2")
+    second = agent_panel._messages_area.get_message_rows()[-1]
+
+    agent_panel.add_checkpoint("ckpt_first", "pre:user", message_id="msg-1")
+
+    assert first._checkpoint_id == "ckpt_first"
+    assert second._checkpoint_id is None
+
+
+def test_pre_checkpoint_attaches_to_matching_reply_bubble_message_id(agent_panel):
+    agent_panel.add_message(role="user", content="dispatch", message_id="dispatch-1")
+    user_row = agent_panel._messages_area.get_message_rows()[-1]
+    agent_panel.add_message(
+        role="agent",
+        content="reply",
+        display_mode="bubble",
+        bubble_title="Report replied",
+        bubble_align="left",
+        message_id="dispatch-1",
+    )
+    reply_row = agent_panel._messages_area.get_message_rows()[-1]
+
+    agent_panel.add_checkpoint("ckpt_dispatch", "pre:main_agent", message_id="dispatch-1")
+
+    assert user_row._checkpoint_id is None
+    assert reply_row._checkpoint_id == "ckpt_dispatch"
+
+
+def test_left_reply_bubble_rollback_signal_reaches_panel(qtbot, agent_panel):
+    agent_panel.add_message(
+        role="agent",
+        content="reply",
+        display_mode="bubble",
+        bubble_title="Report replied",
+        bubble_align="left",
+        message_id="dispatch-1",
+    )
+    reply_row = agent_panel._messages_area.get_message_rows()[-1]
+    agent_panel.add_checkpoint("ckpt_dispatch", "pre:main_agent", message_id="dispatch-1")
+
+    with qtbot.waitSignal(agent_panel.rollback_requested, timeout=1000) as blocker:
+        reply_row.rollback_requested.emit("ckpt_dispatch", reply_row)
+
+    assert blocker.args == ["ckpt_dispatch", reply_row]
+
+
 def test_multiple_messages_and_tools(agent_panel):
     """Multiple messages and tool calls should be displayed correctly."""
     # Add user message

@@ -149,6 +149,23 @@ async def test_process_message(agent_loop, mock_provider, mock_gui):
 
 
 @pytest.mark.asyncio
+async def test_process_message_passes_message_id_to_pre_checkpoint(agent_loop):
+    manager = MagicMock()
+    manager.create_checkpoint = AsyncMock(return_value="cp_main_0001")
+    agent_loop._loop_manager = manager
+
+    msg = UserMessage(
+        content="Hello",
+        agent_type=AgentType.MAIN,
+        message_id="msg-rollback-1",
+    )
+    await agent_loop._process_message(msg)
+
+    manager.create_checkpoint.assert_awaited_once()
+    assert manager.create_checkpoint.await_args.kwargs["message_id"] == "msg-rollback-1"
+
+
+@pytest.mark.asyncio
 async def test_process_message_with_tool_calls(agent_loop, mock_provider, mock_gui):
     tc = LLMToolCall(id="call_1", name="read", arguments={"path": "test.txt"})
 

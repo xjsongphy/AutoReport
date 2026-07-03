@@ -1,8 +1,8 @@
 """Tests for MessageRow component — Cline-style flat timeline."""
 
 from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
-from PyQt6.QtGui import QKeyEvent, QWheelEvent
-from PyQt6.QtWidgets import QApplication, QVBoxLayout, QWidget
+from PyQt6.QtGui import QContextMenuEvent, QKeyEvent, QWheelEvent
+from PyQt6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 from autoreport.gui.widgets.message_row import MessageRow, _raw_markdown_for_selected_text
 from autoreport.gui.widgets.messages_area import MessagesArea
 from autoreport.gui.widgets.ui_utils import compact_tooltip_qss
@@ -102,6 +102,50 @@ def test_message_row_emits_rollback_checkpoint(qtbot):
     widget.rollback_requested.emit(widget._checkpoint_id, widget)
 
     assert seen == [("cp_123", widget)]
+
+
+def test_label_context_menu_includes_rollback_when_checkpoint_is_bound(qtbot, monkeypatch):
+    widget = MessageRow(role="user", content="rollback me")
+    qtbot.addWidget(widget)
+    widget.set_checkpoint_id("cp_123")
+
+    added_actions = []
+
+    class _FakeSignal:
+        def connect(self, callback):
+            self.callback = callback
+
+    class _FakeAction:
+        def __init__(self, text):
+            self._text = text
+            self.triggered = _FakeSignal()
+
+        def text(self):
+            return self._text
+
+    class _FakeMenu:
+        def addAction(self, text):
+            action = _FakeAction(text)
+            added_actions.append(action)
+            return action
+
+        def exec(self, _pos):
+            return None
+
+    monkeypatch.setattr(
+        "autoreport.gui.widgets.message_row.create_isolated_context_menu",
+        lambda _parent: _FakeMenu(),
+    )
+
+    label = widget.findChild(QLabel, "userMessageText")
+    event = QContextMenuEvent(
+        QContextMenuEvent.Reason.Mouse,
+        QPoint(1, 1),
+        QPoint(1, 1),
+    )
+
+    assert widget.eventFilter(label, event) is True
+    assert "回滚到此消息之前" in [action.text() for action in added_actions]
 
 
 def test_coordination_message_shows_prefix(qtbot):

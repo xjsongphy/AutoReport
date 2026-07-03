@@ -454,6 +454,7 @@ class AgentLoop:
                     description=f"pre:{source}",
                     source="pre_message",
                     conversation_history=history_dicts,
+                    message_id=message.message_id,
                 )
                 logger.debug("{} checkpoint created: {}", agent_str, cp_id)
             except Exception as e:

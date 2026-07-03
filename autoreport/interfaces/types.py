@@ -29,6 +29,8 @@ class MessageType(str, Enum):
     API_DEBUG = "api_debug"  # API call debugging information
     TASK_UPDATE = "task_update"
     QUEUE_UPDATE = "queue_update"
+    REPORT = "report"
+    SYSTEM_NOTICE = "system_notice"
 
 
 class AgentType(str, Enum):
@@ -56,6 +58,7 @@ class TaskStatus(str, Enum):
 
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
+    BLOCKED = "blocked"  # sub-agent cannot proceed; needs dispatcher action
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -246,3 +249,32 @@ class ApiDebugMessage(Message):
     duration_ms: int  # Duration in milliseconds
     status: str  # "success" or "error"
     error: str | None = None  # Error message if status is "error"
+
+
+class ReportMessage(Message):
+    """Sub-agent's explicit report on a Main-dispatched task.
+
+    This is the single reply channel for blocking/non-blocking dispatch.
+    The sub-agent's loop subscribes to mark its turn "reported"; Main's
+    SendToAgentTool subscribes (matched by task_id) to resolve its wait.
+    """
+
+    type: MessageType = MessageType.REPORT
+    agent_type: AgentType
+    task_id: str
+    report_type: str  # "reply" | "missing_data" | "quality"
+    content: str = ""
+
+
+class SystemNotice(Message):
+    """Backend -> GUI: a notice explaining why an agent is waiting/busy.
+
+    Rendered as a bubble so the user understands agent activity that is
+    NOT a normal LLM turn (loop guards, manifest wrap-up, etc.). The
+    AgentLoop does NOT subscribe to this type, so publishing it never
+    triggers an extra agent turn.
+    """
+
+    type: MessageType = MessageType.SYSTEM_NOTICE
+    agent_type: AgentType
+    content: str

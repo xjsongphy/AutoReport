@@ -189,6 +189,7 @@ class MessagesArea(QScrollArea):
         bubble_collapsible: bool = True,
         allow_edit: bool | None = None,
         agent_name: str = "Agent",
+        message_id: str | None = None,
     ) -> MessageRow:
         """Add a message row to the container."""
         row = MessageRow(
@@ -205,6 +206,7 @@ class MessagesArea(QScrollArea):
             agent_name=agent_name,
             agent_chain_prev=False,
             agent_chain_next=False,
+            message_id=message_id,
             parent=self._container,
         )
 
@@ -216,7 +218,7 @@ class MessagesArea(QScrollArea):
             row.edit_requested.connect(self.edit_requested.emit)
             row.edit_saved.connect(self._on_edit_saved)
             row.edit_cancelled.connect(self._on_edit_cancelled)
-        if (display_mode == "bubble" and bubble_align == "right") or (role == "user" and display_mode == "agent_markdown"):
+        if display_mode == "bubble" or (role == "user" and display_mode == "agent_markdown"):
             row.rollback_requested.connect(self.rollback_requested.emit)
 
         # Handle editable state — only latest user message is editable
@@ -247,9 +249,20 @@ class MessagesArea(QScrollArea):
 
         return row
 
-    def attach_checkpoint_to_latest_outbound(self, checkpoint_id: str) -> bool:
+    def attach_checkpoint_to_latest_outbound(self, checkpoint_id: str, message_id: str | None = None) -> bool:
+        if message_id:
+            for row in reversed(self.get_message_rows()):
+                if getattr(row, "_display_mode", "") != "bubble":
+                    continue
+                if getattr(row, "_checkpoint_id", None):
+                    continue
+                if getattr(row, "_message_id", None) != message_id:
+                    continue
+                row.set_checkpoint_id(checkpoint_id)
+                return True
+
         for row in reversed(self.get_message_rows()):
-            if not (getattr(row, "_display_mode", "") == "bubble" and getattr(row, "_bubble_align", "") == "right"):
+            if getattr(row, "_display_mode", "") != "bubble":
                 continue
             if getattr(row, "_checkpoint_id", None):
                 continue

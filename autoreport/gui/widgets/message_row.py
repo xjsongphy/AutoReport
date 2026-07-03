@@ -706,6 +706,7 @@ class MessageRow(QWidget):
         agent_name: str = "Agent",
         agent_chain_prev: bool = False,
         agent_chain_next: bool = False,
+        message_id: str | None = None,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
@@ -741,6 +742,7 @@ class MessageRow(QWidget):
         self._raw_markdown_labels: dict[QLabel, str] = {}
         self._agent_chain_prev = agent_chain_prev
         self._agent_chain_next = agent_chain_next
+        self._message_id = message_id
         self._timeline_rail: TimelineRail | None = None
         self._bubble_header: QWidget | None = None
         self._bubble_arrow_widget: _DisclosureArrow | None = None
@@ -1546,6 +1548,9 @@ class MessageRow(QWidget):
     def set_checkpoint_id(self, checkpoint_id: str | None) -> None:
         self._checkpoint_id = checkpoint_id
 
+    def set_message_id(self, message_id: str | None) -> None:
+        self._message_id = message_id
+
     def contextMenuEvent(self, event) -> None:
         """Show VS Code-like context menu for message actions."""
         menu = create_isolated_context_menu(self)
@@ -1557,7 +1562,7 @@ class MessageRow(QWidget):
             edit_action = menu.addAction("编辑并重发")
             edit_action.triggered.connect(self._request_edit)
 
-        if self._is_outbound_message() and self._checkpoint_id:
+        if self._checkpoint_id:
             rollback_action = menu.addAction("回滚到此消息之前")
             rollback_action.triggered.connect(
                 lambda _=False, cp_id=self._checkpoint_id: self.rollback_requested.emit(cp_id, self)
@@ -1620,8 +1625,15 @@ class MessageRow(QWidget):
                 and self._editable
             ):
                 edit_action = menu.addAction("编辑并重发")
+            rollback_action = None
+            if self._checkpoint_id:
+                rollback_action = menu.addAction("回滚到此消息之前")
             action = menu.exec(event.globalPos())
             if not action:
+                return True
+
+            if action == rollback_action and self._checkpoint_id:
+                self.rollback_requested.emit(self._checkpoint_id, self)
                 return True
 
             clipboard = QApplication.clipboard()

@@ -773,6 +773,7 @@ class AgentPanel(QWidget):
         bubble_on_timeline: bool = False,
         bubble_collapsible: bool = True,
         allow_edit: bool | None = None,
+        message_id: str | None = None,
     ) -> None:
         resolved_display_mode = display_mode or ("bubble" if role == "user" else "agent_markdown")
         resolved_bubble_align = bubble_align or ("right" if role == "user" else "left")
@@ -808,6 +809,7 @@ class AgentPanel(QWidget):
             bubble_collapsible=bubble_collapsible,
             allow_edit=allow_edit,
             agent_name=agent_name,
+            message_id=message_id,
         )
         self._update_width()
         if streaming and role == "agent":
@@ -980,10 +982,10 @@ class AgentPanel(QWidget):
             timestamp=ts,
         )
 
-    def add_checkpoint(self, checkpoint_id: str, description: str) -> None:
+    def add_checkpoint(self, checkpoint_id: str, description: str, message_id: str | None = None) -> None:
         # Hide internal pre-message sentinel checkpoints from UI.
         if (description or "").strip().lower().startswith("pre:"):
-            self._messages_area.attach_checkpoint_to_latest_outbound(checkpoint_id)
+            self._messages_area.attach_checkpoint_to_latest_outbound(checkpoint_id, message_id)
             return
         ts = datetime.now().strftime("%H:%M")
         short_id = checkpoint_id[-12:] if len(checkpoint_id) > 12 else checkpoint_id

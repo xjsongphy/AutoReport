@@ -1066,6 +1066,7 @@ class MainWindow(QMainWindow):
                     bubble_on_timeline=bool(rec.get("bubble_on_timeline", False)),
                     bubble_collapsible=bool(rec.get("bubble_collapsible", True)),
                     allow_edit=str(rec.get("source", "user")) == "user",
+                    message_id=rec.get("message_id"),
                 )
             elif role == "agent":
                 if rec.get("display_mode") == "bubble":
@@ -1077,9 +1078,10 @@ class MainWindow(QMainWindow):
                         bubble_align=str(rec.get("bubble_align") or "left"),
                         bubble_on_timeline=bool(rec.get("bubble_on_timeline", True)),
                         bubble_collapsible=bool(rec.get("bubble_collapsible", True)),
+                        message_id=rec.get("message_id"),
                     )
                 else:
-                    panel.add_message("agent", content)
+                    panel.add_message("agent", content, message_id=rec.get("message_id"))
             elif role == "thinking":
                 panel.add_message(
                     "agent",
@@ -1277,7 +1279,12 @@ class MainWindow(QMainWindow):
         agent_str = str(message.agent_type)
         if not self._is_visible_agent(agent_str):
             if not message.streaming and message.content:
-                self._conv_store.append_message(agent_str, "agent", message.content)
+                self._conv_store.append_message(
+                    agent_str,
+                    "agent",
+                    message.content,
+                    extra={"message_id": message.message_id},
+                )
             return
         panel = self._get_panel_for_agent(agent_str)
         state = self._state_for_agent(agent_str)
@@ -1323,7 +1330,12 @@ class MainWindow(QMainWindow):
             row = _latest_incomplete_agent_row()
             if row is not None:
                 row.mark_complete()
-                self._conv_store.append_message(agent_str, "agent", row._content)
+                self._conv_store.append_message(
+                    agent_str,
+                    "agent",
+                    row._content,
+                    extra={"message_id": msg_id or None},
+                )
                 state.answer_started = False
                 state.phase = "idle"
                 return
@@ -1331,9 +1343,14 @@ class MainWindow(QMainWindow):
         panel.finish_thinking()
         state.answer_started = True
         state.phase = "answer"
-        panel.add_message("agent", message.content, streaming=message.streaming)
+        panel.add_message("agent", message.content, streaming=message.streaming, message_id=msg_id or None)
         if not message.streaming:
-            self._conv_store.append_message(agent_str, "agent", message.content)
+            self._conv_store.append_message(
+                agent_str,
+                "agent",
+                message.content,
+                extra={"message_id": msg_id or None},
+            )
             rows = panel._messages_area.get_message_rows()
             if rows and rows[-1]._role == "agent":
                 rows[-1].mark_complete()
@@ -1347,7 +1364,7 @@ class MainWindow(QMainWindow):
                 agent_str,
                 "user",
                 message.content,
-                extra={"source": message.source},
+                extra={"source": message.source, "message_id": message.message_id},
             )
             return
         source_key = str(message.source or "user")
@@ -1375,6 +1392,7 @@ class MainWindow(QMainWindow):
             bubble_on_timeline=bubble_on_timeline,
             bubble_collapsible=True,
             allow_edit=allow_edit,
+            message_id=message.message_id,
         )
 
         self._conv_store.append_message(
@@ -1388,6 +1406,7 @@ class MainWindow(QMainWindow):
                 "bubble_align": bubble_align,
                 "bubble_on_timeline": bubble_on_timeline,
                 "bubble_collapsible": True,
+                "message_id": message.message_id,
             },
         )
 
@@ -1658,7 +1677,7 @@ class MainWindow(QMainWindow):
         agent_str = str(message.agent_type) if hasattr(message, "agent_type") else "main"
         if not self._is_visible_agent(agent_str):
             return
-        self.agent_panel.add_checkpoint(message.checkpoint_id, message.description)
+        self.agent_panel.add_checkpoint(message.checkpoint_id, message.description, message.message_id)
 
     def _handle_task_update_msg(self, message) -> None:
         """Handle TaskUpdateMessage — display task notification in relevant panels."""
