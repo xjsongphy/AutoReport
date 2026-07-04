@@ -32,7 +32,9 @@ from ..interfaces.types import (
     Error,
     Message,
     QueueUpdateMessage,
+    ReportMessage,
     StatusChange,
+    SystemNotice,
     ToolCallMessage,
     ToolResult,
     UserMessage,
@@ -91,6 +93,7 @@ class MainWindow(QMainWindow):
         self._initial_render_prepared = False
         # Cache file context to attach to next user message
         self._pending_file_context: dict[str, dict | None] = {}
+        self._pending_rollbacks: dict[str, dict[str, str | None]] = {}
         self._turn_state: dict[str, _TurnState] = {}
 
         self.setWindowTitle("AutoReport")
@@ -594,7 +597,7 @@ class MainWindow(QMainWindow):
             #execDetailCard {{
                 background-color: {c["detail_card_bg"]};
                 border: 1px solid {c["detail_card_border"]};
-                border-radius: {px(8)};
+                border-radius: {px(6)};
             }}
             #execDetailRow {{
                 background-color: transparent;
@@ -606,8 +609,9 @@ class MainWindow(QMainWindow):
                 min-width: {px(20)};
             }}
             #execDetailValueHost {{
-                background-color: {c["secondaryBtnBg"]};
-                border-radius: {px(6)};
+                background-color: transparent;
+                border: none;
+                border-radius: 0;
             }}
             #execDetailText {{
                 color: {c["detail_fg"]};
@@ -1220,19 +1224,31 @@ class MainWindow(QMainWindow):
             return
 
         panel = self._get_panel_for_agent(agent_type)
+        self._pending_rollbacks[agent_type] = {
+            "message_id": getattr(row, "_message_id", None),
+            "content": getattr(row, "_content", None),
+            "role": getattr(row, "_role", None),
+        }
         panel._messages_area.retract_from_row(row)
         future = self._submit_coroutine(self.backend.rollback_to_checkpoint(agent_type, checkpoint_id))
         if future is not None:
             future.add_done_callback(lambda done: self._rollback_finished_signal.emit(agent_type, done))
 
     def _on_rollback_finished(self, agent_type: str, future) -> None:
+        rollback_target = self._pending_rollbacks.pop(agent_type, None)
         try:
             future.result()
         except Exception as exc:
             logger.warning("Rollback failed for {}: {}", agent_type, exc)
             warning_box(self, "Rollback Failed", str(exc))
+            if self._is_visible_agent(agent_type):
+                self._show_current_agent_conversation()
             return
 
+        if rollback_target:
+            self._conv_store.truncate_from_message(agent_type, **rollback_target)
+        if self._is_visible_agent(agent_type):
+            self._show_current_agent_conversation()
         self.file_tree.refresh()
         current_file = self.preview.current_file
         if current_file and current_file.exists():
@@ -1247,7 +1263,9 @@ class MainWindow(QMainWindow):
             Checkpoint,
             Error,
             QueueUpdateMessage,
+            ReportMessage,
             StatusChange,
+            SystemNotice,
             TaskUpdateMessage,
             ToolCallMessage,
             ToolResult,
@@ -1272,6 +1290,10 @@ class MainWindow(QMainWindow):
             self._handle_task_update_msg(message)
         elif isinstance(message, AgentFeedback):
             self._handle_agent_feedback(message)
+        elif isinstance(message, ReportMessage):
+            self._handle_report_message(message)
+        elif isinstance(message, SystemNotice):
+            self._handle_system_notice(message)
         elif isinstance(message, QueueUpdateMessage):
             self._handle_queue_update(message)
 
@@ -1664,6 +1686,75 @@ class MainWindow(QMainWindow):
                 "bubble_on_timeline": True,
                 "bubble_collapsible": True,
                 "feedback_type": issue_type,
+            },
+        )
+
+    def _handle_report_message(self, message: ReportMessage) -> None:
+        """Handle ReportMessage and show sub-agent reports in main panel."""
+        from enum import Enum
+
+        agent_str = message.agent_type.value if isinstance(message.agent_type, Enum) else str(message.agent_type)
+        bubble_title = self._build_inter_agent_title(
+            f"{self._get_agent_display_name(agent_str)} report: {message.report_type}",
+            message.content,
+        )
+        if self._is_visible_agent("main"):
+            self.agent_panel.add_message(
+                "agent",
+                message.content,
+                source=agent_str,
+                display_mode="bubble",
+                bubble_title=bubble_title,
+                bubble_align="left",
+                bubble_on_timeline=True,
+                bubble_collapsible=True,
+            )
+        self._conv_store.append_message(
+            "main",
+            "agent",
+            message.content,
+            extra={
+                "source": agent_str,
+                "display_mode": "bubble",
+                "bubble_title": bubble_title,
+                "bubble_align": "left",
+                "bubble_on_timeline": True,
+                "bubble_collapsible": True,
+                "report_type": message.report_type,
+                "task_id": message.task_id,
+            },
+        )
+
+    def _handle_system_notice(self, message: SystemNotice) -> None:
+        """Handle SystemNotice and render in target agent panel."""
+        from enum import Enum
+
+        agent_str = message.agent_type.value if isinstance(message.agent_type, Enum) else str(message.agent_type)
+        bubble_title = self._build_inter_agent_title("System", message.content)
+        if self._is_visible_agent(agent_str):
+            panel = self._get_panel_for_agent(agent_str)
+            panel.add_message(
+                "agent",
+                message.content,
+                source="system",
+                display_mode="bubble",
+                bubble_title=bubble_title,
+                bubble_align="left",
+                bubble_on_timeline=True,
+                bubble_collapsible=True,
+            )
+        self._conv_store.append_message(
+            agent_str,
+            "agent",
+            message.content,
+            extra={
+                "source": "system",
+                "display_mode": "bubble",
+                "bubble_title": bubble_title,
+                "bubble_align": "left",
+                "bubble_on_timeline": True,
+                "bubble_collapsible": True,
+                "system_notice": True,
             },
         )
 
