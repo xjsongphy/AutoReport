@@ -20,7 +20,6 @@ from ...core.prompts import PromptLoader
 from ...core.providers.base import LLMProvider
 from ...core.providers.base import Message as LLMMessage
 from ...interfaces.types import (
-    AgentFeedback,
     AgentResponse,
     AgentStatus,
     AgentType,
@@ -28,13 +27,13 @@ from ...interfaces.types import (
     Error,
     Message,
     QueueUpdateMessage,
+    ReportMessage,
     StatusChange,
+    SystemNotice,
     TaskStatus,
     TaskUpdateMessage,
-    UserMessage,
-)
-from ...interfaces.types import (
     ToolCallMessage,
+    UserMessage,
 )
 from ...interfaces.types import (
     ToolResult as ToolResultMsg,
@@ -84,7 +83,8 @@ def _trim_messages_to_budget(
 
     logger.info(
         "Context auto-compact: {} tokens exceed budget {} → trimming",
-        estimated, budget,
+        estimated,
+        budget,
     )
 
     # Always keep system message (index 0)
@@ -121,9 +121,7 @@ def _trim_messages_to_budget(
             # Anthropic-style orphan: tool result disguised as user message.
             # Without its preceding assistant(tool_calls), this would cause
             # an API error (tool result without tool_use).
-            logger.debug(
-                "Stripping orphan user/tool_result message at trim boundary"
-            )
+            logger.debug("Stripping orphan user/tool_result message at trim boundary")
             kept.pop(0)
         else:
             break
@@ -133,7 +131,10 @@ def _trim_messages_to_budget(
 
     logger.info(
         "Context compacted: {} → {} messages ({} → ~{} tokens)",
-        len(messages), len(result), estimated, _estimate_tokens(result),
+        len(messages),
+        len(result),
+        estimated,
+        _estimate_tokens(result),
     )
     return result
 
@@ -157,6 +158,7 @@ class AgentLoop:
         loop_manager: LoopManager | None = None,
         skill_loader: SkillLoader | None = None,
         manifest_manager: ManifestManager | None = None,
+        task_board=None,
     ):
         """Initialize agent loop.
 
@@ -180,6 +182,8 @@ class AgentLoop:
         self._loop_manager = loop_manager
         self._skill_loader = skill_loader
         self._manifest_manager = manifest_manager
+        # Shared task board — used by the loop guards (must-report, main-blocked).
+        self._task_board = task_board
 
         self._prompt_loader = prompt_loader or PromptLoader()
         self._cached_system_prompt: str | None = None
@@ -189,6 +193,13 @@ class AgentLoop:
         self._running = False
         self._message_queue: asyncio.Queue[UserMessage] = asyncio.Queue()
         self._current_message: UserMessage | None = None
+        # Set True when this agent emits a ReportMessage during the current
+        # turn. The turn-end guard checks it to enforce that a Main-dispatched
+        # task ends with an explicit report.
+        self._turn_reported: bool = False
+        # Guard retry counters (reset each turn in _process_message).
+        self._report_retries: int = 0
+        self._main_block_retries: int = 0
         self._conversation_history: list[LLMMessage] = []
         self._current_session_id: str | None = None
         self._manifest_dirty = False
@@ -207,9 +218,8 @@ class AgentLoop:
         self.bus.subscribe(UserMessage, self._bus_callback)
         # Subscribe to task updates
         self.bus.subscribe(TaskUpdateMessage, self._handle_task_update)
-        # Main Agent subscribes to sub-agent feedback
-        if self.agent_type == AgentType.MAIN:
-            self.bus.subscribe(AgentFeedback, self._handle_agent_feedback)
+        # All agents track their own report emissions (turn-reported flag).
+        self.bus.subscribe(ReportMessage, self._handle_report_message)
         # Manifest tool is only for sub-agents
         if self.agent_type != AgentType.MAIN and self._manifest_manager is not None:
             self.tools.register(ManifestTool(self._manifest_manager, self._get_agent_type_str()))
@@ -250,9 +260,7 @@ class AgentLoop:
             try:
                 # Wait for next message with timeout so stop() can break out
                 try:
-                    message = await asyncio.wait_for(
-                        self._message_queue.get(), timeout=1.0
-                    )
+                    message = await asyncio.wait_for(self._message_queue.get(), timeout=1.0)
                 except asyncio.TimeoutError:
                     continue
 
@@ -262,10 +270,12 @@ class AgentLoop:
 
             except Exception as e:
                 logger.error("Error in agent loop for {}: {}", self.agent_type, str(e))
-                await self.bus.publish(Error(
-                    source=str(self.agent_type),
-                    message=str(e),
-                ))
+                await self.bus.publish(
+                    Error(
+                        source=str(self.agent_type),
+                        message=str(e),
+                    )
+                )
 
     async def _handle_user_message(self, message: Message) -> None:
         """Handle user message from bus.
@@ -310,8 +320,16 @@ class AgentLoop:
             return
 
         # use_enum_values=True may store enums as strings
-        src_val = message.source_agent.value if isinstance(message.source_agent, Enum) else str(message.source_agent)
-        tgt_val = message.target_agent.value if isinstance(message.target_agent, Enum) else str(message.target_agent)
+        src_val = (
+            message.source_agent.value
+            if isinstance(message.source_agent, Enum)
+            else str(message.source_agent)
+        )
+        tgt_val = (
+            message.target_agent.value
+            if isinstance(message.target_agent, Enum)
+            else str(message.target_agent)
+        )
         src_enum = AgentType(src_val) if src_val in [e.value for e in AgentType] else None
         tgt_enum = AgentType(tgt_val) if tgt_val in [e.value for e in AgentType] else None
 
@@ -363,7 +381,9 @@ class AgentLoop:
 
         elif message.action == "failed":
             if am_source:
-                notification_text = f"[失败] {tgt_val} 失败：{message.brief}。请检查并决定如何处理。"
+                notification_text = (
+                    f"[失败] {tgt_val} 失败：{message.brief}。请检查并决定如何处理。"
+                )
             elif am_target:
                 notification_text = f"[失败] 来自 {src_val} 的任务失败：{message.brief}"
             elif self.agent_type == AgentType.MAIN:
@@ -382,30 +402,186 @@ class AgentLoop:
         else:
             notification_text = f"任务更新 {message.action}: {message.brief}"
 
-        await self._message_queue.put(UserMessage(
-            content=notification_text,
-            agent_type=self.agent_type,
-            source="system",
-        ))
+        await self._message_queue.put(
+            UserMessage(
+                content=notification_text,
+                agent_type=self.agent_type,
+                source="system",
+            )
+        )
         await self._publish_queue_update()
         logger.debug("Task update delivered to {}: {}", self.agent_type, message.task_id)
 
-    async def _handle_agent_feedback(self, message: Message) -> None:
-        """Handle AgentFeedback from sub-agents — inject into Main Agent's queue."""
-        if not isinstance(message, AgentFeedback):
+    async def _handle_report_message(self, message: Message) -> None:
+        """Mark this turn 'reported' when this agent emits a ReportMessage.
+
+        The turn-end guard checks _turn_reported to enforce that a
+        Main-dispatched task ends with an explicit report.
+        """
+        if not isinstance(message, ReportMessage):
+            return
+        if message.agent_type != self.agent_type:
+            return
+        self._turn_reported = True
+        logger.debug(
+            "{} turn reported (task={}, type={})",
+            self.agent_type,
+            message.task_id,
+            message.report_type,
+        )
+
+    # ------------------------------------------------------------------ #
+    #  Turn-end guards (report protocol)
+    # ------------------------------------------------------------------ #
+
+    _REPORT_GUARD_MAX_RETRIES = 2
+
+    async def _run_guard_round(self, message: UserMessage, reminder: str) -> None:
+        """Run one more LLM round after injecting a guard reminder.
+
+        Reuses _build_messages + llm_provider.chat + _handle_tool_calls so the
+        agent gets a real chance to call `report` (or resolve blocked tasks).
+        """
+        self._conversation_history.append(LLMMessage(role="user", content=reminder))
+        try:
+            messages = _trim_messages_to_budget(
+                await self._build_messages(),
+                context_window=getattr(self.config, "context_window", 128000),
+                max_output=getattr(self.config, "max_tokens", 4096),
+            )
+            tool_defs = self.tools.get_definitions()
+            response = await self.llm_provider.chat(
+                messages=messages,
+                tools=tool_defs or None,
+                temperature=self.config.temperature,
+                max_tokens=self.config.max_tokens,
+            )
+        except Exception as e:
+            logger.error("Guard re-prompt failed for {}: {}", self.agent_type, e)
             return
 
-        agent_str = message.agent_type.value if isinstance(message.agent_type, Enum) else str(message.agent_type)
-        issue_type = message.feedback_type or "issue"
+        if getattr(response, "tool_calls", None):
 
-        notification = f"[{agent_str} 报告 {issue_type}] {message.content}"
-        await self._message_queue.put(UserMessage(
-            content=notification,
-            agent_type=self.agent_type,
-            source="system",
-        ))
-        await self._publish_queue_update()
-        logger.info("AgentFeedback delivered to Main Agent from {}: {}", agent_str, issue_type)
+            @dataclass
+            class _GuardResponse:
+                content: str
+                tool_calls: list
+                thinking: str | None = None
+
+            await self._handle_tool_calls(
+                _GuardResponse(
+                    content=response.content or "",
+                    tool_calls=response.tool_calls,
+                    thinking=getattr(response, "thinking", None),
+                ),
+                getattr(message, "message_id", None),
+            )
+        elif response.content:
+            self._conversation_history.append(
+                LLMMessage(role="assistant", content=response.content)
+            )
+
+    async def _enforce_report_guard(self, message: UserMessage) -> bool:
+        """Sub-agents must call `report` before ending a Main-dispatched turn.
+
+        Returns True if the guard took over (caller must NOT finalize IDLE).
+        Re-prompts up to _REPORT_GUARD_MAX_RETRIES times; if the agent still
+        has not reported, marks the task BLOCKED so Main learns it needs action.
+        """
+        if self.agent_type == AgentType.MAIN:
+            return False
+        if getattr(message, "source", None) != "main_agent":
+            return False
+
+        reminder = (
+            "[系统提醒] 你结束本轮但还没有调用 report。必须在结束前调用 "
+            "report(task_id, type, content)：type='reply' 表示完成，"
+            "'missing_data'/'quality' 表示卡住。请现在调用 report。"
+        )
+        while not self._turn_reported:
+            self._report_retries += 1
+            if self._report_retries > self._REPORT_GUARD_MAX_RETRIES:
+                # Exhausted — mark the active Main-dispatched task BLOCKED.
+                await self._mark_active_task_blocked()
+                await self._set_status(AgentStatus.IDLE)
+                self._report_retries = 0
+                return True
+            await self.bus.publish(
+                SystemNotice(
+                    agent_type=self.agent_type,
+                    content=f"[守卫] {self.agent_type.value} 结束本轮但未调用 report，"
+                    f"提醒重试 ({self._report_retries}/{self._REPORT_GUARD_MAX_RETRIES})。",
+                )
+            )
+            await self._run_guard_round(message, reminder)
+
+        # The agent reported during a re-prompt round — finalize normally.
+        await self._flush_manifest_if_needed()
+        await self._set_status(AgentStatus.IDLE)
+        return True
+
+    async def _mark_active_task_blocked(self) -> None:
+        """Mark the active Main->self task BLOCKED (auto-block fallback)."""
+        if self._task_board is None:
+            return
+        todos = self._task_board.get_todolist(self.agent_type, session_id=self._current_session_id)
+        task = next((t for t in todos if t.source_agent == AgentType.MAIN), None)
+        if task is None:
+            return
+        try:
+            self._task_board.block_task(
+                task.task_id, target_agent=self.agent_type, session_id=self._current_session_id
+            )
+        except ValueError:
+            return
+        await self.bus.publish(
+            SystemNotice(
+                agent_type=self.agent_type,
+                content=f"[守卫] {self.agent_type.value} 多次未 report，"
+                f"任务 {task.task_id} 标记为 blocked，交回 Main 处理。",
+            )
+        )
+
+    async def _enforce_main_blocked_guard(self, message: UserMessage) -> bool:
+        """Main may not go IDLE while it has BLOCKED tasks.
+
+        Returns True if the guard took over. Re-prompts up to
+        _REPORT_GUARD_MAX_RETRIES times; after that, allows IDLE and surfaces
+        the unresolved blocks to the user via a SystemNotice.
+        """
+        if self.agent_type != AgentType.MAIN or self._task_board is None:
+            return False
+
+        reminder = (
+            "[系统提醒] 你还有被阻塞的任务未处理。请用 send_to_agent 重派、"
+            "转交其他 agent，或自行补齐所需输入后再结束。"
+        )
+        while True:
+            blocked = self._task_board.get_blocked_waitlist(
+                AgentType.MAIN, session_id=self._current_session_id
+            )
+            if not blocked:
+                self._main_block_retries = 0
+                return False
+            self._main_block_retries += 1
+            names = ", ".join(f"{t.target_agent.value}:{t.brief}" for t in blocked)
+            if self._main_block_retries > self._REPORT_GUARD_MAX_RETRIES:
+                await self.bus.publish(
+                    SystemNotice(
+                        agent_type=AgentType.MAIN,
+                        content=f"[守卫] Main 多次未解决被阻塞任务，暂停以便用户介入：{names}",
+                    )
+                )
+                self._main_block_retries = 0
+                return False  # allow IDLE so the user can act
+            await self.bus.publish(
+                SystemNotice(
+                    agent_type=AgentType.MAIN,
+                    content=f"[守卫] Main 还有被阻塞的任务：{names}，"
+                    f"请先解决 ({self._main_block_retries}/{self._REPORT_GUARD_MAX_RETRIES})。",
+                )
+            )
+            await self._run_guard_round(message, reminder)
 
     def _queue_message_summary(self, message: UserMessage) -> str:
         content = str(message.content or "").strip()
@@ -422,10 +598,12 @@ class AgentLoop:
     async def _publish_queue_update(self) -> None:
         queued = list(self._message_queue._queue)
         summaries = [self._queue_message_summary(msg) for msg in queued]
-        await self.bus.publish(QueueUpdateMessage(
-            agent_type=self.agent_type,
-            queued_messages=summaries,
-        ))
+        await self.bus.publish(
+            QueueUpdateMessage(
+                agent_type=self.agent_type,
+                queued_messages=summaries,
+            )
+        )
 
     async def _process_message(self, message: UserMessage) -> None:
         """Process a user message.
@@ -438,6 +616,10 @@ class AgentLoop:
         """
         await self._set_status(AgentStatus.THINKING)
 
+        # Reset per-turn state: this message's turn has not yet been reported.
+        self._turn_reported = False
+        self._report_retries = 0
+        self._main_block_retries = 0
         # Reset cancel event for this message
         self._cancel_event.clear()
 
@@ -448,7 +630,12 @@ class AgentLoop:
                 source = message.source if hasattr(message, "source") else "user"
                 agent_str = self._get_agent_type_str()
                 # Save conversation history to checkpoint
-                history_dicts = [msg.model_dump() if hasattr(msg, "model_dump") else {"role": msg.role, "content": msg.content} for msg in self._conversation_history]
+                history_dicts = [
+                    msg.model_dump()
+                    if hasattr(msg, "model_dump")
+                    else {"role": msg.role, "content": msg.content}
+                    for msg in self._conversation_history
+                ]
                 cp_id = await self._loop_manager.create_checkpoint(
                     agent_type=agent_str,
                     description=f"pre:{source}",
@@ -466,14 +653,11 @@ class AgentLoop:
             if self._debug_mode:
                 content = (
                     "[调试模式] 此 Agent 处于独立调试模式，不与其他 Agent 通信。\n"
-                    "你可以直接测试此 Agent 的工具和输出。\n\n"
-                    + content
+                    "你可以直接测试此 Agent 的工具和输出。\n\n" + content
                 )
 
             # Add user message to conversation history
-            self._conversation_history.append(
-                LLMMessage(role="user", content=content)
-            )
+            self._conversation_history.append(LLMMessage(role="user", content=content))
 
             # Build messages — system prompt always first, conversation history follows
             messages = await self._build_messages()
@@ -506,25 +690,29 @@ class AgentLoop:
                     if chunk.delta:
                         accumulated_content += chunk.delta
                         # Stream chunk to UI
-                        await self.bus.publish(AgentResponse(
-                            agent_type=self.agent_type,
-                            content=chunk.delta,
-                            message_id=message.message_id,
-                            streaming=True,
-                        ))
+                        await self.bus.publish(
+                            AgentResponse(
+                                agent_type=self.agent_type,
+                                content=chunk.delta,
+                                message_id=message.message_id,
+                                streaming=True,
+                            )
+                        )
 
                     if chunk.tool_calls:
                         accumulated_tool_calls = chunk.tool_calls
 
                     if chunk.thinking:
                         accumulated_thinking = chunk.thinking
-                        await self.bus.publish(AgentResponse(
-                            agent_type=self.agent_type,
-                            content="",
-                            message_id=message.message_id,
-                            streaming=True,
-                            thinking=chunk.thinking,
-                        ))
+                        await self.bus.publish(
+                            AgentResponse(
+                                agent_type=self.agent_type,
+                                content="",
+                                message_id=message.message_id,
+                                streaming=True,
+                                thinking=chunk.thinking,
+                            )
+                        )
 
                     if chunk.done:
                         # Stream complete — only save to history if no tool calls.
@@ -554,14 +742,18 @@ class AgentLoop:
                 tokens_in = sum(len(m.content) // 4 for m in messages)
                 tokens_out = len(accumulated_content) // 4
 
-                await self.bus.publish(ApiDebugMessage(
-                    model=self.llm_provider.model or "unknown",
-                    tokens_in=tokens_in,
-                    tokens_out=tokens_out,
-                    duration_ms=duration_ms,
-                    status="cancelled" if self._cancel_event.is_set() else ("success" if last_error is None else "error"),
-                    error=last_error,
-                ))
+                await self.bus.publish(
+                    ApiDebugMessage(
+                        model=self.llm_provider.model or "unknown",
+                        tokens_in=tokens_in,
+                        tokens_out=tokens_out,
+                        duration_ms=duration_ms,
+                        status="cancelled"
+                        if self._cancel_event.is_set()
+                        else ("success" if last_error is None else "error"),
+                        error=last_error,
+                    )
+                )
 
             # Handle cancellation — skip tool calls and send cancellation notice
             if self._cancel_event.is_set():
@@ -569,17 +761,20 @@ class AgentLoop:
                     self._conversation_history.append(
                         LLMMessage(role="assistant", content=accumulated_content)
                     )
-                await self.bus.publish(AgentResponse(
-                    agent_type=self.agent_type,
-                    content="[已取消]",
-                    message_id=message.message_id,
-                    streaming=False,
-                ))
+                await self.bus.publish(
+                    AgentResponse(
+                        agent_type=self.agent_type,
+                        content="[已取消]",
+                        message_id=message.message_id,
+                        streaming=False,
+                    )
+                )
                 await self._set_status(AgentStatus.IDLE)
                 return
 
             # Handle tool calls if present
             if accumulated_tool_calls:
+
                 @dataclass
                 class StreamResponse:
                     content: str
@@ -600,35 +795,24 @@ class AgentLoop:
             # SendToAgentTool (and any other bus listener) receives the
             # full response text on the non-streaming message.
             final_content = "" if accumulated_tool_calls else accumulated_content
-            await self.bus.publish(AgentResponse(
-                agent_type=self.agent_type,
-                content=final_content,
-                message_id=message.message_id,
-                streaming=False,
-            ))
+            await self.bus.publish(
+                AgentResponse(
+                    agent_type=self.agent_type,
+                    content=final_content,
+                    message_id=message.message_id,
+                    streaming=False,
+                )
+            )
 
             await self._flush_manifest_if_needed()
 
-            # Auto-notify MAIN when a sub-agent finishes a dispatched task.
-            # Sub-agents often forget to call manage_tasks(action="complete"),
-            # which causes MAIN to wait forever.  This code-level safety net
-            # ensures MAIN always learns when a sub-agent is done.
-            if (self.agent_type != AgentType.MAIN
-                    and hasattr(message, 'source')
-                    and getattr(message, 'source', None) == "main_agent"):
-                await self.bus.publish(UserMessage(
-                    content=(
-                        f"✅ {self.agent_type.value} 已完成你派发的任务。"
-                        f"请检查 {self.agent_type.value} 的输出，"
-                        f"确认无误后继续派发下游任务。"
-                    ),
-                    agent_type=AgentType.MAIN,
-                    source="system",
-                    message_id=getattr(message, 'message_id', None),
-                ))
-                logger.info(
-                    "Auto-notified MAIN of {} completion", self.agent_type.value
-                )
+            # Turn-end guards (report protocol). Each guard may re-prompt the
+            # agent instead of going IDLE; if a guard takes over, it owns the
+            # final status transition and we return without double-finalizing.
+            if await self._enforce_report_guard(message):
+                return
+            if await self._enforce_main_blocked_guard(message):
+                return
 
             await self._set_status(AgentStatus.IDLE)
 
@@ -637,14 +821,18 @@ class AgentLoop:
             self._consecutive_errors += 1
 
             if self._consecutive_errors >= 3:
-                logger.warning("{}: 3 consecutive errors — skipping current message", self.agent_type)
+                logger.warning(
+                    "{}: 3 consecutive errors — skipping current message", self.agent_type
+                )
 
             await self._flush_manifest_if_needed()
             await self._set_status(AgentStatus.ERROR)
-            await self.bus.publish(Error(
-                source=str(self.agent_type),
-                message=str(e),
-            ))
+            await self.bus.publish(
+                Error(
+                    source=str(self.agent_type),
+                    message=str(e),
+                )
+            )
 
         else:
             self._consecutive_errors = 0
@@ -679,13 +867,11 @@ class AgentLoop:
             undescribed = [f for f in files if not f.get("description", "").strip()]
             if undescribed or not notes.strip():
                 hint = (
-                    "\n\n[Manifest 收尾提示]\n"
-                    "本轮的创建/修改/删除文件已自动更新到你的 manifest。"
+                    "\n\n[Manifest 收尾提示]\n本轮的创建/修改/删除文件已自动更新到你的 manifest。"
                 )
                 if undescribed:
-                    hint += (
-                        "以下文件尚无描述，请在方便时通过 manifest 工具补全：\n"
-                        + "\n".join(f"  - {f['path']}" for f in undescribed)
+                    hint += "以下文件尚无描述，请在方便时通过 manifest 工具补全：\n" + "\n".join(
+                        f"  - {f['path']}" for f in undescribed
                     )
                 if not notes.strip():
                     hint += (
@@ -693,12 +879,8 @@ class AgentLoop:
                         "依赖或协作说明。"
                     )
                 else:
-                    hint += (
-                        "\n自由文本区（notes）可能需要补充。请查看并根据需要更新。"
-                    )
-                self._conversation_history.append(
-                    LLMMessage(role="user", content=hint)
-                )
+                    hint += "\n自由文本区（notes）可能需要补充。请查看并根据需要更新。"
+                self._conversation_history.append(LLMMessage(role="user", content=hint))
         except Exception as e:
             logger.warning("Failed to flush manifest for {}: {}", self.agent_type, e)
 
@@ -727,22 +909,26 @@ class AgentLoop:
             )
 
             # Add assistant message with tool calls as structured data
-            current_messages.append(LLMMessage(
-                role="assistant",
-                content=response.content or "",
-                tool_calls=response.tool_calls,
-                thinking=response.thinking,
-            ))
+            current_messages.append(
+                LLMMessage(
+                    role="assistant",
+                    content=response.content or "",
+                    tool_calls=response.tool_calls,
+                    thinking=response.thinking,
+                )
+            )
 
             # Execute each tool call and add results as structured messages
             for tool_call in response.tool_calls:
                 await self._set_status(AgentStatus.RUNNING_TOOL)
 
-                await self.bus.publish(ToolCallMessage(
-                    agent_type=self.agent_type,
-                    tool_name=tool_call.name,
-                    arguments=tool_call.arguments,
-                ))
+                await self.bus.publish(
+                    ToolCallMessage(
+                        agent_type=self.agent_type,
+                        tool_name=tool_call.name,
+                        arguments=tool_call.arguments,
+                    )
+                )
 
                 try:
                     tool = self.tools.get(tool_call.name)
@@ -771,24 +957,33 @@ class AgentLoop:
                     if tool_call.name in ("apply_patch", "delete_file"):
                         self._manifest_dirty = True
 
-                    await self.bus.publish(ToolResultMsg(
-                        agent_type=self.agent_type,
-                        tool_name=tool_call.name,
-                        result=result,
-                    ))
+                    await self.bus.publish(
+                        ToolResultMsg(
+                            agent_type=self.agent_type,
+                            tool_name=tool_call.name,
+                            result=result,
+                        )
+                    )
 
                     result_str = self._format_tool_result(result)
 
                 except Exception as e:
-                    logger.error("Tool execution error for {}: {} | args={}", tool_call.name, str(e), tool_call.arguments)
+                    logger.error(
+                        "Tool execution error for {}: {} | args={}",
+                        tool_call.name,
+                        str(e),
+                        tool_call.arguments,
+                    )
                     error_msg = f"Error executing {tool_call.name}: {str(e)}"
 
-                    await self.bus.publish(ToolResultMsg(
-                        agent_type=self.agent_type,
-                        tool_name=tool_call.name,
-                        result=None,
-                        error=error_msg,
-                    ))
+                    await self.bus.publish(
+                        ToolResultMsg(
+                            agent_type=self.agent_type,
+                            tool_name=tool_call.name,
+                            result=None,
+                            error=error_msg,
+                        )
+                    )
                     result_str = error_msg
 
                 # Add tool result as structured message
@@ -796,12 +991,14 @@ class AgentLoop:
                 provider_class_name = self.llm_provider.__class__.__name__
                 tool_result_role = "user" if provider_class_name == "AnthropicProvider" else "tool"
 
-                current_messages.append(LLMMessage(
-                    role=tool_result_role,
-                    content=result_str,
-                    tool_call_id=tool_call.id,
-                    is_tool_result=True,
-                ))
+                current_messages.append(
+                    LLMMessage(
+                        role=tool_result_role,
+                        content=result_str,
+                        tool_call_id=tool_call.id,
+                        is_tool_result=True,
+                    )
+                )
 
             # Call LLM again with updated conversation
             await self._set_status(AgentStatus.THINKING)
@@ -830,44 +1027,46 @@ class AgentLoop:
                 tokens_in = sum(len(m.content) // 4 for m in current_messages)
                 tokens_out = len(response.content) // 4 if response.content else 0
 
-                await self.bus.publish(ApiDebugMessage(
-                    model=self.llm_provider.model or "unknown",
-                    tokens_in=tokens_in,
-                    tokens_out=tokens_out,
-                    duration_ms=duration_ms,
-                    status="success" if last_error is None else "error",
-                    error=last_error,
-                ))
+                await self.bus.publish(
+                    ApiDebugMessage(
+                        model=self.llm_provider.model or "unknown",
+                        tokens_in=tokens_in,
+                        tokens_out=tokens_out,
+                        duration_ms=duration_ms,
+                        status="success" if last_error is None else "error",
+                        error=last_error,
+                    )
+                )
 
             # This round is non-streaming, so thinking arrives as one block.
             # Publish it so the thinking indicator fills between tool calls —
             # without this the dots row is empty and gets removed on finish.
             if getattr(response, "thinking", None):
-                await self.bus.publish(AgentResponse(
-                    agent_type=self.agent_type,
-                    content="",
-                    message_id=user_message_id,
-                    streaming=True,
-                    thinking=response.thinking,
-                ))
+                await self.bus.publish(
+                    AgentResponse(
+                        agent_type=self.agent_type,
+                        content="",
+                        message_id=user_message_id,
+                        streaming=True,
+                        thinking=response.thinking,
+                    )
+                )
 
         # Update conversation history with final response
         if response.content:
-            current_messages.append(
-                LLMMessage(role="assistant", content=response.content)
-            )
+            current_messages.append(LLMMessage(role="assistant", content=response.content))
             # Publish final content to GUI (it was generated inside the tool loop)
-            await self.bus.publish(AgentResponse(
-                agent_type=self.agent_type,
-                content=response.content,
-                message_id=user_message_id,
-                streaming=False,
-            ))
+            await self.bus.publish(
+                AgentResponse(
+                    agent_type=self.agent_type,
+                    content=response.content,
+                    message_id=user_message_id,
+                    streaming=False,
+                )
+            )
 
         # Save conversation history — strip the system prompt (index 0)
-        self._conversation_history = [
-            m for m in current_messages if m.role != "system"
-        ]
+        self._conversation_history = [m for m in current_messages if m.role != "system"]
 
         if iteration >= max_iterations:
             logger.warning("Max tool iterations reached for agent: {}", self.agent_type)
@@ -883,7 +1082,8 @@ class AgentLoop:
         """
         if isinstance(result, dict):
             filtered = {
-                key: value for key, value in result.items()
+                key: value
+                for key, value in result.items()
                 if not str(key).startswith("_ui_") and str(key) != "completion_summary"
             }
             return str(filtered)
@@ -903,10 +1103,12 @@ class AgentLoop:
         # In debug mode, use DEBUG_MODE status
         display_status = AgentStatus.DEBUG_MODE if self._debug_mode else status
 
-        await self.bus.publish(StatusChange(
-            agent_type=self.agent_type,
-            status=display_status,
-        ))
+        await self.bus.publish(
+            StatusChange(
+                agent_type=self.agent_type,
+                status=display_status,
+            )
+        )
 
     def set_debug_mode(self, enabled: bool) -> None:
         """Enable or disable debug mode.
@@ -971,47 +1173,15 @@ class AgentLoop:
             )
             return
 
-        await self.bus.publish(UserMessage(
-            content=content,
-            agent_type=agent_type,
-            message_id=message_id,
-            source="main_agent",
-        ))
-        logger.info("Main agent sent coordination message to {}", agent_type)
-
-    async def send_feedback(
-        self,
-        content: str,
-        feedback_type: str = "missing_data",
-    ) -> None:
-        """Send structured feedback from sub-agent to main agent.
-
-        Sub-agents use this to report issues, completion status, or queries
-        that require main agent intervention. Only sub-agents can send
-        feedback.
-
-        Args:
-            content: Feedback message content.
-            feedback_type: Type of feedback — "missing_data", "quality",
-                or "query".
-
-        Raises:
-            RuntimeError: If called from the main agent.
-        """
-        if self.agent_type == AgentType.MAIN:
-            raise RuntimeError("Main agent cannot send feedback to itself")
-
-        await self.bus.publish(AgentFeedback(
-            agent_type=self.agent_type,
-            content=content,
-            feedback_type=feedback_type,
-        ))
-        logger.info(
-            "{} sent feedback to main agent (type={}): {}",
-            self.agent_type,
-            feedback_type,
-            content[:80],
+        await self.bus.publish(
+            UserMessage(
+                content=content,
+                agent_type=agent_type,
+                message_id=message_id,
+                source="main_agent",
+            )
         )
+        logger.info("Main agent sent coordination message to {}", agent_type)
 
     async def _get_cached_system_prompt(self) -> str:
         """Return the cached system prompt, rebuilding it when sources change.
@@ -1114,7 +1284,7 @@ class AgentLoop:
         """
         if self._loop_manager is None:
             return ""
-        task_board = getattr(self._loop_manager, '_task_board', None)
+        task_board = getattr(self._loop_manager, "_task_board", None)
         if task_board is None:
             return ""
 
@@ -1140,7 +1310,11 @@ class AgentLoop:
             # Show all incomplete tasks first
             for t in incomplete:
                 if is_waitlist:
-                    tgt = t.target_agent.value if hasattr(t.target_agent, 'value') else str(t.target_agent)
+                    tgt = (
+                        t.target_agent.value
+                        if hasattr(t.target_agent, "value")
+                        else str(t.target_agent)
+                    )
                     result.append(f"  - 等待{tgt} {t.brief}")
                 else:
                     status_map = {
@@ -1156,14 +1330,16 @@ class AgentLoop:
             if completed:
                 # Sort by completed_at descending (most recent first)
                 completed_sorted = sorted(
-                    completed,
-                    key=lambda t: t.completed_at or datetime.min,
-                    reverse=True
+                    completed, key=lambda t: t.completed_at or datetime.min, reverse=True
                 )[:10]
 
                 for t in completed_sorted:
                     if is_waitlist:
-                        tgt = t.target_agent.value if hasattr(t.target_agent, 'value') else str(t.target_agent)
+                        tgt = (
+                            t.target_agent.value
+                            if hasattr(t.target_agent, "value")
+                            else str(t.target_agent)
+                        )
                         result.append(f"  - 等待{tgt} {t.brief} (已完成)")
                     else:
                         result.append(f"  - 已完成 {t.brief}")

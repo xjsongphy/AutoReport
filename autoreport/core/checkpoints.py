@@ -267,6 +267,11 @@ class CheckpointManager:
         for rel, content in restored_content.items():
             fp = self.workspace / rel
             if content is not None:
+                # Defensive guard for legacy checkpoints that tracked binary
+                # files (content reconstructed as ""): never clobber a real
+                # binary file on disk with empty text — that destroys data.
+                if content == "" and fp.exists() and await _is_binary(fp):
+                    continue
                 fp.parent.mkdir(parents=True, exist_ok=True)
                 await asyncio.to_thread(fp.write_text, content, encoding="utf-8")
                 count += 1
@@ -392,8 +397,15 @@ class CheckpointManager:
                     st = fp.stat()
                     rel = fp.relative_to(self.workspace).as_posix()
                     is_bin = await _is_binary(fp)
+                    if is_bin:
+                        # Binary files (PDFs, images, etc.) cannot be stored as
+                        # text in JSON nor restored from diffs. Tracking them
+                        # would cause rollback to overwrite the real bytes with
+                        # empty content — destroying them. Skip entirely so
+                        # rollback never touches binary files on disk.
+                        continue
                     content = None
-                    if not is_bin and st.st_size < 1_000_000:
+                    if st.st_size < 1_000_000:
                         try:
                             content = await asyncio.to_thread(
                                 fp.read_text, encoding="utf-8"

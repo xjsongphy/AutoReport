@@ -21,7 +21,7 @@ from ..tools import (
     ManifestManager,
     PDFParseTool,
     ReadTool,
-    ReportIssueTool,
+    ReportTool,
     SendToAgentTool,
     SkillLoader,
     TaskBoard,
@@ -199,6 +199,7 @@ class LoopManager:
                 loop_manager=self,
                 skill_loader=self.skill_loader,
                 manifest_manager=self.manifest_manager,
+                task_board=self._task_board,
             )
             self._loops[agent_type] = loop
 
@@ -307,7 +308,7 @@ class LoopManager:
             )
         else:
             registry.register(
-                ReportIssueTool(
+                ReportTool(
                     bus=self.bus,
                     agent_type=agent_type,
                     task_board=self._task_board,

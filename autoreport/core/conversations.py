@@ -393,6 +393,58 @@ class ConversationStore:
             records = records[-limit:]
         return records
 
+    def truncate_from_message(
+        self,
+        agent_type: str,
+        *,
+        message_id: str | None = None,
+        content: str | None = None,
+        role: str | None = None,
+    ) -> bool:
+        """Remove the matched record and every following record in the current session."""
+        path = self._get_session_file_path(agent_type)
+        if not path.exists():
+            return False
+
+        records = self.load_messages(agent_type, limit=10_000)
+        start_index = -1
+        for i, rec in enumerate(records):
+            if message_id and str(rec.get("message_id") or "") == str(message_id):
+                if role and str(rec.get("role") or "") != str(role):
+                    continue
+                start_index = i
+                break
+        if start_index < 0 and content is not None:
+            for i, rec in enumerate(records):
+                if role and str(rec.get("role") or "") != str(role):
+                    continue
+                if str(rec.get("content") or "") == str(content):
+                    start_index = i
+                    break
+        if start_index < 0:
+            return False
+
+        kept = records[:start_index]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            for rec in kept:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+        if agent_type == "main":
+            session_id = self.get_current_session_id(agent_type)
+            sessions = self._load_sessions_metadata()
+            preview = ""
+            for rec in reversed(kept):
+                if rec.get("role") == "user":
+                    preview = _user_visible_content_or_empty(str(rec.get("content") or "")).split("\n")[0][:100]
+                    break
+            for s in sessions:
+                if s.get("id") == session_id:
+                    s["preview"] = preview
+                    break
+            self._save_sessions_metadata(sessions)
+        return True
+
     def get_last_user_message(self, agent_type: str) -> str | None:
         records = self.load_messages(agent_type, limit=20)
         for rec in reversed(records):

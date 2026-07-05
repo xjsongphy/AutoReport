@@ -87,7 +87,11 @@ class ExecTool(Tool):
             f"Execute shell commands using {shell_info}. "
             f"The working directory is the project root. "
             "Commands that generate files must specify output paths explicitly. "
-            "Provide both command and a short command_description."
+            "Provide both command and a short command_description. "
+            "Note: file changes made here (rm, cp, mv, python writing files, etc.) "
+            "are NOT recorded by checkpoints and cannot be rolled back. Prefer "
+            "delete_file / apply_patch for files you may need to restore; use rm "
+            "only for bulk cleanup when necessary."
         )
 
     def __init__(

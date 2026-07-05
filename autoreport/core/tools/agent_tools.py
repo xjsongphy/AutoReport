@@ -1,7 +1,7 @@
 """Inter-agent communication tools.
 
-SendToAgentTool: Main Agent dispatches tasks to sub-agents and waits for responses.
-ReportIssueTool: Sub-agents report issues back to the Main Agent.
+SendToAgentTool: Main Agent dispatches tasks to sub-agents and waits for their respond.
+ReportTool: Sub-agents report the outcome (reply/blocked) of a Main-dispatched task.
 """
 
 import asyncio
@@ -10,17 +10,28 @@ from typing import Any
 
 from loguru import logger
 
-from ...interfaces.types import AgentFeedback, AgentResponse, AgentType, TaskUpdateMessage, UserMessage
+from ...interfaces.types import (
+    AgentResponse,
+    AgentStatus,
+    AgentType,
+    ReportMessage,
+    StatusChange,
+    TaskStatus,
+    TaskUpdateMessage,
+    UserMessage,
+)
 from ..loops.bus import MessageBus
 from .registry import Tool
 from .session_utils import resolve_session_id
 
 
 class SendToAgentTool(Tool):
-    """Send a task to a sub-agent and wait for its response.
+    """Dispatch a task to a sub-agent and wait for its `respond`.
 
-    Only available to the Main Agent. Dispatches a coordination message
-    to the specified sub-agent, waits for the response, and returns it.
+    Only available to the Main Agent. Always creates (or, for re-dispatch,
+    reuses) a tracked task. blocking=True (default) waits for the sub-agent's
+    `respond`; blocking=False returns immediately and the sub-agent's later
+    `respond` updates the task + notifies Main.
     """
 
     name = "send_to_agent"
@@ -31,19 +42,28 @@ class SendToAgentTool(Tool):
         "Do not include formulas, implementation steps, copied source content, "
         "output filenames, or quality rules the sub-agent already owns. "
         "Modes (choose one):\n"
-        "- blocking=True (default): Wait for response, no task tracking.\n"
-        "- blocking=False with task_items: Non-blocking, creates tracked tasks for waitlist/todolist.\n"
-        "Returns the sub-agent's full response text."
+        "- blocking=True (default): Wait for the sub-agent's `respond` (reply or blocked).\n"
+        "- blocking=False: Return immediately; the sub-agent's later `respond` notifies you.\n"
+        "task_id: omit on first dispatch; pass an existing task_id to RE-DISPATCH a "
+        "previously blocked task (resets it to in_progress)."
     )
 
     def __init__(self, bus: MessageBus, task_board=None, timeout: int = 120, session_id_resolver=None):
         self._bus = bus
         self._task_board = task_board
-        self._timeout = timeout
+        self._timeout = timeout  # wall-clock fallback cap for the liveness wait
         self._session_id_resolver = session_id_resolver
 
     def _session_id(self) -> str | None:
         return resolve_session_id(self._session_id_resolver)
+
+    @staticmethod
+    def _request_summary(content: str) -> str:
+        first_line = next(
+            (line.strip() for line in str(content or "").splitlines() if line.strip()),
+            "",
+        )
+        return first_line if len(first_line) <= 80 else first_line[:77].rstrip() + "..."
 
     async def __call__(
         self,
@@ -51,18 +71,20 @@ class SendToAgentTool(Tool):
         content: str,
         task_items: list[dict] | None = None,
         blocking: bool = True,
+        task_id: str | None = None,
     ) -> dict[str, Any]:
         """Send a task to a sub-agent.
 
         Args:
             agent_type: Target sub-agent type. One of: theory, data_analysis, plotting, report.
             content: Task instruction to send to the sub-agent.
-            task_items: Optional list of task dicts with 'brief' (short UI text)
-                for waitlist/todolist tracking.
-            blocking: If True, wait for response. If False, return immediately after dispatch.
+            task_items: Optional list of task dicts ('brief' and optionally 'description')
+                for waitlist/todolist tracking. Used only when creating a new task.
+            blocking: If True, wait for the sub-agent's report. If False, return immediately.
+            task_id: Existing task_id to re-dispatch (resets BLOCKED/COMPLETED -> in_progress).
 
         Returns:
-            Dictionary with agent_type, status, response content, and any feedback.
+            Dictionary with agent_type, status, response content, and task_id.
         """
         # Defensive validation: surface clear input errors instead of
         # propagating obscure attribute/type exceptions from downstream logic.
@@ -96,188 +118,210 @@ class SendToAgentTool(Tool):
                 "error": f"Unknown agent type '{agent_type}'. Valid: {valid}",
             }
 
-        # Validate: blocking and task_items are mutually exclusive by design
-        if blocking and task_items:
-            return {
-                "status": "error",
-                "error": "blocking=True does not support task_items. Use blocking=False with task_items for tracked tasks.",
-            }
-        if not blocking and not task_items and self._task_board:
-            return {
-                "status": "error",
-                "error": "blocking=False requires task_items when task_board is available. Provide task_items to track tasks.",
-            }
+        request_summary = self._request_summary(content)
+        sid = self._session_id()
 
-        # --- Task items: create linked waitlist/todolist entries (non-blocking only) ---
-        created_task_ids: list[str] = []
-        if task_items and self._task_board:
-            main_type = AgentType.MAIN
-            for item in task_items:
-                brief = str(
-                    item.get("brief")
-                    or item.get("task_brief")
-                    or content[:80]
-                )
-                task = self._task_board.create_task(
-                    source=main_type,
-                    target=target,
-                    brief=brief,
-                    blocking=blocking,
-                    session_id=self._session_id(),
-                )
-                created_task_ids.append(task.task_id)
-            logger.info("SendToAgentTool: created tasks {}", created_task_ids)
-            for task_id in created_task_ids:
-                task = self._task_board.get_task(task_id)
-                if task is not None:
-                    await self._bus.publish(TaskUpdateMessage(
-                        task_id=task.task_id,
-                        action="created",
-                        source_agent=task.source_agent,
-                        target_agent=task.target_agent,
-                        brief=task.brief,
-                        previous_status=None,
-                    ))
+        # --- Create or re-dispatch task ---
+        if task_id and self._task_board is not None:
+            existing = self._task_board.get_task(
+                task_id, target_agent=target, active_only=False, session_id=sid
+            )
+            if existing is None:
+                return {
+                    "status": "error",
+                    "error": f"task_id {task_id} not found for {target.value}",
+                }
+            # Re-dispatch: reset the whole chain (target + sources) back to in_progress.
+            for t in self._task_board.get_tasks_by_id(task_id):
+                if t.status in (
+                    TaskStatus.BLOCKED,
+                    TaskStatus.COMPLETED,
+                    TaskStatus.FAILED,
+                    TaskStatus.CANCELLED,
+                ):
+                    t.status = TaskStatus.IN_PROGRESS
+                    t.completed_at = None
+            await self._bus.publish(TaskUpdateMessage(
+                task_id=task_id,
+                action="started",
+                source_agent=AgentType.MAIN,
+                target_agent=target,
+                brief=existing.brief,
+            ))
+        elif self._task_board is not None:
+            item = task_items[0] if task_items else {}
+            brief = (
+                str(item.get("brief") or item.get("task_brief") or "").strip()
+                or request_summary[:30]
+            )
+            new_task = self._task_board.create_task(
+                source=AgentType.MAIN,
+                target=target,
+                brief=brief,
+                blocking=blocking,
+                session_id=sid,
+            )
+            task_id = new_task.task_id
+            await self._bus.publish(TaskUpdateMessage(
+                task_id=task_id,
+                action="created",
+                source_agent=new_task.source_agent,
+                target_agent=new_task.target_agent,
+                brief=new_task.brief,
+                previous_status=None,
+            ))
 
-        # Non-blocking: return immediately after dispatch
+        # Non-blocking: dispatch and return immediately
         if not blocking:
             await self._bus.publish(UserMessage(
                 content=content,
                 agent_type=target,
                 source="main_agent",
             ))
-            logger.info("Main Agent dispatched non-blocking task to {}", target)
+            logger.info("Main Agent dispatched non-blocking task {} to {}", task_id, target)
             result: dict[str, Any] = {
                 "status": "delegated",
                 "agent_type": target.value,
+                "blocking": False,
+                "task_id": task_id,
+                "request_summary": request_summary,
                 "message": f"Task sent to {target.value} (non-blocking). "
                            "Agent will be notified on completion.",
             }
-            if created_task_ids:
-                result["task_ids"] = created_task_ids
             return result
 
-        # Blocking path — wait for sub-agent to truly finish.
-        # We used to listen for AgentResponse(streaming=False), but that
-        # fires after every LLM call — not after the agent loop finishes.
-        # Now we correlate with the auto-notify that agent_loop.py publishes
-        # when _process_message() completes, which is the real "done" signal.
-        dispatch_id = str(uuid.uuid4())
-
-        # Create future to wait for response
+        # --- Blocking: wait for the sub-agent's ReportMessage on this task ---
+        # The report IS the reply: type="reply" -> success; else -> blocked.
         loop = asyncio.get_running_loop()
-        future: asyncio.Future[str] = loop.create_future()
-        feedback_items: list[dict[str, str]] = []
-        saw_final_response = False
-        final_response_content = ""
+        future: asyncio.Future[ReportMessage] = loop.create_future()
 
-        def _feedback_summary() -> str:
-            return "\n".join(
-                f"[{item['type']}] {item['content']}"
-                for item in feedback_items
-                if str(item.get("content") or "").strip()
-            )
-
-        def _on_completion(msg: Any) -> None:
-            nonlocal saw_final_response, final_response_content
-            if not isinstance(msg, UserMessage):
+        def _on_report(msg: Any) -> None:
+            if not isinstance(msg, ReportMessage):
                 return
-            if getattr(msg, 'source', None) != "system":
-                return
-            if msg.agent_type != AgentType.MAIN:
-                return
-            # Only match the auto-notify for *this* dispatch
-            if msg.message_id != dispatch_id:
+            if msg.agent_type != target or msg.task_id != task_id:
                 return
             if not future.done():
-                if saw_final_response and final_response_content.strip():
-                    future.set_result(final_response_content)
-                else:
-                    feedback_summary = _feedback_summary()
-                    if feedback_summary:
-                        future.set_result(feedback_summary)
-                    elif saw_final_response:
-                        future.set_result(final_response_content)
-                    else:
-                        future.set_result(msg.content)
+                future.set_result(msg)
 
-        def _on_agent_response(msg: Any) -> None:
-            nonlocal saw_final_response, final_response_content
-            if not isinstance(msg, AgentResponse):
-                return
-            if msg.agent_type != target:
-                return
-            if msg.streaming:
-                return
-            saw_final_response = True
-            final_response_content = msg.content
+        self._bus.subscribe(ReportMessage, _on_report)
 
-        def _on_feedback(msg: Any) -> None:
-            if not isinstance(msg, AgentFeedback):
-                return
-            if msg.agent_type != target.value and msg.agent_type != target:
-                return
-            feedback_items.append({
-                "type": msg.feedback_type,
-                "content": msg.content,
-            })
-
-        # Subscribe BEFORE publishing to avoid race condition
-        self._bus.subscribe(UserMessage, _on_completion)
-        self._bus.subscribe(AgentResponse, _on_agent_response)
-        self._bus.subscribe(AgentFeedback, _on_feedback)
-
+        # Prefix with "blocking:" so agent_loop's auto-notify suppression still
+        # recognizes this dispatch (the auto-notify path is removed in a later task,
+        # but the prefix is harmless and keeps the suppression intact meanwhile).
+        dispatch_message_id = f"blocking:{task_id}"
         await self._bus.publish(UserMessage(
             content=content,
             agent_type=target,
             source="main_agent",
-            message_id=dispatch_id,
+            message_id=dispatch_message_id,
         ))
 
-        logger.info("Main Agent dispatched task to {}", target)
+        logger.info("Main Agent dispatched task {} to {} (blocking)", task_id, target)
 
-        # Wait for response
         try:
-            response_content = await asyncio.wait_for(future, timeout=self._timeout)
-            result: dict[str, Any] = {
-                "status": "success",
-                "agent_type": target.value,
-                "response": response_content,
-            }
-            if feedback_items:
-                result["feedback"] = feedback_items
-            if created_task_ids:
-                result["task_ids"] = created_task_ids
-            return result
+            report = await self._await_with_liveness(future, target, loop)
         except asyncio.TimeoutError:
-            result = {
+            return {
                 "status": "timeout",
                 "agent_type": target.value,
-                "error": f"Sub-agent did not respond within {self._timeout}s. "
-                         "It may still be processing. Try again or use read to check its output.",
+                "task_id": task_id,
+                "request_summary": request_summary,
+                "error": "Sub-agent did not report within the liveness budget. "
+                         "It may still be processing — try again or read its output.",
             }
-            if feedback_items:
-                result["feedback"] = feedback_items
-            return result
         finally:
-            self._bus.unsubscribe(UserMessage, _on_completion)
-            self._bus.unsubscribe(AgentResponse, _on_agent_response)
-            self._bus.unsubscribe(AgentFeedback, _on_feedback)
+            self._bus.unsubscribe(ReportMessage, _on_report)
+
+        if report.report_type == "reply":
+            return {
+                "status": "success",
+                "agent_type": target.value,
+                "task_id": task_id,
+                "blocking": True,
+                "request_summary": request_summary,
+                "response": report.content,
+            }
+        return {
+            "status": "blocked",
+            "agent_type": target.value,
+            "task_id": task_id,
+            "blocking": True,
+            "block_type": report.report_type,
+            "request_summary": request_summary,
+            "response": report.content,
+            "error": f"Sub-agent reported {report.report_type}: {report.content}",
+        }
+
+    async def _await_with_liveness(self, future, target, loop) -> ReportMessage:
+        """Wait for future, counting only target IDLE/ERROR time (no-progress timeout).
+
+        Subscribes to StatusChange from the target: THINKING/RUNNING_TOOL pauses
+        the idle timer (busy != timeout); IDLE/ERROR arms/re-arms it. A wall-clock
+        cap (4x timeout) bounds total wait so a never-reporting turn still resolves.
+        """
+        idle_budget = 60
+        wall_cap = self._timeout * 4
+        idle_handle: asyncio.TimerHandle | None = None
+        wall_deadline = loop.time() + wall_cap
+
+        def _fire_idle() -> None:
+            if not future.done():
+                future.set_exception(asyncio.TimeoutError())
+
+        def arm_idle() -> None:
+            nonlocal idle_handle
+            if idle_handle:
+                idle_handle.cancel()
+            idle_handle = loop.call_later(idle_budget, _fire_idle)
+
+        def _on_status(msg: Any) -> None:
+            if not isinstance(msg, StatusChange) or msg.agent_type != target or future.done():
+                return
+            if msg.status in (AgentStatus.THINKING, AgentStatus.RUNNING_TOOL):
+                if idle_handle:
+                    idle_handle.cancel()
+            else:  # IDLE / ERROR / DEBUG_MODE
+                arm_idle()
+
+        self._bus.subscribe(StatusChange, _on_status)
+        arm_idle()  # target starts IDLE until it picks up the message
+        try:
+            while not future.done():
+                try:
+                    return await asyncio.wait_for(asyncio.shield(future), timeout=1.0)
+                except asyncio.TimeoutError:
+                    if loop.time() > wall_deadline:
+                        raise
+        finally:
+            if idle_handle:
+                idle_handle.cancel()
+            self._bus.unsubscribe(StatusChange, _on_status)
 
 
-class ReportIssueTool(Tool):
-    """Report an issue to the Main Agent.
+class ReportTool(Tool):
+    """Report the outcome of a Main-dispatched task.
 
-    Available to all sub-agents. Use this when prerequisites are missing,
-    input data is malformed, or you need Main Agent intervention.
+    Available to all sub-agents. This is the ONLY way to finish a task
+    dispatched by Main. Required: a sub-agent MUST call `respond` before
+    its turn can end on a Main-dispatched task (enforced by AgentLoop).
+
+    - type="reply": task COMPLETED. content = final response to Main.
+    - type="missing_data" | "quality": task BLOCKED. content = what is
+      needed / what is wrong. Main must resolve before it can stop.
     """
 
-    name = "report_issue"
+    name = "respond"
     description = (
-        "Report an issue to the Main Agent. Use when: prerequisites are missing, "
-        "input data is malformed, another agent's output has quality problems, "
-        "or you need Main Agent to coordinate a fix."
+        "Report the outcome of a task Main dispatched to you. This is the ONLY "
+        "way to finish such a task — you MUST call it before stopping.\n"
+        "Types:\n"
+        "- 'reply': you finished. content = your final response (results, file paths).\n"
+        "- 'missing_data': you cannot proceed because an input is missing. content = exactly what is missing and where it should be.\n"
+        "- 'quality': you cannot proceed because a dependency's output is wrong. content = what is wrong and where.\n"
+        "Do NOT use this to ask the user questions — make a reasonable assumption or report missing_data to Main."
     )
+
+    _VALID_TYPES = ("reply", "missing_data", "quality")
 
     def __init__(self, bus: MessageBus, agent_type: AgentType, task_board=None, session_id_resolver=None):
         self._bus = bus
@@ -288,123 +332,68 @@ class ReportIssueTool(Tool):
     def _session_id(self) -> str | None:
         return resolve_session_id(self._session_id_resolver)
 
-    async def __call__(
-        self,
-        content: str,
-        issue_type: str = "missing_data",
-        request_task_for: str | None = None,
-        task_brief: str = "",
-        task_message: str | None = None,
-    ) -> dict[str, Any]:
-        """Report an issue to the Main Agent.
+    async def __call__(self, task_id: str, type: str, content: str = "") -> dict[str, Any]:
+        """Report outcome of a Main-dispatched task.
 
         Args:
-            content: Detailed description of the issue. Be specific about what is
-                missing, wrong, or needed.
-            issue_type: Type of issue. One of: missing_data (prerequisites absent),
-                quality (output is wrong/malformed), query (need clarification).
-            request_task_for: Optional agent type to request a task for.
-            task_brief: Short summary for UI list display (optional).
-            task_message: Optional message that should be auto-dispatched to the
-                requested target when routing sub -> main -> sub.
+            task_id: The task you are reporting on (shown in your [当前任务] context).
+            type: One of reply | missing_data | quality.
+            content: reply -> final response; missing_data/quality -> what is needed/wrong.
 
         Returns:
-            Confirmation dictionary.
+            Result dictionary.
         """
-        valid_types = {"missing_data", "quality", "query"}
-        if issue_type not in valid_types:
-            issue_type = "missing_data"
+        report_type = str(type).strip()
+        if report_type not in self._VALID_TYPES:
+            return {"status": "error", "error": f"Unknown report type '{type}'. Valid: {', '.join(self._VALID_TYPES)}"}
 
-        requested_target: AgentType | None = None
-        if request_task_for:
+        if not task_id:
+            return {"status": "error", "error": "task_id is required"}
+
+        sid = self._session_id()
+        if self._task_board is not None:
+            task = self._task_board.get_task(task_id, target_agent=self._agent_type, active_only=False, session_id=sid)
+            if task is None:
+                any_task = self._task_board.get_task(task_id, active_only=False, session_id=sid)
+                if any_task is None:
+                    return {"status": "error", "error": f"Task {task_id} not found"}
+                return {"status": "error", "error": f"Task {task_id} is not assigned to you"}
+
+        # Update task status + chain (reuses TaskBoard logic)
+        affected: list = []
+        if self._task_board is not None:
             try:
-                requested_target = AgentType(request_task_for)
-            except ValueError:
-                requested_target = None
+                if report_type == "reply":
+                    affected = self._task_board.complete_task(task_id, target_agent=self._agent_type, session_id=sid)
+                    action = "completed"
+                else:
+                    affected = self._task_board.block_task(task_id, target_agent=self._agent_type, session_id=sid)
+                    action = "blocked"
+            except ValueError as e:
+                return {"status": "error", "error": str(e)}
 
-        # Create task if requested
-        created_task_id: str | None = None
-        dispatched_task_id: str | None = None
-        brief_text = str(task_brief or "").strip()
-        if request_task_for and brief_text and self._task_board:
-            task_link_id = self._task_board._next_id()
-            parent_task = self._task_board.create_task(
-                source=self._agent_type,
-                target=AgentType.MAIN,
-                brief=brief_text,
-                blocking=False,
-                task_id=task_link_id,
-                session_id=self._session_id(),
-            )
-            created_task_id = parent_task.task_id
-            logger.info(
-                "ReportIssueTool: {} created task {} for main coordination (requested_target={})",
-                self._agent_type, parent_task.task_id, request_task_for,
-            )
-            await self._bus.publish(TaskUpdateMessage(
-                task_id=parent_task.task_id,
-                action="created",
-                source_agent=parent_task.source_agent,
-                target_agent=parent_task.target_agent,
-                brief=parent_task.brief,
-                previous_status=None,
-            ))
-            if requested_target and requested_target != AgentType.MAIN:
-                child_task = self._task_board.create_task(
-                    source=AgentType.MAIN,
-                    target=requested_target,
-                    brief=brief_text,
-                    blocking=False,
-                    task_id=task_link_id,
-                    session_id=self._session_id(),
-                )
-                dispatched_task_id = child_task.task_id
-                logger.info(
-                    "ReportIssueTool: auto-dispatched child task {} from main to {}",
-                    child_task.task_id, requested_target,
-                )
+            # Notify UI task board (existing path)
+            for t in affected:
                 await self._bus.publish(TaskUpdateMessage(
-                    task_id=child_task.task_id,
-                    action="created",
-                    source_agent=child_task.source_agent,
-                    target_agent=child_task.target_agent,
-                    brief=child_task.brief,
-                    previous_status=None,
-                ))
-                dispatch_content = str(task_message or "").strip() or brief_text
-                issue_context = content.strip()
-                if issue_context and issue_context != dispatch_content:
-                    dispatch_content = (
-                        f"{dispatch_content}\n\n"
-                        f"Context from {self._agent_type.value}: {issue_context}"
-                    )
-                await self._bus.publish(UserMessage(
-                    content=dispatch_content,
-                    agent_type=requested_target,
-                    source="main_agent",
+                    task_id=t.task_id,
+                    action=action,
+                    source_agent=t.source_agent,
+                    target_agent=t.target_agent,
+                    brief=t.brief,
                 ))
 
-        await self._bus.publish(AgentFeedback(
+        # Single reply channel: resolves Main's wait + marks this loop's turn reported
+        await self._bus.publish(ReportMessage(
             agent_type=self._agent_type,
-            content=content,
-            feedback_type=issue_type,
+            task_id=task_id,
+            report_type=report_type,
+            content=str(content or ""),
         ))
 
-        logger.info(
-            "{} reported issue (type={}): {}",
-            self._agent_type, issue_type, content[:80],
-        )
-
-        result: dict[str, Any] = {
-            "status": "reported",
-            "agent_type": self._agent_type.value if isinstance(self._agent_type, AgentType) else str(self._agent_type),
-            "issue_type": issue_type,
+        logger.info("{} reported {} for task {}", self._agent_type, report_type, task_id)
+        return {
+            "status": "ok",
+            "task_id": task_id,
+            "report_type": report_type,
+            "message": f"Reported {report_type} for task {task_id}",
         }
-        if created_task_id:
-            result["task_id"] = created_task_id
-            result["requested_target"] = (
-                requested_target.value if requested_target else request_task_for
-            )
-        if dispatched_task_id:
-            result["dispatched_task_id"] = dispatched_task_id
-        return result
