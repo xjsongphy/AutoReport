@@ -23,6 +23,37 @@ def test_collapsed_shows_summary(qtbot):
     assert "Read" in summary
 
 
+def test_exec_tool_displays_as_bash(qtbot):
+    widget = ToolCallGroup()
+    qtbot.addWidget(widget)
+
+    widget.add_tool_call(
+        "exec",
+        {"command": "git status --short", "command_description": "full current status"},
+        success=True,
+        duration_ms=10,
+    )
+
+    summary = widget.get_summary_text()
+    assert "Bash" in summary
+    assert "Exec" not in summary
+
+
+def test_bash_alias_renders_exec_detail(qtbot):
+    widget = ToolCallGroup()
+    qtbot.addWidget(widget)
+
+    widget.add_tool_call(
+        "bash",
+        {"command": "printf ok"},
+        success=True,
+        duration_ms=10,
+        result={"stdout": "ok", "stderr": ""},
+    )
+
+    assert widget.findChild(QWidget, "execDetailCard") is not None
+
+
 def test_no_expand_behavior(qtbot):
     """Tool rows are summary-only and stay non-expandable."""
     widget = ToolCallGroup()
@@ -270,9 +301,12 @@ def test_exec_detail_text_shrinks_in_narrow_panel(qtbot):
         assert lab.minimumWidth() == 0
 
 
-def test_exec_out_preview_is_limited_to_three_lines(qtbot):
+def test_exec_out_preview_keeps_full_text_but_clamps_display_to_three_lines(qtbot):
     widget = ToolCallGroup()
     qtbot.addWidget(widget)
+    widget.resize(420, 220)
+    widget.show()
+    qtbot.waitExposed(widget)
     widget.add_tool_call(
         "exec",
         {"command": "printf many", "command_description": "many lines"},
@@ -281,10 +315,11 @@ def test_exec_out_preview_is_limited_to_three_lines(qtbot):
         result={"stdout": "one\ntwo\nthree\nfour\nfive", "stderr": ""},
     )
 
-    labels = widget.findChildren(type(widget._header_text))
+    labels = widget.findChildren(QLabel)
     out_labels = [lab for lab in labels if lab.objectName() == "execDetailText" and "one" in lab.text()]
     assert out_labels
-    assert out_labels[0].text() == "one\ntwo\nthree"
+    assert out_labels[0].text() == "one\ntwo\nthree\nfour\nfive"
+    assert out_labels[0].maximumHeight() <= (out_labels[0].fontMetrics().lineSpacing() * 3) + 4
 
 
 def test_exec_out_preview_has_fade_mask_and_value_host(qtbot):
@@ -306,7 +341,7 @@ def test_exec_out_preview_has_fade_mask_and_value_host(qtbot):
     assert widget.findChild(QWidget, "execDetailValueHost") is not None
 
 
-def test_exec_out_preview_is_top_aligned_and_wrapped(qtbot):
+def test_exec_out_preview_is_top_aligned_and_does_not_soft_wrap(qtbot):
     widget = ToolCallGroup()
     qtbot.addWidget(widget)
     widget.resize(320, 220)
@@ -326,8 +361,32 @@ def test_exec_out_preview_is_top_aligned_and_wrapped(qtbot):
         if lab.objectName() == "execDetailText" and "one" in lab.text()
     ]
     assert out_labels
-    assert out_labels[0].wordWrap() is True
+    assert out_labels[0].wordWrap() is False
     assert out_labels[0].alignment() & Qt.AlignmentFlag.AlignTop
+
+
+def test_exec_in_long_command_stays_single_line_without_soft_wrap(qtbot):
+    widget = ToolCallGroup()
+    qtbot.addWidget(widget)
+    widget.resize(320, 220)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    long_command = "cd Tex && rm -f main.aux main.bbl main.blg main.log main.out mainNotes.bib && xelatex --interaction=nonstopmode main.tex"
+    widget.add_tool_call(
+        "exec",
+        {"command": long_command, "command_description": "many args"},
+        success=True,
+        duration_ms=80,
+    )
+
+    in_labels = [
+        lab for lab in widget.findChildren(QLabel)
+        if lab.objectName() == "execDetailText" and lab.text() == long_command
+    ]
+    assert in_labels
+    assert in_labels[0].wordWrap() is False
+    assert in_labels[0].maximumHeight() <= in_labels[0].fontMetrics().lineSpacing() + 4
 
 
 def test_exec_copy_button_reserves_width_by_default(qtbot):
@@ -340,12 +399,63 @@ def test_exec_copy_button_reserves_width_by_default(qtbot):
         duration_ms=10,
     )
 
-    copy_buttons = [btn for btn in widget.findChildren(QPushButton) if btn.objectName() == "userCopyBtn"]
+    copy_buttons = [btn for btn in widget.findChildren(QPushButton) if btn.objectName() == "execCopyBtn"]
     assert copy_buttons
     for btn in copy_buttons:
         assert not btn.isEnabled()
         assert btn.minimumWidth() == 30
         assert btn.maximumWidth() == 30
+
+
+def test_exec_copy_button_is_vertically_centered_for_single_line_command(qtbot):
+    widget = ToolCallGroup()
+    qtbot.addWidget(widget)
+    widget.resize(520, 220)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    widget.add_tool_call(
+        "exec",
+        {
+            "command": "ls -la Tex/fig && ls Tex/fig/*.pdf | head -6",
+            "command_description": "single line",
+        },
+        success=True,
+        duration_ms=10,
+    )
+    qtbot.wait(20)
+
+    in_label = next(
+        lab
+        for lab in widget.findChildren(QLabel)
+        if lab.objectName() == "execDetailText"
+        and lab.text() == "ls -la Tex/fig && ls Tex/fig/*.pdf | head -6"
+    )
+    copy_button = next(
+        btn
+        for btn in widget.findChildren(QPushButton)
+        if btn.objectName() == "execCopyBtn"
+    )
+
+    label_center_y = in_label.mapTo(widget, in_label.rect().center()).y()
+    button_center_y = copy_button.mapTo(widget, copy_button.rect().center()).y()
+    assert abs(button_center_y - label_center_y) <= 2
+
+
+def test_exec_copy_button_does_not_use_user_message_style(qtbot):
+    widget = ToolCallGroup()
+    qtbot.addWidget(widget)
+    widget.add_tool_call(
+        "exec",
+        {"command": "echo ok", "command_description": "show output"},
+        success=True,
+        duration_ms=10,
+    )
+
+    assert not [
+        btn for btn in widget.findChildren(QPushButton)
+        if btn.objectName() == "userCopyBtn"
+    ]
 
 
 # ---------------------------------------------------------------------------

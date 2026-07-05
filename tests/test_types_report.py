@@ -1,5 +1,9 @@
 from autoreport.interfaces.types import (
-    AgentType, MessageType, ReportMessage, SystemNotice, TaskStatus,
+    AgentType,
+    MessageType,
+    ReportMessage,
+    SystemNotice,
+    TaskStatus,
 )
 
 

@@ -102,6 +102,41 @@ def test_input_height_grows_and_scrolls_after_10_lines(qtbot):
     assert h19 - h5 < 8 * widget.fontMetrics().lineSpacing()
 
 
+def test_wrapping_long_line_grows_box_and_caps_with_scrollbar(qtbot):
+    """A long single line that wraps must grow the box (no explicit newlines).
+
+    Regression: ``documentSize().height()`` does not report pixels, so wrapped
+    lines were never counted — pasted paragraphs stayed 1 line tall with no
+    scrollbar. Height must now track wrapped visual lines and cap at 10.
+    """
+    widget = ChatInput()
+    qtbot.addWidget(widget)
+    widget.resize(360, 80)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    h1 = widget.height()
+
+    # One short line: still single-line height.
+    widget.setPlainText("hello")
+    qtbot.wait(10)
+    assert widget.height() == h1
+    assert widget.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+
+    # One long line that wraps to several visual lines: box must grow.
+    widget.setPlainText("word " * 120)
+    qtbot.wait(10)
+    assert widget.height() > h1, "wrapping must grow the input box"
+    assert widget.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOn
+
+    # Capped at the 10-line maximum height regardless of how much is pasted.
+    cap = widget.height()
+    widget.setPlainText("word " * 400)
+    qtbot.wait(10)
+    assert widget.height() == cap, "height must cap at the 10-line maximum"
+    assert widget.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOn
+
+
 def test_input_method_preedit_hides_placeholder(qtbot):
     widget = ChatInput()
     qtbot.addWidget(widget)

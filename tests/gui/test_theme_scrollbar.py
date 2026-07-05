@@ -1,6 +1,7 @@
 """Tests for shared GUI scrollbar styling."""
 
 import inspect
+from types import SimpleNamespace
 
 from autoreport.gui import main_window
 from autoreport.gui.theme import scrollbar_stylesheet
@@ -47,6 +48,7 @@ def test_scrollbar_stylesheet_preserves_horizontal_options() -> None:
     assert "height: 6px;" in qss
     assert "min-width: 24px;" in qss
     assert "width: 0;" in qss
+    assert "margin: 0;" in qss
     assert ":vertical" not in qss
 
 
@@ -63,3 +65,19 @@ def test_scrollbar_call_sites_use_shared_helper() -> None:
 
     for call_site in call_sites:
         assert "scrollbar_stylesheet(" in inspect.getsource(call_site)
+
+
+def test_main_window_theme_does_not_emit_stray_qss_braces() -> None:
+    captured: dict[str, str] = {}
+
+    fake = SimpleNamespace()
+    fake.setStyleSheet = lambda qss: captured.setdefault("qss", qss)
+
+    main_window.MainWindow._apply_theme(fake)
+
+    lines = [line.strip() for line in captured["qss"].splitlines()]
+    assert "QScrollBar:horizontal" in captured["qss"]
+    assert "QScrollBar:vertical" in captured["qss"]
+    assert "QComboBox#subAgentSelector" in captured["qss"]
+    assert "QPushButton#userSaveBtn" in captured["qss"]
+    assert "{" not in [line for line in lines if line in {"{", "}"}]

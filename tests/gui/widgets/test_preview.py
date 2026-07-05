@@ -135,10 +135,34 @@ def test_preview_clicked_without_pdf_shows_information(qtbot, tmp_path: Path, mo
         called["count"] += 1
         return QMessageBox.StandardButton.Ok
 
-    monkeypatch.setattr(QMessageBox, "information", _fake_info)
+    monkeypatch.setattr("autoreport.gui.widgets.preview.information_box", _fake_info)
     widget._on_preview_clicked()
 
     assert called["count"] == 1
+
+
+def test_confirm_close_modified_tab_uses_styled_question_box(qtbot, tmp_path: Path, monkeypatch) -> None:
+    text_file = tmp_path / "note.txt"
+    text_file.write_text("old", encoding="utf-8")
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+
+    seen = {}
+
+    def _fake_question(parent, title, text, **kwargs):
+        seen["parent"] = parent
+        seen["title"] = title
+        seen["text"] = text
+        seen["kwargs"] = kwargs
+        return QMessageBox.StandardButton.Save
+
+    monkeypatch.setattr("autoreport.gui.widgets.preview.question_box", _fake_question)
+
+    result = widget._confirm_close_modified_tab(text_file)
+
+    assert result == QMessageBox.StandardButton.Save
+    assert seen["title"] == "保存更改"
+    assert text_file.name in seen["text"]
 
 
 def test_editor_selection_emits_selected_line_context(qtbot, tmp_path: Path) -> None:
@@ -175,6 +199,35 @@ def test_dirty_unified_tab_shows_dot_and_close_for_unselected_tab(qtbot, tmp_pat
     qtbot.wait(10)
     widget._sync_tabs_from_panels()
     widget._unified_tab_bar.setCurrentIndex(1)
+
+    host = widget._unified_tab_bar.tabButton(0, QTabBar.ButtonPosition.RightSide)
+    buttons = host.findChildren(QPushButton)
+    texts = [b.text() for b in buttons]
+
+    assert "•" in texts
+    assert "✕" in texts
+
+
+def test_hovered_dirty_unified_tab_swaps_dot_for_close(qtbot, tmp_path: Path) -> None:
+    text_file = tmp_path / "note.txt"
+    text_file.write_text("old", encoding="utf-8")
+    other = tmp_path / "other.txt"
+    other.write_text("other", encoding="utf-8")
+
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.load_file(text_file)
+    widget.load_file(other)
+
+    key = str(text_file.resolve())
+    state = widget._panels[0]._tabs[key]
+    state.viewer.setText("changed")
+    qtbot.wait(10)
+    widget._sync_tabs_from_panels()
+    widget._unified_tab_bar.setCurrentIndex(1)
+
+    widget._tab_hovered_index = 0
+    widget._refresh_unified_tab_affordances()
 
     host = widget._unified_tab_bar.tabButton(0, QTabBar.ButtonPosition.RightSide)
     buttons = host.findChildren(QPushButton)
@@ -361,6 +414,71 @@ def test_duplicate_tab_path_label_uses_natural_height_for_alignment(
     )
 
     assert host.height() >= path_label.sizeHint().height()
+
+
+def test_duplicate_tab_path_label_is_vertically_centered_in_tab_host(qtbot, tmp_path: Path) -> None:
+    first = tmp_path / "first" / "note.txt"
+    second = tmp_path / "second" / "note.txt"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_text("first", encoding="utf-8")
+    second.write_text("second", encoding="utf-8")
+
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.load_file(first)
+    widget.load_file(second)
+
+    host = widget._unified_tab_bar.tabButton(0, QTabBar.ButtonPosition.RightSide)
+    path_label = next(
+        label
+        for label in host.findChildren(QLabel)
+        if label.objectName() == "tabDuplicatePath"
+    )
+
+    assert abs(path_label.geometry().center().y() - host.rect().center().y()) <= 2
+
+
+def test_duplicate_tab_path_label_matches_tab_font_size(qtbot, tmp_path: Path) -> None:
+    first = tmp_path / "Plots" / "same.fig"
+    second = tmp_path / "Tex" / "same.fig"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_text("plot", encoding="utf-8")
+    second.write_text("tex", encoding="utf-8")
+
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.load_file(first)
+    widget.load_file(second)
+
+    host = widget._unified_tab_bar.tabButton(0, QTabBar.ButtonPosition.RightSide)
+    path_label = next(
+        label
+        for label in host.findChildren(QLabel)
+        if label.objectName() == "tabDuplicatePath"
+    )
+
+    assert path_label.font().pointSizeF() == widget._unified_tab_bar.font().pointSizeF()
+
+
+def test_same_named_figs_in_plots_and_tex_get_distinct_tabs(qtbot, tmp_path: Path) -> None:
+    first = tmp_path / "Plots" / "shared.fig"
+    second = tmp_path / "Tex" / "shared.fig"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_text("plot", encoding="utf-8")
+    second.write_text("tex", encoding="utf-8")
+
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.load_file(first)
+    widget.load_file(second)
+
+    keys = [widget._unified_tab_bar.tabData(i) for i in range(widget._unified_tab_bar.count())]
+    assert len(keys) == 2
+    assert str(first.resolve()) in keys
+    assert str(second.resolve()) in keys
 
 
 def test_unified_tab_bar_disables_scroll_buttons(qtbot, tmp_path: Path) -> None:

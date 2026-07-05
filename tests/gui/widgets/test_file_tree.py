@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 from PyQt6.QtCore import QEvent, QItemSelectionModel, QPointF, Qt
-from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtGui import QKeyEvent, QMouseEvent
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtWidgets import QAbstractItemDelegate, QTreeWidgetItem
 
@@ -81,6 +81,8 @@ def test_file_tree_has_cross_platform_shortcut_handler() -> None:
     assert "Key_F2" in source
     assert "Key_Delete" in source
     assert "Key_Backspace" in source
+    assert "matches(QKeySequence.StandardKey.Copy)" in source
+    assert "matches(QKeySequence.StandardKey.Paste)" in source
 
 
 def test_blank_click_selects_project_root(qtbot, tmp_path: Path) -> None:
@@ -161,6 +163,76 @@ def test_context_menu_has_required_actions() -> None:
     # Should have actions for directories
     assert "new_file_action" in menu_source
     assert "new_folder_action" in menu_source
+    assert "copy_action" in menu_source
+    assert "paste_action" in menu_source
+
+
+def test_file_tree_copy_paste_shortcuts_duplicate_selected_file(qtbot, tmp_path: Path) -> None:
+    source = tmp_path / "References" / "note.txt"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("copied", encoding="utf-8")
+
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.select_file(source)
+
+    copy_event = QKeyEvent(
+        QEvent.Type.KeyPress,
+        Qt.Key.Key_C,
+        Qt.KeyboardModifier.ControlModifier,
+    )
+    paste_event = QKeyEvent(
+        QEvent.Type.KeyPress,
+        Qt.Key.Key_V,
+        Qt.KeyboardModifier.ControlModifier,
+    )
+
+    assert widget._handle_tree_key(copy_event) is True
+    assert widget._handle_tree_key(paste_event) is True
+    assert (tmp_path / "References" / "note copy.txt").read_text(encoding="utf-8") == "copied"
+
+
+def test_file_tree_copy_paste_cmd_shortcut_works_on_mac(qtbot, tmp_path: Path) -> None:
+    """⌘C / ⌘V must trigger copy/paste (matches() misses Cmd on macOS)."""
+    source = tmp_path / "References" / "note.txt"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("copied", encoding="utf-8")
+
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.select_file(source)
+
+    copy_cmd = QKeyEvent(
+        QEvent.Type.KeyPress,
+        Qt.Key.Key_C,
+        Qt.KeyboardModifier.MetaModifier,
+    )
+    paste_cmd = QKeyEvent(
+        QEvent.Type.KeyPress,
+        Qt.Key.Key_V,
+        Qt.KeyboardModifier.MetaModifier,
+    )
+
+    assert widget._handle_tree_key(copy_cmd) is True
+    assert widget._handle_tree_key(paste_cmd) is True
+    assert (tmp_path / "References" / "note copy.txt").read_text(encoding="utf-8") == "copied"
+
+
+def test_unique_copy_target_naming(tmp_path: Path) -> None:
+    from autoreport.gui.widgets.file_tree import FileTreeWidget
+
+    d = tmp_path
+    # no collision -> keep original name
+    assert FileTreeWidget._unique_copy_target(Path("x.py"), d).name == "x.py"
+    (d / "x.py").touch()
+    assert FileTreeWidget._unique_copy_target(Path("x.py"), d).name == "x copy.py"
+    (d / "x copy.py").touch()
+    assert FileTreeWidget._unique_copy_target(Path("x.py"), d).name == "x copy 2.py"
+    (d / "x copy 2.py").touch()
+    assert FileTreeWidget._unique_copy_target(Path("x.py"), d).name == "x copy 3.py"
+    # directory case: suffix is empty, stem is the dir name
+    (d / "foo").mkdir(exist_ok=True)
+    assert FileTreeWidget._unique_copy_target(Path("foo"), d).name == "foo copy"
 
 
 def test_delete_operations_use_confirmation() -> None:

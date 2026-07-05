@@ -65,6 +65,14 @@ def test_fallback_built_in_types(agents_dir):
         assert len(result) > 0
 
 
+def test_report_prompt_pins_table_and_float_layout_rules():
+    prompt = Path("autoreport/templates/agents/report_agent.md").read_text(encoding="utf-8")
+
+    assert "表格自适应宽度" in prompt
+    assert "不要全行占满" in prompt
+    assert "图表强制固定在源码位置" in prompt
+
+
 def test_load_shared_context_available(agents_dir):
     d = agents_dir
     (d / "Common.md").write_text("## Shared\n\nCommon todo policy.", encoding="utf-8")

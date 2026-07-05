@@ -1,5 +1,6 @@
 """Tests for agent loop processing engine."""
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -13,6 +14,8 @@ from autoreport.interfaces.types import (
     AgentStatus,
     AgentType,
     QueueUpdateMessage,
+    ReportMessage,
+    SystemNotice,
     TaskUpdateMessage,
     UserMessage,
 )
@@ -321,3 +324,110 @@ async def test_start_idempotent(agent_loop):
     await agent_loop.start()
     assert agent_loop._running is True
     await agent_loop.stop()
+
+
+@pytest.mark.asyncio
+async def test_loop_marks_turn_reported_on_own_report(agent_loop):
+    """A ReportMessage from this agent sets _turn_reported = True."""
+    assert agent_loop._turn_reported is False
+    await agent_loop.bus.publish(ReportMessage(
+        agent_type=agent_loop.agent_type,
+        task_id="tk1",
+        report_type="reply",
+        content="done",
+    ))
+    msg = await asyncio.wait_for(agent_loop.bus._queue.get(), timeout=1)
+    await agent_loop.bus._notify_subscribers(msg)
+    assert agent_loop._turn_reported is True
+
+
+@pytest.mark.asyncio
+async def test_loop_ignores_report_from_other_agent(agent_loop):
+    """A ReportMessage from a different agent does not set our flag."""
+    agent_loop._turn_reported = False
+    await agent_loop.bus.publish(ReportMessage(
+        agent_type=AgentType.PLOTTING,  # fixture loop is MAIN
+        task_id="tk1",
+        report_type="reply",
+        content="done",
+    ))
+    msg = await asyncio.wait_for(agent_loop.bus._queue.get(), timeout=1)
+    await agent_loop.bus._notify_subscribers(msg)
+    assert agent_loop._turn_reported is False
+
+
+def _sub_loop(workspace, config, mock_provider, mock_prompt_loader, board):
+    """A sub-agent (plotting) loop with a real task board, for guard tests."""
+    from autoreport.core.loops.agent_loop import AgentLoop
+    bus = MessageBus()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    loop = AgentLoop(
+        agent_type=AgentType.PLOTTING,
+        workspace=workspace,
+        tools=tools,
+        bus=bus,
+        config=config,
+        llm_provider=mock_provider,
+        prompt_loader=mock_prompt_loader,
+        loop_manager=None,
+        task_board=board,
+    )
+    return loop
+
+
+async def _drain_bus(bus) -> None:
+    """Deliver queued messages to subscribers (no process_loop in tests)."""
+    while True:
+        try:
+            msg = bus._queue.get_nowait()
+        except asyncio.QueueEmpty:
+            return
+        await bus._notify_subscribers(msg)
+
+
+@pytest.mark.asyncio
+async def test_sub_guard_reprompts_when_no_report(workspace, config, mock_provider, mock_prompt_loader):
+    """A sub-agent ending a Main-dispatched turn without report is re-prompted."""
+    from autoreport.core.tools.task_board import TaskBoard
+    board = TaskBoard()
+    board.create_task(AgentType.MAIN, AgentType.PLOTTING, "draw", task_id="tk1")
+    loop = _sub_loop(workspace, config, mock_provider, mock_prompt_loader, board)
+
+    notices = []
+    loop.bus.subscribe(SystemNotice, lambda m: notices.append(m))
+
+    msg = UserMessage(content="draw plot", agent_type=AgentType.PLOTTING, source="main_agent")
+    await loop._process_message(msg)
+    await _drain_bus(loop.bus)
+
+    # mock_provider returns text-only (no tool call), so report is never called.
+    # The guard should fire and publish at least one SystemNotice before going IDLE.
+    assert any("report" in n.content for n in notices)
+
+
+@pytest.mark.asyncio
+async def test_main_guard_blocks_idle_with_blocked_tasks(workspace, config, mock_provider, mock_prompt_loader):
+    """Main may not go IDLE while it has BLOCKED tasks; a SystemNotice is published."""
+    from autoreport.core.tools.task_board import TaskBoard
+    board = TaskBoard()
+    bus = MessageBus()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    from autoreport.core.loops.agent_loop import AgentLoop
+    loop = AgentLoop(
+        agent_type=AgentType.MAIN, workspace=workspace, tools=tools, bus=bus,
+        config=config, llm_provider=mock_provider, prompt_loader=mock_prompt_loader,
+        loop_manager=None, task_board=board,
+    )
+    board.create_task(AgentType.MAIN, AgentType.PLOTTING, "draw", task_id="tk1")
+    board.block_task("tk1", target_agent=AgentType.PLOTTING)
+
+    notices = []
+    bus.subscribe(SystemNotice, lambda m: notices.append(m))
+
+    msg = UserMessage(content="coordinate", agent_type=AgentType.MAIN, source="user")
+    await loop._process_message(msg)
+    await _drain_bus(bus)
+
+    assert any("被阻塞" in n.content for n in notices)

@@ -107,11 +107,33 @@ def test_file_context_lives_in_dock_bar_and_toggles(agent_panel):
     assert agent_panel._context_attachment_btn.icon().cacheKey() != file_icon_key
 
 
+def test_context_attachment_hidden_without_editor_context(agent_panel):
+    assert agent_panel._context_separator.isHidden()
+    assert agent_panel._context_attachment_btn.isHidden()
+
+    agent_panel.set_opened_file("sections/intro.tex")
+    agent_panel.clear_file_context()
+
+    assert agent_panel._context_separator.isHidden()
+    assert agent_panel._context_attachment_btn.isHidden()
+
+
 def test_selection_context_label_uses_line_count(agent_panel):
     agent_panel.set_preview_context("sections/intro.tex", "a\nb", 3, 4)
 
     assert agent_panel._context_attachment_btn.text() == "2 lines selected"
-    assert agent_panel._context_attachment_btn.toolTip() == "sections/intro.tex"
+    assert agent_panel._context_attachment_btn.toolTip() == ""
+    assert agent_panel._context_attachment_btn._compact_tooltip_filter._text == "sections/intro.tex"
+
+
+def test_context_attachment_uses_compact_tooltip(agent_panel):
+    agent_panel.set_opened_file("Plots/fig/fig6.pdf")
+
+    btn = agent_panel._context_attachment_btn
+
+    assert btn.toolTip() == ""
+    assert hasattr(btn, "_compact_tooltip_filter")
+    assert btn._compact_tooltip_filter._text == "Plots/fig/fig6.pdf"
 
 
 def test_composer_side_gap_matches_bottom_mask_height(agent_panel, qtbot):

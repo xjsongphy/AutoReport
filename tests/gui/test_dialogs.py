@@ -1,7 +1,9 @@
 """Tests for the unified themed message-box helpers."""
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QMessageBox, QWidget
 
+from autoreport.gui.theme import get_theme_colors
 from autoreport.gui.dialogs import (
     critical_box,
     information_box,
@@ -39,6 +41,27 @@ def test_affirmative_button_uses_primary_style(qtbot) -> None:
     # Non-affirmative buttons keep the default (secondary) selector.
     assert no.objectName() == ""
     assert "#msgPrimaryBtn" in box.styleSheet()
+
+
+def test_message_box_buttons_use_unified_text_button_style(qtbot) -> None:
+    box = _build_question_box()
+    qtbot.addWidget(box)
+    colors = get_theme_colors()
+
+    style = box.styleSheet()
+    assert "background-color: transparent" in style
+    assert f"background-color: {colors['buttonBlue']}" not in style
+    assert f"background-color: {colors['secondaryBtnBg']}" not in style
+
+
+def test_message_box_buttons_use_text_button_cursor(qtbot) -> None:
+    box = _build_question_box()
+    qtbot.addWidget(box)
+
+    yes = box.button(QMessageBox.StandardButton.Yes)
+    no = box.button(QMessageBox.StandardButton.No)
+
+    assert yes.cursor().shape() == no.cursor().shape() == Qt.CursorShape.PointingHandCursor
 
 
 def test_standard_buttons_get_chinese_labels(qtbot) -> None:

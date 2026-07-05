@@ -83,3 +83,38 @@ def test_send_to_agent_tool_result_does_not_append_delegate_bubble():
 
     assert [call[0] for call in panel_calls] == ["tool_result"]
     assert [call[0] for call in store_calls] == ["tool_result"]
+
+
+def test_rollback_finished_truncates_current_session_and_refreshes_visible_panel():
+    calls: dict[str, object] = {}
+
+    class _Future:
+        def result(self):
+            return {"restored_files": 1}
+
+    fake = SimpleNamespace()
+    fake._pending_rollbacks = {
+        "main": {
+            "message_id": "msg-1",
+            "content": "hello",
+            "role": "user",
+        }
+    }
+    fake._conv_store = SimpleNamespace(
+        truncate_from_message=lambda agent_type, **kwargs: calls.setdefault(
+            "truncate", (agent_type, kwargs)
+        )
+    )
+    fake._is_visible_agent = lambda agent_type: agent_type == "main"
+    fake._show_current_agent_conversation = lambda: calls.setdefault("show", True)
+    fake.file_tree = SimpleNamespace(refresh=lambda: calls.setdefault("refresh", True))
+    fake.preview = SimpleNamespace(current_file=None)
+
+    MainWindow._on_rollback_finished(fake, "main", _Future())
+
+    assert calls["truncate"] == (
+        "main",
+        {"message_id": "msg-1", "content": "hello", "role": "user"},
+    )
+    assert calls["show"] is True
+    assert calls["refresh"] is True

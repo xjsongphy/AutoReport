@@ -1,17 +1,15 @@
-"""Tests for SendToAgentTool and ReportIssueTool — inter-agent communication."""
+"""Tests for SendToAgentTool and ReportTool — inter-agent communication."""
 
 import asyncio
 
 import pytest
 
 from autoreport.core.loops.bus import MessageBus
-from autoreport.core.tools.agent_tools import ReportIssueTool, SendToAgentTool
+from autoreport.core.tools.agent_tools import ReportTool, SendToAgentTool
 from autoreport.core.tools.task_board import TaskBoard
 from autoreport.interfaces.types import (
-    AgentFeedback,
-    AgentResponse,
     AgentType,
-    TaskUpdateMessage,
+    TaskStatus,
     UserMessage,
 )
 
@@ -19,6 +17,46 @@ from autoreport.interfaces.types import (
 @pytest.fixture
 def bus():
     return MessageBus()
+
+
+@pytest.fixture
+def board():
+    return TaskBoard()
+
+
+async def _drain(bus) -> None:
+    """Flush all queued messages through subscribers (tests have no process_loop)."""
+    while True:
+        try:
+            msg = bus._queue.get_nowait()
+        except asyncio.QueueEmpty:
+            return
+        await bus._notify_subscribers(msg)
+
+
+def _emit_report_on_dispatch(bus, board, target, report_type, content):
+    """Background task: when Main dispatches to `target`, drive a realistic ReportTool call.
+
+    Uses ReportTool (not a raw ReportMessage) so the task status is updated
+    exactly as in production. Drains the bus after each step so subscribers fire.
+    """
+    async def respond():
+        rtool = ReportTool(bus=bus, agent_type=target, task_board=board)
+        while True:
+            msg = await asyncio.wait_for(bus._queue.get(), timeout=2)
+            await bus._notify_subscribers(msg)
+            if (
+                isinstance(msg, UserMessage)
+                and msg.agent_type == target
+                and getattr(msg, "source", None) == "main_agent"
+            ):
+                tasks = board.get_waitlist(AgentType.MAIN)
+                tid = tasks[0].task_id if tasks else None
+                await rtool(task_id=tid, type=report_type, content=content)
+                await _drain(bus)  # flush ReportTool's TaskUpdateMessage + ReportMessage
+                break
+
+    return asyncio.create_task(respond())
 
 
 class TestSendToAgentTool:
@@ -30,118 +68,79 @@ class TestSendToAgentTool:
         assert "Unknown agent type" in result["error"]
 
     @pytest.mark.asyncio
-    async def test_blocking_success(self, bus):
-        tool = SendToAgentTool(bus=bus, timeout=5)
+    async def test_blocking_success_on_reply_report(self, bus, board):
+        tool = SendToAgentTool(bus=bus, task_board=board, timeout=5)
+        responder = _emit_report_on_dispatch(bus, board, AgentType.THEORY, "reply", "theory done")
 
-        async def respond():
-            while True:
-                msg = await asyncio.wait_for(bus._queue.get(), timeout=2)
-                await bus._notify_subscribers(msg)
-                # The tool now resolves on a system UserMessage to MAIN that
-                # echoes the dispatch message_id (auto-notify contract from
-                # agent_loop._process_message), not on AgentResponse.
-                if isinstance(msg, UserMessage) and msg.agent_type == AgentType.THEORY:
-                    await bus._notify_subscribers(UserMessage(
-                        content="theory done",
-                        agent_type=AgentType.MAIN,
-                        source="system",
-                        message_id=msg.message_id,
-                    ))
-                    break
-
-        task = asyncio.create_task(respond())
         result = await tool(agent_type="theory", content="derive formula")
-        task.cancel()
+        responder.cancel()
 
         assert result["status"] == "success"
         assert result["agent_type"] == "theory"
         assert result["response"] == "theory done"
+        assert "task_id" in result
+        # Task marked completed along the chain
+        assert board.get_task(result["task_id"], target_agent=AgentType.THEORY).status == TaskStatus.COMPLETED
 
     @pytest.mark.asyncio
-    async def test_timeout_when_no_response(self, bus):
-        tool = SendToAgentTool(bus=bus, timeout=0.2)
-        result = await tool(agent_type="plotting", content="draw plot")
-        assert result["status"] == "timeout"
-        assert result["agent_type"] == "plotting"
+    async def test_blocking_blocked_on_missing_data_report(self, bus, board):
+        tool = SendToAgentTool(bus=bus, task_board=board, timeout=5)
+        responder = _emit_report_on_dispatch(bus, board, AgentType.THEORY, "missing_data", "need refs/x.pdf")
+
+        result = await tool(agent_type="theory", content="derive formula")
+        responder.cancel()
+
+        assert result["status"] == "blocked"
+        assert result["block_type"] == "missing_data"
+        assert "need refs/x.pdf" in result["response"]
+        assert board.get_task(result["task_id"], target_agent=AgentType.THEORY).status == TaskStatus.BLOCKED
 
     @pytest.mark.asyncio
-    async def test_blocking_success_prefers_final_agent_response_over_completion_banner(self, bus):
-        tool = SendToAgentTool(bus=bus, timeout=5)
+    async def test_blocking_creates_task_with_brief(self, bus, board):
+        tool = SendToAgentTool(bus=bus, task_board=board, timeout=5)
+        responder = _emit_report_on_dispatch(bus, board, AgentType.PLOTTING, "reply", "done")
 
-        async def respond():
-            while True:
-                msg = await asyncio.wait_for(bus._queue.get(), timeout=2)
-                await bus._notify_subscribers(msg)
-                if isinstance(msg, UserMessage) and msg.agent_type == AgentType.PLOTTING:
-                    await bus._notify_subscribers(AgentResponse(
-                        agent_type=AgentType.PLOTTING,
-                        content="plotting failed: missing CV file",
-                        streaming=False,
-                    ))
-                    await bus._notify_subscribers(UserMessage(
-                        content="✅ plotting 已完成你派发的任务。请检查 plotting 的输出，确认无误后继续派发下游任务。",
-                        agent_type=AgentType.MAIN,
-                        source="system",
-                        message_id=msg.message_id,
-                    ))
-                    break
-
-        task = asyncio.create_task(respond())
-        result = await tool(agent_type="plotting", content="draw plot")
-        task.cancel()
-
-        assert result["status"] == "success"
-        assert result["response"] == "plotting failed: missing CV file"
-
-    @pytest.mark.asyncio
-    async def test_captures_feedback(self, bus):
-        tool = SendToAgentTool(bus=bus, timeout=5)
-
-        async def respond_with_feedback():
-            while True:
-                msg = await asyncio.wait_for(bus._queue.get(), timeout=2)
-                await bus._notify_subscribers(msg)
-                if isinstance(msg, UserMessage) and msg.agent_type == AgentType.THEORY:
-                    fb = AgentFeedback(
-                        agent_type=AgentType.THEORY,
-                        content="need more data",
-                        feedback_type="quality",
-                    )
-                    await bus._notify_subscribers(fb)
-                    # Resolution signal is a system UserMessage to MAIN echoing
-                    # the dispatch message_id, not an AgentResponse.
-                    await bus._notify_subscribers(UserMessage(
-                        content="done",
-                        agent_type=AgentType.MAIN,
-                        source="system",
-                        message_id=msg.message_id,
-                    ))
-                    break
-
-        task = asyncio.create_task(respond_with_feedback())
-        result = await tool(agent_type="theory", content="derive")
-        task.cancel()
-
-        assert result["status"] == "success"
-        assert "feedback" in result
-        assert len(result["feedback"]) == 1
-        assert result["feedback"][0]["type"] == "quality"
-
-    @pytest.mark.asyncio
-    async def test_non_blocking_requires_task_items_with_board(self, bus):
-        board = TaskBoard()
-        tool = SendToAgentTool(bus=bus, task_board=board)
         result = await tool(
-            agent_type="data_analysis",
-            content="analyze data",
-            blocking=False,
+            agent_type="plotting",
+            content="draw the scatter plot",
+            task_items=[{"brief": "scatter plot"}],
         )
-        assert result["status"] == "error"
-        assert "requires task_items" in result["error"]
+        responder.cancel()
+
+        assert result["status"] == "success"
+        task = board.get_task(result["task_id"], target_agent=AgentType.PLOTTING)
+        assert task.brief == "scatter plot"
 
     @pytest.mark.asyncio
-    async def test_non_blocking_with_task_items_delegates(self, bus):
-        board = TaskBoard()
+    async def test_redispatch_reuses_task_id_and_resets_in_progress(self, bus, board):
+        tool = SendToAgentTool(bus=bus, task_board=board, timeout=5)
+
+        # First dispatch: sub reports missing_data -> task BLOCKED
+        r1_responder = _emit_report_on_dispatch(bus, board, AgentType.THEORY, "missing_data", "need x")
+        r1 = await tool(agent_type="theory", content="derive")
+        r1_responder.cancel()
+        tid = r1["task_id"]
+        assert board.get_task(tid, target_agent=AgentType.THEORY).status == TaskStatus.BLOCKED
+
+        # Re-dispatch with same task_id: chain reset to IN_PROGRESS
+        r2_responder = _emit_report_on_dispatch(bus, board, AgentType.THEORY, "reply", "done now")
+        r2 = await tool(agent_type="theory", content="derive again", task_id=tid)
+        r2_responder.cancel()
+
+        assert r2["task_id"] == tid
+        assert r2["status"] == "success"
+        # Status went IN_PROGRESS (re-dispatch) then COMPLETED (reply)
+        assert board.get_task(tid, target_agent=AgentType.THEORY).status == TaskStatus.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_redispatch_unknown_task_id_errors(self, bus, board):
+        tool = SendToAgentTool(bus=bus, task_board=board, timeout=5)
+        result = await tool(agent_type="theory", content="x", task_id="tk000")
+        assert result["status"] == "error"
+        assert "tk000" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_non_blocking_dispatches_without_waiting(self, bus, board):
         tool = SendToAgentTool(bus=bus, task_board=board)
         result = await tool(
             agent_type="data_analysis",
@@ -151,188 +150,33 @@ class TestSendToAgentTool:
         )
         assert result["status"] == "delegated"
         assert result["agent_type"] == "data_analysis"
-        assert "task_ids" in result
+        assert result["blocking"] is False
+        assert "task_id" in result
+        # A dispatch UserMessage to the target was published (after a TaskUpdateMessage)
+        dispatch = None
+        for _ in range(5):
+            msg = await asyncio.wait_for(bus._queue.get(), timeout=1)
+            if isinstance(msg, UserMessage):
+                dispatch = msg
+                break
+        assert dispatch is not None
+        assert dispatch.agent_type == AgentType.DATA_ANALYSIS
+        assert dispatch.source == "main_agent"
 
     @pytest.mark.asyncio
-    async def test_task_items_creates_tracked_tasks(self, bus):
-        board = TaskBoard()
-        tool = SendToAgentTool(bus=bus, task_board=board, timeout=1)
-        result = await tool(
-            agent_type="plotting",
-            content="create scatter",
-            blocking=False,
-            task_items=[
-                {"brief": "scatter plot"},
-                {"brief": "histogram"},
-            ],
-        )
-        assert "task_ids" in result
-        assert len(result["task_ids"]) == 2
-        tasks = board.get_todolist(AgentType.PLOTTING)
-        assert len(tasks) == 2
-
-    @pytest.mark.asyncio
-    async def test_blocking_with_task_items_rejected(self, bus):
-        board = TaskBoard()
+    async def test_timeout_when_no_report(self, bus, board):
+        # timeout=0.2 -> wall_cap = 0.8s; no report emitted -> timeout
         tool = SendToAgentTool(bus=bus, task_board=board, timeout=0.2)
-        result = await tool(
-            agent_type="report",
-            content="compile report",
-            task_items=[{"brief": "final report"}],
-        )
-        assert result["status"] == "error"
-        assert "does not support task_items" in result["error"]
-        # No task created
-        tasks = board.get_todolist(AgentType.REPORT)
-        assert len(tasks) == 0
-
-    @pytest.mark.asyncio
-    async def test_non_blocking_without_board_ignored(self, bus):
-        tool = SendToAgentTool(bus=bus, timeout=0.2)
-        result = await tool(
-            agent_type="theory",
-            content="test",
-            blocking=False,
-            task_items=[{"brief": "no board to track"}],
-        )
-        # Without task_board, task_items are ignored and allowed
-        assert result["status"] == "delegated"
-        assert "task_ids" not in result
-
-
-class TestReportIssueTool:
-    @pytest.mark.asyncio
-    async def test_reports_issue_to_bus(self, bus):
-        received = []
-        bus.subscribe(AgentFeedback, lambda msg: received.append(msg))
-
-        tool = ReportIssueTool(bus=bus, agent_type=AgentType.DATA_ANALYSIS)
-        result = await tool(content="raw data is corrupted")
-
-        assert result["status"] == "reported"
-        assert result["agent_type"] == "data_analysis"
-        assert result["issue_type"] == "missing_data"
-
-        msg = await asyncio.wait_for(bus._queue.get(), timeout=1)
-        await bus._notify_subscribers(msg)
-        assert len(received) == 1
-        assert received[0].content == "raw data is corrupted"
-
-    @pytest.mark.asyncio
-    async def test_invalid_issue_type_defaults(self, bus):
-        tool = ReportIssueTool(bus=bus, agent_type=AgentType.THEORY)
-        result = await tool(content="test", issue_type="invalid_type")
-        assert result["issue_type"] == "missing_data"
-
-    @pytest.mark.asyncio
-    async def test_all_valid_issue_types(self, bus):
-        tool = ReportIssueTool(bus=bus, agent_type=AgentType.PLOTTING)
-        for itype in ("missing_data", "quality", "query"):
-            result = await tool(content="test", issue_type=itype)
-            assert result["issue_type"] == itype
-
-    @pytest.mark.asyncio
-    async def test_request_task_creates_task(self, bus):
-        board = TaskBoard()
-        tool = ReportIssueTool(bus=bus, agent_type=AgentType.PLOTTING, task_board=board)
-        result = await tool(
-            content="missing theory curves",
-            issue_type="missing_data",
-            request_task_for="theory",
-            task_brief="derive formulas for overlay",
-        )
-        assert result["status"] == "reported"
-        assert "task_id" in result
-        assert result["requested_target"] == "theory"
-        tasks = board.get_todolist(AgentType.MAIN)
-        assert len(tasks) == 1
-        assert tasks[0].brief == "derive formulas for overlay"
-
-    @pytest.mark.asyncio
-    async def test_request_task_auto_dispatches_child_task(self, bus):
-        board = TaskBoard()
-        tool = ReportIssueTool(bus=bus, agent_type=AgentType.PLOTTING, task_board=board)
-
-        result = await tool(
-            content="missing theory curves",
-            issue_type="missing_data",
-            request_task_for="theory",
-            task_brief="theory overlay",
-            task_message="derive formulas for overlay",
-        )
-
-        assert result["status"] == "reported"
-        assert result["requested_target"] == "theory"
-        assert "task_id" in result
-        assert "dispatched_task_id" in result
-
-        parent = board.get_task(result["task_id"], target_agent=AgentType.MAIN)
-        child = board.get_task(result["dispatched_task_id"], target_agent=AgentType.THEORY)
-        assert parent is not None
-        assert child is not None
-        assert parent.source_agent == AgentType.PLOTTING
-        assert parent.target_agent == AgentType.MAIN
-        assert child.source_agent == AgentType.MAIN
-        assert child.target_agent == AgentType.THEORY
-        assert child.task_id == parent.task_id
-        assert child.brief == "theory overlay"
-
-        queued = [await asyncio.wait_for(bus._queue.get(), timeout=1) for _ in range(4)]
-        task_updates = [msg for msg in queued if isinstance(msg, TaskUpdateMessage)]
-        user_messages = [msg for msg in queued if isinstance(msg, UserMessage)]
-        feedbacks = [msg for msg in queued if isinstance(msg, AgentFeedback)]
-
-        assert len(task_updates) == 2
-        assert len(user_messages) == 1
-        assert len(feedbacks) == 1
-        assert user_messages[0].agent_type == AgentType.THEORY
-        assert user_messages[0].source == "main_agent"
-        assert "derive formulas for overlay" in user_messages[0].content
-        assert "missing theory curves" in user_messages[0].content
-
-    @pytest.mark.asyncio
-    async def test_request_task_invalid_target_defaults_to_main(self, bus):
-        board = TaskBoard()
-        tool = ReportIssueTool(bus=bus, agent_type=AgentType.PLOTTING, task_board=board)
-        result = await tool(
-            content="test",
-            request_task_for="nonexistent_agent",
-            task_brief="something",
-        )
-        assert "task_id" in result
-        assert "dispatched_task_id" not in result
-        tasks = board.get_todolist(AgentType.MAIN)
-        assert len(tasks) == 1
-
-    @pytest.mark.asyncio
-    async def test_no_task_without_board(self, bus):
-        tool = ReportIssueTool(bus=bus, agent_type=AgentType.THEORY)
-        result = await tool(
-            content="test",
-            request_task_for="main",
-            task_brief="help",
-        )
-        assert "task_id" not in result
-
-    @pytest.mark.asyncio
-    async def test_no_task_without_brief(self, bus):
-        board = TaskBoard()
-        tool = ReportIssueTool(bus=bus, agent_type=AgentType.THEORY, task_board=board)
-        result = await tool(
-            content="test",
-            request_task_for="main",
-            task_brief="",
-        )
-        assert "task_id" not in result
+        result = await tool(agent_type="plotting", content="draw plot")
+        assert result["status"] == "timeout"
+        assert result["agent_type"] == "plotting"
 
 
 class TestTaskBriefFallback:
-    """task_items brief key resolution and content fallback."""
+    """task_items brief resolution and content fallback (one task per dispatch)."""
 
     @pytest.mark.asyncio
-    async def test_brief_key_used_when_present(self, bus):
-        """When task_items contain 'brief', that value is used for the task."""
-        board = TaskBoard()
+    async def test_brief_key_used_when_present(self, bus, board):
         tool = SendToAgentTool(bus=bus, task_board=board)
         result = await tool(
             agent_type="data_analysis",
@@ -346,9 +190,8 @@ class TestTaskBriefFallback:
         assert tasks[0].brief == "Analyze CSV"
 
     @pytest.mark.asyncio
-    async def test_content_fallback_when_no_brief(self, bus):
-        """When task_items have no 'brief', falls back to content[:80]."""
-        board = TaskBoard()
+    async def test_content_fallback_when_no_brief(self, bus, board):
+        """When task_items have no 'brief', falls back to the request summary (first line, ≤30 chars)."""
         tool = SendToAgentTool(bus=bus, task_board=board)
         result = await tool(
             agent_type="theory",
@@ -359,63 +202,6 @@ class TestTaskBriefFallback:
         assert result["status"] == "delegated"
         tasks = board.get_todolist(AgentType.THEORY)
         assert len(tasks) == 1
-        expected = "Derive the uncertainty formula for single-slit diffraction experiment"[:80]
+        expected = "Derive the uncertainty formula for single-slit diffraction experiment"[:30]
         assert tasks[0].brief == expected
 
-
-class TestReportIssueTaskMessage:
-    """ReportIssueTool task_message merging and fallback behavior."""
-
-    @pytest.mark.asyncio
-    async def test_task_message_merges_with_content(self, bus):
-        """When task_message differs from content, both are included in the dispatched message."""
-        board = TaskBoard()
-        tool = ReportIssueTool(bus=bus, agent_type=AgentType.PLOTTING, task_board=board)
-
-        result = await tool(
-            content="the theory curves are wrong",
-            issue_type="quality",
-            request_task_for="theory",
-            task_brief="fix theory curves",
-            task_message="please rederive the diffraction formula",
-        )
-
-        assert result["status"] == "reported"
-        assert "dispatched_task_id" in result
-
-        # Drain the bus queue to find the UserMessage dispatched to theory
-        queued = [await asyncio.wait_for(bus._queue.get(), timeout=1) for _ in range(4)]
-        user_messages = [msg for msg in queued if isinstance(msg, UserMessage)]
-        assert len(user_messages) == 1
-        assert user_messages[0].agent_type == AgentType.THEORY
-        # task_message is used as the primary dispatch content
-        assert "please rederive the diffraction formula" in user_messages[0].content
-        # content is merged as context when it differs from the dispatch content
-        assert "the theory curves are wrong" in user_messages[0].content
-
-    @pytest.mark.asyncio
-    async def test_task_message_empty_falls_back_to_brief(self, bus):
-        """When task_message is empty/None, the dispatch uses task_brief as content."""
-        board = TaskBoard()
-        tool = ReportIssueTool(bus=bus, agent_type=AgentType.DATA_ANALYSIS, task_board=board)
-
-        result = await tool(
-            content="raw data has outliers",
-            issue_type="quality",
-            request_task_for="plotting",
-            task_brief="create cleaned scatter plot",
-            task_message=None,
-        )
-
-        assert result["status"] == "reported"
-        assert "dispatched_task_id" in result
-
-        # Drain the bus queue
-        queued = [await asyncio.wait_for(bus._queue.get(), timeout=1) for _ in range(4)]
-        user_messages = [msg for msg in queued if isinstance(msg, UserMessage)]
-        assert len(user_messages) == 1
-        assert user_messages[0].agent_type == AgentType.PLOTTING
-        # Falls back to task_brief when task_message is empty
-        assert "create cleaned scatter plot" in user_messages[0].content
-        # Content is merged as context since it differs
-        assert "raw data has outliers" in user_messages[0].content

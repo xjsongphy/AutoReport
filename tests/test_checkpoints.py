@@ -185,6 +185,48 @@ async def test_rollback_restores_files(temp_workspace):
 
 
 @pytest.mark.asyncio
+async def test_binary_files_not_tracked_and_survive_rollback(temp_workspace):
+    """Binary files must never be zeroed by rollback.
+
+    Regression: binary files (PDFs, images) have ``content=None`` because they
+    can't be stored as text. The diff logic reconstructed them as empty strings,
+    so rollback overwrote the real bytes with 0-byte files — destroying data.
+    Binary files are now excluded from capture, and rollback refuses to clobber
+    a real binary file with empty content.
+    """
+    manager = CheckpointManager(temp_workspace)
+
+    # A genuine binary file (null byte) in the agent's write dir.
+    binary_file = temp_workspace / "Data" / "processed" / "fig.png"
+    binary_file.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR")
+
+    # A text file alongside, which we will roll back.
+    text_file = temp_workspace / "Data" / "processed" / "result.json"
+    text_file.write_text('{"v": 1}')
+
+    cp = await manager.create_checkpoint(
+        agent_type="data_analysis", description="with binary"
+    )
+
+    # Checkpoint must not track the binary file at all.
+    state = manager.get_checkpoint("data_analysis", cp).file_states
+    assert "Data/processed/fig.png" not in state
+    assert all(not s.is_binary for s in state.values())
+
+    # Mutate both; then roll back.
+    text_file.write_text('{"v": 2}')
+    binary_file.write_bytes(b"\x89PNG different bytes\x00")
+    await manager.rollback("data_analysis", cp)
+
+    # Text file restored; binary file NOT zeroed (left as-is on disk).
+    assert text_file.read_text() == '{"v": 1}'
+    assert binary_file.read_bytes() != b""
+    # The binary file is not checkpoint-managed, so rollback leaves whatever is
+    # currently on disk untouched (it must never be truncated to 0 bytes).
+    assert len(binary_file.read_bytes()) > 0
+
+
+@pytest.mark.asyncio
 async def test_epoch_monotonic(temp_workspace):
     """Epochs are monotonically increasing per agent."""
     manager = CheckpointManager(temp_workspace)

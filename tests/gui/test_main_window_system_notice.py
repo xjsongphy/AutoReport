@@ -25,7 +25,9 @@ def test_system_notice_renders_in_target_agent_panel():
     fake._is_visible_agent = lambda agent_type: agent_type == "main"
     fake._get_panel_for_agent = lambda agent_type: _Panel()
     fake._get_agent_display_name = lambda agent_type: str(agent_type).replace("_", " ").title()
-    fake._build_inter_agent_title = lambda prefix, content: MainWindow._build_inter_agent_title(fake, prefix, content)
+    fake._build_inter_agent_title = lambda prefix, content: MainWindow._build_inter_agent_title(
+        fake, prefix, content
+    )
 
     MainWindow._handle_system_notice(
         fake,
@@ -80,7 +82,9 @@ def test_report_message_renders_in_main_panel():
     fake._get_panel_for_agent = lambda agent_type: _Panel()
     fake.agent_panel = _Panel()  # ReportMessage renders in main panel
     fake._get_agent_display_name = lambda agent_type: "Plotting"
-    fake._build_inter_agent_title = lambda prefix, content: MainWindow._build_inter_agent_title(fake, prefix, content)
+    fake._build_inter_agent_title = lambda prefix, content: MainWindow._build_inter_agent_title(
+        fake, prefix, content
+    )
 
     MainWindow._handle_report_message(
         fake,
@@ -103,7 +107,10 @@ def test_report_message_renders_in_main_panel():
     assert kwargs["bubble_align"] == "left"
     assert kwargs["bubble_on_timeline"] is True
     assert kwargs["bubble_collapsible"] is True
-    assert "report" in kwargs["bubble_title"].lower() or "missing_data" in kwargs["bubble_title"].lower()
+    assert (
+        "report" in kwargs["bubble_title"].lower()
+        or "missing_data" in kwargs["bubble_title"].lower()
+    )
 
     # Check store was called with persistence parameters
     assert len(store_calls) == 1
@@ -140,7 +147,9 @@ def test_system_notice_for_invisible_agent_skips_panel():
     fake._is_visible_agent = lambda agent_type: agent_type == "main"
     fake._get_panel_for_agent = lambda agent_type: _Panel()
     fake._get_agent_display_name = lambda agent_type: str(agent_type).replace("_", " ").title()
-    fake._build_inter_agent_title = lambda prefix, content: MainWindow._build_inter_agent_title(fake, prefix, content)
+    fake._build_inter_agent_title = lambda prefix, content: MainWindow._build_inter_agent_title(
+        fake, prefix, content
+    )
 
     MainWindow._handle_system_notice(
         fake,
@@ -176,7 +185,9 @@ def test_report_message_for_invisible_main_skips_panel():
     fake._is_visible_agent = lambda agent_type: agent_type == "plotting"
     fake._get_panel_for_agent = lambda agent_type: _Panel()
     fake._get_agent_display_name = lambda agent_type: "Data Analysis"
-    fake._build_inter_agent_title = lambda prefix, content: MainWindow._build_inter_agent_title(fake, prefix, content)
+    fake._build_inter_agent_title = lambda prefix, content: MainWindow._build_inter_agent_title(
+        fake, prefix, content
+    )
 
     MainWindow._handle_report_message(
         fake,
