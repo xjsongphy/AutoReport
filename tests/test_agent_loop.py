@@ -173,6 +173,33 @@ async def test_process_message(agent_loop, mock_provider, mock_gui):
 
 
 @pytest.mark.asyncio
+async def test_process_message_includes_dispatch_summary_and_detail(agent_loop, mock_provider):
+    captured_messages = []
+
+    async def capture_chat_stream(*args, **kwargs):
+        from autoreport.core.providers.base import LLMStreamChunk
+
+        captured_messages.extend(kwargs["messages"])
+        yield LLMStreamChunk(delta=None, done=True)
+
+    mock_provider.chat_stream = capture_chat_stream
+
+    msg = UserMessage(
+        agent_type=AgentType.MAIN,
+        source="main_agent",
+        summary="Analyze the CSV",
+        content="Use Data/raw.csv and report fit parameters.",
+    )
+
+    await agent_loop._process_message(msg)
+
+    user_messages = [m for m in captured_messages if m.role == "user"]
+    assert user_messages
+    assert "[Task Summary]\nAnalyze the CSV" in user_messages[-1].content
+    assert "[Task Detail]\nUse Data/raw.csv and report fit parameters." in user_messages[-1].content
+
+
+@pytest.mark.asyncio
 async def test_process_message_passes_message_id_to_pre_checkpoint(agent_loop):
     manager = MagicMock()
     manager.create_checkpoint = AsyncMock(return_value="cp_main_0001")
@@ -303,6 +330,23 @@ async def test_delegated_task_update_does_not_queue_llm_turn(agent_loop):
     assert not any(isinstance(item, QueueUpdateMessage) for item in published)
 
 
+@pytest.mark.asyncio
+async def test_inter_agent_message_does_not_show_in_queue_preview(agent_loop):
+    msg = UserMessage(
+        content="Use Data/raw.csv",
+        summary="Analyze raw CSV",
+        agent_type=AgentType.MAIN,
+        source="main_agent",
+    )
+
+    await agent_loop._handle_user_message(msg)
+
+    assert not agent_loop._message_queue.empty()
+    published = [item for item in agent_loop.bus._queue._queue if isinstance(item, QueueUpdateMessage)]
+    assert published
+    assert published[-1].queued_messages == []
+
+
 def test_format_tool_result_dict(agent_loop):
     result = agent_loop._format_tool_result({"key": "value"})
     assert "key" in result
@@ -319,6 +363,16 @@ def test_format_tool_result_strips_ui_only_fields(agent_loop):
     assert "completion_summary" not in result
     assert "_ui_summary" not in result
     assert "_ui_detail" not in result
+
+
+def test_format_tool_result_keeps_inter_agent_summary(agent_loop):
+    result = agent_loop._format_tool_result({
+        "status": "success",
+        "summary": "Short visible summary",
+        "content": "Full response content",
+    })
+    assert "Short visible summary" in result
+    assert "Full response content" in result
 
 
 def test_format_tool_result_string(agent_loop):
@@ -394,7 +448,12 @@ async def test_respond_tool_call_marks_turn_reported_synchronously(
             LLMToolCall(
                 id="call_respond",
                 name="respond",
-                arguments={"task_id": "tk1", "type": "reply", "content": "done"},
+                arguments={
+                    "task_id": "tk1",
+                    "type": "reply",
+                    "summary": "Done",
+                    "content": "done",
+                },
             )
         ],
     )
@@ -467,6 +526,32 @@ async def test_sub_guard_reprompts_when_no_report(workspace, config, mock_provid
     # mock_provider returns text-only (no tool call), so report is never called.
     # The guard should fire and publish at least one SystemNotice before going IDLE.
     assert any("Respond" in n.content for n in notices)
+
+
+@pytest.mark.asyncio
+async def test_sub_guard_does_not_reprompt_completed_main_task(
+    workspace, config, mock_provider, mock_prompt_loader
+):
+    """Completed Main-dispatched tasks should not be forced to respond again."""
+    from autoreport.core.tools.task_board import TaskBoard
+    board = TaskBoard()
+    board.create_task(AgentType.MAIN, AgentType.PLOTTING, "draw", task_id="tk1")
+    board.complete_task("tk1", target_agent=AgentType.PLOTTING)
+    loop = _sub_loop(workspace, config, mock_provider, mock_prompt_loader, board)
+
+    notices = []
+    loop.bus.subscribe(SystemNotice, lambda m: notices.append(m))
+
+    msg = UserMessage(
+        content="draw plot follow-up",
+        agent_type=AgentType.PLOTTING,
+        source="main_agent",
+        message_id="blocking:tk1",
+    )
+    await loop._process_message(msg)
+    await _drain_bus(loop.bus)
+
+    assert not any("Respond" in n.content for n in notices)
 
 
 @pytest.mark.asyncio

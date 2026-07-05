@@ -38,9 +38,11 @@ class SendToAgentTool(Tool):
     description = (
         "Send a task instruction to a sub-agent. Use this to dispatch work to: "
         "theory, data_analysis, plotting, report. Keep the message minimal: "
-        "task goal, input file locations, dependency, and explicit user constraints only. "
+        "summary (short visible task summary) plus content (full task detail: "
+        "task goal, input file locations, dependency, and explicit user constraints only). "
         "Do not include formulas, implementation steps, copied source content, "
         "output filenames, or quality rules the sub-agent already owns. "
+        "summary is required and must be non-empty; content is required and must be non-empty. "
         "Modes (choose one):\n"
         "- blocking=True (default): Wait for the sub-agent's `respond` (reply or blocked).\n"
         "- blocking=False: Return immediately; the sub-agent's later `respond` notifies you.\n"
@@ -58,16 +60,48 @@ class SendToAgentTool(Tool):
         return resolve_session_id(self._session_id_resolver)
 
     @staticmethod
-    def _request_summary(content: str) -> str:
-        first_line = next(
-            (line.strip() for line in str(content or "").splitlines() if line.strip()),
-            "",
-        )
-        return first_line if len(first_line) <= 80 else first_line[:77].rstrip() + "..."
+    def _clean_required_text(value: Any, field_name: str) -> tuple[str | None, dict[str, str] | None]:
+        if not isinstance(value, str):
+            return None, {
+                "status": "error",
+                "error": f"Invalid {field_name} type: expected str, got {type(value).__name__}.",
+            }
+        text = value.strip()
+        if not text:
+            return None, {"status": "error", "error": f"{field_name} cannot be empty."}
+        if field_name == "summary" and SendToAgentTool._is_route_placeholder_summary(text):
+            return None, {
+                "status": "error",
+                "error": (
+                    "summary must describe the task outcome or blocker, not the message route."
+                ),
+            }
+        return text, None
+
+    @staticmethod
+    def _is_route_placeholder_summary(text: str) -> bool:
+        normalized = " ".join(str(text or "").strip().lower().replace("_", " ").split())
+        route_placeholders = {
+            "sub to main",
+            "agent to main",
+            "theory to main",
+            "data analysis to main",
+            "data-analysis to main",
+            "plotting to main",
+            "report to main",
+            "main to sub",
+            "main to theory",
+            "main to data analysis",
+            "main to data-analysis",
+            "main to plotting",
+            "main to report",
+        }
+        return normalized in route_placeholders
 
     async def __call__(
         self,
         agent_type: str,
+        summary: str,
         content: str,
         task_items: list[dict] | None = None,
         blocking: bool = True,
@@ -77,7 +111,8 @@ class SendToAgentTool(Tool):
 
         Args:
             agent_type: Target sub-agent type. One of: theory, data_analysis, plotting, report.
-            content: Task instruction to send to the sub-agent.
+            summary: Short visible task summary for bubbles and task context.
+            content: Full task instruction to send to the sub-agent.
             task_items: Optional list of task dicts ('brief' and optionally 'description')
                 for waitlist/todolist tracking. Used only when creating a new task.
             blocking: If True, wait for the sub-agent's report. If False, return immediately.
@@ -96,18 +131,16 @@ class SendToAgentTool(Tool):
                     "Use one of: theory, data_analysis, plotting, report."
                 ),
             }
-        if not isinstance(content, str):
-            return {
-                "status": "error",
-                "error": f"Invalid content type: expected str, got {type(content).__name__}.",
-            }
+        summary, error = self._clean_required_text(summary, "summary")
+        if error is not None:
+            return error
+        content, error = self._clean_required_text(content, "content")
+        if error is not None:
+            return error
 
         agent_type = agent_type.strip()
-        content = content.strip()
         if not agent_type:
             return {"status": "error", "error": "agent_type cannot be empty."}
-        if not content:
-            return {"status": "error", "error": "content cannot be empty."}
 
         try:
             target = AgentType(agent_type)
@@ -118,7 +151,7 @@ class SendToAgentTool(Tool):
                 "error": f"Unknown agent type '{agent_type}'. Valid: {valid}",
             }
 
-        request_summary = self._request_summary(content)
+        request_summary = summary
         sid = self._session_id()
 
         # --- Create or re-dispatch task ---
@@ -152,7 +185,7 @@ class SendToAgentTool(Tool):
             item = task_items[0] if task_items else {}
             brief = (
                 str(item.get("brief") or item.get("task_brief") or "").strip()
-                or request_summary[:30]
+                or summary[:30]
             )
             new_task = self._task_board.create_task(
                 source=AgentType.MAIN,
@@ -175,6 +208,7 @@ class SendToAgentTool(Tool):
         if not blocking:
             await self._bus.publish(UserMessage(
                 content=content,
+                summary=summary,
                 agent_type=target,
                 source="main_agent",
             ))
@@ -184,6 +218,8 @@ class SendToAgentTool(Tool):
                 "agent_type": target.value,
                 "blocking": False,
                 "task_id": task_id,
+                "summary": summary,
+                "content": content,
                 "request_summary": request_summary,
                 "message": f"Task sent to {target.value} (non-blocking). "
                            "Agent will be notified on completion.",
@@ -211,6 +247,7 @@ class SendToAgentTool(Tool):
         dispatch_message_id = f"blocking:{task_id}"
         await self._bus.publish(UserMessage(
             content=content,
+            summary=summary,
             agent_type=target,
             source="main_agent",
             message_id=dispatch_message_id,
@@ -225,6 +262,8 @@ class SendToAgentTool(Tool):
                 "status": "timeout",
                 "agent_type": target.value,
                 "task_id": task_id,
+                "summary": summary,
+                "content": content,
                 "request_summary": request_summary,
                 "error": "Sub-agent did not report within the liveness budget. "
                          "It may still be processing — try again or read its output.",
@@ -238,7 +277,10 @@ class SendToAgentTool(Tool):
                 "agent_type": target.value,
                 "task_id": task_id,
                 "blocking": True,
+                "summary": summary,
+                "content": content,
                 "request_summary": request_summary,
+                "response_summary": report.summary,
                 "response": report.content,
             }
         return {
@@ -247,7 +289,10 @@ class SendToAgentTool(Tool):
             "task_id": task_id,
             "blocking": True,
             "block_type": report.report_type,
+            "summary": summary,
+            "content": content,
             "request_summary": request_summary,
+            "response_summary": report.summary,
             "response": report.content,
             "error": f"Sub-agent responded {report.report_type}: {report.content}",
         }
@@ -317,10 +362,12 @@ class RespondTool(Tool):
     description = (
         "Respond to Main with the outcome of a task Main dispatched to you. This is the ONLY "
         "way to finish such a task — you MUST call it before stopping.\n"
+        "summary is required and must be a concise visible summary of the result/blocker; "
+        "content is required and must contain the full response details.\n"
         "Types:\n"
-        "- 'reply': you finished. content = your final response (results, file paths).\n"
-        "- 'missing_data': you cannot proceed because an input is missing. content = exactly what is missing and where it should be.\n"
-        "- 'quality': you cannot proceed because a dependency's output is wrong. content = what is wrong and where.\n"
+        "- 'reply': you finished. summary = short outcome; content = final response (results, file paths).\n"
+        "- 'missing_data': you cannot proceed because an input is missing. summary = short blocker; content = exactly what is missing and where it should be.\n"
+        "- 'quality': you cannot proceed because a dependency's output is wrong. summary = short issue; content = what is wrong and where.\n"
         "Do NOT use this to ask the user questions — make a reasonable assumption or report missing_data to Main."
     )
 
@@ -353,12 +400,13 @@ class RespondTool(Tool):
             active_only=False,
         )
 
-    async def __call__(self, task_id: str, type: str, content: str = "") -> dict[str, Any]:
+    async def __call__(self, task_id: str, type: str, summary: str, content: str) -> dict[str, Any]:
         """Report outcome of a Main-dispatched task.
 
         Args:
             task_id: The task you are reporting on (shown in your [当前任务] context).
             type: One of reply | missing_data | quality.
+            summary: Short visible summary for Main's coordination bubble.
             content: reply -> final response; missing_data/quality -> what is needed/wrong.
 
         Returns:
@@ -370,6 +418,13 @@ class RespondTool(Tool):
 
         if not task_id:
             return {"status": "error", "error": "task_id is required"}
+
+        summary, error = SendToAgentTool._clean_required_text(summary, "summary")
+        if error is not None:
+            return error
+        content, error = SendToAgentTool._clean_required_text(content, "content")
+        if error is not None:
+            return error
 
         sid = self._session_id()
         if self._task_board is not None:
@@ -419,6 +474,7 @@ class RespondTool(Tool):
             agent_type=self._agent_type,
             task_id=task_id,
             report_type=report_type,
+            summary=summary,
             content=str(content or ""),
         ))
 
@@ -427,6 +483,7 @@ class RespondTool(Tool):
             "status": "ok",
             "task_id": task_id,
             "report_type": report_type,
+            "summary": summary,
             "content": str(content or ""),
             "message": f"Reported {report_type} for task {task_id}",
         }

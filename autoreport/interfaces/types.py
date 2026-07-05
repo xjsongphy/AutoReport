@@ -82,6 +82,9 @@ class UserMessage(Message):
 
     type: MessageType = MessageType.USER_MESSAGE
     content: str
+    # Short visible summary for inter-agent coordination. Tools enforce this
+    # for new coordination messages; default keeps older stored messages valid.
+    summary: str = ""
     agent_type: AgentType = AgentType.MAIN
     message_id: str | None = None
     source: str = "user"  # "user" | "system" | "main_agent" | "<agent_type>"
@@ -251,6 +254,8 @@ class ReportMessage(Message):
     agent_type: AgentType
     task_id: str
     report_type: str  # "reply" | "missing_data" | "quality"
+    # Short visible summary shown in coordination bubbles.
+    summary: str = ""
     content: str = ""
 
 

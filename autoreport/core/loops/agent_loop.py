@@ -436,12 +436,15 @@ class AgentLoop:
             return False
         if getattr(message, "source", None) != "main_agent":
             return False
+        if not self._has_active_main_dispatched_task(message):
+            return False
         if self._turn_reported:
             return False
 
         reminder = (
             "本轮需要调用 Respond 向 Main 回复。请调用 "
-            "respond(task_id, type, content)：type='reply' 表示完成，"
+            "respond(task_id, type, summary, content)：summary 是必须填写的简短结果摘要，"
+            "type='reply' 表示完成，"
             "'missing_data'/'quality' 表示卡住。"
         )
         while not self._turn_reported:
@@ -467,6 +470,48 @@ class AgentLoop:
         await self._flush_manifest_if_needed()
         await self._set_status(AgentStatus.IDLE)
         return True
+
+    def _has_active_main_dispatched_task(self, message: UserMessage) -> bool:
+        """Return whether this Main-origin turn still has an active task to report."""
+        if self._task_board is None:
+            return True
+
+        task_id = self._task_id_from_message(message)
+        session_id = self._current_session_id
+        if task_id:
+            scoped = self._task_board.get_task(
+                task_id,
+                target_agent=self.agent_type,
+                source_agent=AgentType.MAIN,
+                active_only=True,
+                session_id=session_id,
+            )
+            if scoped is not None:
+                return True
+            unscoped = self._task_board.get_task(
+                task_id,
+                target_agent=self.agent_type,
+                source_agent=AgentType.MAIN,
+                active_only=True,
+            )
+            return unscoped is not None
+
+        todos = self._task_board.get_todolist(self.agent_type, session_id=session_id)
+        if not todos:
+            todos = self._task_board.get_todolist(self.agent_type)
+        return any(
+            t.source_agent == AgentType.MAIN
+            and t.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS)
+            for t in todos
+        )
+
+    @staticmethod
+    def _task_id_from_message(message: UserMessage) -> str | None:
+        message_id = str(getattr(message, "message_id", "") or "").strip()
+        if message_id.startswith("blocking:"):
+            task_id = message_id.split(":", 1)[1].strip()
+            return task_id or None
+        return None
 
     async def _mark_active_task_blocked(self) -> None:
         """Mark the active Main->self task BLOCKED (auto-block fallback)."""
@@ -533,6 +578,14 @@ class AgentLoop:
             await self._run_guard_round(message, reminder)
 
     def _queue_message_summary(self, message: UserMessage) -> str:
+        summary = str(getattr(message, "summary", "") or "").strip()
+        if summary:
+            if message.source == "main_agent":
+                return f"From Main: {summary}"
+            if message.source and message.source != "user":
+                sender = get_agent_badge(message.source)
+                return f"From {sender}: {summary}"
+            return summary
         content = str(message.content or "").strip()
         first_line = content.splitlines()[0].strip() if content else ""
         if message.source == "main_agent":
@@ -544,9 +597,22 @@ class AgentLoop:
             return f"From {sender}: {first_line}" if first_line else f"From {sender}"
         return first_line or "Queued message"
 
+    def _llm_content_for_user_message(self, message: UserMessage) -> str:
+        content = str(message.content or "").strip()
+        summary = str(getattr(message, "summary", "") or "").strip()
+        if message.source == "main_agent" and summary:
+            if content:
+                return f"[Task Summary]\n{summary}\n\n[Task Detail]\n{content}"
+            return f"[Task Summary]\n{summary}"
+        return content
+
     async def _publish_queue_update(self) -> None:
         queued = list(self._message_queue._queue)
-        summaries = [self._queue_message_summary(msg) for msg in queued]
+        summaries = [
+            self._queue_message_summary(msg)
+            for msg in queued
+            if str(getattr(msg, "source", "user") or "user") == "user"
+        ]
         await self.bus.publish(
             QueueUpdateMessage(
                 agent_type=self.agent_type,
@@ -598,7 +664,7 @@ class AgentLoop:
 
         try:
             # In debug mode, wrap message with context
-            content = message.content
+            content = self._llm_content_for_user_message(message)
             if self._debug_mode:
                 content = (
                     "[调试模式] 此 Agent 处于独立调试模式，不与其他 Agent 通信。\n"
@@ -1092,51 +1158,6 @@ class AgentLoop:
             True if debug mode is enabled.
         """
         return self._debug_mode
-
-    async def send_to_sub_agent(
-        self,
-        agent_type: AgentType,
-        content: str,
-        message_id: str | None = None,
-    ) -> None:
-        """Send coordination message from main agent to sub-agent.
-
-        Only main agent can send coordination messages. Target agents in
-        debug mode will not receive coordination messages.
-
-        Args:
-            agent_type: Target sub-agent type.
-            content: Message content to send.
-            message_id: Optional message ID for tracking.
-
-        Raises:
-            RuntimeError: If called from a non-main agent.
-        """
-        if self.agent_type != AgentType.MAIN:
-            raise RuntimeError("Only main agent can send coordination messages")
-
-        if self._loop_manager is None:
-            logger.warning("Loop manager not available, cannot send coordination message")
-            return
-
-        # Check if target agent is in debug mode
-        target_loop = self._loop_manager.get_loop(agent_type)
-        if target_loop and target_loop.debug_mode:
-            logger.debug(
-                "Target agent {} is in debug mode, skipping coordination",
-                agent_type,
-            )
-            return
-
-        await self.bus.publish(
-            UserMessage(
-                content=content,
-                agent_type=agent_type,
-                message_id=message_id,
-                source="main_agent",
-            )
-        )
-        logger.info("Main agent sent coordination message to {}", agent_type)
 
     async def _get_cached_system_prompt(self) -> str:
         """Return the cached system prompt, rebuilding it when sources change.

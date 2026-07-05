@@ -1060,16 +1060,16 @@ class AgentPanel(QWidget):
 
     def add_task_block(self, todolist: list[dict], waitlist: list[dict]) -> None:
         """Render Task block with Todo/Wait sections (empty sections omitted)."""
-        lines = ["Task"]
+        lines = ["<b>Task</b>"]
 
-        def render_items(items: list[dict]) -> list[str]:
+        def render_items(items: list[dict], *, wait: bool = False) -> list[str]:
             rows = []
             for item in items[:10]:
                 brief = str(item.get("brief", "")).strip() or "task"
                 status = str(item.get("status", "pending")).lower()
                 done = status in {"completed", "cancelled", "failed"}
-                marker = "☑" if done else "☐"
-                rows.append(f"- {marker} {brief}")
+                marker = "☑" if done else ("○" if wait else "☐")
+                rows.append(f"{marker} {brief}")
             return rows
 
         if todolist:
@@ -1080,14 +1080,20 @@ class AgentPanel(QWidget):
         if waitlist:
             lines.append("")
             lines.append("Wait")
-            lines.extend(render_items(waitlist))
+            lines.extend(render_items(waitlist, wait=True))
 
-        ts = datetime.now().strftime("%H:%M")
-        self._messages_area.add_message_row(
-            role="agent",
-            content="\n".join(lines),
-            timestamp=ts,
-            is_coordination=True,
+        summary = "\n".join(lines)
+        self.add_tool_call(
+            "manage_tasks",
+            {"action": "list"},
+            summary=summary,
+            expandable=False,
+        )
+        self.add_tool_result(
+            "manage_tasks",
+            {"status": "ok"},
+            summary=summary,
+            expandable=False,
         )
 
     # ---- Status ----

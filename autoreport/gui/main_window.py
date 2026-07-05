@@ -1410,7 +1410,11 @@ class MainWindow(QMainWindow):
                 agent_str,
                 "user",
                 message.content,
-                extra={"source": message.source, "message_id": message.message_id},
+                extra={
+                    "source": message.source,
+                    "message_id": message.message_id,
+                    "summary": getattr(message, "summary", "") or "",
+                },
             )
             return
         source_key = str(message.source or "user")
@@ -1423,7 +1427,8 @@ class MainWindow(QMainWindow):
             sender = (
                 "Main" if source_key == "main_agent" else self._get_agent_display_name(source_key)
             )
-            bubble_title = self._build_inter_agent_title(
+            summary = str(getattr(message, "summary", "") or "").strip()
+            bubble_title = summary or self._build_inter_agent_title(
                 f"Message From {sender}",
                 message.content,
             )
@@ -1449,6 +1454,7 @@ class MainWindow(QMainWindow):
             message.content,
             extra={
                 "source": message.source,
+                "summary": getattr(message, "summary", "") or "",
                 "display_mode": "bubble",
                 "bubble_title": bubble_title,
                 "bubble_align": bubble_align,
@@ -1477,6 +1483,11 @@ class MainWindow(QMainWindow):
     def _handle_tool_call(self, message: ToolCallMessage) -> None:
         agent_str = str(message.agent_type)
         state = self._state_for_agent(agent_str)
+        if agent_str == "main" and message.tool_name == "send_to_agent":
+            if self._is_visible_agent(agent_str):
+                self._get_panel_for_agent(agent_str).finish_thinking()
+            state.phase = "tool"
+            return
         if not self._is_visible_agent(agent_str):
             self._conv_store.append_tool_call(agent_str, message.tool_name, message.arguments)
             return
@@ -1492,7 +1503,10 @@ class MainWindow(QMainWindow):
             expandable = False
         elif message.tool_name == "respond":
             detail = str(message.arguments.get("content") or "").strip() or None
-            summary = MainWindow._respond_summary(self, agent_str, detail)
+            summary = (
+                str(message.arguments.get("summary") or "").strip()
+                or MainWindow._respond_summary(self, agent_str, detail)
+            )
             expandable = bool(detail)
         elif message.tool_name == "manage_tasks":
             summary = "<b>Task</b>"
@@ -1526,12 +1540,25 @@ class MainWindow(QMainWindow):
                 summary, detail = self._format_send_to_agent_bubble(message.result, message.error)
                 expandable = bool(detail)
                 result_str = detail or summary
+                self._conv_store.append_tool_call(
+                    agent_str,
+                    message.tool_name,
+                    self._send_to_agent_result_arguments(message.result),
+                    extra={"summary": summary},
+                )
             elif message.tool_name == "respond":
                 summary, detail = self._format_respond_bubble(
                     message.result, message.error, agent_str=agent_str
                 )
                 expandable = bool(detail)
                 result_str = detail or summary
+            elif message.tool_name == "manage_tasks":
+                message.result = self._augment_manage_tasks_result(agent_str, message.result)
+                summary, detail, expandable = self._format_manage_tasks_result(
+                    message.result, message.error
+                )
+                if summary:
+                    result_str = summary
             self._conv_store.append_tool_result(
                 agent_str,
                 message.tool_name,
@@ -1571,6 +1598,21 @@ class MainWindow(QMainWindow):
             if summary:
                 result_str = summary
 
+        if agent_str == "main" and message.tool_name == "send_to_agent":
+            panel.add_tool_call(
+                message.tool_name,
+                self._send_to_agent_result_arguments(message.result),
+                summary=summary,
+                detail=detail,
+                expandable=bool(expandable),
+            )
+            self._conv_store.append_tool_call(
+                agent_str,
+                message.tool_name,
+                self._send_to_agent_result_arguments(message.result),
+                extra={"summary": summary},
+            )
+
         panel.add_tool_result(
             message.tool_name,
             message.result,
@@ -1591,6 +1633,16 @@ class MainWindow(QMainWindow):
                 "expandable": expandable,
             },
         )
+
+    def _send_to_agent_result_arguments(self, result: Any) -> dict[str, Any]:
+        if isinstance(result, dict):
+            target = str(result.get("agent_type") or "sub").strip() or "sub"
+            task_id = str(result.get("task_id") or "").strip()
+            args: dict[str, Any] = {"agent_type": target}
+            if task_id:
+                args["task_id"] = task_id
+            return args
+        return {}
 
     def _augment_manage_tasks_result(self, agent_str: str, result: Any) -> Any:
         """Ensure manage_tasks result always carries todolist/waitlist for UI rendering."""
@@ -1646,23 +1698,25 @@ class MainWindow(QMainWindow):
 
         status = str(result.get("status", "success"))
         response = str(result.get("response", "") or "").strip()
+        request_summary = str(result.get("summary") or result.get("request_summary") or "").strip()
+        response_summary = str(result.get("response_summary") or "").strip()
 
         if status == "delegated":
             detail = str(result.get("message", "") or "").strip() or None
-            return (route, detail)
+            return (request_summary or route, detail)
 
         if status == "timeout":
             detail = str(result.get("error", "") or "").strip() or None
-            return (route, detail)
+            return (request_summary or route, detail)
 
         if status == "error":
             detail = str(result.get("error", "") or "").strip() or None
-            return (route, detail)
+            return (request_summary or route, detail)
 
         if not response:
-            return (route, None)
+            return (response_summary or request_summary or route, None)
 
-        return (route, response)
+        return (response_summary or request_summary or route, response)
 
     def _format_respond_bubble(
         self, result, error: str | None, *, agent_str: str = "sub"
@@ -1675,7 +1729,8 @@ class MainWindow(QMainWindow):
         detail = str(result.get("content") or "").strip()
         if not detail:
             detail = str(result.get("message") or "").strip()
-        return (MainWindow._respond_summary(self, agent_str, detail), detail or None)
+        summary = str(result.get("summary") or "").strip()
+        return (summary or MainWindow._respond_summary(self, agent_str, detail), detail or None)
 
     def _format_manage_tasks_result(
         self, result, error: str | None
@@ -1703,6 +1758,8 @@ class MainWindow(QMainWindow):
                     "failed": "⚠",
                     "cancelled": "✗",
                 }.get(status, "☐")
+                if title == "Wait" and status == "pending":
+                    marker = "○"
                 lines.append(f"{marker} {brief}")
                 shown += 1
             return lines
@@ -1757,7 +1814,8 @@ class MainWindow(QMainWindow):
             if isinstance(message.agent_type, Enum)
             else str(message.agent_type)
         )
-        bubble_title = MainWindow._respond_summary(self, agent_str, message.content)
+        summary = str(getattr(message, "summary", "") or "").strip()
+        bubble_title = summary or MainWindow._respond_summary(self, agent_str, message.content)
         if self._is_visible_agent("main"):
             self.agent_panel.add_message(
                 "agent",
@@ -1775,6 +1833,7 @@ class MainWindow(QMainWindow):
             message.content,
             extra={
                 "source": agent_str,
+                "summary": summary,
                 "display_mode": "bubble",
                 "bubble_title": bubble_title,
                 "bubble_align": "left",

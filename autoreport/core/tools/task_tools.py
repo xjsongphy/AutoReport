@@ -437,11 +437,16 @@ class ManageTasksTool(Tool):
         if terminal.source_agent == terminal.target_agent:
             return 0
 
+        summary = response.strip().splitlines()[0].strip()
+        if len(summary) > 96:
+            summary = summary[:93].rstrip() + "..."
+
         await self._bus.publish(
             ReportMessage(
                 agent_type=leaf.target_agent,
                 task_id=leaf.task_id,
                 report_type="reply",
+                summary=summary,
                 content=response,
             )
         )

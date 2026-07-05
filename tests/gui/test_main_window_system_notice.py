@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 from autoreport.gui.main_window import MainWindow
-from autoreport.interfaces.types import AgentType, ReportMessage, SystemNotice
+from autoreport.interfaces.types import AgentType, ReportMessage, SystemNotice, UserMessage
 
 
 def test_system_notice_renders_in_target_agent_panel():
@@ -92,6 +92,7 @@ def test_report_message_renders_in_main_panel():
             agent_type=AgentType.PLOTTING,
             task_id="tk1",
             report_type="missing_data",
+            summary="Need x data",
             content="Need x column data",
         ),
     )
@@ -107,7 +108,7 @@ def test_report_message_renders_in_main_panel():
     assert kwargs["bubble_align"] == "left"
     assert kwargs["bubble_on_timeline"] is False
     assert kwargs["bubble_collapsible"] is True
-    assert kwargs["bubble_title"] == "Plotting to Main: Need x column data"
+    assert kwargs["bubble_title"] == "Need x data"
 
     # Check store was called with persistence parameters
     assert len(store_calls) == 1
@@ -123,6 +124,53 @@ def test_report_message_renders_in_main_panel():
     assert kwargs["extra"]["bubble_collapsible"] is True
     assert kwargs["extra"]["report_type"] == "missing_data"
     assert kwargs["extra"]["task_id"] == "tk1"
+    assert kwargs["extra"]["summary"] == "Need x data"
+
+
+def test_main_dispatch_message_uses_summary_bubble():
+    panel_calls: list[tuple[str, tuple, dict]] = []
+    store_calls: list[tuple[str, tuple, dict]] = []
+
+    class _Panel:
+        def add_message(self, *args, **kwargs):
+            panel_calls.append(("message", args, kwargs))
+
+    class _Store:
+        def append_message(self, *args, **kwargs):
+            store_calls.append(("message", args, kwargs))
+
+    fake = SimpleNamespace()
+    fake._conv_store = _Store()
+    fake._is_visible_agent = lambda agent_type: agent_type == "plotting"
+    fake._get_panel_for_agent = lambda agent_type: _Panel()
+    fake._get_agent_display_name = lambda agent_type: "Main"
+    fake._build_inter_agent_title = lambda prefix, content: MainWindow._build_inter_agent_title(
+        fake, prefix, content
+    )
+
+    MainWindow._handle_user_message(
+        fake,
+        UserMessage(
+            agent_type=AgentType.PLOTTING,
+            source="main_agent",
+            summary="Draw final figure",
+            content="Use Data/Processed/final.csv and save the generated plot.",
+        ),
+    )
+
+    assert len(panel_calls) == 1
+    _, args, kwargs = panel_calls[0]
+    assert args[0] == "user"
+    assert args[1] == "Use Data/Processed/final.csv and save the generated plot."
+    assert kwargs["bubble_title"] == "Draw final figure"
+    assert kwargs["bubble_collapsible"] is True
+
+    assert len(store_calls) == 1
+    _, args, kwargs = store_calls[0]
+    assert args[0] == "plotting"
+    assert args[2] == "Use Data/Processed/final.csv and save the generated plot."
+    assert kwargs["extra"]["summary"] == "Draw final figure"
+    assert kwargs["extra"]["bubble_title"] == "Draw final figure"
 
 
 def test_system_notice_for_invisible_agent_skips_panel():

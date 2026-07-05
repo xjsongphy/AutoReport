@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import pytest
+from PyQt6.QtWidgets import QLabel
 
 from autoreport.gui.widgets.agent_panel import AgentPanel
 
@@ -563,6 +564,57 @@ def test_task_update_waitlist_format(agent_panel):
     assert "⏳ 等待Theory:" in rows[0]._content
     assert "Theory" in rows[0]._content
     assert "derive formulas" in rows[0]._content
+
+
+def test_add_task_block_uses_task_tool_group_controls(agent_panel, qtbot):
+    agent_panel.add_task_block(
+        todolist=[{"brief": "Process data", "status": "pending"}],
+        waitlist=[{"brief": "Plot figures", "status": "pending"}],
+    )
+    qtbot.wait(20)
+
+    assert agent_panel._messages_area.get_message_rows() == []
+    groups = agent_panel._messages_area.get_tool_groups()
+    assert len(groups) == 1
+
+    controls = [
+        label
+        for label in groups[0].findChildren(QLabel)
+        if label.objectName() == "taskStatusControl"
+    ]
+    texts = [
+        label.text()
+        for label in groups[0].findChildren(QLabel)
+        if label.objectName() == "taskTextLabel"
+    ]
+
+    assert [control.text() for control in controls] == ["", ""]
+    assert texts == ["Process data", "Plot figures"]
+
+
+def test_task_block_can_precede_deferred_send_to_agent_group(agent_panel, qtbot):
+    agent_panel.add_task_block(
+        todolist=[],
+        waitlist=[{"brief": "Derive formulas", "status": "pending"}],
+    )
+    agent_panel.add_tool_call(
+        "send_to_agent",
+        {"agent_type": "theory"},
+        summary="Main to Theory",
+        expandable=False,
+    )
+    agent_panel.add_tool_result(
+        "send_to_agent",
+        {"status": "delegated", "agent_type": "theory"},
+        summary="Main to Theory",
+        expandable=False,
+    )
+    qtbot.wait(20)
+
+    groups = agent_panel._messages_area.get_tool_groups()
+    assert len(groups) == 2
+    assert groups[0].tool_names() == ["manage_tasks"]
+    assert groups[1].tool_names() == ["send_to_agent"]
 
 
 def test_add_checkpoint_creates_message(agent_panel):
