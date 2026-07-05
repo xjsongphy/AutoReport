@@ -60,8 +60,13 @@ class TestMainAgentBasic:
             collector.start()
 
             await b.send("main", "你好，请简单介绍一下你能做什么")
-            responses = await collector.wait_for(AgentResponse, timeout=60, count=1)
+            # The streaming provider now also surfaces thinking_delta chunks as
+            # AgentResponse(content=""). The first chunk may therefore be a
+            # thinking-only delta, so wait for the agent to return to idle before
+            # reading the assembled text (see MessageCollector.wait_for_idle).
+            await collector.wait_for_idle(AgentType.MAIN, timeout=60)
 
+            responses = collector.agent_responses
             assert len(responses) >= 1
             text = collector.get_full_agent_text(AgentType.MAIN)
             assert len(text) > 0
