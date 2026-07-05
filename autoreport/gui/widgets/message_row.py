@@ -8,8 +8,18 @@
 import re
 from functools import lru_cache
 
-from PyQt6.QtCore import QEvent, QPoint, QPointF, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QClipboard, QColor, QIcon, QKeySequence, QPainter, QPalette, QPen, QWheelEvent
+from PyQt6.QtCore import QEvent, QMargins, QObject, QRect, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import (
+    QClipboard,
+    QColor,
+    QIcon,
+    QKeySequence,
+    QLinearGradient,
+    QPainter,
+    QPalette,
+    QPen,
+    QWheelEvent,
+)
 
 from ..scale import scaled_size
 from PyQt6.QtWidgets import (
@@ -30,6 +40,9 @@ from .ui_utils import create_isolated_context_menu, install_compact_tooltip, ren
 from ...utils.editor_context import parse_editor_context
 
 TIMELINE_EVENT_ROW_HEIGHT = 34
+COLLAPSE_LINE_LIMIT = 5
+TIMELINE_TEXT_LEFT_GUTTER = 4
+USER_BUBBLE_CONTENT_MARGINS = QMargins(10, 10, 10, 10)
 _CODE_BLOCK_PATTERN = re.compile(r"```(\w*)\n(.*?)```", re.DOTALL)
 
 class _DisclosureArrow(QWidget):
@@ -115,35 +128,6 @@ class _ElidedLabel(QLabel):
         )
         if self.text() != elided:
             super().setText(elided)
-
-
-class _OpticallyCenteredChipLabel(_ElidedLabel):
-    """Draw chip text using tight bounds so it appears visually centered."""
-
-    _OPTICAL_Y_OFFSET = -1.0
-
-    def paintEvent(self, event) -> None:  # noqa: N802
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
-        painter.setPen(self.palette().color(QPalette.ColorRole.WindowText))
-        painter.setFont(self.font())
-
-        text = self.text()
-        if not text:
-            return
-
-        rect = self.contentsRect()
-        metrics = self.fontMetrics()
-        tight = metrics.tightBoundingRect(text)
-        baseline_y = (
-            rect.center().y()
-            - ((tight.top() + tight.bottom()) / 2.0)
-            + self._OPTICAL_Y_OFFSET
-        )
-        painter.drawText(
-            QPointF(float(rect.left()), float(baseline_y)),
-            text,
-        )
 
 
 def _parse_code_blocks(content: str) -> list[tuple[str, str | None]]:
@@ -311,6 +295,26 @@ def _raw_markdown_for_selected_text(raw_markdown: str, selected_text: str) -> st
     return raw_markdown[start_raw:end_raw]
 
 
+def _opaque_bounds(pixmap) -> QRect:
+    image = pixmap.toImage()
+    width = image.width()
+    height = image.height()
+    min_x = width
+    min_y = height
+    max_x = -1
+    max_y = -1
+    for y in range(height):
+        for x in range(width):
+            if QColor(image.pixelColor(x, y)).alpha() > 0:
+                min_x = min(min_x, x)
+                min_y = min(min_y, y)
+                max_x = max(max_x, x)
+                max_y = max(max_y, y)
+    if max_x < min_x or max_y < min_y:
+        return QRect()
+    return QRect(min_x, min_y, (max_x - min_x) + 1, (max_y - min_y) + 1)
+
+
 class _CodeBlockWidget(QWidget):
     """VS Code-style code block with right-side hover-visible copy icon."""
 
@@ -375,6 +379,276 @@ class _NestedScrollPlainTextEdit(QPlainTextEdit):
         event.accept()
 
 
+class _FadeMask(QWidget):
+    def __init__(self, base_color: str, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._base_color = QColor(base_color)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+    def set_base_color(self, color: str) -> None:
+        self._base_color = QColor(color)
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        gradient = QLinearGradient(0, 0, 0, max(1, self.height()))
+        top = QColor(self._base_color)
+        bottom = QColor(self._base_color)
+        top.setAlpha(0)
+        bottom.setAlpha(255)
+        gradient.setColorAt(0.0, top)
+        gradient.setColorAt(1.0, bottom)
+        painter.fillRect(self.rect(), gradient)
+
+
+class _ExpandableContentWidget(QWidget):
+    toggled = pyqtSignal(bool)
+    overflow_changed = pyqtSignal()
+
+    def __init__(
+        self,
+        label: QLabel,
+        *,
+        fade_color: str,
+        line_limit: int = COLLAPSE_LINE_LIMIT,
+        collapsed_text: str | None = None,
+        expanded_text: str | None = None,
+        clamp_collapsed: bool = True,
+        overlay_host: QWidget | None = None,
+        toggle_host: QWidget | None = None,
+        toggle_host_margins: QMargins | None = None,
+        parent: QWidget | None = None,
+    ):
+        super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._line_limit = max(1, int(line_limit))
+        self._expanded = False
+        self._self_hovered = False
+        self._host_hovered = False
+        self._has_overflow = False
+        self._max_content_width: int | None = None
+        self._clamp_collapsed = clamp_collapsed
+        self._overlay_host = overlay_host or self
+        self._toggle_host = toggle_host or self._overlay_host
+        self._toggle_host_margins = toggle_host_margins or QMargins(0, 0, 0, 0)
+        self._collapsed_text = str(label.text() if collapsed_text is None else collapsed_text)
+        default_expanded = self._collapsed_text if expanded_text is None else expanded_text
+        self._expanded_text = str(default_expanded or "")
+
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(0)
+
+        self._label = label
+        self._label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._label.setMinimumWidth(0)
+        self._layout.addWidget(self._label)
+
+        self._fade = _FadeMask(fade_color, self._overlay_host)
+        self._fade.setObjectName("messageFadeMask")
+        self._fade.hide()
+
+        self._toggle_btn = QPushButton("Show More", self._toggle_host)
+        self._toggle_btn.setObjectName("messageExpandBtn")
+        self._toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._toggle_btn.clicked.connect(self._toggle_from_button)
+        self._toggle_btn.hide()
+
+        self.setMouseTracking(True)
+        if self._overlay_host is not self:
+            self._overlay_host.setMouseTracking(True)
+            self._overlay_host.installEventFilter(self)
+        if self._toggle_host not in {self, self._overlay_host}:
+            self._toggle_host.setMouseTracking(True)
+            self._toggle_host.installEventFilter(self)
+        self._refresh_clamp()
+
+    def enterEvent(self, event) -> None:  # noqa: N802
+        super().enterEvent(event)
+        self._self_hovered = True
+        self._update_toggle_visibility()
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        super().leaveEvent(event)
+        self._self_hovered = False
+        self._update_toggle_visibility()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._refresh_clamp()
+        self._position_overlay()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if watched in {self._overlay_host, self._toggle_host}:
+            if event.type() in (QEvent.Type.Enter, QEvent.Type.HoverEnter):
+                self._host_hovered = True
+                self._update_toggle_visibility()
+            elif event.type() in (QEvent.Type.Leave, QEvent.Type.HoverLeave):
+                self._host_hovered = False
+                self._update_toggle_visibility()
+            elif event.type() in (QEvent.Type.Resize, QEvent.Type.Move, QEvent.Type.Show):
+                self._position_overlay()
+        return super().eventFilter(watched, event)
+
+    def setMaximumContentWidth(self, width: int) -> None:
+        width = max(40, int(width))
+        if self._max_content_width == width:
+            return
+        self._max_content_width = width
+        self._label.setMaximumWidth(width)
+        self._refresh_clamp()
+
+    def set_text(self, text: str) -> None:
+        value = str(text or "")
+        self._collapsed_text = value
+        self._expanded_text = value
+        self._refresh_clamp()
+
+    def set_collapsed_text(self, text: str) -> None:
+        self._collapsed_text = str(text or "")
+        self._refresh_clamp()
+
+    def set_expanded_text(self, text: str) -> None:
+        self._expanded_text = str(text or "")
+        self._refresh_clamp()
+
+    def set_texts(self, collapsed_text: str, expanded_text: str, *, clamp_collapsed: bool) -> None:
+        self._collapsed_text = str(collapsed_text or "")
+        self._expanded_text = str(expanded_text or "")
+        self._clamp_collapsed = bool(clamp_collapsed)
+        self._refresh_clamp()
+
+    def label(self) -> QLabel:
+        return self._label
+
+    def is_expanded(self) -> bool:
+        return self._expanded
+
+    def has_overflow(self) -> bool:
+        return self._has_overflow
+
+    def can_toggle(self) -> bool:
+        return self._has_distinct_expanded_text() or self._has_overflow or self._expanded
+
+    def set_expanded(self, expanded: bool) -> None:
+        expanded = bool(expanded)
+        if self._expanded == expanded:
+            self._refresh_clamp()
+            return
+        self._expanded = expanded
+        self._refresh_clamp()
+
+    def _toggle_from_button(self) -> None:
+        if not self.can_toggle():
+            return
+        self._expanded = not self._expanded
+        self._refresh_clamp()
+        self.toggled.emit(self._expanded)
+
+    def _has_distinct_expanded_text(self) -> bool:
+        return bool(self._expanded_text) and self._expanded_text != self._collapsed_text
+
+    def _display_text(self) -> str:
+        if self._expanded and self._has_distinct_expanded_text():
+            return self._expanded_text
+        return self._collapsed_text
+
+    def _collapsed_height(self) -> int:
+        margins = self._label.contentsMargins()
+        return (
+            self._label.fontMetrics().height() * self._line_limit
+            + margins.top()
+            + margins.bottom()
+            + 2
+        )
+
+    def _text_height_for_width(self, width: int) -> int:
+        text = self._display_text()
+        margins = self._label.contentsMargins()
+        content_width = max(1, width - margins.left() - margins.right())
+        flags = int(Qt.TextFlag.TextWordWrap | Qt.TextFlag.TextExpandTabs)
+        rect = self._label.fontMetrics().boundingRect(
+            QRect(0, 0, content_width, 100000),
+            flags,
+            text,
+        )
+        return rect.height() + margins.top() + margins.bottom()
+
+    def _label_width(self) -> int:
+        width = self._max_content_width if self._max_content_width is not None else self.width()
+        width = max(40, int(width))
+        if not self._clamp_collapsed and self.can_toggle():
+            width -= self._toggle_btn.sizeHint().width() + 8
+        return max(40, width)
+
+    def _refresh_clamp(self) -> None:
+        display_text = self._display_text()
+        if self._label.text() != display_text:
+            self._label.setText(display_text)
+
+        label_width = self._label_width()
+        old_overflow = self._has_overflow
+        if self._clamp_collapsed and not self._has_distinct_expanded_text():
+            natural_height = max(
+                self._text_height_for_width(label_width),
+                self._label.heightForWidth(label_width),
+            )
+            collapsed_height = self._collapsed_height()
+            self._has_overflow = natural_height > (collapsed_height + 2)
+            if self._expanded or not self._has_overflow:
+                self._label.setMinimumHeight(0)
+                self._label.setMaximumHeight(16777215)
+            else:
+                self._label.setMinimumHeight(collapsed_height)
+                self._label.setMaximumHeight(collapsed_height)
+        else:
+            self._has_overflow = False
+            self._label.setMinimumHeight(0)
+            self._label.setMaximumHeight(16777215)
+        self._label.setMaximumWidth(label_width)
+
+        self._fade.setVisible(self._clamp_collapsed and self._has_overflow and not self._expanded)
+        self._toggle_btn.setText("Show less" if self._expanded else "Show More")
+        self._update_toggle_visibility()
+        self._position_overlay()
+        self.updateGeometry()
+        if old_overflow != self._has_overflow:
+            self.overflow_changed.emit()
+
+    def _update_toggle_visibility(self) -> None:
+        self._toggle_btn.setVisible((self._self_hovered or self._host_hovered) and self.can_toggle())
+
+    def _position_overlay(self) -> None:
+        overlay_rect = self._overlay_host.rect()
+        fade_height = max(28, self._label.fontMetrics().lineSpacing() * 2)
+        fade_bottom = overlay_rect.height()
+        self._fade.setGeometry(
+            0,
+            max(0, fade_bottom - fade_height),
+            overlay_rect.width(),
+            fade_height,
+        )
+        self._toggle_btn.adjustSize()
+        btn_size = self._toggle_btn.size()
+        toggle_host_rect = self._toggle_host.rect()
+        btn_x = max(
+            self._toggle_host_margins.left(),
+            toggle_host_rect.width() - self._toggle_host_margins.right() - btn_size.width(),
+        )
+        btn_y = max(
+            self._toggle_host_margins.top(),
+            toggle_host_rect.height() - self._toggle_host_margins.bottom() - btn_size.height(),
+        )
+        self._toggle_btn.move(
+            btn_x,
+            btn_y,
+        )
+        self._fade.raise_()
+        self._toggle_btn.raise_()
+
+
 class MessageRow(QWidget):
     """Render a chat message matching VS Code Copilot Chat's visual style."""
 
@@ -396,11 +670,13 @@ class MessageRow(QWidget):
         content: str,
         timestamp: str = "",
         is_coordination: bool = False,
-        render_as_user_bubble: bool = False,
+        display_mode: str = "agent_markdown",
+        bubble_align: str = "left",
+        bubble_title: str | None = None,
+        bubble_on_timeline: bool = False,
+        bubble_collapsible: bool = True,
+        allow_edit: bool | None = None,
         agent_name: str = "Agent",
-        summary: str | None = None,
-        detail: str | None = None,
-        expandable: bool = True,
         agent_chain_prev: bool = False,
         agent_chain_next: bool = False,
         parent: QWidget | None = None,
@@ -415,23 +691,34 @@ class MessageRow(QWidget):
         self._message_payload = _message_payload_from_content(content)
         self._timestamp = timestamp
         self._is_coordination = is_coordination
-        self._render_as_user_bubble = render_as_user_bubble
+        if display_mode == "agent_markdown" and role == "user":
+            display_mode = "bubble"
+        if display_mode == "bubble" and bubble_align == "left" and role == "user":
+            bubble_align = "right"
+        if allow_edit is None:
+            allow_edit = role == "user" and display_mode == "bubble" and bubble_align == "right"
+        self._display_mode = display_mode
+        self._bubble_align = bubble_align
+        self._bubble_title = bubble_title
+        self._bubble_on_timeline = bubble_on_timeline
+        self._bubble_collapsible = bubble_collapsible
+        self._allow_edit = allow_edit
         self._agent_name = agent_name
         self._complete = False
         self._agent_content_layout: QVBoxLayout | None = None
         self._user_footer: QWidget | None = None
         self._editable = False
         self._user_bubble_container: QWidget | None = None
-        self._summary = summary
-        self._detail = detail
-        self._expandable = expandable
         self._expanded = False
         self._wrapping_labels: list[QLabel] = []
         self._raw_markdown_labels: dict[QLabel, str] = {}
         self._agent_chain_prev = agent_chain_prev
         self._agent_chain_next = agent_chain_next
         self._timeline_rail: TimelineRail | None = None
-        self._summary_btn: QPushButton | None = None
+        self._bubble_header: QWidget | None = None
+        self._bubble_arrow_widget: _DisclosureArrow | None = None
+        self._bubble_arrow_host: QWidget | None = None
+        self._bubble_title_label: QLabel | None = None
         self._summary_header: QWidget | None = None
         self._summary_arrow_widget: _DisclosureArrow | None = None
         self._summary_arrow_host: QWidget | None = None
@@ -455,6 +742,7 @@ class MessageRow(QWidget):
         self._bubble_text = str(self._message_payload["text"] or "")
         self._context_chip_text = self._message_payload["chip_text"]
         self._context_chip_tooltip = self._message_payload["chip_tooltip"]
+        self._body_content_widget: _ExpandableContentWidget | None = None
         self._setup_ui()
         self._setup_hover_handler()
 
@@ -478,7 +766,7 @@ class MessageRow(QWidget):
             coord.setObjectName("msgCoordination")
             self._outer_layout.addWidget(coord)
 
-        if self._is_outbound_message():
+        if self._uses_bubble_layout() and self._bubble_align == "right":
             self._outer_layout.setContentsMargins(16, 6, 16, 6)
             row = QWidget(outer)
             row.setObjectName("userMessageRow")
@@ -508,18 +796,12 @@ class MessageRow(QWidget):
                 QSizePolicy.Policy.Preferred,
             )
             bl = QVBoxLayout(bubble)
-            bl.setContentsMargins(8, 8, 12, 8)
+            bl.setContentsMargins(USER_BUBBLE_CONTENT_MARGINS)
             bl.setSpacing(0)
             self._user_bubble_widget = bubble
             self._user_bubble_layout = bcl
 
-            if self._summary is not None:
-                bl.addWidget(self._build_summary_widget("user"))
-                self._detail_widget = self._build_detail_widget("user")
-                bl.addWidget(self._detail_widget)
-                self._detail_widget.setVisible(False)
-            else:
-                self._populate_user_bubble_content(bl)
+            self._populate_bubble_content(bl, bubble_type="right")
 
             bcl.addWidget(bubble)
 
@@ -562,8 +844,9 @@ class MessageRow(QWidget):
             rl.setContentsMargins(0, 0, 0, 0)
             rl.setSpacing(8)
 
-            self._timeline_rail = TimelineRail(parent=row)
-            rl.addWidget(self._timeline_rail, 0, Qt.AlignmentFlag.AlignLeft)
+            if self._uses_timeline():
+                self._timeline_rail = TimelineRail(parent=row)
+                rl.addWidget(self._timeline_rail, 0, Qt.AlignmentFlag.AlignLeft)
 
             self._agent_content_layout = QVBoxLayout()
             self._agent_content_layout.setContentsMargins(
@@ -575,13 +858,34 @@ class MessageRow(QWidget):
             self._agent_content_layout.setSpacing(0)
             rl.addLayout(self._agent_content_layout, 1)
             self._outer_layout.addWidget(row)
-            self._rebuild_agent_content()
+            if self._uses_bubble_layout():
+                bubble_host = QWidget(row)
+                bubble_host.setObjectName("leftBubbleHost")
+                host_layout = QVBoxLayout(bubble_host)
+                host_layout.setContentsMargins(0, 0, 0, _timeline_bottom_padding(self))
+                host_layout.setSpacing(0)
+                bubble = QWidget(bubble_host)
+                bubble.setObjectName("userMessageBubble")
+                bubble.setSizePolicy(
+                    QSizePolicy.Policy.Expanding,
+                    QSizePolicy.Policy.Preferred,
+                )
+                bubble_layout = QVBoxLayout(bubble)
+                bubble_layout.setContentsMargins(USER_BUBBLE_CONTENT_MARGINS)
+                bubble_layout.setSpacing(0)
+                self._user_bubble_widget = bubble
+                self._populate_bubble_content(bubble_layout, bubble_type="left")
+                host_layout.addWidget(bubble, 0, Qt.AlignmentFlag.AlignLeft)
+                self._agent_content_layout.addWidget(bubble_host)
+                self._update_left_bubble_width()
+            else:
+                self._rebuild_agent_content()
             self._update_agent_chain()
 
         layout.addWidget(outer)
 
-    def _populate_user_bubble_content(self, layout: QVBoxLayout) -> None:
-        if self._context_chip_text:
+    def _populate_bubble_content(self, layout: QVBoxLayout, *, bubble_type: str) -> None:
+        if bubble_type == "right" and self._context_chip_text:
             layout.addWidget(
                 self._build_context_chip(self._context_chip_text),
                 0,
@@ -589,30 +893,38 @@ class MessageRow(QWidget):
             )
             if self._bubble_text:
                 layout.addSpacing(8)
-        text_content = self._bubble_text
-        if not text_content:
-            return
-        text = QLabel(text_content)
+        text = QLabel(self._bubble_text)
         text.setObjectName("userMessageText")
         text.setWordWrap(True)
-        text.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         text.setTextFormat(Qt.TextFormat.PlainText)
         text.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         text.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
-        text.setMinimumWidth(0)
         text.installEventFilter(self)
         c = get_theme_colors()
         text.setStyleSheet(f"color: {c['editor_fg']}; background-color: transparent;")
-        layout.addWidget(text)
+        collapsed_text, expanded_text, clamp_collapsed = self._bubble_text_strategy()
+        self._body_content_widget = self._build_expandable_content_widget(
+            text,
+            fade_color=c["bubble_bg"],
+            collapsed_text=collapsed_text,
+            expanded_text=expanded_text,
+            clamp_collapsed=clamp_collapsed,
+            overlay_host=None,
+            toggle_host=self._user_bubble_widget,
+            toggle_host_margins=layout.contentsMargins(),
+        )
+        self._body_content_widget.toggled.connect(self._on_bubble_expanded_changed)
+        self._body_content_widget.overflow_changed.connect(self._refresh_bubble_header)
+        layout.addWidget(self._body_content_widget)
 
     def _build_context_chip(self, chip_text: str) -> QWidget:
         chip = QWidget(self)
         chip.setObjectName("userContextChip")
         chip.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         chip_layout = QHBoxLayout(chip)
-        chip_layout.setContentsMargins(10, 0, 10, 2)
+        chip_layout.setContentsMargins(10, 0, 10, 0)
         chip_layout.setSpacing(6)
         chip.setFixedHeight(30)
 
@@ -625,7 +937,7 @@ class MessageRow(QWidget):
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         chip_layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignVCenter)
 
-        text_label = _OpticallyCenteredChipLabel(chip_text, chip)
+        text_label = _ElidedLabel(chip_text, chip)
         text_label.setObjectName("userContextChipText")
         text_label.installEventFilter(self)
         text_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
@@ -644,6 +956,17 @@ class MessageRow(QWidget):
     def _clear_agent_content(self) -> None:
         self._wrapping_labels = []
         self._raw_markdown_labels = {}
+        self._body_content_widget = None
+        self._bubble_header = None
+        self._bubble_arrow_widget = None
+        self._bubble_arrow_host = None
+        self._bubble_title_label = None
+        self._summary_header = None
+        self._summary_arrow_widget = None
+        self._summary_arrow_host = None
+        self._summary_text_label = None
+        self._detail_label = None
+        self._detail_widget = None
         if self._agent_content_layout is None:
             return
         while self._agent_content_layout.count():
@@ -661,12 +984,12 @@ class MessageRow(QWidget):
         self._clear_agent_content()
         if self._agent_content_layout is None:
             return
-
-        if self._summary is not None:
-            self._agent_content_layout.addWidget(self._build_summary_widget("agent"))
-            self._detail_widget = self._build_detail_widget("agent")
+        if self._display_mode == "thought":
+            self._agent_content_layout.addWidget(self._build_summary_widget())
+            self._detail_widget = self._build_detail_widget()
             self._agent_content_layout.addWidget(self._detail_widget)
             self._detail_widget.setVisible(self._expanded and self._has_detail())
+            self._apply_text_width_constraints()
             self._sync_timeline_dot_alignment()
             return
 
@@ -712,95 +1035,79 @@ class MessageRow(QWidget):
             self._timeline_rail.set_chain(self._agent_chain_prev, self._agent_chain_next)
 
     def _has_detail(self) -> bool:
-        return bool(self._detail)
+        return bool(self._content)
 
-    def _build_summary_widget(self, summary_type: str) -> QWidget:
+    def _build_summary_widget(self) -> QWidget:
         widget = _SummaryHeader(self)
-        if summary_type == "agent":
-            # Keep timeline events on a fixed vertical pitch.
-            widget.setMinimumHeight(TIMELINE_EVENT_ROW_HEIGHT)
+        widget.setMinimumHeight(TIMELINE_EVENT_ROW_HEIGHT)
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        layout.setSpacing(0)
         self._summary_header = widget
+        widget.setObjectName("toolCallHeader")
 
-        if summary_type == "agent":
-            widget.setObjectName("toolCallHeader")
-        else:
-            widget.setObjectName("msgSummaryHeader")
+        # Content host with same margins as regular agent message labels (0,2,0,6)
+        content_host = QWidget(widget)
+        content_host_layout = QHBoxLayout(content_host)
+        content_host_layout.setContentsMargins(0, 2, 0, 6)
+        content_host_layout.setSpacing(4)
 
-        self._summary_arrow_widget = _DisclosureArrow(self._expanded, widget)
-        self._summary_arrow_widget.setVisible(self._expandable and self._has_detail())
-        self._summary_arrow_host = QWidget(widget)
+        self._summary_arrow_widget = _DisclosureArrow(self._expanded, content_host)
+        self._summary_arrow_widget.setVisible(self._bubble_collapsible and self._has_detail())
+        self._summary_arrow_host = QWidget(content_host)
         self._summary_arrow_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
         ahl = QVBoxLayout(self._summary_arrow_host)
         ahl.setContentsMargins(0, 0, 0, 0)
         ahl.setSpacing(0)
         ahl.addWidget(self._summary_arrow_widget, 0, Qt.AlignmentFlag.AlignTop)
-        left_margin = 4 if summary_type == "agent" else 0
-        layout.setContentsMargins(left_margin, 4, 0, 6)
 
-        self._summary_text_label = QLabel(self._summary or "", widget)
+        self._summary_text_label = QLabel(self._bubble_title or "", content_host)
         self._summary_text_label.setObjectName("toolCallHeaderText")
         self._summary_text_label.setTextFormat(Qt.TextFormat.PlainText)
         self._summary_text_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        self._summary_text_label.setWordWrap(True)
-        self._summary_text_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
-        self._summary_text_label.setMinimumWidth(0)
-        layout.addWidget(self._summary_text_label, 0, Qt.AlignmentFlag.AlignTop)
-        layout.addWidget(self._summary_arrow_host, 0, Qt.AlignmentFlag.AlignTop)
-        layout.addStretch(1)
+        self._summary_text_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+
+        content_host_layout.addWidget(self._summary_text_label, 0, Qt.AlignmentFlag.AlignTop)
+        content_host_layout.addWidget(self._summary_arrow_host, 0, Qt.AlignmentFlag.AlignTop)
+        content_host_layout.addStretch(1)
+
+        layout.addWidget(content_host, 1, Qt.AlignmentFlag.AlignTop)
         self._sync_summary_arrow_alignment()
         self._sync_timeline_dot_alignment()
-
         widget.setCursor(
             Qt.CursorShape.PointingHandCursor
-            if (self._expandable and self._has_detail())
+            if (self._bubble_collapsible and self._has_detail())
             else Qt.CursorShape.ArrowCursor
         )
         widget.clicked.connect(self._toggle_summary)
+        self._refresh_summary_header()
         return widget
 
-    def _build_detail_widget(self, detail_type: str) -> QWidget:
+    def _build_detail_widget(self) -> QWidget:
         widget = QWidget(self)
         layout = QVBoxLayout(widget)
-        # Keep expanded content aligned with timeline content start.
-        left_margin = 4 if detail_type == "agent" else 20
-        layout.setContentsMargins(left_margin, 2, 0, 0)
+        layout.setContentsMargins(TIMELINE_TEXT_LEFT_GUTTER, 2, 0, 0)
         layout.setSpacing(0)
-
-        if detail_type == "agent":
-            label = self._build_agent_markdown_label(self._detail or "")
-            self._detail_label = label
-        else:
-            label = QLabel(self._detail or "")
-            label.setObjectName("userMessageText")
-            label.setWordWrap(True)
-            label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
-            label.setTextFormat(Qt.TextFormat.PlainText)
-            label.setTextInteractionFlags(
-                Qt.TextInteractionFlag.TextSelectableByMouse
-            )
-            label.setMinimumWidth(0)
-            c = get_theme_colors()
-            label.setStyleSheet(f"color: {c['editor_fg']}; background-color: transparent;")
+        label = self._build_agent_markdown_label(self._content or "")
+        self._detail_label = label
         layout.addWidget(label)
         return widget
 
     def _toggle_summary(self) -> None:
-        if not (self._expandable and self._has_detail()):
+        if not (self._bubble_collapsible and self._has_detail()):
             return
         self._expanded = not self._expanded
-        if self._detail_widget:
+        if self._detail_widget is not None:
             self._detail_widget.setVisible(self._expanded)
         self._refresh_summary_header()
 
     def set_summary_text(self, summary: str) -> None:
-        self._summary = summary
+        self._bubble_title = summary
         self._refresh_summary_header()
 
     def set_detail_text(self, detail: str) -> None:
-        self._detail = detail
+        self._bubble_text = detail or ""
+        self._content = detail or ""
         if self._detail_label is not None:
             self._detail_label.setText(render_markdown(detail or ""))
             self._raw_markdown_labels[self._detail_label] = detail or ""
@@ -809,14 +1116,14 @@ class MessageRow(QWidget):
             expanded = self._expanded
             self._rebuild_agent_content()
             self._expanded = expanded
-        if self._detail_widget:
+        if self._detail_widget is not None:
             self._detail_widget.setVisible(self._expanded and self._has_detail())
         self._refresh_summary_header()
 
     def _refresh_summary_header(self) -> None:
-        can_expand = self._expandable and self._has_detail()
+        can_expand = self._bubble_collapsible and self._has_detail()
         if self._summary_text_label is not None:
-            self._summary_text_label.setText(self._summary or "")
+            self._summary_text_label.setText(self._bubble_title or "")
         if self._summary_arrow_widget is not None:
             self._summary_arrow_widget.setVisible(can_expand)
             self._summary_arrow_widget.set_expanded(self._expanded)
@@ -828,21 +1135,124 @@ class MessageRow(QWidget):
             )
         self._apply_thinking_text_style()
 
-    def _sync_summary_arrow_alignment(self) -> None:
-        """Align disclosure arrow center to the first summary text line center."""
-        if (
-            self._summary_arrow_host is None
-            or self._summary_text_label is None
-            or self._summary_arrow_widget is None
-        ):
+    def _build_bubble_header(self) -> QWidget:
+        widget = _SummaryHeader(self)
+        if self._bubble_on_timeline:
+            # Keep timeline events on a fixed vertical pitch.
+            widget.setMinimumHeight(TIMELINE_EVENT_ROW_HEIGHT)
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        self._bubble_header = widget
+        widget.setObjectName("toolCallHeader" if self._display_mode == "thought" else "msgSummaryHeader")
+
+        self._bubble_arrow_widget = _DisclosureArrow(self._expanded, widget)
+        self._bubble_arrow_host = QWidget(widget)
+        self._bubble_arrow_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+        ahl = QVBoxLayout(self._bubble_arrow_host)
+        ahl.setContentsMargins(0, 0, 0, 0)
+        ahl.setSpacing(0)
+        ahl.addWidget(self._bubble_arrow_widget, 0, Qt.AlignmentFlag.AlignTop)
+        left_margin = 4 if self._bubble_on_timeline else 0
+        layout.setContentsMargins(left_margin, 4, 0, 6)
+
+        self._bubble_title_label = QLabel(self._bubble_title or "", widget)
+        self._bubble_title_label.setObjectName("toolCallHeaderText")
+        self._bubble_title_label.setTextFormat(Qt.TextFormat.PlainText)
+        self._bubble_title_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self._bubble_title_label.setWordWrap(True)
+        self._bubble_title_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._bubble_title_label.setMinimumWidth(0)
+        layout.addWidget(self._bubble_title_label, 1, Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(self._bubble_arrow_host, 0, Qt.AlignmentFlag.AlignTop)
+        self._sync_bubble_arrow_alignment()
+        self._sync_timeline_dot_alignment()
+
+        widget.setCursor(
+            Qt.CursorShape.PointingHandCursor
+            if self._can_toggle_bubble()
+            else Qt.CursorShape.ArrowCursor
+        )
+        widget.clicked.connect(self._toggle_bubble)
+        self._refresh_bubble_header()
+        return widget
+
+    def _toggle_bubble(self) -> None:
+        if not self._can_toggle_bubble():
             return
-        metrics = self._summary_text_label.fontMetrics()
-        line_height = max(1, metrics.height())
-        arrow_height = max(1, self._summary_arrow_widget.height())
+        self._set_bubble_expanded(not self._expanded)
+
+    def _set_bubble_expanded(self, expanded: bool) -> None:
+        self._expanded = bool(expanded)
+        if self._body_content_widget is not None:
+            self._body_content_widget.set_expanded(self._expanded)
+        self._refresh_bubble_header()
+
+    def set_bubble_title(self, title: str | None) -> None:
+        if self._display_mode == "thought":
+            self.set_summary_text(title or "")
+            return
+        self._bubble_title = title
+        if self._body_content_widget is not None:
+            collapsed_text, expanded_text, clamp_collapsed = self._bubble_text_strategy()
+            self._body_content_widget.set_texts(
+                collapsed_text,
+                expanded_text,
+                clamp_collapsed=clamp_collapsed,
+            )
+        self._refresh_bubble_header()
+
+    def set_bubble_content(self, content: str) -> None:
+        if self._display_mode == "thought":
+            self.set_detail_text(content)
+            return
+        self._bubble_text = content or ""
+        self._content = content or ""
+        if self._body_content_widget is not None:
+            collapsed_text, expanded_text, clamp_collapsed = self._bubble_text_strategy()
+            self._body_content_widget.set_texts(
+                collapsed_text,
+                expanded_text,
+                clamp_collapsed=clamp_collapsed,
+            )
+            self._apply_text_width_constraints()
+        self._refresh_bubble_header()
+
+    def _on_bubble_expanded_changed(self, expanded: bool) -> None:
+        self._expanded = expanded
+        self._refresh_bubble_header()
+
+    def _refresh_bubble_header(self) -> None:
+        self._sync_timeline_dot_alignment()
+        self._apply_thinking_text_style()
+
+    def _can_toggle_bubble(self) -> bool:
+        if not self._bubble_collapsible:
+            return False
+        if self._body_content_widget is None:
+            return False
+        return self._body_content_widget.can_toggle()
+
+    def _align_arrow_to_first_line(self, arrow_host, text_label, arrow_widget) -> None:
+        """Align disclosure arrow center to the first text line center."""
+        if arrow_host is None or text_label is None or arrow_widget is None:
+            return
+        line_height = max(1, text_label.fontMetrics().height())
+        arrow_height = max(1, arrow_widget.height())
         top_offset = max(0, (line_height - arrow_height) // 2)
-        host_layout = self._summary_arrow_host.layout()
+        host_layout = arrow_host.layout()
         if isinstance(host_layout, QVBoxLayout):
             host_layout.setContentsMargins(0, top_offset, 0, 0)
+
+    def _sync_summary_arrow_alignment(self) -> None:
+        self._align_arrow_to_first_line(
+            self._summary_arrow_host, self._summary_text_label, self._summary_arrow_widget
+        )
+
+    def _sync_bubble_arrow_alignment(self) -> None:
+        self._align_arrow_to_first_line(
+            self._bubble_arrow_host, self._bubble_title_label, self._bubble_arrow_widget
+        )
 
     @staticmethod
     def _first_line_center_y(top_offset: int, line_height: int) -> float:
@@ -852,12 +1262,25 @@ class MessageRow(QWidget):
         """Align timeline dot center to the first visible text line center."""
         if self._timeline_rail is None:
             return
-        # Summary rows (e.g. Thought): align to summary first line.
         if self._summary_text_label is not None and self._summary_header is not None:
             metrics = self._summary_text_label.fontMetrics()
             line_height = metrics.height()
             margins = self._summary_header.layout().contentsMargins() if self._summary_header.layout() else None
             top = margins.top() if margins is not None else 0
+            self._timeline_rail.set_dot_center_y(self._first_line_center_y(top, line_height))
+            return
+        if self._bubble_title_label is not None and self._bubble_header is not None:
+            metrics = self._bubble_title_label.fontMetrics()
+            line_height = metrics.height()
+            margins = self._bubble_header.layout().contentsMargins() if self._bubble_header.layout() else None
+            top = margins.top() if margins is not None else 0
+            self._timeline_rail.set_dot_center_y(self._first_line_center_y(top, line_height))
+            return
+        if self._body_content_widget is not None:
+            label = self._body_content_widget.label()
+            metrics = label.fontMetrics()
+            line_height = metrics.height()
+            top = label.contentsMargins().top()
             self._timeline_rail.set_dot_center_y(self._first_line_center_y(top, line_height))
             return
         # Plain agent messages: align to first markdown label first line.
@@ -876,20 +1299,16 @@ class MessageRow(QWidget):
 
     def _apply_thinking_text_style(self) -> None:
         color = get_theme_colors()["muted"] if self._is_thinking_row else ""
-        if self._summary_text_label is not None:
-            if color:
-                self._summary_text_label.setStyleSheet(
-                    f"color: {color}; background-color: transparent;"
-                )
-            else:
-                self._summary_text_label.setStyleSheet("")
-        if self._detail_label is not None:
-            if color:
-                self._detail_label.setStyleSheet(
-                    f"color: {color}; background-color: transparent;"
-                )
-            else:
-                self._detail_label.setStyleSheet("")
+        sheet = f"color: {color}; background-color: transparent;" if color else ""
+        for label in (
+            self._summary_text_label,
+            self._detail_label,
+            self._bubble_title_label,
+        ):
+            if label is not None:
+                label.setStyleSheet(sheet)
+        if self._body_content_widget is not None:
+            self._body_content_widget.label().setStyleSheet(sheet)
 
     def mark_complete(self) -> None:
         """Mark streaming complete — enable hover-triggered actions."""
@@ -906,7 +1325,7 @@ class MessageRow(QWidget):
 
         Only the most recent user message should be editable.
         """
-        if self._role != "user":
+        if not self._allow_edit:
             return
         self._editable = editable
         if self._complete and self._user_footer:
@@ -914,7 +1333,7 @@ class MessageRow(QWidget):
 
     def _request_edit(self) -> None:
         """Enter edit mode for this user message."""
-        if self._role == "user" and self._editable:
+        if self._allow_edit and self._editable:
             self.enter_edit_mode()
 
     def enter_edit_mode(self) -> None:
@@ -938,16 +1357,13 @@ class MessageRow(QWidget):
             f"}}"
         )
 
-        if self._summary is not None:
-            edit_content = self._detail
-        else:
-            edit_content = self._bubble_text
+        edit_content = self._bubble_text
 
         edit_bubble = QWidget(self._user_bubble_container)
         edit_bubble.setObjectName("userEditBubble")
         edit_bubble.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         ebl = QVBoxLayout(edit_bubble)
-        ebl.setContentsMargins(8, 8, 12, 8)
+        ebl.setContentsMargins(USER_BUBBLE_CONTENT_MARGINS)
         ebl.setSpacing(0)
 
         edit = _NestedScrollPlainTextEdit(edit_content or "")
@@ -1004,7 +1420,6 @@ class MessageRow(QWidget):
                 QSizePolicy.Policy.Preferred,
             )
             self._user_bubble_container.setMinimumWidth(max(80, self.width() - 32))
-            self._user_bubble_container.setMaximumWidth(16777215)
             self._user_bubble_container.setMaximumWidth(max(80, self.width() - 32))
         self._update_edit_widget_height()
         self._edit_widget.setFocus()
@@ -1111,7 +1526,7 @@ class MessageRow(QWidget):
         copy_action = menu.addAction("复制")
         copy_action.triggered.connect(self._copy_content)
 
-        if self._role == "user" and self._editable:
+        if self._allow_edit and self._editable:
             edit_action = menu.addAction("编辑并重发")
             edit_action.triggered.connect(self._request_edit)
 
@@ -1174,7 +1589,7 @@ class MessageRow(QWidget):
             edit_action = None
             if (
                 obj.objectName() in {"userMessageText", "userContextChipText"}
-                and self._role == "user"
+                and self._allow_edit
                 and self._editable
             ):
                 edit_action = menu.addAction("编辑并重发")
@@ -1291,25 +1706,69 @@ class MessageRow(QWidget):
         super().resizeEvent(event)
         self._apply_text_width_constraints()
         self._sync_summary_arrow_alignment()
+        self._sync_bubble_arrow_alignment()
         self._sync_timeline_dot_alignment()
-        if self._is_outbound_message() and self._user_bubble_container is not None:
-            if self._editing:
-                width = max(80, self.width() - 32)
-                self._user_bubble_container.setMinimumWidth(width)
-            else:
-                width = self._target_user_bubble_width()
-                self._user_bubble_container.setMinimumWidth(width)
-            self._user_bubble_container.setMaximumWidth(width)
-            self._sync_context_chip_width()
+        self._update_user_bubble_width()
+        self._update_left_bubble_width()
+
+    def _update_user_bubble_width(self) -> None:
+        if not self._is_outbound_message() or self._user_bubble_container is None:
+            return
+        if self._editing:
+            width = max(80, self.width() - 32)
+        else:
+            width = self._target_user_bubble_width()
+        self._user_bubble_container.setMinimumWidth(width)
+        self._user_bubble_container.setMaximumWidth(width)
+        self._sync_context_chip_width()
+
+    def _update_left_bubble_width(self) -> None:
+        if not (self._uses_bubble_layout() and self._bubble_align == "left"):
+            return
+        if self._user_bubble_widget is None:
+            return
+        width = max(80, self.width() - 56)
+        self._user_bubble_widget.setMinimumWidth(width)
+        self._user_bubble_widget.setMaximumWidth(width)
+        if self._body_content_widget is not None:
+            self._body_content_widget.setMaximumContentWidth(
+                self._user_bubble_content_width_limit()
+            )
 
     def _is_outbound_message(self) -> bool:
         """Right-side messages sent to an agent share the user bubble layout."""
-        return self._role == "user" or self._render_as_user_bubble
+        return self._uses_bubble_layout() and self._bubble_align == "right"
+
+    def _uses_bubble_layout(self) -> bool:
+        return self._display_mode == "bubble"
+
+    def _uses_timeline(self) -> bool:
+        if self._is_coordination:
+            return False
+        return self._display_mode in {"agent_markdown", "thought"} or self._bubble_on_timeline
+
+    def _uses_summary_bubble(self) -> bool:
+        return self._uses_bubble_layout() and bool(self._bubble_title) and not self._allow_edit
+
+    def _bubble_text_strategy(self) -> tuple[str, str, bool]:
+        if self._uses_summary_bubble():
+            return (str(self._bubble_title or ""), self._bubble_text, False)
+        return (self._bubble_text, self._bubble_text, True)
 
     def _apply_text_width_constraints(self) -> None:
         max_w = max(40, self._content_width_limit())
         for label in self._wrapping_labels:
             label.setMaximumWidth(max_w)
+        if self._uses_bubble_layout():
+            bubble_max_w = self._user_bubble_content_width_limit()
+            if self._bubble_title_label is not None:
+                self._bubble_title_label.setMaximumWidth(max(40, bubble_max_w - 24))
+            if self._body_content_widget is not None:
+                self._body_content_widget.setMaximumContentWidth(bubble_max_w)
+        elif self._display_mode == "thought" and self._summary_text_label is not None:
+            self._summary_text_label.setMaximumWidth(
+                max(40, max_w - 24 - TIMELINE_TEXT_LEFT_GUTTER)
+            )
 
     def _target_user_bubble_width(self) -> int:
         # Match the agent/tool timeline geometry: when the user bubble is
@@ -1322,6 +1781,22 @@ class MessageRow(QWidget):
 
     def _content_width_limit(self) -> int:
         return self.width() - 56
+
+    def _user_bubble_content_width_limit(self) -> int:
+        bubble_width = self._target_user_bubble_width() if self._bubble_align == "right" else max(40, self.width() - 56)
+        bubble = self._user_bubble_widget
+        if bubble is not None and bubble.layout() is not None:
+            margins = bubble.layout().contentsMargins()
+            bubble_width -= margins.left() + margins.right()
+        return max(40, bubble_width)
+
+    def refresh_layout_for_width_change(self) -> None:
+        """Synchronously recompute width-dependent sub-layouts."""
+        self._apply_text_width_constraints()
+        self._sync_bubble_arrow_alignment()
+        self._sync_timeline_dot_alignment()
+        self._update_user_bubble_width()
+        self._update_left_bubble_width()
 
     def _sync_context_chip_width(self) -> None:
         if self._context_chip_widget is None:
@@ -1343,7 +1818,7 @@ class MessageRow(QWidget):
 
     def get_display_text(self) -> str:
         role_text = "You" if self._role == "user" else "Agent"
-        content = self._bubble_text if self._is_outbound_message() else self._content
+        content = self._bubble_text if self._uses_bubble_layout() else self._content
         return f"{role_text}: {content}"
 
     def is_expanded(self) -> bool:
@@ -1359,3 +1834,28 @@ class MessageRow(QWidget):
         bubble_padding = 24
         row_gutters = 40
         return int((chip_width + bubble_padding) / 0.75) + row_gutters
+
+    def _build_expandable_content_widget(
+        self,
+        label: QLabel,
+        *,
+        fade_color: str,
+        collapsed_text: str | None = None,
+        expanded_text: str | None = None,
+        clamp_collapsed: bool = True,
+        overlay_host: QWidget | None = None,
+        toggle_host: QWidget | None = None,
+        toggle_host_margins: QMargins | None = None,
+    ) -> _ExpandableContentWidget:
+        widget = _ExpandableContentWidget(
+            label,
+            fade_color=fade_color,
+            collapsed_text=collapsed_text,
+            expanded_text=expanded_text,
+            clamp_collapsed=clamp_collapsed,
+            overlay_host=overlay_host,
+            toggle_host=toggle_host,
+            toggle_host_margins=toggle_host_margins,
+            parent=self,
+        )
+        return widget

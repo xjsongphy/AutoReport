@@ -1,4 +1,4 @@
-"""Tests for prompt loader with progressive loading."""
+"""Tests for prompt loader."""
 
 import tempfile
 from pathlib import Path
@@ -12,45 +12,40 @@ from autoreport.core.prompts.loader import PromptLoader
 def agents_dir():
     d = Path(tempfile.mkdtemp())
     (d / "main_agent.md").write_text(
-        "## Identity\nYou are the main agent.\n\n## Full Instructions\nDetailed main instructions.\n",
+        "# Main Agent\n\nYou are the main agent.\n\n## Core Rules\n\nCoordinate sub-agents.\n",
         encoding="utf-8",
     )
     (d / "data_analysis_agent.md").write_text(
-        "## Identity\nYou analyze data.\n\n## Full Instructions\nProcess CSV files.\n",
+        "# Data Analysis Agent\n\nYou analyze data.\n\n## Instructions\n\nProcess CSV files.\n",
         encoding="utf-8",
     )
     return d
 
 
-def test_load_identity(agents_dir):
+def test_load_prompt_main(agents_dir):
     loader = PromptLoader(agents_dir=agents_dir)
-    result = loader.load_identity("main")
+    result = loader.load_prompt("main")
     assert "main agent" in result
 
 
-def test_load_full(agents_dir):
+def test_load_prompt_data_analysis(agents_dir):
     loader = PromptLoader(agents_dir=agents_dir)
-    result = loader.load_full("main")
-    assert "Detailed main instructions" in result
-
-
-def test_load_complete(agents_dir):
-    loader = PromptLoader(agents_dir=agents_dir)
-    result = loader.load_complete("main")
-    assert "main agent" in result
-    assert "Detailed main instructions" in result
+    result = loader.load_prompt("data_analysis")
+    assert "data" in result
+    assert "CSV" in result
 
 
 def test_cache_hits(agents_dir):
     loader = PromptLoader(agents_dir=agents_dir)
-    first = loader.load_identity("main")
-    second = loader.load_identity("main")
+    first = loader.load_prompt("main")
+    second = loader.load_prompt("main")
     assert first == second
+    assert first is second  # same object, cached
 
 
 def test_reload_clears_cache(agents_dir):
     loader = PromptLoader(agents_dir=agents_dir)
-    loader.load_identity("main")
+    loader.load_prompt("main")
     assert "main" in loader._cache
 
     loader.reload()
@@ -59,31 +54,29 @@ def test_reload_clears_cache(agents_dir):
 
 def test_fallback_for_missing_file(agents_dir):
     loader = PromptLoader(agents_dir=agents_dir)
-    result = loader.load_identity("nonexistent_agent")
+    result = loader.load_prompt("nonexistent_agent")
     assert "nonexistent_agent" in result
 
 
 def test_fallback_built_in_types(agents_dir):
-    """Built-in agent types should have fallback prompts."""
     loader = PromptLoader(agents_dir=agents_dir)
     for agent_type in ["main", "data_analysis", "plotting", "theory", "report"]:
-        result = loader.load_identity(agent_type)
+        result = loader.load_prompt(agent_type)
         assert len(result) > 0
 
 
-def test_extract_section(agents_dir):
-    loader = PromptLoader(agents_dir=agents_dir)
-    content = (agents_dir / "main_agent.md").read_text()
-    section = loader._extract_section(content, "identity")
-    assert "main agent" in section
+def test_load_shared_context_available(agents_dir):
+    d = agents_dir
+    (d / "Common.md").write_text("## Shared\n\nCommon todo policy.", encoding="utf-8")
+    loader = PromptLoader(agents_dir=d)
+    result = loader.load_shared_context()
+    assert "Common todo policy" in result
 
 
-def test_extract_section_not_found(agents_dir):
+def test_load_shared_context_missing(agents_dir):
     loader = PromptLoader(agents_dir=agents_dir)
-    content = "No sections here"
-    section = loader._extract_section(content, "identity")
-    # Fallback: when section not found, return full content
-    assert section == "No sections here"
+    result = loader.load_shared_context()
+    assert result is None
 
 
 def test_get_filename_mapping(agents_dir):

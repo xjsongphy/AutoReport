@@ -1,4 +1,4 @@
-"""Prompt loader with progressive loading support."""
+"""Prompt loader — loads complete agent prompts with shared context."""
 
 import re
 from pathlib import Path
@@ -8,28 +8,17 @@ from loguru import logger
 
 
 class PromptLoader:
-    """Load agent prompts with progressive loading support.
+    """Load agent prompts.
 
-    Progressive loading strategy:
-    - Identity: Loaded at startup (~100-200 words), defines core role
-    - Full: Loaded on first agent activation, contains detailed instructions
-
-    Each prompt file should have two sections:
-    ## Identity
-    Brief role definition and core responsibilities.
-
-    ## Full Instructions
-    Detailed workflow, reference handling, narrative style, output format.
+    Each agent prompt file is a single Markdown file.  The full content is
+    loaded and returned every time — there is no identity/full split.
+    Shared context (Common.md) and per-agent skill summaries are assembled
+    by the caller, not here.
     """
 
     # Template directory paths
     _BASE_DIR: Final = Path(__file__).parent.parent.parent / "templates"
     _AGENTS_DIR: Final = _BASE_DIR / "agents"
-    _SECTION_HEADERS: Final = {
-        "identity": ("## Identity", "## identity"),
-        "full": ("## Full Instructions", "## full instructions", "## Full"),
-    }
-    _NEXT_SECTION_PATTERN: Final = re.compile(r"^##\s[^#]", re.MULTILINE)
 
     def __init__(self, agents_dir: Path | None = None):
         """Initialize prompt loader.
@@ -39,54 +28,38 @@ class PromptLoader:
                        Defaults to autoreport/templates/agents/.
         """
         self._agents_dir = Path(agents_dir) if agents_dir else self._AGENTS_DIR
-        self._cache: dict[str, dict[str, str]] = {}
-        self._shared_context: str | None = None
+        self._cache: dict[str, tuple[int | None, str]] = {}
+        self._shared_cache: tuple[int | None, str | None] | None = None
 
-    def load_identity(self, agent_type: str) -> str:
-        """Load identity section of agent prompt.
+    def load_prompt(self, agent_type: str) -> str:
+        """Load complete agent prompt.
 
         Args:
-            agent_type: Agent type (e.g., "main", "data_analysis", "plotting",
-                        "theory", "report")
+            agent_type: Agent type (e.g., "main", "data_analysis").
 
         Returns:
-            Identity section content.
+            Complete prompt file content.
 
         Raises:
             FileNotFoundError: If prompt file not found.
-            ValueError: If identity section not found in file.
         """
-        return self._load_section(agent_type, "identity")
+        filename = self._get_filename(agent_type)
+        filepath = self._agents_dir / filename
+        mtime_ns = filepath.stat().st_mtime_ns if filepath.exists() else None
 
-    def load_full(self, agent_type: str) -> str:
-        """Load full instructions section of agent prompt.
+        cached = self._cache.get(agent_type)
+        if cached and cached[0] == mtime_ns:
+            return cached[1]
 
-        Args:
-            agent_type: Agent type (e.g., "main", "data_analysis", "plotting",
-                        "theory", "report")
+        if not filepath.exists():
+            logger.warning("Prompt file not found: {}, using fallback", filepath)
+            prompt = self._get_fallback_prompt(agent_type)
+        else:
+            content = filepath.read_text(encoding="utf-8")
+            prompt = content.strip()
 
-        Returns:
-            Full instructions section content.
-
-        Raises:
-            FileNotFoundError: If prompt file not found.
-            ValueError: If full section not found in file.
-        """
-        return self._load_section(agent_type, "full")
-
-    def load_complete(self, agent_type: str) -> str:
-        """Load complete prompt (identity + full instructions).
-
-        Args:
-            agent_type: Agent type (e.g., "main", "data_analysis", "plotting",
-                        "theory", "report")
-
-        Returns:
-            Complete prompt content with both sections.
-        """
-        identity = self.load_identity(agent_type)
-        full = self.load_full(agent_type)
-        return f"{identity}\n\n{full}"
+        self._cache[agent_type] = (mtime_ns, prompt)
+        return prompt
 
     def load_shared_context(self) -> str | None:
         """Load shared prompts for all agents.
@@ -94,62 +67,33 @@ class PromptLoader:
         Returns:
             Shared context content, or None if file not found.
         """
-        if self._shared_context is not None:
-            return self._shared_context
+        path = self._agents_dir / "Common.md"
+        mtime_ns = path.stat().st_mtime_ns if path.exists() else None
 
-        path = self._AGENTS_DIR / "Common.md"
+        if self._shared_cache and self._shared_cache[0] == mtime_ns:
+            return self._shared_cache[1]
+
         if not path.exists():
             logger.debug("Shared context file not found: {}", path)
+            self._shared_cache = (None, None)
             return None
 
         content = path.read_text(encoding="utf-8").strip()
-        self._shared_context = content
-        return content
+        shared = content or None
+        self._shared_cache = (mtime_ns, shared)
+        return shared
 
-    def _load_section(self, agent_type: str, section: str) -> str:
-        """Load a specific section from agent prompt file.
-
-        Args:
-            agent_type: Agent type identifier.
-            section: Section name ("identity" or "full").
-
-        Returns:
-            Section content.
-
-        Raises:
-            FileNotFoundError: If prompt file not found.
-            ValueError: If section not found in file.
-        """
-        # Check cache first
-        cached = self._cache.get(agent_type)
-        if cached and section in cached:
-            return cached[section]
-
-        # Map agent_type to filename
+    def get_signature(self, agent_type: str) -> tuple[int | None, int | None]:
+        """Return a file-based signature for prompt cache invalidation."""
         filename = self._get_filename(agent_type)
-        filepath = self._agents_dir / filename
-
-        if not filepath.exists():
-            logger.warning("Prompt file not found: {}, using fallback", filepath)
-            return self._get_fallback_prompt(agent_type)
-
-        # Read once and cache both sections to avoid duplicate disk reads/parsing.
-        content = filepath.read_text(encoding="utf-8")
-        identity = self._extract_section(content, "identity", filepath)
-        full = self._extract_section(content, "full", filepath)
-        self._cache[agent_type] = {"identity": identity, "full": full}
-        return self._cache[agent_type][section]
+        prompt_path = self._agents_dir / filename
+        shared_path = self._agents_dir / "Common.md"
+        prompt_sig = prompt_path.stat().st_mtime_ns if prompt_path.exists() else None
+        shared_sig = shared_path.stat().st_mtime_ns if shared_path.exists() else None
+        return prompt_sig, shared_sig
 
     def _get_filename(self, agent_type: str) -> str:
-        """Map agent type to filename.
-
-        Args:
-            agent_type: Agent type identifier.
-
-        Returns:
-            Filename for the agent prompt.
-        """
-        # Map common variations to standardized filenames
+        normalized = agent_type.lower().replace("-", "_").replace(" ", "_")
         mapping = {
             "main": "main_agent.md",
             "data_analysis": "data_analysis_agent.md",
@@ -157,71 +101,9 @@ class PromptLoader:
             "theory": "theory_agent.md",
             "report": "report_agent.md",
         }
-
-        # Handle underscores and hyphens
-        normalized = agent_type.lower().replace("-", "_").replace(" ", "_")
-
         return mapping.get(normalized, f"{normalized}_agent.md")
 
-    def _extract_section(self, content: str, section: str, filepath: Path | None = None) -> str:
-        """Extract a section from markdown content.
-
-        Args:
-            content: Full markdown content.
-            section: Section name to extract.
-            filepath: Optional file path for logging.
-
-        Returns:
-            Section content without the header.
-
-        Raises:
-            ValueError: If section not found.
-        """
-        headers = self._SECTION_HEADERS.get(section, ())
-        if not headers:
-            raise ValueError(f"Unknown section: {section}")
-
-        # Find section start
-        start_idx = -1
-        matched_header = None
-        for header in headers:
-            idx = content.find(header)
-            if idx != -1:
-                start_idx = idx + len(header)
-                matched_header = header
-                break
-
-        if start_idx == -1:
-            # Section not found — return full file content as fallback
-            logger.debug("Section '{}' not found in '{}', using full content", section, filepath)
-            return content.strip()
-
-        # Find next major section header (## level, not ###)
-        search_start = start_idx
-        next_header_idx = len(content)
-
-        for match in self._NEXT_SECTION_PATTERN.finditer(content, search_start):
-            idx = match.start()
-            # Make sure it's not our matched header
-            header_at_idx = content[idx:idx + len(matched_header)] if idx + len(matched_header) <= len(content) else ""
-            if header_at_idx != matched_header:
-                next_header_idx = idx
-                break
-
-        # Extract section content
-        section_content = content[start_idx:next_header_idx].strip()
-
-        return section_content
-
     def _get_fallback_prompt(self, agent_type: str) -> str:
-        """Get fallback prompt when file not found.
-
-        Args:
-            agent_type: Agent type identifier.
-
-        Returns:
-            Fallback prompt content.
-        """
         fallbacks = {
             "main": "You are the Main Agent for an automated physics experiment report writing system. Coordinate sub-agents and communicate with users.",
             "data_analysis": "You are the Data Analysis Agent. Read experimental data, process it, and generate analysis results.",
@@ -229,16 +111,13 @@ class PromptLoader:
             "theory": "You are the Theory Agent. Analyze reference materials and provide theoretical derivations.",
             "report": "You are the Report Agent. Write LaTeX reports and compile them to PDF.",
         }
-
         return fallbacks.get(
             agent_type.lower(),
             f"You are a {agent_type} agent for the AutoReport system.",
         )
 
     def reload(self) -> None:
-        """Clear cache and reload all prompts.
-
-        Useful for development or when prompts are modified at runtime.
-        """
+        """Clear cache — useful when prompts are modified at runtime."""
         self._cache.clear()
+        self._shared_cache = None
         logger.info("Prompt cache cleared")

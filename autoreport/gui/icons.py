@@ -1,9 +1,10 @@
 """Agent icons from Tabler Icons (MIT License)."""
 
-from PyQt6.QtGui import QColor, QIcon, QPainterPath, QPen, QPixmap, QPainter
 from PyQt6.QtCore import QByteArray, Qt
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
 
+from .theme import get_theme_colors
 
 # Tabler Icons SVG data (24x24, stroke-width 1.5)
 _SVG_ICONS: dict[str, str] = {
@@ -25,18 +26,20 @@ _AGENT_ICON_MAP: dict[str, str] = {
     "report": "file-text",
 }
 
-# Agent icon colors
-_AGENT_COLORS: dict[str, str] = {
-    "main": "#0078d4",        # Blue
-    "data_analysis": "#107c10",  # Green
-    "plotting": "#8e44ad",    # Purple
-    "theory": "#e67e22",      # Orange
-    "report": "#5dade2",      # Light Blue
+_AGENT_COLOR_KEYS: dict[str, str] = {
+    "main": "agent_main",
+    "data_analysis": "agent_data_analysis",
+    "plotting": "agent_plotting",
+    "theory": "agent_theory",
+    "report": "agent_report",
 }
 
 
-def _svg_to_icon(svg_data: str, color: str = "#d4d4d4", size: int = 16) -> QIcon:
+def _svg_to_icon(svg_data: str, color: str | None = None, size: int = 16) -> QIcon:
     """Convert SVG string to QIcon with specified color and size."""
+    if color is None:
+        color = get_theme_colors()["icon_default"]
+
     # Inject color into SVG (both stroke and fill)
     colored_svg = svg_data.replace('stroke="currentColor"', f'stroke="{color}"')
     colored_svg = colored_svg.replace('fill="currentColor"', f'fill="{color}"')
@@ -67,7 +70,8 @@ def get_agent_icon(agent_type: str, color: str | None = None, size: int = 24) ->
     icon_name = _AGENT_ICON_MAP.get(agent_type, "robot")
     # Use agent's theme color if no override provided
     if color is None:
-        color = _AGENT_COLORS.get(agent_type, "#0078d4")
+        c = get_theme_colors()
+        color = c.get(_AGENT_COLOR_KEYS.get(agent_type, "agent_main"), c["agent_main"])
     cache_key = f"{icon_name}_{color}_{size}"
 
     if cache_key not in _ICON_CACHE:
@@ -77,13 +81,15 @@ def get_agent_icon(agent_type: str, color: str | None = None, size: int = 24) ->
     return _ICON_CACHE[cache_key]
 
 
-def get_run_icon(color: str = "#4ec9b0", size: int = 18) -> QIcon:
+def get_run_icon(color: str | None = None, size: int = 18) -> QIcon:
     """Get QIcon for the run/play button (VSCode Codicon).
 
     Args:
-        color: Icon color (default VSCode green: #4ec9b0).
+        color: Icon color override. Defaults to the current theme run icon color.
         size: Icon size in pixels (default 18).
     """
+    if color is None:
+        color = get_theme_colors()["icon_run"]
     cache_key = f"run_{color}_{size}"
 
     if cache_key not in _ICON_CACHE:
@@ -93,8 +99,10 @@ def get_run_icon(color: str = "#4ec9b0", size: int = 18) -> QIcon:
     return _ICON_CACHE[cache_key]
 
 
-def get_preview_icon(color: str = "#4ec9b0", size: int = 18) -> QIcon:
+def get_preview_icon(color: str | None = None, size: int = 18) -> QIcon:
     """Get QIcon for the preview button (VSCode-style eye icon)."""
+    if color is None:
+        color = get_theme_colors()["icon_preview"]
     cache_key = f"preview_{color}_{size}"
 
     if cache_key not in _ICON_CACHE:
@@ -104,8 +112,10 @@ def get_preview_icon(color: str = "#4ec9b0", size: int = 18) -> QIcon:
     return _ICON_CACHE[cache_key]
 
 
-def get_context_eye_icons(color: str = "#a6a6a6", size: int = 14) -> dict[str, QIcon]:
+def get_context_eye_icons(color: str | None = None, size: int = 14) -> dict[str, QIcon]:
     """Get eye / eye-off icons matching API config page style."""
+    if color is None:
+        color = get_theme_colors()["icon_context_eye"]
     eye_key = f"context_eye_{color}_{size}"
     off_key = f"context_eye_off_{color}_{size}"
 

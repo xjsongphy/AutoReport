@@ -161,9 +161,9 @@ class ConversationStore:
         agent_dir.mkdir(parents=True, exist_ok=True)
         return agent_dir / f"{session_id}.jsonl"
 
-    def _session_user_texts(self, session_id: str) -> list[str]:
+    def _session_user_texts(self, session_id: str, agent_type: str | None = None) -> list[str]:
         texts: list[str] = []
-        for agent_type in _AGENT_TYPES:
+        for agent_type in ([agent_type] if agent_type else _AGENT_TYPES):
             jsonl_path = self._dir / agent_type / f"{session_id}.jsonl"
             if not jsonl_path.exists():
                 continue
@@ -186,23 +186,32 @@ class ConversationStore:
                 continue
         return texts
 
-    def get_sessions(self) -> list[dict]:
-        """Return session metadata ordered newest first, excluding empty sessions."""
+    def get_sessions(self, agent_type: str | None = None) -> list[dict]:
+        """Return session metadata ordered newest first, excluding empty sessions.
+
+        When *agent_type* is given, only sessions in which that specific agent
+        has at least one message are returned — this is what the per-agent
+        history dropdown uses so each agent only sees its own conversations.
+        When *agent_type* is None (default) a session is included if ANY agent
+        has messages. Name/preview are likewise derived only from the given
+        agent's messages when scoped, so the list never mixes agents.
+        """
         sessions = self._load_sessions_metadata()
         non_empty = []
+        check_agents = [agent_type] if agent_type else _AGENT_TYPES
 
         for s in sessions:
             session_id = s.get("id")
             has_messages = False
-            for agent_type in _AGENT_TYPES:
-                jsonl_path = self._dir / agent_type / f"{session_id}.jsonl"
+            for at in check_agents:
+                jsonl_path = self._dir / at / f"{session_id}.jsonl"
                 if jsonl_path.exists() and jsonl_path.stat().st_size > 0:
                     has_messages = True
                     break
 
             if has_messages:
                 item = dict(s)
-                user_texts = self._session_user_texts(str(session_id))
+                user_texts = self._session_user_texts(str(session_id), agent_type)
                 visible_name = _user_visible_content_or_empty(item.get("name", ""))
                 visible_preview = _user_visible_content_or_empty(item.get("preview", ""))
                 if not visible_name or visible_name in ("新对话", "未命名对话", "???"):

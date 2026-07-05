@@ -39,6 +39,7 @@ class Message:
     tool_call_id: str | None = None  # tool result messages (role="tool" for OpenAI)
     is_tool_result: bool = False  # marks this as a tool result message
     thinking: str | None = None  # DeepSeek extended thinking blocks
+    cache_control: bool = False  # mark for prompt caching (Anthropic ephemeral cache)
 
 
 @dataclass

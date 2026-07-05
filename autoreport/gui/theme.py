@@ -40,18 +40,31 @@ def get_theme_colors() -> dict[str, str]:
     dark = is_dark_mode()
 
     # === Base Colors ===
-    bg = "#1e1e1e" if dark else "#ffffff"
-    surface = "#181818" if dark else "#f0f0f0"
-    panel_bg = "#141414" if dark else "#f0f0f0"
-    titlebar_bg = "#141414" if dark else surface
+    bg = "#1f1f1f" if dark else "#ffffff"
+    surface = "#181818" if dark else "#f8f8f8"
+    panel_bg = "#181818" if dark else "#f8f8f8"
+    titlebar_bg = "#181818" if dark else surface
     messages_bg = panel_bg
-    border = "#2b2b2b" if dark else "#e0e0e0"
-    fg = "#cccccc" if dark else "#616161"
-    muted = "#737373" if dark else "#9e9e9e"
+    border = "#2b2b2b" if dark else "#e5e5e5"
+    fg = "#cccccc" if dark else "#3b3b3b"
+    muted = "#9d9d9d" if dark else "#616161"
 
-    # Pre-define values before using in aliases
-    focus = "#0078d4" if dark else "#0090ff"
+    # Blue system: only two keys should be consumed by UI code.
+    button_blue = "#0078d4" if dark else "#005fb8"
+    selection_blue = "#264f78" if dark else "#add6ff"
     hover = "#2a2d2e" if dark else "#e8e8e8"
+    danger = "#f44747" if dark else "#d32f2f"
+    success = "#73c991" if dark else "#388a34"
+    input_bg = "#313131" if dark else "#ffffff"
+    input_border = "#3c3c3c" if dark else "#cecece"
+    input_fg = "#cccccc" if dark else "#3b3b3b"
+    disabled_fg = muted
+    secondary_bg = "#313131" if dark else "#e5e5e5"
+    secondary_border = "#3c3c3c" if dark else "#cecece"
+    detail_card_bg = "#23272f" if dark else "#ffffff"
+    detail_card_border = "#353b46" if dark else border
+    detail_muted = "#9aa3b2" if dark else muted
+    detail_fg = "#d5dbe5" if dark else fg
 
     return {
         # === Layout ===
@@ -60,10 +73,12 @@ def get_theme_colors() -> dict[str, str]:
         "panel_bg": panel_bg,  # Agent panel background (darker than editor)
         "titlebar_bg": titlebar_bg,  # Custom window title bar background
         "messages_bg": messages_bg,  # Agent conversation area background
-        "card": "#252526" if dark else "#f5f5f5",  # Elevated cards
+        "card": "#252526" if dark else "#f8f8f8",  # Elevated cards
         "border": border,
         "fg": fg,
         "muted": muted,
+        "buttonBlue": button_blue,
+        "selectionBlue": selection_blue,
         "radius_sm": "4px",
         "radius_md": "6px",
         "radius_lg": "10px",
@@ -75,33 +90,18 @@ def get_theme_colors() -> dict[str, str]:
         "fw_bold": "700",
 
         # === Aliases for specific components ===
-        "bg_header": surface,  # Header background
-        "bg_header_alt": bg,  # Alternative header background (menus)
-        "fg_dim": muted,  # Dimmed foreground
         "title": fg,  # Title text
-        "focus_border": focus,  # Focus border
 
         # === Interactive ===
         "hover": hover,  # --vscode-toolbar-hoverBackground
-        "selection": "#264f78" if dark else "#add6ff",
-        "focus": focus,  # Focus color for UI elements
 
         # === Input ===
-        "input_bg": "#313131" if dark else "#ffffff",
-        "input_border": "#3c3c3c" if dark else "#e0e0e0",
-        "input_border_width": "1px",
+        "input_bg": input_bg,
+        "input_border": input_border,
 
         # === Buttons ===
-        "primary": "#0078d4" if dark else "#0090ff",
-        "primary_hover": "#026ec1" if dark else "#006cbe",
-        "danger": "#f44747" if dark else "#d32f2f",
+        "danger": danger,
         "danger_hover": "#d32f2f" if dark else "#b71c1c",
-
-        # === Chat Action Buttons ===
-        "send_bg": "#0078d4" if dark else "#0090ff",
-        "send_hover": "#026ec1" if dark else "#006cbe",
-        "stop_bg": "#f44747" if dark else "#d32f2f",
-        "stop_hover": "#d32f2f" if dark else "#b71c1c",
 
         # === Scrollbar ===
         "scrollbar": "#6b6b6b" if dark else "#c1c1c1",
@@ -111,137 +111,132 @@ def get_theme_colors() -> dict[str, str]:
         "bubble_bg": "#2a2a2a" if dark else "#ffffff",
         "bubble_hover": "#333333" if dark else "#ffffff",
         "edit_bubble_bg": "#3c3c3c" if dark else "#ffffff",
-        "edit_bubble_border": "transparent" if dark else "#616161",
+        "edit_bubble_border": "transparent" if dark else "#cecece",
         "avatar_bg": "#3c3c3c" if dark else "#e0e0e0",
         "avatar_fg": "#cccccc" if dark else "#616161",
 
         # === Status Indicators ===
-        "status_think": "#0078d4" if dark else "#0090ff",
         "status_tool": "#cca700" if dark else "#bf8900",
-        "status_error": "#f44747" if dark else "#d32f2f",
+        "status_running": button_blue,
+        "status_success": success,
+        "status_error": danger,
         "status_debug": "#b180d7" if dark else "#7b1fa2",
-        "status_idle": "#737373" if dark else "#9e9e9e",
-
-        # === Header Actions ===
-        "header_action": "#737373" if dark else "#9e9e9e",
-        "header_action_hover": "#cccccc" if dark else "#616161",
+        "status_idle": muted,
+        "timeline_dot": "#9ca3af" if dark else "#000000",
 
         # === File Tree ===
         "tree_hover": "#2a2d2e" if dark else "#e8e8e8",
-        "tree_sel_bg": "#094771" if dark else "#cce8ff",
+        "tree_sel_bg": "#094771" if dark else "#e8e8e8",
         "tree_sel_fg": "#ffffff" if dark else "#202020",
 
         # === Editor/Preview ===
         "editor_bg": bg,
-        "editor_fg": "#d4d4d4" if dark else "#333333",
+        "editor_fg": fg,
         "editor_margin": bg if dark else "#ffffff",
-        "editor_caret_fg": "#ffffff" if dark else "#000000",
-        "accent": "#0078d4" if dark else "#0090ff",
-        "compile_bg": "#0e639c" if dark else "#0078d4",
-        "compile_fg": "#ffffff",
+        "editor_caret_fg": "#ffffff" if dark else "#005fb8",
+        "markdown_table_header_bg": "#252526" if dark else "#f8f8f8",
 
         # === Tabs ===
         "tab_active_bg": bg if dark else "#ffffff",
-        "tab_inactive_bg": surface if dark else "#f0f0f0",
-        "tab_active_fg": "#ffffff" if dark else "#1a1a1a",
-        "tab_inactive_fg": "#969696" if dark else "#888888",
+        "tab_active_fg": "#ffffff" if dark else "#3b3b3b",
+        "tab_inactive_fg": "#9d9d9d" if dark else "#868686",
 
         # === Context Menu ===
-        "context_bg": bg if dark else "#f3f3f3",
-        "context_border": "#2b2b2b" if dark else "#e0e0e0",
-        "popup_fg": "#cccccc" if dark else "#333333",
+        "context_bg": bg if dark else "#ffffff",
+        "context_border": "#454545" if dark else "#cecece",
+        "popup_fg": "#cccccc" if dark else "#3b3b3b",
         "popup_hover": "#2a2d2e" if dark else "#f5f5f5",
 
-        # === Spinner ===
-        "spinner_fg": "#0078d4" if dark else "#0090ff",
-
         # === Tool Calls ===
-        "tool_fg": "#cccccc" if dark else "#616161",
-        "tool_border": "#2b2b2b" if dark else "#e0e0e0",
-        "tool_detail": "#737373" if dark else "#9e9e9e",
+        "tool_fg": fg,
+        "tool_detail": muted,
+        "detail_card_bg": detail_card_bg,
+        "detail_card_border": detail_card_border,
+        "detail_muted": detail_muted,
+        "detail_fg": detail_fg,
+        "detail_hover_fg": "#e2e8f0" if dark else fg,
+
+        # === Message Controls ===
+        "message_expand_bg": "rgba(32, 33, 36, 0.92)" if dark else "rgba(245, 245, 245, 0.96)",
+        "message_expand_fg": "#f3f4f6" if dark else "#333333",
+        "message_expand_border": (
+            "rgba(255, 255, 255, 0.08)" if dark else "rgba(0, 0, 0, 0.10)"
+        ),
+        "message_expand_hover_bg": (
+            "rgba(48, 50, 56, 0.96)" if dark else "rgba(232, 232, 232, 0.98)"
+        ),
+
+        # === Icon Semantic Colors ===
+        "icon_default": "#cccccc" if dark else "#3b3b3b",
+        "icon_run": success,
+        "icon_preview": success,
+        "icon_context_eye": "#a6a6a6" if dark else muted,
+        "agent_main": button_blue,
+        "agent_data_analysis": "#73c991" if dark else "#388a34",
+        "agent_plotting": "#8e44ad" if dark else "#7b1fa2",
+        "agent_theory": "#e67e22" if dark else "#bf8900",
+        "agent_report": "#5dade2" if dark else "#267f99",
+
+        # === Syntax Highlighting ===
+        "syntax_keyword": "#C586C0" if dark else "#AF00DB",
+        "syntax_string": "#CE9178" if dark else "#A31515",
+        "syntax_comment": "#6A9955" if dark else "#008000",
+        "syntax_number": "#B5CEA8" if dark else "#098658",
+        "syntax_operator": "#D4D4D4" if dark else "#000000",
+        "syntax_identifier": "#9CDCFE" if dark else "#001080",
+        "syntax_class_name": "#4EC9B0" if dark else "#267F99",
+        "syntax_function": "#DCDCAA" if dark else "#795E26",
+
+        # === Markdown tokens (VSCode dark-modern / light-modern) ===
+        # markup.heading / markup.bold — bold blue (dark) vs navy/maroon (light).
+        "md_heading": "#569CD6" if dark else "#800000",
+        "md_bold": "#569CD6" if dark else "#000080",
+        # punctuation.definition.list.begin — list markers (-, *, 1.).
+        "md_list": "#6796E6" if dark else "#0451A5",
+        # punctuation.definition.quote.begin — block-quote marker (>).
+        "md_quote": "#6A9955" if dark else "#0451A5",
 
         # === Dialog/Config Specific ===
-        "bodyBg": bg,
-        "headerBg": surface,
-        "headerBorder": border,
-        "footerBg": surface,
-        "footerBorder": border,
-        "cardBg": surface,
-        "cardBorder": border,
-        "titleFg": fg,
-        "subtitleFg": muted,
-        "categoryFg": fg,
-        "sectionFg": fg,
         "activeFg": "#ffffff" if dark else "#202020",
-        "checkFg": "#4ec9b0" if dark else "#008000",
+        "checkFg": success,
 
         # === Input Variations ===
-        "inputBg": "#313131" if dark else "#ffffff",
-        "inputBorder": "#3c3c3c" if dark else "#e0e0e0",
-        "inputFg": "#cccccc" if dark else "#333333",
-        "inputFocusBorder": focus,
+        "inputBg": input_bg,
+        "inputBorder": input_border,
+        "inputFg": input_fg,
         "inputDisabledBg": "#1f1f1f" if dark else "#f3f3f3",
-        "inputDisabledFg": "#737373" if dark else "#9e9e9e",
+        "inputDisabledFg": disabled_fg,
 
         # === Primary Button Variations ===
-        "primaryBg": "#0078d4" if dark else "#0090ff",
-        "primaryFg": "#ffffff",
-        "primaryHover": "#026ec1" if dark else "#006cbe",
-        "primaryBtnBg": "#0078d4" if dark else "#0090ff",
         "primaryBtnFg": "#ffffff",
-        "primaryBtnHover": "#026ec1" if dark else "#006cbe",
-        "primaryBtnPressed": "#005a9e" if dark else "#005a9e",
 
         # === Secondary Button ===
-        "secondaryBorder": "#3c3c3c" if dark else "#c5c5c5",
-        "secondaryFg": fg,
-        "secondaryHoverBg": hover,
-        "secondaryBtnBg": "#3c3c3c" if dark else "#e0e0e0",
-        "secondaryBtnBorder": "#3c3c3c" if dark else "#c5c5c5",
+        "secondaryBtnBg": secondary_bg,
+        "secondaryBtnBorder": secondary_border,
         "secondaryBtnFg": fg,
         "secondaryBtnHoverBg": hover,
         "secondaryBtnHoverBorder": "#4c4c4c" if dark else "#b5b5b5",
 
         # === Action Buttons ===
-        "addBtnBorder": "#3c3c3c" if dark else "#c5c5c5",
+        "addBtnBorder": secondary_border,
         "addBtnFg": fg,
-        "addBtnHoverBg": hover,
-        "deleteFg": "#f44747" if dark else "#d32f2f",
-        "deleteHoverBg": "#f44747" if dark else "#d32f2f",
+        "deleteFg": danger,
+        "deleteHoverBg": danger,
         "deleteHoverFg": "#ffffff",
         "resetFg": fg,
         "resetHoverFg": "#ffffff" if dark else "#202020",
 
         # === Test/Connection Buttons ===
-        "testBorder": "#3c3c3c" if dark else "#c5c5c5",
-        "testFg": fg,
-        "testHoverBg": hover,
-        "testDisabledBorder": "#1f1f1f" if dark else "#f3f3f3",
-        "testDisabledFg": "#737373" if dark else "#9e9e9e",
-
-        # === Preset/Sync Buttons ===
-        "presetBtnBg": "#3c3c3c" if dark else "#e0e0e0",
-        "presetBtnBorder": "#3c3c3c" if dark else "#c5c5c5",
-        "presetBtnFg": fg,
-        "presetBtnHoverBg": hover,
-        "syncBtnBorder": "#3c3c3c" if dark else "#c5c5c5",
-        "syncBtnFg": fg,
-        "syncBtnHoverBg": hover,
-
-        # === Cancel Button ===
-        "cancelFg": fg,
         "cancelHoverFg": "#ffffff" if dark else "#202020",
 
         # === Path/Link ===
-        "pathFg": "#cccccc" if dark else "#616161",
-        "link": "#0078d4" if dark else "#0090ff",
-        "linkHover": "#026ec1" if dark else "#006cbe",
+        "pathFg": fg,
 
         # === Warning/Error ===
         "warningBg": "#4a1d1d" if dark else "#ffe5e5",
         "warningBorder": "#d94545" if dark else "#e55555",
         "warningFg": "#ff6b6b" if dark else "#c53030",
-        "successFg": "#4ec9b0" if dark else "#008000",
+        "successFg": success,
     }
 
 
@@ -258,3 +253,57 @@ def format_stylesheet(template: str, colors: dict[str, str] | None = None) -> st
     if colors is None:
         colors = get_theme_colors()
     return template.format(**colors)
+
+
+def scrollbar_stylesheet(
+    *,
+    selector: str = "QScrollBar",
+    orientation: str = "vertical",
+    background_color: str = "transparent",
+    thickness: str = "8px",
+    min_handle_extent: str = "30px",
+    radius: str = "4px",
+    margin: str | None = None,
+    handle_margin: str | None = None,
+    colors: dict[str, str] | None = None,
+) -> str:
+    """Build themed scrollbar QSS while leaving layout choices to callers."""
+    if colors is None:
+        colors = get_theme_colors()
+    if orientation not in {"vertical", "horizontal"}:
+        raise ValueError("orientation must be 'vertical' or 'horizontal'")
+
+    thickness_prop = "width" if orientation == "vertical" else "height"
+    min_extent_prop = "min-height" if orientation == "vertical" else "min-width"
+    line_extent_prop = "height" if orientation == "vertical" else "width"
+    margin_rule = f"\n                margin: {margin};" if margin else ""
+    handle_margin_rule = f"\n                margin: {handle_margin};" if handle_margin else ""
+
+    return f"""
+            {selector}:{orientation} {{
+                background-color: {background_color};
+                {thickness_prop}: {thickness};
+                border: none;
+                {margin_rule}
+            }}
+            {selector}::handle:{orientation} {{
+                background-color: {colors["scrollbar"]};
+                {min_extent_prop}: {min_handle_extent};
+                border-radius: {radius};
+                {handle_margin_rule}
+            }}
+            {selector}::handle:{orientation}:hover,
+            {selector}::handle:{orientation}:pressed {{
+                background-color: {colors["scrollbar_hover"]};
+            }}
+            {selector}::add-line:{orientation},
+            {selector}::sub-line:{orientation} {{
+                {line_extent_prop}: 0;
+                border: none;
+                background-color: transparent;
+            }}
+            {selector}::add-page:{orientation},
+            {selector}::sub-page:{orientation} {{
+                background-color: transparent;
+            }}
+        """

@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ..theme import get_theme_colors
+from ..theme import get_theme_colors, scrollbar_stylesheet
 from ...utils.editor_context import user_visible_content
 from .ui_utils import create_isolated_context_menu, danger_filled_button_qss
 
@@ -163,7 +163,7 @@ class SessionListItem(QWidget):
 
         c = get_theme_colors()
         if self._is_current:
-            bg = c["selection"]
+            bg = c["selectionBlue"]
         elif hovered:
             bg = c["hover"]
         else:
@@ -306,29 +306,16 @@ class ConversationHistoryDropdown(QFrame):
                 font-size: 11px;
                 background: transparent;
             }}
-            QScrollBar:vertical {{
-                background: transparent;
-                width: 10px;
-                margin: 4px 0 4px 2px;
-                border: none;
-            }}
-            QScrollBar::handle:vertical {{
-                background: {c["scrollbar"]};
-                min-height: 28px;
-                border-radius: {c["radius_sm"]};
-                margin: 2px;
-            }}
-            QScrollBar::handle:vertical:hover {{
-                background: {c["scrollbar_hover"]};
-            }}
-            QScrollBar::add-line:vertical,
-            QScrollBar::sub-line:vertical,
-            QScrollBar::add-page:vertical,
-            QScrollBar::sub-page:vertical {{
-                background: transparent;
-                border: none;
-                height: 0px;
-            }}
+            {scrollbar_stylesheet(
+                orientation="vertical",
+                background_color="transparent",
+                thickness="10px",
+                min_handle_extent="28px",
+                radius=c["radius_sm"],
+                margin="4px 0 4px 2px",
+                handle_margin="2px",
+                colors=c,
+            )}
             {danger_filled_button_qss(
                 "#sessionDeleteBtn",
                 radius=c["radius_sm"],

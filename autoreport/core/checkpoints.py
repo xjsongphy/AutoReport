@@ -88,19 +88,17 @@ class CheckpointData:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CheckpointData":
-        file_states = {}
-        for path, state in data.get("file_states", {}).items():
-            if isinstance(state, dict):
-                file_states[path] = FileState.from_dict(state)
-            else:
-                file_states[path] = FileState.from_dict(state)
+        file_states = {
+            path: FileState.from_dict(state)
+            for path, state in data.get("file_states", {}).items()
+            if isinstance(state, dict)
+        }
 
-        file_diffs = {}
-        for path, d in data.get("file_diffs", {}).items():
-            if isinstance(d, dict):
-                file_diffs[path] = FileDiff(**d)
-            else:
-                file_diffs[path] = d
+        file_diffs = {
+            path: FileDiff(**d)
+            for path, d in data.get("file_diffs", {}).items()
+            if isinstance(d, dict)
+        }
 
         return cls(
             id=data["id"],
@@ -299,6 +297,9 @@ class CheckpointManager:
     def clear_old(self, agent_type: str, keep: int = 20) -> int:
         """Remove old checkpoints for *agent_type*, keeping the most recent *keep*.
 
+        The baseline checkpoint (parent_id is None) is never deleted so the
+        diff chain always remains reconstructable.
+
         Returns the number of checkpoints removed.
         """
         bucket = self._checkpoints.get(agent_type, {})
@@ -308,6 +309,9 @@ class CheckpointManager:
         sorted_cps = sorted(bucket.values(), key=lambda c: c.epoch, reverse=True)
         removed = 0
         for cp in sorted_cps[keep:]:
+            # Never delete the baseline (parent_id is None)
+            if cp.parent_id is None:
+                continue
             self._delete_one(cp)
             removed += 1
 
@@ -428,25 +432,35 @@ class CheckpointManager:
         prev_paths = set(prev_content.keys())
         curr_paths = set(current_states.keys())
 
-        # Deleted files
+        # Deleted files — compute SHA256 of content being deleted
         for path in prev_paths - curr_paths:
+            old_text = prev_content.get(path, "")
             diffs[path] = FileDiff(
                 path=path,
                 operation="deleted",
-                sha256_before=prev_content.get(path, "") if path in prev_content else "",
+                sha256_before=await _sha256_of_string(old_text),
                 sha256_after="",
                 unified_diff=None,
             )
 
-        # Added files
+        # Added files — generate diff against empty string for rollback
         for path in curr_paths - prev_paths:
             state = current_states[path]
+            curr_text = state.content or ""
+            # Generate unified diff from empty to current content
+            udiff = "\n".join(difflib.unified_diff(
+                [],  # empty file
+                curr_text.splitlines(),
+                fromfile="/dev/null",
+                tofile=path,
+                lineterm="",
+            ))
             diffs[path] = FileDiff(
                 path=path,
                 operation="added",
                 sha256_before="",
                 sha256_after=state.hash,
-                unified_diff=None,
+                unified_diff=udiff,
             )
 
         # Modified files
@@ -487,13 +501,14 @@ class CheckpointManager:
         bucket = self._checkpoints.get(agent_type, {})
         chain: list[CheckpointData] = []
 
-        # Walk back to baseline
+        # Walk back to baseline — identified by parent_id being None,
+        # NOT by file_states being non-empty (empty write dirs are valid).
         cp = target
-        while cp is not None and not cp.file_states:
+        while cp is not None and cp.parent_id is not None:
             chain.append(cp)
             cp = bucket.get(cp.parent_id) if cp.parent_id else None
 
-        if cp is None or not cp.file_states:
+        if cp is None:
             raise ValueError(
                 f"Cannot find baseline checkpoint for {target.id}"
             )
@@ -510,11 +525,8 @@ class CheckpointManager:
         for cp_node in reversed(chain):
             for path, diff in cp_node.file_diffs.items():
                 if diff.operation == "added":
-                    # We need content from the diff — but for diffs we don't
-                    # store full content for added files. Fallback: we can
-                    # try to find it in the next checkpoint's file_states or
-                    # just apply the diff to empty string.
-                    result[path] = _apply_unified_diff("", diff.unified_diff) if diff.unified_diff else ""
+                    # Apply diff to empty string to get new file content
+                    result[path] = _apply_unified_diff("", diff.unified_diff)
                 elif diff.operation == "modified":
                     old_content = result.get(path, "")
                     result[path] = _apply_unified_diff(old_content, diff.unified_diff) if diff.unified_diff else old_content
@@ -568,8 +580,6 @@ def _apply_unified_diff(original: str, diff_text: str | None) -> str:
 
     diff_lines = diff_text.splitlines(keepends=True)
     # Parse unified diff and apply
-    # Using difflib's built-in patch capability
-    patches: list[tuple[int, int, list[str]]] = []  # (start, end, new_lines)
 
     i = 0
     while i < len(diff_lines):
@@ -589,7 +599,6 @@ def _apply_unified_diff(original: str, diff_text: str | None) -> str:
                 from_count = int(from_parts[1]) if len(from_parts) > 1 else 0
 
                 # Read hunk body
-                hunk_remove: list[str] = []
                 hunk_add: list[str] = []
                 i += 1
                 while i < len(diff_lines) and not diff_lines[i].startswith("@@"):
@@ -598,12 +607,12 @@ def _apply_unified_diff(original: str, diff_text: str | None) -> str:
                         i += 1
                         continue
                     if dl.startswith("-"):
-                        hunk_remove.append(dl[1:])  # strip leading '-'
+                        pass  # removal line — strip handled by range below
                     elif dl.startswith("+"):
                         hunk_add.append(dl[1:])  # strip leading '+'
                     else:
-                        hunk_remove.append(dl)
-                        hunk_add.append(dl)
+                        # Context line - strip leading space before appending
+                        hunk_add.append(dl[1:] if len(dl) > 0 else dl)
                     i += 1
 
                 # Apply patch: remove from_start..from_start+from_count,

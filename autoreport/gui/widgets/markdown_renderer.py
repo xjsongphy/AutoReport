@@ -6,47 +6,28 @@ Uses Python-Markdown for parsing, then post-processes for Qt compatibility.
 
 import re
 from typing import Any
+from xml.etree import ElementTree
 
 import markdown
 from markdown.extensions import Extension
 from markdown.treeprocessors import Treeprocessor
-from xml.etree import ElementTree as etree
 
 from ..theme import get_theme_colors
-
-
-def _is_dark_mode() -> bool:
-    from PyQt6.QtCore import Qt
-    from PyQt6.QtWidgets import QApplication
-    app = QApplication.instance()
-    if app is None:
-        return False
-    hints = app.styleHints()
-    if hasattr(hints, "colorScheme"):
-        try:
-            if hints.colorScheme() == Qt.ColorScheme.Dark:
-                return True
-            if hints.colorScheme() == Qt.ColorScheme.Light:
-                return False
-        except Exception:
-            pass
-    window = app.palette().window().color()
-    return window.lightness() < 128
 
 
 class _QtCompatTreeprocessor(Treeprocessor):
     """Adjust HTML tree for Qt rich text compatibility."""
 
-    def run(self, root: etree.Element) -> Any:
+    def run(self, root: ElementTree.Element) -> Any:
         c = get_theme_colors()
         code_bg = c["card"]
         code_border = c["border"]
         code_fg = c["editor_fg"]
         inline_code_bg = c["bubble_bg"]
         inline_code_fg = c["editor_fg"]
-        accent = c["accent"]
+        accent = c["buttonBlue"]
         muted = c["muted"]
-        th_bg = c["card"] if _is_dark_mode() else "#ffffff"
+        th_bg = c["markdown_table_header_bg"]
 
         # Qt rich text doesn't support <pre>, convert to styled <div>
         for pre in root.iter("pre"):
@@ -101,7 +82,7 @@ class _QtCompatTreeprocessor(Treeprocessor):
 class QtCompatExtension(Extension):
     """Markdown extension for Qt rich text compatibility."""
 
-    def extendMarkdown(self, md):
+    def extendMarkdown(self, md):  # noqa: N802
         md.treeprocessors.register(_QtCompatTreeprocessor(md), "qt_compat", 175)
 
 

@@ -1,11 +1,10 @@
 """Configuration dialog with multi-provider support and cc-switch presets."""
 
 from loguru import logger
-from PyQt6.QtCore import QPointF, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QApplication,
-    QCheckBox,
     QDialog,
     QFrame,
     QGridLayout,
@@ -24,6 +23,7 @@ from ..config.manager import ConfigManager
 from ..config.presets import ProviderPreset, get_presets_by_category, load_presets
 from ..config.schema import ApiConfig
 from ..core.preset_sync import is_cached, sync_presets
+from .dialogs import information_box, question_box, warning_box
 from .theme import get_theme_colors
 from .widgets.ui_utils import (
     IconActionButton,
@@ -137,7 +137,7 @@ class ConfigCard(QFrame):
         self.test_btn = TextButton(
             text="测试连接",
             tooltip="测试连接",
-            color=c["primaryBtnBg"],
+            color=c["buttonBlue"],
             object_name="testBtn",
             on_click=self._test_connection,
         )
@@ -199,9 +199,9 @@ class ConfigCard(QFrame):
     def _test_connection(self) -> None:
         api_key = self.key_input.text().strip()
         if not api_key:
-            QMessageBox.warning(self, "测试失败", "未配置 API Key。")
+            warning_box(self, "测试失败", "未配置 API Key。")
             return
-        QMessageBox.information(
+        information_box(
             self, "测试结果",
             f"API Key 已配置（{self.name_input.text()}，连接测试功能待实现）。",
         )
@@ -343,7 +343,7 @@ class ConfigDialog(QDialog):
         self.sync_btn = TextButton(
             text="同步预设",
             tooltip="从 cc-switch 仓库同步最新预设模板",
-            color=c["primaryBtnBg"],
+            color=c["buttonBlue"],
             object_name="syncBtn",
             on_click=self._sync_presets,
         )
@@ -404,15 +404,6 @@ class ConfigDialog(QDialog):
 
         self._update_empty_hint_visibility()
         self.scroll_layout.addWidget(self._empty_hint)
-
-        # Add config button
-        add_row = QHBoxLayout()
-        add_row.setContentsMargins(20, 4, 20, 4)
-        add_btn = QPushButton("+ 添加配置")
-        add_btn.setObjectName("addBtn")
-        add_btn.clicked.connect(self._add_config)
-        add_row.addWidget(add_btn)
-        add_row.addStretch()
 
         # Footer
         footer = QWidget(self)
@@ -580,18 +571,18 @@ class ConfigDialog(QDialog):
         self.sync_btn.setText("同步预设")
 
         if error_msg:
-            QMessageBox.warning(
+            warning_box(
                 None, "同步失败",
                 f"预设同步出错：{error_msg}\n将使用内置预设模板。",
             )
         elif cached:
             count = len(load_presets())
-            QMessageBox.information(
+            information_box(
                 None, "同步完成",
                 f"成功同步 {n} 个文件。\n当前共 {count} 个预设模板可用。",
             )
         else:
-            QMessageBox.warning(
+            warning_box(
                 None, "同步失败",
                 "无法下载预设文件，请检查网络连接和代理设置。\n"
                 "将使用内置预设模板。",
@@ -610,16 +601,15 @@ class ConfigDialog(QDialog):
 
         self._config_manager.save_config()
         logger.info("Configuration saved: {} configs", len(new_configs))
-        QMessageBox.information(self, "保存成功", "API 配置已保存。")
+        information_box(self, "保存成功", "API 配置已保存。")
         self.accept()
 
     def _reset_config(self) -> None:
-        reply = QMessageBox.question(
+        reply = question_box(
             self,
             "确认重置",
             "确定要恢复默认配置吗？\n\n这将删除所有自定义配置并恢复默认设置。",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            default=QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
@@ -635,23 +625,14 @@ class ConfigDialog(QDialog):
         self._refresh_enabled_combo()
 
         logger.info("Configuration reset to defaults")
-        QMessageBox.information(self, "重置完成", "配置已恢复为默认值。请重新配置 API Key。")
-
-    def _is_dark_mode(self) -> bool:
-        hints = QApplication.styleHints()
-        if hasattr(hints, "colorScheme"):
-            return hints.colorScheme() == Qt.ColorScheme.Dark
-        app = QApplication.instance()
-        if app:
-            return app.palette().color(Qt.ColorRole.Window).lightness() < 128
-        return False
+        information_box(self, "重置完成", "配置已恢复为默认值。请重新配置 API Key。")
 
     def _apply_style(self) -> None:
         from PyQt6.QtGui import QPalette
         c = get_theme_colors()
         # Add/override colors specific to config dialog
-        c["addBtnBorder"] = c["primaryBtnBg"]  # 蓝色添加按钮边框
-        c["addBtnFg"] = c["primaryBtnBg"]
+        c["addBtnBorder"] = c["buttonBlue"]  # 蓝色添加按钮边框
+        c["addBtnFg"] = c["buttonBlue"]
         c["deleteFg"] = c["fg"]  # 使用主题前景色
         c["deleteHoverBg"] = c["warningBg"]
         c["deleteHoverFg"] = c["warningFg"]
@@ -662,20 +643,20 @@ class ConfigDialog(QDialog):
 
         self.setStyleSheet(f"""
             ConfigDialog {{
-                background-color: {c["bodyBg"]};
+                background-color: {c["bg"]};
             }}
             #dialogHeader {{
-                background-color: {c["headerBg"]};
-                border-bottom: 1px solid {c["headerBorder"]};
+                background-color: {c["surface"]};
+                border-bottom: 1px solid {c["border"]};
             }}
             #dialogTitle {{
                 font-size: 20px;
                 font-weight: {c["fw_semibold"]};
-                color: {c["titleFg"]};
+                color: {c["fg"]};
             }}
             #dialogSubtitle {{
                 font-size: 13px;
-                color: {c["subtitleFg"]};
+                color: {c["muted"]};
                 margin-top: 4px;
             }}
             #apiWarning {{
@@ -689,7 +670,7 @@ class ConfigDialog(QDialog):
             }}
             #emptyHint {{
                 font-size: 14px;
-                color: {c["subtitleFg"]};
+                color: {c["muted"]};
                 padding: 40px 20px;
             }}
             #activeLabel {{
@@ -698,26 +679,26 @@ class ConfigDialog(QDialog):
                 color: {c["activeFg"]};
             }}
             #dialogFooter {{
-                background-color: {c["footerBg"]};
-                border-top: 1px solid {c["footerBorder"]};
+                background-color: {c["surface"]};
+                border-top: 1px solid {c["border"]};
             }}
             #providerCard {{
-                background-color: {c["cardBg"]};
-                border: 1px solid {c["cardBorder"]};
+                background-color: {c["surface"]};
+                border: 1px solid {c["border"]};
                 border-radius: {c["radius_lg"]};
             }}
             #categoryLabel {{
                 font-size: 12px;
                 font-weight: {c["fw_semibold"]};
-                color: {c["categoryFg"]};
+                color: {c["fg"]};
                 text-transform: uppercase;
                 margin-top: 4px;
             }}
             {filled_button_qss(
                 "#saveBtn",
-                bg=c["primaryBtnBg"],
+                bg=c["buttonBlue"],
                 fg=c["primaryBtnFg"],
-                hover_bg=c["primaryBtnHover"],
+                hover_bg=c["buttonBlue"],
                 disabled_bg=c["border"],
                 disabled_fg=c["muted"],
                 radius=c["radius_md"],
@@ -725,7 +706,7 @@ class ConfigDialog(QDialog):
                 font_size=13,
             )}
             QPushButton#saveBtn:pressed {{
-                background-color: {c["primaryBtnPressed"]};
+                background-color: {c["buttonBlue"]};
             }}
             {secondary_filled_button_qss(
                 "#addBtn",
@@ -775,11 +756,11 @@ class ConfigDialog(QDialog):
             }}
             {dashed_button_qss(
                 "#blankBtn",
-                fg=c["subtitleFg"],
+                fg=c["muted"],
                 border=c["inputBorder"],
                 hover_bg="transparent",
-                hover_fg=c["primaryBtnBg"],
-                hover_border=c["primaryBtnBg"],
+                hover_fg=c["buttonBlue"],
+                hover_border=c["buttonBlue"],
                 radius=c["radius_sm"],
                 padding="6px 14px",
                 font_size=12,
@@ -787,7 +768,7 @@ class ConfigDialog(QDialog):
             {line_edit_qss(
                 "",
                 border_color=c["inputBorder"],
-                focus_border_color=c["inputFocusBorder"],
+                focus_border_color=c["buttonBlue"],
                 background_color=c["inputBg"],
                 foreground_color=c["inputFg"],
                 disabled_bg=c["inputDisabledBg"],
@@ -802,8 +783,8 @@ class ConfigDialog(QDialog):
                 border_color=c["inputBorder"],
                 background_color=c["inputBg"],
                 foreground_color=c["inputFg"],
-                hover_border_color=c["inputFocusBorder"],
-                selection_bg=c["selection"],
+                hover_border_color=c["buttonBlue"],
+                selection_bg=c["selectionBlue"],
                 selection_fg=c["fg"],
                 font_size=13,
                 padding="6px 30px 6px 10px",
@@ -821,11 +802,11 @@ class ConfigDialog(QDialog):
                 background-color: {c["hover"]};
             }}
             QScrollArea {{
-                background-color: {c["bodyBg"]};
+                background-color: {c["bg"]};
                 border: none;
             }}
             QScrollArea > QWidget {{
-                background-color: {c["bodyBg"]};
+                background-color: {c["bg"]};
             }}
         """)
 

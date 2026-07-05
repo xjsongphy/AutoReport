@@ -12,17 +12,15 @@ from ...interfaces.types import AgentType, FileRollbackRequest, Message, Restart
 from ..checkpoints import CheckpointManager
 from ..tools import SkillLoader
 from ..tools import (
-    BashTool,
-    BuiltinTemplateTool,
     DeleteFileTool,
     EditFileTool,
+    ExecTool,
     FileStateManager,
-    ListDirTool,
     LoadSkillTool,
     ManageTasksTool,
     ManifestManager,
     PDFParseTool,
-    ReadFileTool,
+    ReadTool,
     ReportIssueTool,
     SendToAgentTool,
     SkillLoader,
@@ -235,31 +233,35 @@ class LoopManager:
         file_state_manager = self._get_file_state_manager(agent_type)
 
         # Common tools for all agents
-        registry.register(ReadFileTool(
+        registry.register(ReadTool(
             workspace=self.workspace,
             file_state_manager=file_state_manager,
         ))
-        registry.register(ListDirTool(workspace=self.workspace))
 
         # Determine write allowed directory based on agent type
         write_dirs = {
-            AgentType.DATA_ANALYSIS: self.workspace / "Data" / "Processed",
+            AgentType.DATA_ANALYSIS: self.workspace / "Data",
             AgentType.PLOTTING: self.workspace / "Code",
             AgentType.THEORY: self.workspace / "Theory",
             AgentType.REPORT: self.workspace / "Tex",
-            AgentType.MAIN: self.workspace,  # Main agent has full access
+            AgentType.MAIN: self.workspace / "Outline",  # MAIN only writes Outline/report_outline.md
         }
 
         write_dir = write_dirs.get(agent_type, self.workspace)
 
         # Register write tools
-        registry.register(WriteFileTool(
+        write_tool_kwargs = dict(
             workspace=self.workspace,
             write_allowed_dir=write_dir,
             manifest_manager=self.manifest_manager,
             agent_type=agent_type.value,
             file_state_manager=file_state_manager,
-        ))
+        )
+        if agent_type == AgentType.PLOTTING:
+            from ..tools.file_tools import _validate_plotting_script
+            write_tool_kwargs["content_validator"] = _validate_plotting_script
+
+        registry.register(WriteFileTool(**write_tool_kwargs))
         registry.register(EditFileTool(
             workspace=self.workspace,
             write_allowed_dir=write_dir,
@@ -275,9 +277,9 @@ class LoopManager:
             file_state_manager=file_state_manager,
         ))
 
-        # Execution tool (for data analysis, plotting, report, and main agent)
-        if agent_type in (AgentType.DATA_ANALYSIS, AgentType.PLOTTING, AgentType.REPORT, AgentType.MAIN):
-            registry.register(BashTool(
+        # Execution tool (for data analysis, plotting, report agents only — MAIN delegates, does not execute)
+        if agent_type in (AgentType.DATA_ANALYSIS, AgentType.PLOTTING, AgentType.REPORT):
+            registry.register(ExecTool(
                 working_dir=self.workspace,
                 timeout=120,
             ))
@@ -298,10 +300,6 @@ class LoopManager:
                 workspace=self.workspace,
                 timeout=mineru_timeout,
             ))
-
-        # Built-in template access (Report Agent only)
-        if agent_type == AgentType.REPORT:
-            registry.register(BuiltinTemplateTool())
 
         # Skill loading — all agents can load skills on demand
         registry.register(LoadSkillTool(skill_loader=self.skill_loader))
@@ -370,11 +368,21 @@ class LoopManager:
         cp = self.checkpoint_manager.get_checkpoint(agent_type, checkpoint_id)
         if cp:
             from ...interfaces.types import Checkpoint as CheckpointMsg
+            # For baseline: use file_states hashes directly.
+            # For subsequent: derive from file_diffs (sha256_after for each file).
+            if cp.file_states:
+                file_hashes = {path: state.hash for path, state in cp.file_states.items()}
+            else:
+                file_hashes = {
+                    path: d.sha256_after
+                    for path, d in cp.file_diffs.items()
+                    if d.sha256_after
+                }
             msg = CheckpointMsg(
                 agent_type=agent_type,
                 checkpoint_id=checkpoint_id,
                 description=cp.description,
-                file_states={path: state.hash for path, state in cp.file_states.items()},
+                file_states=file_hashes,
                 message_id=message_id,
             )
             await self.bus.publish(msg)
@@ -418,6 +426,8 @@ class LoopManager:
                 # Clear current history and restore from checkpoint
                 loop._conversation_history.clear()
                 for msg_dict in cp.conversation_history:
+                    msg_dict = dict(msg_dict)
+                    msg_dict["content"] = msg_dict.get("content") or ""
                     msg = LLMMessage(**msg_dict)
                     loop._conversation_history.append(msg)
                 logger.info("Restored {} messages for {}", len(loop._conversation_history), agent_type)

@@ -9,7 +9,13 @@ from autoreport.config.schema import AgentDefaults
 from autoreport.core.loops.agent_loop import AgentLoop
 from autoreport.core.loops.bus import MessageBus
 from autoreport.core.providers.base import LLMResponse, ToolCall
-from autoreport.interfaces.types import AgentStatus, AgentType, QueueUpdateMessage, UserMessage
+from autoreport.interfaces.types import (
+    AgentStatus,
+    AgentType,
+    QueueUpdateMessage,
+    TaskUpdateMessage,
+    UserMessage,
+)
 
 
 @pytest.fixture
@@ -41,8 +47,8 @@ def mock_provider():
 @pytest.fixture
 def mock_prompt_loader():
     loader = MagicMock()
-    loader.load_identity.return_value = "You are a test agent."
-    loader.load_full.return_value = "Full instructions for testing."
+    loader.load_prompt.return_value = "You are a test agent.\n\n## Core Rules\n\nDo your job well."
+    loader.load_shared_context.return_value = None  # No Common.md in test fixture
     return loader
 
 
@@ -110,27 +116,27 @@ def test_set_debug_mode_disabled(agent_loop):
 
 
 @pytest.mark.asyncio
-async def test_progressive_prompt_first_call(agent_loop, mock_prompt_loader):
+async def test_system_prompt_first_call_loads_and_caches(agent_loop, mock_prompt_loader):
     prompt = await agent_loop._get_system_prompt()
-    mock_prompt_loader.load_identity.assert_called_once_with("main")
-    assert prompt == "You are a test agent."
-
-
-@pytest.mark.asyncio
-async def test_progressive_prompt_second_call(agent_loop, mock_prompt_loader):
-    await agent_loop._get_system_prompt()  # identity
-    prompt = await agent_loop._get_system_prompt()  # full
-    mock_prompt_loader.load_full.assert_called_once_with("main")
+    mock_prompt_loader.load_prompt.assert_called_once_with("main")
     assert "test agent" in prompt
-    assert "Full instructions" in prompt
 
 
 @pytest.mark.asyncio
-async def test_progressive_prompt_cached(agent_loop, mock_prompt_loader):
-    await agent_loop._get_system_prompt()  # identity
-    await agent_loop._get_system_prompt()  # full
-    await agent_loop._get_system_prompt()  # cached
-    assert mock_prompt_loader.load_full.call_count == 1  # Not called again
+async def test_system_prompt_second_call_uses_cache(agent_loop, mock_prompt_loader):
+    await agent_loop._get_system_prompt()  # first call — loads & caches
+    prompt = await agent_loop._get_system_prompt()  # second call — cached
+    # load_prompt should still only be called once
+    assert mock_prompt_loader.load_prompt.call_count == 1
+    assert "test agent" in prompt
+
+
+@pytest.mark.asyncio
+async def test_system_prompt_cached_across_calls(agent_loop, mock_prompt_loader):
+    await agent_loop._get_system_prompt()  # first call
+    await agent_loop._get_system_prompt()  # second call
+    await agent_loop._get_system_prompt()  # third call
+    assert mock_prompt_loader.load_prompt.call_count == 1  # Cached — not called again
 
 
 @pytest.mark.asyncio
@@ -144,7 +150,7 @@ async def test_process_message(agent_loop, mock_provider, mock_gui):
 
 @pytest.mark.asyncio
 async def test_process_message_with_tool_calls(agent_loop, mock_provider, mock_gui):
-    tc = ToolCall(id="call_1", name="read_file", arguments={"path": "test.txt"})
+    tc = ToolCall(id="call_1", name="read", arguments={"path": "test.txt"})
 
     # Mock streaming: first yields chunks, then tool calls at end
     async def mock_chat_stream_with_tools(*args, **kwargs):
@@ -163,7 +169,7 @@ async def test_process_message_with_tool_calls(agent_loop, mock_provider, mock_g
         tool_called.append(kwargs)
         return {"content": "file data"}
 
-    agent_loop.tools.get = lambda name: mock_tool if name == "read_file" else None
+    agent_loop.tools.get = lambda name: mock_tool if name == "read" else None
 
     msg = UserMessage(content="Read file", agent_type=AgentType.MAIN)
     await agent_loop._process_message(msg)
@@ -222,6 +228,38 @@ async def test_handle_user_message_publishes_queue_update(agent_loop):
 
     published = list(agent_loop.bus._queue._queue)
     assert any(isinstance(item, QueueUpdateMessage) for item in published)
+
+
+@pytest.mark.asyncio
+async def test_local_task_update_does_not_queue_llm_turn(agent_loop):
+    msg = TaskUpdateMessage(
+        task_id="tk001",
+        action="completed",
+        source_agent=AgentType.MAIN,
+        target_agent=AgentType.MAIN,
+        brief="local bookkeeping",
+    )
+
+    await agent_loop._handle_task_update(msg)
+
+    assert agent_loop._message_queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_delegated_task_update_still_queues_relevant_llm_turn(agent_loop):
+    msg = TaskUpdateMessage(
+        task_id="tk002",
+        action="completed",
+        source_agent=AgentType.MAIN,
+        target_agent=AgentType.REPORT,
+        brief="delegated report",
+    )
+
+    await agent_loop._handle_task_update(msg)
+
+    queued = await agent_loop._message_queue.get()
+    assert queued.source == "system"
+    assert "report 已完成" in queued.content
 
 
 def test_format_tool_result_dict(agent_loop):

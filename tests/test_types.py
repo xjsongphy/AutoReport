@@ -75,18 +75,18 @@ def test_agent_response():
 def test_tool_call_message():
     msg = ToolCall(
         agent_type=AgentType.DATA_ANALYSIS,
-        tool_name="read_file",
+        tool_name="read",
         arguments={"path": "data.csv"},
     )
     assert msg.type == "tool_call"
-    assert msg.tool_name == "read_file"
+    assert msg.tool_name == "read"
     assert msg.arguments["path"] == "data.csv"
 
 
 def test_tool_result_message():
     msg = ToolResult(
         agent_type=AgentType.DATA_ANALYSIS,
-        tool_name="read_file",
+        tool_name="read",
         result={"content": "data"},
     )
     assert msg.type == "tool_result"

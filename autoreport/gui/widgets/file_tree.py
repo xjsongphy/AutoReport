@@ -10,12 +10,13 @@ Uses native QTreeWidget styling with:
 import shutil
 from pathlib import Path
 import json
+import sys
 
 from loguru import logger
-from PyQt6.QtCore import QFileInfo, QFileSystemWatcher, QMimeData, QPoint, QRect, QSize, QSignalBlocker, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QFileInfo, QFileSystemWatcher, QPoint, QRect, QSize, QSignalBlocker, Qt, QTimer, pyqtSignal
 
 from autoreport.utils.logging_config import ui_logger
-from PyQt6.QtGui import QColor, QCursor, QDrag, QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QDropEvent, QIcon, QPalette, QPainter, QPen, QPixmap
+from PyQt6.QtGui import QColor, QCursor, QDrag, QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QDropEvent, QIcon, QMouseEvent, QPalette, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemDelegate,
     QAbstractItemView,
@@ -36,11 +37,12 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ..theme import get_theme_colors
+from ..theme import get_theme_colors, scrollbar_stylesheet
 from .ui_utils import UI_HOVER_DELAY_MS, IconActionButton, compact_tooltip_qss, create_isolated_context_menu, render_svg_icon
 
 # Fixed directory structure
-FIXED_DIRECTORIES = ["Data", "References", "Theory", "Code", "Tex"]
+FIXED_DIRECTORIES = ["Data", "References", "Theory", "Code", "Outline", "Tex"]
+FILE_TREE_CONTENT_LEFT_INSET = 16
 _FILE_TEXT_ICON_GAP_ADJUST = 28
 _FILE_EDITOR_LEFT_ADJUST = -26
 _DIRECTORY_EDITOR_LEFT_ADJUST = 4
@@ -152,18 +154,9 @@ DIR_LABELS = {
     "References": "References",
     "Theory": "Theory",
     "Code": "Code",
+    "Outline": "Outline",
     "Tex": "Tex",
     "Processed": "Processed",
-}
-
-# Directory descriptions (for tooltips)
-DIR_DESCRIPTIONS = {
-    "Data": "实验数据",
-    "References": "参考资料",
-    "Theory": "理论推导",
-    "Code": "代码与图像",
-    "Tex": "报告",
-    "Processed": "分析结果",
 }
 
 
@@ -199,6 +192,37 @@ class _DragDropTreeWidget(QTreeWidget):
                 event.accept()
                 return
         super().mouseMoveEvent(event)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        """Allow Cmd-click (macOS) to toggle multi-selection.
+
+        QAbstractItemView decides toggle-selection on Qt::ControlModifier.
+        On macOS the Cmd key surfaces as Qt::MetaModifier, which Qt does NOT
+        remap, so Cmd-click silently replaces the selection instead of toggling.
+        Translate Meta -> Control on macOS so the platform-native modifier
+        works; Ctrl already maps to ControlModifier everywhere.
+        """
+        if (
+            sys.platform == "darwin"
+            and event.button() == Qt.MouseButton.LeftButton
+            and (event.modifiers() & Qt.KeyboardModifier.MetaModifier)
+            and not (event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        ):
+            new_mods = (
+                event.modifiers() & ~Qt.KeyboardModifier.MetaModifier
+                | Qt.KeyboardModifier.ControlModifier
+            )
+            translated = QMouseEvent(
+                event.type(),
+                event.position(),
+                event.globalPosition(),
+                event.button(),
+                event.buttons(),
+                new_mods,
+            )
+            super().mousePressEvent(translated)
+            return
+        super().mousePressEvent(event)
 
     def _row_background_color(self, item: QTreeWidgetItem | None) -> QColor | None:
         if item is None:
@@ -288,7 +312,6 @@ class _DragDropTreeWidget(QTreeWidget):
         icon = current_item.icon(0)
         if icon.isNull():
             # Create a default icon if none exists
-            from PyQt6.QtWidgets import QApplication
             from PyQt6.QtGui import QPainter
             pixmap = QPixmap(16, 16)
             pixmap.fill(Qt.GlobalColor.transparent)
@@ -382,7 +405,6 @@ class _DragDropTreeWidget(QTreeWidget):
 def _get_file_icon(ext: str, style: QStyle = None, file_path: Path | None = None) -> QIcon:
     """Get file icon by extension, preferring system file-type icons."""
     if style is None:
-        from PyQt6.QtWidgets import QApplication
         style = QApplication.style()
     provider = QFileIconProvider()
     if file_path is not None:
@@ -497,7 +519,7 @@ class FileTreeWidget(QWidget):
         # Enable both internal move and external drag-drop
         self.tree.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.tree.setDefaultDropAction(Qt.DropAction.MoveAction)
-        self.tree.setIndentation(14)
+        self.tree.setIndentation(FILE_TREE_CONTENT_LEFT_INSET)
         self.tree.setRootIsDecorated(True)
         self.tree.setItemsExpandable(True)
         self.tree.setAnimated(False)
@@ -516,7 +538,8 @@ class FileTreeWidget(QWidget):
         self.tree.itemDelegate().closeEditor.connect(self._on_close_editor)
         layout.addWidget(self.tree)
 
-        # Use native margins to keep top-level branch spacing consistent.
+        # Keep top-level disclosure arrows off the panel edge while moving the
+        # folder and file rows as a single tree structure.
         self.tree.setContentsMargins(0, 0, 0, 0)
 
         self.tree.header().hide()
@@ -568,7 +591,7 @@ class FileTreeWidget(QWidget):
                 border: none;
                 outline: none;
                 show-decoration-selected: 0;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                font-family: "Segoe UI", Roboto, sans-serif;
                 font-size: 13px;
                 alternate-background-color: {c["surface"]};
             }}
@@ -604,33 +627,20 @@ class FileTreeWidget(QWidget):
                 border: 1px solid {c["border"]};
                 border-radius: {c["radius_sm"]};
                 padding: 2px 2px;
-                selection-background-color: {c["accent"]};
+                selection-background-color: {c["buttonBlue"]};
             }}
             #fileTree QLineEdit:focus {{
-                border: 1px solid {c["accent"]};
+                border: 1px solid {c["buttonBlue"]};
             }}
 
-            /* Scrollbar */
-            QScrollBar:vertical {{
-                background-color: {c["surface"]};
-                width: 10px;
-                border: none;
-            }}
-
-            QScrollBar::handle:vertical {{
-                background-color: {c["scrollbar"]};
-                min-height: 30px;
-                border-radius: {c["radius_md"]};
-            }}
-
-            QScrollBar::handle:vertical:hover {{
-                background-color: {c["scrollbar_hover"]};
-            }}
-
-            QScrollBar::add-line:vertical,
-            QScrollBar::sub-line:vertical {{
-                height: 0px;
-            }}
+            {scrollbar_stylesheet(
+                orientation="vertical",
+                background_color=c["surface"],
+                thickness="10px",
+                min_handle_extent="30px",
+                radius=c["radius_md"],
+                colors=c,
+            )}
 
             /* Tooltips */
             {compact_tooltip_qss("QToolTip")}
@@ -1158,7 +1168,6 @@ class FileTreeWidget(QWidget):
                 item.setText(0, DIR_LABELS.get(dir_name, dir_name))
 
     def _on_item_expanded(self, item: QTreeWidgetItem) -> None:
-        from PyQt6.QtWidgets import QApplication
         style = QApplication.style()
 
         dir_name = item.data(0, Qt.ItemDataRole.UserRole)
@@ -1723,7 +1732,6 @@ class FileTreeWidget(QWidget):
         self._new_folder_in_dir(self._get_selected_dir())
 
     def _new_file_in_dir(self, dir_name: str) -> None:
-        from PyQt6.QtWidgets import QApplication
         style = QApplication.style()
 
         dir_path = self.workspace / dir_name
@@ -1896,50 +1904,10 @@ class FileTreeWidget(QWidget):
         self._set_editing_item(item)
         self.tree.editItem(item, 0)
 
-    def _delete_file(self, file_path: Path, item: QTreeWidgetItem) -> None:
-        reply = QMessageBox.question(
-            self,
-            "删除文件",
-            f"确定要删除 '{file_path.name}' 吗?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                file_path.unlink()
-                parent = item.parent()
-                if parent:
-                    parent.removeChild(item)
-                else:
-                    root = self.tree.invisibleRootItem()
-                    root.removeChild(item)
-                logger.info("Deleted file: {}", file_path)
-            except Exception as e:
-                QMessageBox.warning(self, "删除失败", f"无法删除文件:\n{e}")
-
     def _rename_directory(self, dir_path: Path, item: QTreeWidgetItem) -> None:
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
         self._set_editing_item(item)
         self.tree.editItem(item, 0)
-
-    def _delete_directory(self, dir_path: Path, item: QTreeWidgetItem) -> None:
-        reply = QMessageBox.question(
-            self,
-            "删除文件夹",
-            f"确定要删除 '{dir_path.name}' 及其所有内容吗?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                shutil.rmtree(dir_path)
-                parent = item.parent()
-                if parent:
-                    parent.removeChild(item)
-                else:
-                    root = self.tree.invisibleRootItem()
-                    root.removeChild(item)
-                logger.info("Deleted directory: {}", dir_path)
-            except Exception as e:
-                QMessageBox.warning(self, "删除失败", f"无法删除文件夹:\n{e}")
 
     def _handle_tree_key(self, event) -> bool:
         if self.tree.state() == QAbstractItemView.State.EditingState:
@@ -1973,15 +1941,6 @@ class FileTreeWidget(QWidget):
             return
         if dir_name and dir_name not in FIXED_DIRECTORIES:
             self._rename_directory(self.workspace / dir_name, item)
-
-    def _delete_item_from_shortcut(self, item: QTreeWidgetItem) -> None:
-        dir_name = item.data(0, Qt.ItemDataRole.UserRole)
-        file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
-        if file_path_str:
-            self._delete_file(Path(file_path_str), item)
-            return
-        if dir_name and dir_name not in FIXED_DIRECTORIES:
-            self._delete_directory(self.workspace / dir_name, item)
 
     def _styled_message_box(
         self,

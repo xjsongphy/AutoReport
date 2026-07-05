@@ -1,7 +1,7 @@
 """Integration tests for read-before-edit / file_state mechanism.
 
 Verifies the full lifecycle:
-  read_file  → records state
+  read  → records state
   edit_file  → warns if not read / if stale
   write_file → warns if not read / if stale
   delete_file → (optional check)
@@ -13,7 +13,7 @@ import pytest
 
 from autoreport.core.tools.file_state import FileState, FileStateManager
 from autoreport.core.tools.file_tools import (
-    ReadFileTool,
+    ReadTool,
     WriteFileTool,
     EditFileTool,
     DeleteFileTool,
@@ -50,14 +50,14 @@ def manifest(workspace: Path) -> ManifestManager:
 
 
 @pytest.fixture
-def read_tool(workspace: Path, fsm: FileStateManager) -> ReadFileTool:
-    return ReadFileTool(workspace, file_state_manager=fsm)
+def read_tool(workspace: Path, fsm: FileStateManager) -> ReadTool:
+    return ReadTool(workspace, file_state_manager=fsm)
 
 
 @pytest.fixture
 def write_tool(workspace: Path, allowed_dir: Path, fsm: FileStateManager, manifest: ManifestManager) -> WriteFileTool:
     return WriteFileTool(
-        workspace,
+        workspace=workspace,
         write_allowed_dir=allowed_dir,
         manifest_manager=manifest,
         agent_type="test",
@@ -68,7 +68,7 @@ def write_tool(workspace: Path, allowed_dir: Path, fsm: FileStateManager, manife
 @pytest.fixture
 def edit_tool(workspace: Path, allowed_dir: Path, fsm: FileStateManager, manifest: ManifestManager) -> EditFileTool:
     return EditFileTool(
-        workspace,
+        workspace=workspace,
         write_allowed_dir=allowed_dir,
         manifest_manager=manifest,
         agent_type="test",
@@ -79,7 +79,7 @@ def edit_tool(workspace: Path, allowed_dir: Path, fsm: FileStateManager, manifes
 @pytest.fixture
 def delete_tool(workspace: Path, allowed_dir: Path, fsm: FileStateManager, manifest: ManifestManager) -> DeleteFileTool:
     return DeleteFileTool(
-        workspace,
+        workspace=workspace,
         write_allowed_dir=allowed_dir,
         manifest_manager=manifest,
         agent_type="test",
@@ -185,11 +185,11 @@ class TestFileStateManager:
 
 
 # ---------------------------------------------------------------------------
-# Integration: ReadFileTool records state
+# Integration: ReadTool records state
 # ---------------------------------------------------------------------------
 
 class TestReadFileIntegration:
-    async def test_read_records_state(self, workspace: Path, read_tool: ReadFileTool, fsm: FileStateManager):
+    async def test_read_records_state(self, workspace: Path, read_tool: ReadTool, fsm: FileStateManager):
         f = workspace / "test.txt"
         f.write_text("hello\nworld\n", encoding="utf-8")
         result = await read_tool(path="test.txt")
@@ -197,10 +197,10 @@ class TestReadFileIntegration:
         assert "content" in result
         # Should be recorded in FSM
         state = fsm.get_state(f)
-        assert state is not None, "read_file should record state in FSM"
+        assert state is not None, "read should record state in FSM"
         assert state.size == f.stat().st_size
 
-    async def test_read_binary_returns_error(self, workspace: Path, read_tool: ReadFileTool):
+    async def test_read_binary_returns_error(self, workspace: Path, read_tool: ReadTool):
         f = workspace / "binary.bin"
         f.write_bytes(b"\x80\x81\x82\x83")  # invalid UTF-8
         result = await read_tool(path="binary.bin")
@@ -208,7 +208,7 @@ class TestReadFileIntegration:
         assert "binary" in result["error"].lower() or "utf-8" in result["error"].lower()
 
     async def test_read_then_edit_passes(self, workspace: Path, allowed_dir: Path,
-                                         read_tool: ReadFileTool, edit_tool: EditFileTool):
+                                         read_tool: ReadTool, edit_tool: EditFileTool):
         f = allowed_dir / "read_edit.txt"
         f.write_text("line1\nline2\nline3\n", encoding="utf-8")
         # Read first
@@ -233,7 +233,7 @@ class TestReadFileIntegration:
         assert "without having read it" in result["warning"]
 
     async def test_edit_stale_after_change(self, workspace: Path, allowed_dir: Path,
-                                           read_tool: ReadFileTool, edit_tool: EditFileTool):
+                                           read_tool: ReadTool, edit_tool: EditFileTool):
         f = allowed_dir / "stale_edit.txt"
         f.write_text("original\n", encoding="utf-8")
         # Read
@@ -262,7 +262,7 @@ class TestReadFileIntegration:
         """Read state should be isolated per agent (no cross-agent sharing)."""
         fsm_a = FileStateManager()
         fsm_b = FileStateManager()
-        read_a = ReadFileTool(workspace, file_state_manager=fsm_a)
+        read_a = ReadTool(workspace, file_state_manager=fsm_a)
         edit_b = EditFileTool(
             workspace,
             write_allowed_dir=allowed_dir,

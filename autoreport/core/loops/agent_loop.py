@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -26,19 +27,19 @@ from ...interfaces.types import (
     ApiDebugMessage,
     Error,
     Message,
+    QueueUpdateMessage,
     StatusChange,
     TaskStatus,
     TaskUpdateMessage,
-    QueueUpdateMessage,
     UserMessage,
 )
-from ...utils.agent_labels import get_agent_badge
 from ...interfaces.types import (
     ToolCall as ToolCallMsg,
 )
 from ...interfaces.types import (
     ToolResult as ToolResultMsg,
 )
+from ...utils.agent_labels import get_agent_badge
 from ..tools import SkillLoader
 from ..tools.manifest_tool import ManifestManager, ManifestTool
 from ..tools.registry import ToolRegistry
@@ -101,11 +102,31 @@ def _trim_messages_to_budget(
         else:
             break
 
-    # Ensure the boundary is legal: first kept message should be user role
-    if kept and kept[0].role != "user":
-        # Find the next user message backwards from the trim point
-        # If none, keep the system prompt only
-        logger.debug("Adjusting trim boundary to user-turn alignment")
+    # Ensure the boundary is legal.
+    # 1. Strip orphan 'tool' messages whose 'assistant(tool_calls)' was trimmed.
+    # 2. Strip orphan 'assistant' messages whose preceding 'user' was trimmed.
+    # 3. The first real message after system must be 'user'.
+    # 4. Anthropic-style tool results (role="user", is_tool_result=True) whose
+    #    'assistant(tool_calls)' was trimmed.
+    while kept:
+        role = kept[0].role
+        is_tool_result = getattr(kept[0], "is_tool_result", False)
+        if role == "tool":
+            logger.debug("Stripping orphan tool message at trim boundary")
+            kept.pop(0)
+        elif role == "assistant":
+            logger.debug("Stripping orphan assistant message at trim boundary")
+            kept.pop(0)
+        elif role == "user" and is_tool_result:
+            # Anthropic-style orphan: tool result disguised as user message.
+            # Without its preceding assistant(tool_calls), this would cause
+            # an API error (tool result without tool_use).
+            logger.debug(
+                "Stripping orphan user/tool_result message at trim boundary"
+            )
+            kept.pop(0)
+        else:
+            break
 
     # Always prepend system prompt
     result = [system_msg] + kept
@@ -161,9 +182,8 @@ class AgentLoop:
         self._manifest_manager = manifest_manager
 
         self._prompt_loader = prompt_loader or PromptLoader()
-        self._identity_prompt: str | None = None
-        self._full_prompt_loaded = False
-        self._cached_full_prompt: str | None = None
+        self._cached_system_prompt: str | None = None
+        self._cached_system_prompt_signature: tuple[Any, ...] | None = None
 
         self._status = AgentStatus.IDLE
         self._running = False
@@ -173,6 +193,7 @@ class AgentLoop:
         self._current_session_id: str | None = None
         self._manifest_dirty = False
         self._cancel_event = asyncio.Event()
+        self._consecutive_errors = 0
 
         # Debug mode
         self._debug_mode = False
@@ -302,6 +323,14 @@ class AgentLoop:
         am_target = self.agent_type == tgt_enum
         is_local = src_enum == tgt_enum
 
+        if is_local:
+            logger.debug(
+                "Local task update kept out of {} LLM queue: {}",
+                self.agent_type,
+                message.task_id,
+            )
+            return
+
         if message.action == "created":
             if am_source and self.agent_type == AgentType.MAIN:
                 notification_text = f"[等待] {src_val} 等待 {tgt_val} 的：{message.brief}"
@@ -366,7 +395,6 @@ class AgentLoop:
         if not isinstance(message, AgentFeedback):
             return
 
-        from enum import Enum
         agent_str = message.agent_type.value if isinstance(message.agent_type, Enum) else str(message.agent_type)
         issue_type = message.feedback_type or "issue"
 
@@ -426,7 +454,6 @@ class AgentLoop:
                     description=f"pre:{source}",
                     source="pre_message",
                     conversation_history=history_dicts,
-                    message_id=message.message_id,
                 )
                 logger.debug("{} checkpoint created: {}", agent_str, cp_id)
             except Exception as e:
@@ -447,19 +474,8 @@ class AgentLoop:
                 LLMMessage(role="user", content=content)
             )
 
-            # Get system prompt with progressive loading
-            system_prompt = await self._get_system_prompt()
-            if self._manifest_manager and self.agent_type != AgentType.MAIN:
-                system_prompt += (
-                    "\n\n[Manifest]\n"
-                    "你可以在需要时使用 manifest 了解当前本地提供了哪些文件。"
-                    "文件描述应简短，更复杂的关系、依赖、协作说明写在自由文本区。"
-                    "只有在本轮结束前，才重点补充 manifest 的自由文本区。"
-                )
-
-            # Prepare messages with system prompt
-            messages = [LLMMessage(role="system", content=system_prompt)]
-            messages.extend(self._conversation_history)
+            # Build messages — system prompt always first, conversation history follows
+            messages = await self._build_messages()
 
             # Auto-compact: trim if exceeds context budget
             messages = _trim_messages_to_budget(
@@ -592,16 +608,46 @@ class AgentLoop:
             ))
 
             await self._flush_manifest_if_needed()
+
+            # Auto-notify MAIN when a sub-agent finishes a dispatched task.
+            # Sub-agents often forget to call manage_tasks(action="complete"),
+            # which causes MAIN to wait forever.  This code-level safety net
+            # ensures MAIN always learns when a sub-agent is done.
+            if (self.agent_type != AgentType.MAIN
+                    and hasattr(message, 'source')
+                    and getattr(message, 'source', None) == "main_agent"):
+                await self.bus.publish(UserMessage(
+                    content=(
+                        f"✅ {self.agent_type.value} 已完成你派发的任务。"
+                        f"请检查 {self.agent_type.value} 的输出，"
+                        f"确认无误后继续派发下游任务。"
+                    ),
+                    agent_type=AgentType.MAIN,
+                    source="system",
+                    message_id=getattr(message, 'message_id', None),
+                ))
+                logger.info(
+                    "Auto-notified MAIN of {} completion", self.agent_type.value
+                )
+
             await self._set_status(AgentStatus.IDLE)
 
         except Exception as e:
             logger.error("Error processing message in {}: {}", self.agent_type, str(e))
+            self._consecutive_errors += 1
+
+            if self._consecutive_errors >= 3:
+                logger.warning("{}: 3 consecutive errors — skipping current message", self.agent_type)
+
             await self._flush_manifest_if_needed()
             await self._set_status(AgentStatus.ERROR)
             await self.bus.publish(Error(
                 source=str(self.agent_type),
                 message=str(e),
             ))
+
+        else:
+            self._consecutive_errors = 0
 
     async def _flush_manifest_if_needed(self) -> None:
         """Wrap up manifest at end of loop: prompt agent to update free-text notes.
@@ -638,7 +684,7 @@ class AgentLoop:
                 )
                 if undescribed:
                     hint += (
-                        f"以下文件尚无描述，请在方便时通过 manifest 工具补全：\n"
+                        "以下文件尚无描述，请在方便时通过 manifest 工具补全：\n"
                         + "\n".join(f"  - {f['path']}" for f in undescribed)
                     )
                 if not notes.strip():
@@ -669,7 +715,7 @@ class AgentLoop:
         max_iterations = self.config.max_tool_iterations
         iteration = 0
 
-        current_messages = list(self._conversation_history)
+        current_messages = await self._build_messages()
 
         while response.tool_calls and iteration < max_iterations:
             iteration += 1
@@ -702,6 +748,23 @@ class AgentLoop:
                     tool = self.tools.get(tool_call.name)
                     if tool is None:
                         raise ValueError(f"Tool not found: {tool_call.name}")
+
+                    # Detect truncated tool calls: output hit max_tokens before arguments were complete
+                    if not tool_call.arguments:
+                        usage = response.usage or {}
+                        output_tokens = usage.get("output_tokens", 0)
+                        if output_tokens >= 8192:
+                            raise ValueError(
+                                f"Tool call to '{tool_call.name}' has no arguments — "
+                                f"the response was truncated at {output_tokens} output tokens. "
+                                f"Your output is too long. Break the file into smaller parts "
+                                f"and write them one at a time using write_file, or use a shorter response."
+                            )
+                        else:
+                            raise ValueError(
+                                f"Tool call to '{tool_call.name}' has no arguments. "
+                                f"Please provide the required parameters."
+                            )
 
                     result = await tool(**tool_call.arguments)
 
@@ -789,7 +852,10 @@ class AgentLoop:
                 streaming=False,
             ))
 
-        self._conversation_history = current_messages
+        # Save conversation history — strip the system prompt (index 0)
+        self._conversation_history = [
+            m for m in current_messages if m.role != "system"
+        ]
 
         if iteration >= max_iterations:
             logger.warning("Max tool iterations reached for agent: {}", self.agent_type)
@@ -935,60 +1001,97 @@ class AgentLoop:
             content[:80],
         )
 
-    async def _get_system_prompt(self) -> str:
-        """Get system prompt with progressive loading and skill injection.
+    async def _get_cached_system_prompt(self) -> str:
+        """Return the cached system prompt, rebuilding it when sources change.
 
-        Returns:
-            Complete system prompt (identity + full instructions + skills).
-
-        Progressive loading strategy:
-        - First call: Load identity (fast startup)
-        - Subsequent calls: Load full prompt (detailed instructions)
+        The prompt is assembled from the agent template, shared context
+        (Common.md), and — for the Report agent only — an on-demand skills
+        summary. The assembled text is cached, but the cache is invalidated
+        automatically when the underlying prompt files change.
         """
         agent_type_str = self._get_agent_type_str()
+        logger.debug("Loading system prompt for agent: {}", self.agent_type)
+        prompt_signature = self._prompt_loader.get_signature(agent_type_str)
+        skills_summary = None
+        if self.agent_type == AgentType.REPORT and self._skill_loader:
+            skills_summary = self._skill_loader.build_skills_summary()
+        current_signature = (
+            agent_type_str,
+            prompt_signature,
+            skills_summary,
+            bool(self._manifest_manager and self.agent_type != AgentType.MAIN),
+        )
 
-        # First call: load identity only
-        if self._identity_prompt is None:
-            logger.debug("Loading identity prompt for agent: {}", self.agent_type)
-            self._identity_prompt = self._prompt_loader.load_identity(agent_type_str)
-            return self._identity_prompt
+        if (
+            self._cached_system_prompt is not None
+            and self._cached_system_prompt_signature == current_signature
+        ):
+            return self._cached_system_prompt
 
-        # Check if we need to load full prompt
-        if not self._full_prompt_loaded:
-            logger.debug("Loading full prompt for agent: {}", self.agent_type)
-            full_prompt = self._prompt_loader.load_full(agent_type_str)
+        parts: list[str] = [self._prompt_loader.load_prompt(agent_type_str)]
 
-            parts = [self._identity_prompt, full_prompt]
+        shared = self._prompt_loader.load_shared_context()
+        if shared:
+            parts.append(shared)
 
-            # Inject shared output descriptions (all agents)
-            shared = self._prompt_loader.load_shared_context()
-            if shared and isinstance(shared, str):
-                parts.append(shared)
+        # Skills summary — Report agent only (others don't need skill guidance)
+        if skills_summary:
+            parts.append(
+                "\n## Available Skills\n\n"
+                "The following skills are available. Use `load_skill` tool to get "
+                "full content when needed:\n\n" + skills_summary
+            )
+            logger.debug("Injected skills summary for report agent")
 
-            # Inject skills summary if available (on-demand loading)
-            if self._skill_loader:
-                skills_summary = self._skill_loader.build_skills_summary()
-                if skills_summary:
-                    parts.append("\n## Available Skills\n\n")
-                    parts.append("The following skills are available. Use `load_skill` tool to get full content when needed:\n\n")
-                    parts.append(skills_summary)
-                    logger.debug("Injected skills summary for agent: {}", self.agent_type)
+        # Manifest hint — sub-agents only
+        if self._manifest_manager and self.agent_type != AgentType.MAIN:
+            parts.append(
+                "\n\n[Manifest]\n"
+                "你可以在需要时使用 manifest 了解当前本地提供了哪些文件。"
+                "文件描述应简短，更复杂的关系、依赖、协作说明写在自由文本区。"
+                "只有在本轮结束前，才重点补充 manifest 的自由文本区。"
+            )
 
-            self._cached_full_prompt = "\n\n".join(parts)
-            self._full_prompt_loaded = True
+        self._cached_system_prompt = "\n\n".join(parts)
+        self._cached_system_prompt_signature = current_signature
+        return self._cached_system_prompt
 
-            # Inject task state
-            task_section = self._build_task_state_section()
-            if task_section:
-                return self._cached_full_prompt + task_section
+    async def _get_system_prompt(self) -> str:
+        """Return the system prompt with live task state appended.
 
-            return self._cached_full_prompt
-
-        # Return cached complete prompt with current task state
+        The base prompt is cached once; the task-state section is rebuilt
+        fresh each time so it reflects the current board state.
+        """
+        base = await self._get_cached_system_prompt()
         task_section = self._build_task_state_section()
         if task_section:
-            return self._cached_full_prompt + task_section
-        return self._cached_full_prompt
+            return base + task_section
+        return base
+
+    async def _build_messages(self) -> list[LLMMessage]:
+        """Build the message list for any LLM request.
+
+        System prompt is always first (with cache_control for Anthropic caching),
+        followed by the recorded conversation history.  This single entry-point
+        is used by both the initial streaming call *and* tool-call iterations, so
+        the system prompt is never accidentally dropped.
+        """
+        sanitized_history = [
+            LLMMessage(
+                role=msg.role,
+                content=msg.content or "",
+                tool_calls=msg.tool_calls,
+                tool_call_id=msg.tool_call_id,
+                is_tool_result=msg.is_tool_result,
+                thinking=msg.thinking,
+                cache_control=msg.cache_control,
+            )
+            for msg in self._conversation_history
+        ]
+        return [
+            LLMMessage(role="system", content=await self._get_system_prompt(), cache_control=True),
+            *sanitized_history,
+        ]
 
     def _build_task_state_section(self) -> str:
         """Build current task state section for the system prompt.

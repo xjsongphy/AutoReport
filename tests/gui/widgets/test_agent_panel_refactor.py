@@ -69,8 +69,10 @@ def test_add_message_with_summary(agent_panel):
     agent_panel.add_message(
         role="agent",
         content="detail line 1\ndetail line 2",
-        summary="Collapsed summary",
-        detail="detail line 1\ndetail line 2",
+        display_mode="bubble",
+        bubble_title="Collapsed summary",
+        bubble_align="left",
+        bubble_on_timeline=True,
     )
 
     rows = agent_panel._messages_area.get_message_rows()
@@ -133,7 +135,7 @@ def test_set_agent_type_uses_badged_title(agent_panel):
 
 def test_add_tool_call_creates_group(agent_panel):
     """add_tool_call should create a ToolCallGroup."""
-    agent_panel.add_tool_call("read_file", {"path": "test.py"})
+    agent_panel.add_tool_call("read", {"path": "test.py"})
 
     groups = agent_panel._messages_area.get_tool_groups()
     assert len(groups) == 1
@@ -141,13 +143,32 @@ def test_add_tool_call_creates_group(agent_panel):
     assert len(rows) == 0
 
 
+def test_empty_thinking_row_is_removed_when_finished(agent_panel):
+    agent_panel.start_thinking()
+
+    agent_panel.finish_thinking()
+
+    assert agent_panel._messages_area.message_count() == 0
+    assert agent_panel._thinking_row is None
+
+
+def test_tool_call_after_empty_thinking_does_not_leave_phantom_thought(agent_panel):
+    agent_panel.start_thinking()
+
+    agent_panel.add_tool_call("read", {"path": "Processed"})
+
+    assert agent_panel._messages_area.message_count() == 1
+    assert agent_panel._messages_area.get_message_rows() == []
+    assert len(agent_panel._messages_area.get_tool_groups()) == 1
+
+
 def test_add_tool_result_adds_to_group(agent_panel):
     """add_tool_result should add to the current tool group."""
     # First add a tool call
-    agent_panel.add_tool_call("read_file", {"path": "test.py"})
+    agent_panel.add_tool_call("read", {"path": "test.py"})
 
     # Then add the result
-    agent_panel.add_tool_result("read_file", "file content", error=None)
+    agent_panel.add_tool_result("read", "file content", error=None)
 
     groups = agent_panel._messages_area.get_tool_groups()
     assert len(groups) == 1
@@ -179,6 +200,83 @@ def test_add_tool_result_updates_pending_group_item(agent_panel):
     assert "Theory replied: first line" in groups[0].get_summary_text()
 
 
+def test_adjacent_manage_tasks_status_change_updates_in_place(agent_panel):
+    created_summary = "<b>Task</b>\nTodo\n☐ DATA_ANALYSIS: Process all measurements\n\nWait\n☐ DATA_ANALYSIS: Process all measurements"
+    started_summary = "<b>Task</b>\nTodo\n● DATA_ANALYSIS: Process all measurements\n\nWait\n● DATA_ANALYSIS: Process all measurements"
+
+    agent_panel.add_tool_call(
+        "manage_tasks",
+        {
+            "action": "add",
+            "description": "Process calibration, C-V curves, Phi-V, 2ω, and noise data",
+            "brief": "DATA_ANALYSIS: Process all measurements",
+        },
+    )
+    agent_panel.add_tool_result("manage_tasks", created_summary, summary=created_summary)
+    first_group = agent_panel._messages_area.get_tool_groups()[0]
+
+    agent_panel.add_tool_call(
+        "manage_tasks",
+        {
+            "action": "start",
+            "task_id": "tk007",
+            "brief": "DATA_ANALYSIS: Process all measurements",
+        },
+    )
+    agent_panel.add_tool_result("manage_tasks", started_summary, summary=started_summary)
+
+    groups = agent_panel._messages_area.get_tool_groups()
+    assert groups == [first_group]
+    assert "● DATA_ANALYSIS: Process all measurements" in groups[0].get_summary_text()
+    assert "☐ DATA_ANALYSIS: Process all measurements" not in groups[0].get_summary_text()
+
+
+def test_manage_tasks_status_change_does_not_merge_across_other_events(agent_panel):
+    task_summary = "<b>Task</b>\nTodo\n☐ DATA_ANALYSIS: Process all measurements"
+
+    agent_panel.add_tool_call(
+        "manage_tasks",
+        {"action": "add", "brief": "DATA_ANALYSIS: Process all measurements"},
+    )
+    agent_panel.add_tool_result("manage_tasks", task_summary, summary=task_summary)
+    agent_panel.add_tool_call("read", {"path": "."})
+    agent_panel.add_tool_result("read", "content")
+    agent_panel.add_tool_call(
+        "manage_tasks",
+        {
+            "action": "start",
+            "task_id": "tk007",
+            "brief": "DATA_ANALYSIS: Process all measurements",
+        },
+    )
+    agent_panel.add_tool_result("manage_tasks", task_summary, summary=task_summary)
+
+    groups = agent_panel._messages_area.get_tool_groups()
+    assert len(groups) == 3
+    assert [group.tool_names() for group in groups] == [["manage_tasks"], ["read"], ["manage_tasks"]]
+
+
+def test_manage_tasks_different_task_content_does_not_merge(agent_panel):
+    first_summary = "<b>Task</b>\nTodo\n☐ DATA_ANALYSIS: Process all measurements"
+    second_summary = "<b>Task</b>\nTodo\n☐ PLOTTING: Generate all figures"
+
+    agent_panel.add_tool_call(
+        "manage_tasks",
+        {"action": "add", "brief": "DATA_ANALYSIS: Process all measurements"},
+    )
+    agent_panel.add_tool_result("manage_tasks", first_summary, summary=first_summary)
+    agent_panel.add_tool_call(
+        "manage_tasks",
+        {"action": "add", "brief": "PLOTTING: Generate all figures"},
+    )
+    agent_panel.add_tool_result("manage_tasks", second_summary, summary=second_summary)
+
+    groups = agent_panel._messages_area.get_tool_groups()
+    assert len(groups) == 2
+    assert "DATA_ANALYSIS: Process all measurements" in groups[0].get_summary_text()
+    assert "PLOTTING: Generate all figures" in groups[1].get_summary_text()
+
+
 def test_batch_tool_calls_render_as_separate_timeline_items(agent_panel):
     agent_panel.add_tool_call("write_file", {"path": "a.txt"})
     agent_panel.add_tool_call("write_file", {"path": "b.txt"})
@@ -191,7 +289,7 @@ def test_batch_tool_calls_render_as_separate_timeline_items(agent_panel):
 
 
 def test_tool_call_before_agent_text_keeps_event_order(agent_panel):
-    agent_panel.add_tool_call("list_dir", {"path": "."})
+    agent_panel.add_tool_call("read", {"path": "."})
     agent_panel.add_message(role="agent", content="Hello", streaming=True)
 
     rows = agent_panel._messages_area.get_message_rows()
@@ -203,7 +301,7 @@ def test_tool_call_before_agent_text_keeps_event_order(agent_panel):
 
 def test_agent_text_tool_text_keeps_separate_timeline_items(agent_panel):
     agent_panel.add_message(role="agent", content="First", streaming=True)
-    agent_panel.add_tool_call("list_dir", {"path": "."})
+    agent_panel.add_tool_call("read", {"path": "."})
     agent_panel.add_message(role="agent", content="Second", streaming=True)
 
     rows = agent_panel._messages_area.get_message_rows()
@@ -215,21 +313,24 @@ def test_agent_text_tool_text_keeps_separate_timeline_items(agent_panel):
 
 
 def test_thinking_row_finishes_with_elapsed_summary(agent_panel):
-    agent_panel.set_status("thinking")
+    agent_panel.start_thinking()
     rows = agent_panel._messages_area.get_message_rows()
     assert len(rows) == 1
-    assert rows[0]._summary.startswith("Thought for ")
+    assert rows[0]._display_mode == "thought"
+    assert rows[0]._bubble_title.startswith("Thought for ")
+    assert rows[0]._summary_text_label is not None
 
     agent_panel.append_thinking("raw **markdown** thought")
-    assert rows[0]._detail == "raw **markdown** thought"
+    assert rows[0]._bubble_text == "raw **markdown** thought"
+    assert rows[0]._detail_label is not None
 
-    agent_panel.set_status("idle")
-    assert rows[0]._summary.startswith("Thought for ")
+    agent_panel.finish_thinking()
+    assert rows[0]._bubble_title.startswith("Thought for ")
     assert rows[0]._complete is True
 
 
 def test_thinking_timer_updates_existing_row_in_place(agent_panel):
-    agent_panel.set_status("thinking")
+    agent_panel.start_thinking()
     row = agent_panel._messages_area.get_message_rows()[0]
 
     agent_panel._thinking_started_at -= 2
@@ -237,24 +338,25 @@ def test_thinking_timer_updates_existing_row_in_place(agent_panel):
 
     rows = agent_panel._messages_area.get_message_rows()
     assert rows == [row]
-    assert row._summary.startswith("Thought for ")
-    assert row._summary != "Thought for 1s"
+    assert row._bubble_title.startswith("Thought for ")
+    assert row._bubble_title != "Thought for 1s"
 
 
 def test_thinking_detail_updates_existing_detail_label(agent_panel):
-    agent_panel.set_status("thinking")
+    agent_panel.start_thinking()
     row = agent_panel._messages_area.get_message_rows()[0]
-    agent_panel.append_thinking("first")
+    agent_panel.append_thinking("first\nsecond\nthird\nfourth\nfifth\nsixth")
     row._summary_header.clicked.emit()
     assert row.is_expanded()
     assert row._detail_label is not None
     assert "first" in row._detail_label.text()
 
-    agent_panel.append_thinking(" second")
+    agent_panel.append_thinking("first\nsecond\nthird\nfourth\nfifth\nsixth\nseventh")
     rows = agent_panel._messages_area.get_message_rows()
     assert rows == [row]
     assert row.is_expanded()
-    assert "first second" in row._detail_label.text()
+    assert row._detail_label is not None
+    assert "seventh" in row._detail_label.text()
 
 
 def test_thinking_stream_merge_handles_delta_snapshot_and_final(agent_panel):
@@ -263,18 +365,24 @@ def test_thinking_stream_merge_handles_delta_snapshot_and_final(agent_panel):
     assert agent_panel._merge_thinking_chunk("hello world", "hello world") == "hello world"
     assert agent_panel._merge_thinking_chunk("hello wor", "world") == "hello world"
 
-    agent_panel.set_status("thinking")
+    agent_panel.start_thinking()
     agent_panel.append_thinking("hello ")
     agent_panel.append_thinking("world")
     agent_panel.append_thinking("hello world")
     row = agent_panel._messages_area.get_message_rows()[0]
-    assert row._detail == "hello world"
+    assert row._bubble_text == "hello world"
 
 
 def test_summary_arrow_stays_next_to_text(qtbot):
     from autoreport.gui.widgets.message_row import MessageRow
 
-    row = MessageRow(role="agent", content="", summary="Thought for 1s", detail="detail")
+    row = MessageRow(
+        role="agent",
+        content="detail",
+        display_mode="thought",
+        bubble_title="Thought for 1s",
+        bubble_collapsible=True,
+    )
     qtbot.addWidget(row)
     row.resize(600, 80)
     row.show()
@@ -282,7 +390,73 @@ def test_summary_arrow_stays_next_to_text(qtbot):
 
     text_right = row._summary_text_label.mapTo(row, row._summary_text_label.rect().topRight()).x()
     arrow_left = row._summary_arrow_widget.mapTo(row, row._summary_arrow_widget.rect().topLeft()).x()
-    assert 0 <= arrow_left - text_right <= 10
+    # The summary arrow sits immediately after the title text, separated only by
+    # the content-host layout spacing (plus the arrow host's intrinsic layout).
+    assert 0 <= arrow_left - text_right <= 12
+
+
+def test_thought_summary_stays_single_line_when_width_is_sufficient(qtbot):
+    from autoreport.gui.widgets.message_row import MessageRow
+
+    row = MessageRow(
+        role="agent",
+        content="detail",
+        display_mode="thought",
+        bubble_title="Thought for 1s",
+        bubble_collapsible=True,
+    )
+    qtbot.addWidget(row)
+    row.resize(600, 80)
+    row.show()
+    qtbot.waitExposed(row)
+
+    assert row._summary_text_label is not None
+    line_height = row._summary_text_label.fontMetrics().lineSpacing()
+    assert row._summary_text_label.height() <= line_height + 6
+
+
+def test_thought_summary_label_keeps_visible_width(qtbot):
+    from autoreport.gui.widgets.message_row import MessageRow
+
+    row = MessageRow(
+        role="agent",
+        content="detail",
+        display_mode="thought",
+        bubble_title="Thought for 1s",
+        bubble_collapsible=True,
+    )
+    qtbot.addWidget(row)
+    row.resize(600, 80)
+    row.show()
+    qtbot.waitExposed(row)
+
+    assert row._summary_text_label is not None
+    assert row._summary_text_label.width() >= 80
+
+
+def test_thought_detail_aligns_close_to_summary_start(qtbot):
+    from autoreport.gui.widgets.message_row import MessageRow
+
+    row = MessageRow(
+        role="agent",
+        content="detail line",
+        display_mode="thought",
+        bubble_title="Thought for 1s",
+        bubble_collapsible=True,
+    )
+    qtbot.addWidget(row)
+    row.resize(600, 120)
+    row.show()
+    qtbot.waitExposed(row)
+
+    assert row._summary_header is not None
+    assert row._detail_label is not None
+    row._summary_header.clicked.emit()
+    qtbot.wait(20)
+
+    summary_left = row._summary_text_label.mapTo(row, row._summary_text_label.rect().topLeft()).x()
+    detail_left = row._detail_label.mapTo(row, row._detail_label.rect().topLeft()).x()
+    assert abs(detail_left - summary_left) <= 4
 
 
 def test_set_debug_mode_shows_hides_panel(agent_panel):
@@ -375,11 +549,11 @@ def test_multiple_messages_and_tools(agent_panel):
     assert agent_panel._messages_area.message_count() == 1
 
     # Add tool call
-    agent_panel.add_tool_call("read_file", {"path": "test.py"})
+    agent_panel.add_tool_call("read", {"path": "test.py"})
     assert agent_panel._messages_area.message_count() == 2
 
     # Add tool result
-    agent_panel.add_tool_result("read_file", "content", None)
+    agent_panel.add_tool_result("read", "content", None)
     assert agent_panel._messages_area.message_count() == 2
 
     # Add agent response
@@ -438,7 +612,7 @@ def test_edit_saved_retracts_following_rows_and_sends_immediately(qtbot, agent_p
     agent_panel.add_message(role="user", content="old user")
     target_row = agent_panel._messages_area.get_message_rows()[-1]
     agent_panel.add_message(role="agent", content="old reply")
-    agent_panel.add_tool_call("read_file", {"path": "a.txt"})
+    agent_panel.add_tool_call("read", {"path": "a.txt"})
 
     assert agent_panel._messages_area.message_count() == 3
 

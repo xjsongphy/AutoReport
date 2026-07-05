@@ -4,6 +4,7 @@ import asyncio
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 from PyQt6.QtCore import QTimer, Qt, pyqtSignal
@@ -37,10 +38,11 @@ from ..interfaces.types import (
     UserMessage,
 )
 from ..utils.agent_labels import get_agent_badge, get_agent_title
-from ..utils.editor_context import build_editor_context_message
+from ..utils.editor_context import build_editor_context_message, build_editor_context_prompt
 from ..utils.logging_config import ui_logger
+from .dialogs import question_box, warning_box
 from .scale import dpi_scale
-from .theme import get_theme_colors
+from .theme import get_theme_colors, scrollbar_stylesheet
 from .title_bar import TitleBar
 from .widgets.agent_panel import AgentPanel
 from .widgets.file_tree import FileTreeWidget
@@ -197,44 +199,22 @@ class MainWindow(QMainWindow):
                 margin: 0;
                 padding: 0;
             }}
-            QScrollBar:vertical {{
-                background-color: transparent;
-                width: {px(8)};
-                border: none;
-            }}
-            QScrollBar::handle:vertical {{
-                background-color: {c["scrollbar"]};
-                min-height: {px(30)};
-                border-radius: {px(4)};
-            }}
-            QScrollBar::handle:vertical:hover {{
-                background-color: {c["scrollbar_hover"]};
-            }}
-            QScrollBar::handle:vertical:pressed {{
-                background-color: {c["scrollbar_hover"]};
-            }}
-            QScrollBar::add-line:vertical,
-            QScrollBar::sub-line:vertical {{
-                height: 0;
-            }}
-            QScrollBar:horizontal {{
-                background-color: transparent;
-                height: {px(8)};
-                border: none;
-            }}
-            QScrollBar::handle:horizontal {{
-                background-color: {c["scrollbar"]};
-                min-width: {px(30)};
-                border-radius: {px(4)};
-            }}
-            QScrollBar::handle:horizontal:hover,
-            QScrollBar::handle:horizontal:pressed {{
-                background-color: {c["scrollbar_hover"]};
-            }}
-            QScrollBar::add-line:horizontal,
-            QScrollBar::sub-line:horizontal {{
-                width: 0;
-            }}
+            {scrollbar_stylesheet(
+                orientation="vertical",
+                background_color="transparent",
+                thickness=px(8),
+                min_handle_extent=px(30),
+                radius=px(4),
+                colors=c,
+            )}
+            {scrollbar_stylesheet(
+                orientation="horizontal",
+                background_color="transparent",
+                thickness=px(8),
+                min_handle_extent=px(30),
+                radius=px(4),
+                colors=c,
+            )}
             {compact_tooltip_qss("QToolTip")}
 
             /* ---- Panel Header ---- */
@@ -262,8 +242,8 @@ class MainWindow(QMainWindow):
                 border_color=c["border"],
                 background_color=c["surface"],
                 foreground_color=c["fg"],
-                hover_border_color=c["focus"],
-                selection_bg=c["selection"],
+                hover_border_color=c["buttonBlue"],
+                selection_bg=c["selectionBlue"],
                 selection_fg=c["fg"],
                 font_size=12,
                 padding="2px 24px 2px 8px",
@@ -333,9 +313,9 @@ class MainWindow(QMainWindow):
             }}
             /* VS Code send button */
             #sendBtn {{
-                background-color: {c["send_bg"]};
+                background-color: {c["buttonBlue"]};
                 color: {c["primaryBtnFg"]};
-                border: 1px solid {c["send_bg"]};
+                border: 1px solid {c["buttonBlue"]};
                 border-radius: {px(6)};
                 font-size: {px(14)};
                 font-weight: {c["fw_bold"]};
@@ -346,8 +326,8 @@ class MainWindow(QMainWindow):
                 max-height: {px(22)};
             }}
             #sendBtn:hover {{
-                background-color: {c["send_hover"]};
-                border-color: {c["send_hover"]};
+                background-color: {c["buttonBlue"]};
+                border-color: {c["buttonBlue"]};
             }}
             #stopBtn {{
                 background-color: transparent;
@@ -395,11 +375,8 @@ class MainWindow(QMainWindow):
                 border: 1px solid {c["border"]};
                 border-radius: {px(12)};
             }}
-            #userMessageBubble:hover {{
-                background-color: {c["bubble_hover"]};
-            }}
             #userContextChip {{
-                background-color: {c["card"]};
+                background-color: {c["hover"]};
                 border: 1px solid {c["border"]};
                 border-radius: {px(8)};
             }}
@@ -425,8 +402,19 @@ class MainWindow(QMainWindow):
             #userMessageText {{
                 color: {c["editor_fg"]};
                 font-size: {px(13)};
-                line-height: 1.5;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
+                font-family: "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
+            }}
+            #messageExpandBtn {{
+                background-color: {c["message_expand_bg"]};
+                color: {c["message_expand_fg"]};
+                border: 1px solid {c["message_expand_border"]};
+                border-radius: {px(9)};
+                padding: {px(3)} {px(8)};
+                font-size: {px(11)};
+                font-weight: {c["fw_medium"]};
+            }}
+            #messageExpandBtn:hover {{
+                background-color: {c["message_expand_hover_bg"]};
             }}
             #userMessageBubbleContainer {{
                 background-color: transparent;
@@ -449,9 +437,9 @@ class MainWindow(QMainWindow):
             }}
             {filled_button_qss(
                 "#userSaveBtn",
-                bg=c["primary"],
+                bg=c["buttonBlue"],
                 fg=c["primaryBtnFg"],
-                hover_bg=c["primary_hover"],
+                hover_bg=c["buttonBlue"],
                 disabled_bg=c["muted"],
                 disabled_fg=c["primaryBtnFg"],
                 radius=px(4),
@@ -500,7 +488,7 @@ class MainWindow(QMainWindow):
                 font-size: {px(13)};
                 font-weight: {c["fw_semibold"]};
                 color: {c["fg"]};
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
+                font-family: "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             #agentMessageRow {{
                 background-color: transparent;
@@ -510,7 +498,7 @@ class MainWindow(QMainWindow):
                 font-size: {px(13)};
                 line-height: 1.5;
                 background-color: transparent;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
+                font-family: "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
             }}
             #msgCoordination {{
                 font-size: {px(11)};
@@ -586,54 +574,85 @@ class MainWindow(QMainWindow):
             }}
             #toolCallHeaderText {{
                 color: {c["tool_fg"]};
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
+                font-family: "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
                 font-size: {px(13)};
-                line-height: 1.5;
+                line-height: 1.7;
                 font-weight: {c["fw_medium"]};
             }}
             #toolCallDetail {{
                 color: {c["tool_detail"]};
-                font-family: "Segoe UI", "SF Pro", -apple-system, sans-serif;
+                font-family: "Segoe UI", "SF Pro", sans-serif;
                 font-size: {px(11)};
                 padding: {px(1)} 0 {px(2)} {px(12)};
             }}
-            #bashDetailCard {{
-                background-color: #23272f;
-                border: 1px solid #353b46;
+            #execDetailCard {{
+                background-color: {c["detail_card_bg"]};
+                border: 1px solid {c["detail_card_border"]};
                 border-radius: {px(8)};
             }}
-            #bashDetailRow {{
+            #execDetailRow {{
                 background-color: transparent;
             }}
-            #bashDetailTag {{
-                color: #9aa3b2;
+            #execDetailTag {{
+                color: {c["detail_muted"]};
                 font-size: {px(10)};
                 font-weight: {c["fw_semibold"]};
                 min-width: {px(20)};
             }}
-            #bashDetailText {{
-                color: #d5dbe5;
+            #execDetailText {{
+                color: {c["detail_fg"]};
                 font-family: "Cascadia Code", "SF Mono", "Consolas", monospace;
                 font-size: {px(11)};
             }}
-            #bashDetailDivider {{
-                background-color: #353b46;
+            #execDetailDivider {{
+                background-color: {c["detail_card_border"]};
                 border: none;
             }}
-            #bashCopyBtn {{
+            #manageDetailCard {{
+                background-color: {c["detail_card_bg"]};
+                border: 1px solid {c["detail_card_border"]};
+                border-radius: {px(8)};
+            }}
+            #manageDetailTitle {{
+                color: {c["detail_muted"]};
+                font-size: {px(10)};
+                font-weight: {c["fw_semibold"]};
+            }}
+            #manageDetailItem {{
+                color: {c["detail_fg"]};
+                font-size: {px(11)};
+                line-height: 1.6;
+                font-family: "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
+            }}
+            #manageDetailDone {{
+                color: {c["detail_muted"]};
+                font-size: {px(11)};
+                line-height: 1.6;
+                font-family: "Segoe UI", "Microsoft YaHei", "Roboto", "Helvetica Neue", sans-serif;
+                text-decoration: line-through;
+            }}
+            #manageDetailEmpty {{
+                color: {c["detail_muted"]};
+                font-size: {px(11)};
+            }}
+            #manageDetailDivider {{
+                background-color: {c["detail_card_border"]};
+                border: none;
+            }}
+            #execCopyBtn {{
                 background-color: transparent;
                 border: none;
-                color: #9aa3b2;
+                color: {c["detail_muted"]};
                 font-size: {px(10)};
                 padding: {px(2)} {px(4)};
             }}
-            #bashCopyBtn:hover {{
-                color: #e2e8f0;
+            #execCopyBtn:hover {{
+                color: {c["detail_hover_fg"]};
             }}
 
             /* ---- Status Indicator ---- */
             #statusSpinner {{
-                color: {c["spinner_fg"]};
+                color: {c["buttonBlue"]};
                 font-size: {px(13)};
             }}
             #statusHeader {{
@@ -726,13 +745,47 @@ class MainWindow(QMainWindow):
             logger.info("Open file requested: {}", file_path)
 
     def _on_open_folder(self) -> None:
-        """Handle open folder action."""
+        """Handle open folder action — switch workspace to the selected folder.
+
+        The workspace is bound at startup (LoopManager, async loop, conversation
+        stores all key off it), so switching means relaunching the app into the
+        new project via ``--project``. The new process is started detached and
+        this window is closed.
+        """
+        from PyQt6.QtCore import QProcess
         from PyQt6.QtWidgets import QFileDialog
 
-        folder_path = QFileDialog.getExistingDirectory(self, "打开文件夹")
-        if folder_path:
-            # TODO: Switch workspace
-            logger.info("Open folder requested: {}", folder_path)
+        from ..core.recent_projects import RecentProjects
+        from .project_dialog import create_project_structure, is_valid_project
+
+        folder_path = QFileDialog.getExistingDirectory(self, "打开文件夹（切换工作区）")
+        if not folder_path:
+            return
+
+        folder = Path(folder_path).expanduser().resolve()
+
+        # Validate it looks like an AutoReport project; offer to scaffold if not.
+        if not is_valid_project(folder):
+            reply = question_box(
+                self,
+                "不是有效的项目",
+                f"'{folder.name}' 不是 AutoReport 项目。是否在该目录创建项目结构并打开？",
+                default=QMessageBox.StandardButton.Yes,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            create_project_structure(folder)
+
+        RecentProjects().add(folder)
+
+        # Relaunch detached into the new workspace so the new window survives
+        # after this process quits.
+        QProcess.startDetached(
+            sys.executable,
+            ["-m", "autoreport", "--project", str(folder)],
+        )
+        logger.info("Switching workspace to {} (relaunching)", folder)
+        QApplication.closeAllWindows()
 
     def _on_save_file(self) -> None:
         """Save the active file in the preview panel."""
@@ -981,33 +1034,39 @@ class MainWindow(QMainWindow):
                 panel.add_message(
                     "user",
                     content,
-                    summary=rec.get("summary"),
-                    detail=rec.get("detail"),
-                    expandable=rec.get("expandable", True),
+                    display_mode=str(rec.get("display_mode") or "bubble"),
+                    bubble_title=rec.get("bubble_title"),
+                    bubble_align=str(rec.get("bubble_align") or "right"),
+                    bubble_on_timeline=bool(rec.get("bubble_on_timeline", False)),
+                    bubble_collapsible=bool(rec.get("bubble_collapsible", True)),
+                    allow_edit=str(rec.get("source", "user")) == "user",
                 )
             elif role == "agent":
-                panel.add_message(
-                    "agent",
-                    content,
-                    summary=rec.get("summary"),
-                    detail=rec.get("detail"),
-                    expandable=rec.get("expandable", True),
-                )
+                if rec.get("display_mode") == "bubble":
+                    panel.add_message(
+                        "agent",
+                        content,
+                        display_mode="bubble",
+                        bubble_title=rec.get("bubble_title"),
+                        bubble_align=str(rec.get("bubble_align") or "left"),
+                        bubble_on_timeline=bool(rec.get("bubble_on_timeline", True)),
+                        bubble_collapsible=bool(rec.get("bubble_collapsible", True)),
+                    )
+                else:
+                    panel.add_message("agent", content)
             elif role == "thinking":
                 panel.add_message(
                     "agent",
                     content,
-                    summary=rec.get("summary") or "Thought",
-                    detail=rec.get("detail") or content,
-                    expandable=rec.get("expandable", True),
+                    display_mode="thought",
+                    bubble_title=rec.get("bubble_title") or "Thought",
+                    bubble_collapsible=bool(rec.get("bubble_collapsible", True)),
                 )
             elif role == "tool_call":
                 panel.add_tool_call(
                     content,
                     rec.get("arguments", {}),
                     summary=rec.get("summary"),
-                    detail=rec.get("detail"),
-                    expandable=rec.get("expandable", True),
                 )
             elif role == "tool_result":
                 panel.add_tool_result(
@@ -1015,8 +1074,6 @@ class MainWindow(QMainWindow):
                     rec.get("result"),
                     rec.get("error"),
                     summary=rec.get("summary"),
-                    detail=rec.get("detail"),
-                    expandable=rec.get("expandable"),
                 )
             elif role == "error":
                 panel.add_error(rec.get("source", ""), content)
@@ -1031,9 +1088,9 @@ class MainWindow(QMainWindow):
             "thinking",
             detail or "",
             extra={
-                "summary": summary,
-                "detail": detail or "",
-                "expandable": expandable,
+                "display_mode": "thought",
+                "bubble_title": summary,
+                "bubble_collapsible": expandable,
             },
         )
 
@@ -1045,6 +1102,9 @@ class MainWindow(QMainWindow):
             role = str(rec.get("role", ""))
             content = str(rec.get("content", ""))
             if role == "user":
+                context = rec.get("editor_context")
+                if isinstance(context, dict):
+                    content = build_editor_context_prompt(context, content)
                 converted.append({"role": "user", "content": content})
             elif role == "agent":
                 converted.append({"role": "assistant", "content": content})
@@ -1095,34 +1155,10 @@ class MainWindow(QMainWindow):
         full_content = content
         file_context = self._pending_file_context.get(agent_type)
         if file_context:
-            context_msg = self._format_file_context(file_context)
-            if context_msg:
-                full_content = f"{context_msg}\n\n{content}"
+            full_content = build_editor_context_prompt(file_context, content)
             self._pending_file_context[agent_type] = None
 
         self._submit_coroutine(self.backend.send_user_message(full_content, agent_type))
-
-    def _format_file_context(self, file_context: dict) -> str:
-        """Format file context for attachment to user message."""
-        if not file_context:
-            return ""
-
-        if file_context.get("type") == "selection":
-            fp = file_context.get("file", "")
-            s = file_context.get("start_line", "")
-            e = file_context.get("end_line", "")
-            return (
-                "Editor context: selection\n"
-                f"File: {fp}\n"
-                f"Selected lines: {s}-{e}\n"
-            )
-        elif file_context.get("type") == "file":
-            fp = file_context.get("file", "")
-            return (
-                "Editor context: file\n"
-                f"Current file: {fp}\n"
-            )
-        return ""
 
     def _on_agent_file_context(self, file_context: dict) -> None:
         self._pending_file_context[self.current_agent_type] = file_context
@@ -1144,12 +1180,11 @@ class MainWindow(QMainWindow):
         self._submit_coroutine(self.backend.interrupt_current_message(agent_type))
 
     def _on_rollback_requested(self, agent_type: str, checkpoint_id: str, row) -> None:
-        reply = QMessageBox.question(
+        reply = question_box(
             self,
             "Rollback",
             "Rollback files and conversation to before this message?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            default=QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
@@ -1165,7 +1200,7 @@ class MainWindow(QMainWindow):
             future.result()
         except Exception as exc:
             logger.warning("Rollback failed for {}: {}", agent_type, exc)
-            QMessageBox.warning(self, "Rollback Failed", str(exc))
+            warning_box(self, "Rollback Failed", str(exc))
             return
 
         self.file_tree.refresh()
@@ -1224,7 +1259,7 @@ class MainWindow(QMainWindow):
             for row in reversed(rows):
                 if getattr(row, "_role", "") != "agent":
                     continue
-                if getattr(row, "_summary", None) is not None:
+                if getattr(row, "_display_mode", "") != "agent_markdown":
                     continue
                 if not getattr(row, "_content", ""):
                     continue
@@ -1289,13 +1324,13 @@ class MainWindow(QMainWindow):
             return
         source_key = str(message.source or "user")
         is_agent_message = source_key not in {"user", "system"}
-        is_coordination = source_key == "main_agent"
-        summary = None
-        detail = None
-        expandable = True
+        bubble_title = None
+        bubble_align = "right"
+        bubble_on_timeline = False
+        allow_edit = source_key == "user"
         if is_agent_message:
             sender = "Main" if source_key == "main_agent" else self._get_agent_display_name(source_key)
-            summary, detail, expandable = self._build_inter_agent_summary(
+            bubble_title = self._build_inter_agent_title(
                 f"Message From {sender}",
                 message.content,
             )
@@ -1305,10 +1340,13 @@ class MainWindow(QMainWindow):
             "user",
             message.content,
             source=message.source,
-            coordination=is_coordination,
-            summary=summary,
-            detail=detail,
-            expandable=expandable,
+            coordination=False,
+            display_mode="bubble",
+            bubble_title=bubble_title,
+            bubble_align=bubble_align,
+            bubble_on_timeline=bubble_on_timeline,
+            bubble_collapsible=True,
+            allow_edit=allow_edit,
         )
 
         self._conv_store.append_message(
@@ -1317,9 +1355,11 @@ class MainWindow(QMainWindow):
             message.content,
             extra={
                 "source": message.source,
-                "summary": summary,
-                "detail": detail,
-                "expandable": expandable,
+                "display_mode": "bubble",
+                "bubble_title": bubble_title,
+                "bubble_align": bubble_align,
+                "bubble_on_timeline": bubble_on_timeline,
+                "bubble_collapsible": True,
             },
         )
 
@@ -1336,19 +1376,14 @@ class MainWindow(QMainWindow):
         panel.finish_thinking()
         state.phase = "tool"
         summary = None
-        detail = None
-        expandable = True
         if agent_str == "main" and message.tool_name == "send_to_agent":
             target = self._get_agent_display_name(str(message.arguments.get("agent_type", "sub")))
             summary = f"Main To {target}"
-            expandable = False
 
         panel.add_tool_call(
             message.tool_name,
             message.arguments,
             summary=summary,
-            detail=detail,
-            expandable=expandable,
         )
         self._conv_store.append_tool_call(
             agent_str,
@@ -1356,8 +1391,6 @@ class MainWindow(QMainWindow):
             message.arguments,
             extra={
                 "summary": summary,
-                "detail": detail,
-                "expandable": expandable,
             },
         )
 
@@ -1366,6 +1399,21 @@ class MainWindow(QMainWindow):
         state = self._state_for_agent(agent_str)
         if not self._is_visible_agent(agent_str):
             result_str = str(message.result) if message.result else None
+            if agent_str == "main" and message.tool_name == "send_to_agent":
+                bubble_title, bubble_body = self._format_send_to_agent_bubble(message.result, message.error)
+                if bubble_title:
+                    self._conv_store.append_message(
+                        agent_str,
+                        "agent",
+                        bubble_body or "",
+                        extra={
+                            "display_mode": "bubble",
+                            "bubble_title": bubble_title,
+                            "bubble_align": "left",
+                            "bubble_on_timeline": True,
+                            "bubble_collapsible": True,
+                        },
+                    )
             self._conv_store.append_tool_result(
                 agent_str,
                 message.tool_name,
@@ -1376,28 +1424,50 @@ class MainWindow(QMainWindow):
         panel = self._get_panel_for_agent(agent_str)
         result_str = str(message.result) if message.result else None
         summary = None
-        detail = None
-        expandable = None
         safe_error = None
         if message.error:
             safe_error = "Tool execution failed"
 
         if agent_str == "main" and message.tool_name == "send_to_agent":
-            summary, detail, expandable = self._format_send_to_agent_result(message.result, message.error)
-            result_str = detail or summary
+            summary, bubble_body = self._format_send_to_agent_bubble(message.result, message.error)
+            result_str = bubble_body or summary
         elif message.tool_name == "manage_tasks":
-            summary, detail, expandable = self._format_manage_tasks_result(message.result, message.error)
-            if summary or detail:
-                result_str = detail or summary
+            message.result = self._augment_manage_tasks_result(agent_str, message.result)
+            summary, _, _ = self._format_manage_tasks_result(message.result, message.error)
+            if summary:
+                result_str = summary
 
         panel.add_tool_result(
             message.tool_name,
             message.result,
             safe_error,
             summary=summary,
-            detail=detail,
-            expandable=expandable,
         )
+        if agent_str == "main" and message.tool_name == "send_to_agent":
+            bubble_title, bubble_body = self._format_send_to_agent_bubble(message.result, message.error)
+            if bubble_title:
+                if self._is_visible_agent(agent_str):
+                    panel.add_message(
+                        "agent",
+                        bubble_body or "",
+                        display_mode="bubble",
+                        bubble_title=bubble_title,
+                        bubble_align="left",
+                        bubble_on_timeline=True,
+                        bubble_collapsible=True,
+                    )
+                self._conv_store.append_message(
+                    agent_str,
+                    "agent",
+                    bubble_body or "",
+                    extra={
+                        "display_mode": "bubble",
+                        "bubble_title": bubble_title,
+                        "bubble_align": "left",
+                        "bubble_on_timeline": True,
+                        "bubble_collapsible": True,
+                    },
+                )
         state.phase = "tool"
         self._conv_store.append_tool_result(
             agent_str,
@@ -1406,18 +1476,44 @@ class MainWindow(QMainWindow):
             message.error,
             extra={
                 "summary": summary,
-                "detail": detail,
-                "expandable": expandable,
             },
         )
 
-    def _format_send_to_agent_result(self, result, error: str | None) -> tuple[str, str | None, bool]:
+    def _augment_manage_tasks_result(self, agent_str: str, result: Any) -> Any:
+        """Ensure manage_tasks result always carries todolist/waitlist for UI rendering."""
+        if not isinstance(result, dict):
+            return result
+        if isinstance(result.get("todolist"), list) and isinstance(result.get("waitlist"), list):
+            return result
+        loop_manager = getattr(self.backend, "loop_manager", None)
+        task_board = getattr(loop_manager, "_task_board", None) if loop_manager is not None else None
+        if task_board is None:
+            return result
+        try:
+            agent_type = AgentType(agent_str)
+        except ValueError:
+            return result
+        session_id = self._conv_store.get_current_session_id(agent_str)
+        todolist = task_board.get_todolist(agent_type, session_id=session_id)
+        waitlist = task_board.get_waitlist(agent_type, session_id=session_id)
+        augmented = dict(result)
+        augmented["todolist"] = [
+            {"task_id": t.task_id, "brief": t.brief, "status": t.status.value, "source_agent": t.source_agent.value}
+            for t in todolist
+        ]
+        augmented["waitlist"] = [
+            {"task_id": t.task_id, "brief": t.brief, "status": t.status.value, "target_agent": t.target_agent.value}
+            for t in waitlist
+        ]
+        return augmented
+
+    def _format_send_to_agent_bubble(self, result, error: str | None) -> tuple[str, str | None]:
         if error:
-            return ("Send To Agent", error, True)
+            return ("Send To Agent", error)
 
         if not isinstance(result, dict):
             text = str(result).strip() if result is not None else ""
-            return ("Sub-agent replied", text or None, bool(text))
+            return ("Sub-agent replied", text or None)
 
         target = self._get_agent_display_name(str(result.get("agent_type", "sub")))
         status = str(result.get("status", "success"))
@@ -1425,23 +1521,22 @@ class MainWindow(QMainWindow):
 
         if status == "delegated":
             detail = str(result.get("message", "") or "").strip() or None
-            return (f"Delegated To {target}", detail, bool(detail))
+            return (f"Delegated To {target}", detail)
 
         if status == "timeout":
             detail = str(result.get("error", "") or "").strip() or None
-            return (f"{target} did not reply in time", detail, bool(detail))
+            return (f"{target} did not reply in time", detail)
 
         if status == "error":
             detail = str(result.get("error", "") or "").strip() or None
-            return (f"Send To {target}", detail, bool(detail))
+            return (f"Send To {target}", detail)
 
         if not response:
-            return (f"{target} replied", None, False)
+            return (f"{target} replied", None)
 
         first_line = response.splitlines()[0].strip()
         summary = f"{target} replied: {first_line}" if first_line else f"{target} replied"
-        detail = response if ("\n" in response or len(response) > len(first_line)) else None
-        return (summary, detail, bool(detail))
+        return (summary, response)
 
     def _format_manage_tasks_result(self, result, error: str | None) -> tuple[str | None, str | None, bool | None]:
         if error or not isinstance(result, dict):
@@ -1451,29 +1546,38 @@ class MainWindow(QMainWindow):
             return (None, None, None)
 
         def _rows(items: list[dict], title: str) -> list[str]:
-            lines = [f"<b>{title}</b>"]
+            if not items:
+                return []
+            lines = [title]
             shown = 0
             for item in items:
                 if shown >= 10:
                     break
                 status = str(item.get("status", "pending")).lower()
                 brief = str(item.get("brief", "")).strip() or "task"
-                done = status in {"completed", "cancelled", "failed"}
-                marker = "☑" if done else "☐"
-                if done:
-                    lines.append(f"<span style='color:#9098a3'>{marker} <s>{brief}</s></span>")
-                else:
-                    lines.append(f"<span style='color:#9098a3'>{marker} {brief}</span>")
+                marker = {
+                    "pending": "☐",
+                    "in_progress": "●",
+                    "completed": "☑",
+                    "failed": "⚠",
+                    "cancelled": "✗",
+                }.get(status, "☐")
+                lines.append(f"{marker} {brief}")
                 shown += 1
-            if shown == 0:
-                lines.append("<span style='color:#9098a3'>—</span>")
             return lines
 
         todolist = result.get("todolist")
         waitlist = result.get("waitlist")
         if isinstance(todolist, list) and isinstance(waitlist, list):
-            body = "\n".join(_rows(todolist, "Todo") + ["", *(_rows(waitlist, "Waiting"))])
-            summary = f"<b>Task</b><br/>{body}"
+            sections = [_rows(todolist, "Todo"), _rows(waitlist, "Wait")]
+            lines = ["<b>Task</b>"]
+            for section in sections:
+                if not section:
+                    continue
+                if len(lines) > 1:
+                    lines.append("")
+                lines.extend(section)
+            summary = "\n".join(lines)
             return (summary, None, False)
 
         ui_summary = str(result.get("_ui_summary", "") or "").strip()
@@ -1482,15 +1586,13 @@ class MainWindow(QMainWindow):
             return (None, None, None)
         return (ui_summary or "Task completed", ui_detail or None, bool(ui_detail))
 
-    def _build_inter_agent_summary(self, prefix: str, content: str) -> tuple[str, str | None, bool]:
+    def _build_inter_agent_title(self, prefix: str, content: str) -> str:
         response = str(content or "").strip()
         if not response:
-            return (prefix, None, False)
+            return prefix
 
         first_line = response.splitlines()[0].strip()
-        summary = f"{prefix}: {first_line}" if first_line else prefix
-        detail = response if ("\n" in response or len(response) > len(first_line)) else None
-        return (summary, detail, bool(detail))
+        return f"{prefix}: {first_line}" if first_line else prefix
 
     def _handle_status_change(self, message: StatusChange) -> None:
         agent_str = str(message.agent_type)
@@ -1509,7 +1611,7 @@ class MainWindow(QMainWindow):
 
         agent_str = message.agent_type.value if isinstance(message.agent_type, Enum) else str(message.agent_type)
         issue_type = message.feedback_type or "issue"
-        summary, detail, expandable = self._build_inter_agent_summary(
+        bubble_title = self._build_inter_agent_title(
             f"{self._get_agent_display_name(agent_str)} reported {issue_type}",
             message.content,
         )
@@ -1518,9 +1620,11 @@ class MainWindow(QMainWindow):
                 "agent",
                 message.content,
                 source=agent_str,
-                summary=summary,
-                detail=detail,
-                expandable=expandable,
+                display_mode="bubble",
+                bubble_title=bubble_title,
+                bubble_align="left",
+                bubble_on_timeline=True,
+                bubble_collapsible=True,
             )
         self._conv_store.append_message(
             "main",
@@ -1528,9 +1632,11 @@ class MainWindow(QMainWindow):
             message.content,
             extra={
                 "source": agent_str,
-                "summary": summary,
-                "detail": detail,
-                "expandable": expandable,
+                "display_mode": "bubble",
+                "bubble_title": bubble_title,
+                "bubble_align": "left",
+                "bubble_on_timeline": True,
+                "bubble_collapsible": True,
                 "feedback_type": issue_type,
             },
         )
@@ -1588,7 +1694,7 @@ class MainWindow(QMainWindow):
     # ---- Conversation History ----
 
     def _on_history_requested(self, agent_type: str) -> None:
-        sessions = self._conv_store.get_sessions()
+        sessions = self._conv_store.get_sessions(agent_type)
         current_id = self._conv_store.get_current_session_id(agent_type)
         panel = self._get_panel_for_agent(agent_type)
         panel.show_history_dropdown(sessions, current_id)
@@ -1641,10 +1747,23 @@ class MainWindow(QMainWindow):
         self._conv_store.delete_session(session_id)
         self._clear_all_panels()
         self._load_conversations()
+        self._refresh_history_dropdown_if_open()
         logger.info("Deleted session: {}", session_id)
+
+    def _refresh_history_dropdown_if_open(self) -> None:
+        """Repopulate the history dropdown with fresh data if it is open.
+
+        Deleting a session mutates the store but the open dropdown is a static
+        snapshot, so it would otherwise still show the removed entry.
+        """
+        if self.agent_panel.is_history_dropdown_visible():
+            sessions = self._conv_store.get_sessions(self.current_agent_type)
+            current_id = self._conv_store.get_current_session_id(self.current_agent_type)
+            self.agent_panel.show_history_dropdown(sessions, current_id)
 
     def _on_rename_session(self, session_id: str, new_name: str) -> None:
         self._conv_store.rename_session(session_id, new_name)
+        self._refresh_history_dropdown_if_open()
         logger.info("Renamed session {} to {}", session_id, new_name)
 
     def _clear_all_panels(self) -> None:
