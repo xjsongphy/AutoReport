@@ -9,6 +9,7 @@ from autoreport.core.tools.agent_tools import ReportTool, SendToAgentTool
 from autoreport.core.tools.task_board import TaskBoard
 from autoreport.interfaces.types import (
     AgentType,
+    ReportMessage,
     TaskStatus,
     UserMessage,
 )
@@ -81,6 +82,23 @@ class TestSendToAgentTool:
         assert "task_id" in result
         # Task marked completed along the chain
         assert board.get_task(result["task_id"], target_agent=AgentType.THEORY).status == TaskStatus.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_liveness_wait_returns_already_completed_report(self, bus, board):
+        tool = SendToAgentTool(bus=bus, task_board=board, timeout=5)
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        report = ReportMessage(
+            agent_type=AgentType.THEORY,
+            task_id="tk1",
+            report_type="reply",
+            content="done",
+        )
+        future.set_result(report)
+
+        result = await tool._await_with_liveness(future, AgentType.THEORY, loop)
+
+        assert result is report
 
     @pytest.mark.asyncio
     async def test_blocking_blocked_on_missing_data_report(self, bus, board):
@@ -204,4 +222,3 @@ class TestTaskBriefFallback:
         assert len(tasks) == 1
         expected = "Derive the uncertainty formula for single-slit diffraction experiment"[:30]
         assert tasks[0].brief == expected
-

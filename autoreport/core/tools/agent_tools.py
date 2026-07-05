@@ -249,7 +249,7 @@ class SendToAgentTool(Tool):
             "block_type": report.report_type,
             "request_summary": request_summary,
             "response": report.content,
-            "error": f"Sub-agent reported {report.report_type}: {report.content}",
+            "error": f"Sub-agent responded {report.report_type}: {report.content}",
         }
 
     async def _await_with_liveness(self, future, target, loop) -> ReportMessage:
@@ -263,6 +263,9 @@ class SendToAgentTool(Tool):
         wall_cap = self._timeout * 4
         idle_handle: asyncio.TimerHandle | None = None
         wall_deadline = loop.time() + wall_cap
+
+        if future.done():
+            return await future
 
         def _fire_idle() -> None:
             if not future.done():
@@ -299,7 +302,7 @@ class SendToAgentTool(Tool):
 
 
 class ReportTool(Tool):
-    """Report the outcome of a Main-dispatched task.
+    """Respond to Main with the outcome of a Main-dispatched task.
 
     Available to all sub-agents. This is the ONLY way to finish a task
     dispatched by Main. Required: a sub-agent MUST call `respond` before
@@ -312,7 +315,7 @@ class ReportTool(Tool):
 
     name = "respond"
     description = (
-        "Report the outcome of a task Main dispatched to you. This is the ONLY "
+        "Respond to Main with the outcome of a task Main dispatched to you. This is the ONLY "
         "way to finish such a task — you MUST call it before stopping.\n"
         "Types:\n"
         "- 'reply': you finished. content = your final response (results, file paths).\n"
@@ -331,6 +334,24 @@ class ReportTool(Tool):
 
     def _session_id(self) -> str | None:
         return resolve_session_id(self._session_id_resolver)
+
+    def _find_assigned_task(self, task_id: str):
+        if self._task_board is None:
+            return None
+        sid = self._session_id()
+        task = self._task_board.get_task(
+            task_id,
+            target_agent=self._agent_type,
+            active_only=False,
+            session_id=sid,
+        )
+        if task is not None:
+            return task
+        return self._task_board.get_task(
+            task_id,
+            target_agent=self._agent_type,
+            active_only=False,
+        )
 
     async def __call__(self, task_id: str, type: str, content: str = "") -> dict[str, Any]:
         """Report outcome of a Main-dispatched task.
@@ -352,12 +373,16 @@ class ReportTool(Tool):
 
         sid = self._session_id()
         if self._task_board is not None:
-            task = self._task_board.get_task(task_id, target_agent=self._agent_type, active_only=False, session_id=sid)
+            task = self._find_assigned_task(task_id)
             if task is None:
-                any_task = self._task_board.get_task(task_id, active_only=False, session_id=sid)
+                any_task = (
+                    self._task_board.get_task(task_id, active_only=False, session_id=sid)
+                    or self._task_board.get_task(task_id, active_only=False)
+                )
                 if any_task is None:
                     return {"status": "error", "error": f"Task {task_id} not found"}
                 return {"status": "error", "error": f"Task {task_id} is not assigned to you"}
+            sid = task.session_id
 
         # Update task status + chain (reuses TaskBoard logic)
         affected: list = []
@@ -390,10 +415,11 @@ class ReportTool(Tool):
             content=str(content or ""),
         ))
 
-        logger.info("{} reported {} for task {}", self._agent_type, report_type, task_id)
+        logger.info("{} responded {} for task {}", self._agent_type, report_type, task_id)
         return {
             "status": "ok",
             "task_id": task_id,
             "report_type": report_type,
+            "content": str(content or ""),
             "message": f"Reported {report_type} for task {task_id}",
         }

@@ -118,6 +118,26 @@ def test_set_debug_mode_disabled(agent_loop):
     assert len(agent_loop.bus._subscribers.get(UserMessage, [])) == 1
 
 
+def test_task_state_section_includes_task_id_for_respond(workspace, config, mock_provider, mock_prompt_loader):
+    from autoreport.core.tools.task_board import TaskBoard
+
+    board = TaskBoard()
+    board.create_task(
+        AgentType.MAIN,
+        AgentType.PLOTTING,
+        "draw final figure",
+        task_id="tk123",
+        session_id="main-session",
+    )
+    loop = _sub_loop(workspace, config, mock_provider, mock_prompt_loader, board)
+    loop._current_session_id = "plotting-session"
+
+    section = loop._build_task_state_section()
+
+    assert "tk123" in section
+    assert "draw final figure" in section
+
+
 @pytest.mark.asyncio
 async def test_system_prompt_first_call_loads_and_caches(agent_loop, mock_prompt_loader):
     prompt = await agent_loop._get_system_prompt()
@@ -403,7 +423,7 @@ async def test_sub_guard_reprompts_when_no_report(workspace, config, mock_provid
 
     # mock_provider returns text-only (no tool call), so report is never called.
     # The guard should fire and publish at least one SystemNotice before going IDLE.
-    assert any("report" in n.content for n in notices)
+    assert any("Respond" in n.content for n in notices)
 
 
 @pytest.mark.asyncio

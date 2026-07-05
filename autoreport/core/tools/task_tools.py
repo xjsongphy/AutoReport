@@ -4,7 +4,7 @@ from typing import Any
 
 from loguru import logger
 
-from ...interfaces.types import AgentType, TaskUpdateMessage, UserMessage
+from ...interfaces.types import AgentType, ReportMessage, TaskUpdateMessage
 from .registry import Tool
 from .session_utils import resolve_session_id
 
@@ -130,10 +130,16 @@ class ManageTasksTool(Tool):
         sid = self._session_id()
         any_task = self._task_board.get_task(tid, active_only=False, session_id=sid)
         if any_task is None:
+            any_task = self._task_board.get_task(tid, active_only=False)
+        if any_task is None:
             return {"status": "error", "error": f"Task {tid} not found"}, None
         task = self._task_board.get_task(
             tid, target_agent=self._agent_type, active_only=False, session_id=sid
         )
+        if task is None:
+            task = self._task_board.get_task(
+                tid, target_agent=self._agent_type, active_only=False
+            )
         if task is None:
             return {"status": "error", "error": f"Task {tid} is not assigned to you"}, None
         return None, task
@@ -262,7 +268,7 @@ class ManageTasksTool(Tool):
                 continue
             try:
                 previous_status = task.status.value
-                result = board_fn(tid, target_agent=self._agent_type, session_id=self._session_id())
+                result = board_fn(tid, target_agent=self._agent_type, session_id=task.session_id)
                 # start_task returns a single TaskItem; others return a list
                 affected = result if isinstance(result, list) else [result]
                 all_affected.extend(affected)
@@ -335,7 +341,7 @@ class ManageTasksTool(Tool):
                 affected = self._task_board.complete_task(
                     tid,
                     target_agent=self._agent_type,
-                    session_id=self._session_id(),
+                    session_id=task.session_id,
                 )
                 all_affected.extend(affected)
                 prev_statuses.append(previous_status)
@@ -431,14 +437,12 @@ class ManageTasksTool(Tool):
         if terminal.source_agent == terminal.target_agent:
             return 0
 
-        source = "main_agent" if leaf.target_agent == AgentType.MAIN else leaf.target_agent.value
-        completion_notice = f"✅ {leaf.target_agent.value} completed task: {leaf.brief}"
-        content = completion_notice if not response else f"{completion_notice}\n\n{response}"
         await self._bus.publish(
-            UserMessage(
-                content=content,
-                agent_type=terminal.source_agent,
-                source=source,
+            ReportMessage(
+                agent_type=leaf.target_agent,
+                task_id=leaf.task_id,
+                report_type="reply",
+                content=response,
             )
         )
         return 1

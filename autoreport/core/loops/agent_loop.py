@@ -482,7 +482,7 @@ class AgentLoop:
             )
 
     async def _enforce_report_guard(self, message: UserMessage) -> bool:
-        """Sub-agents must call `report` before ending a Main-dispatched turn.
+        """Sub-agents must call `respond` before ending a Main-dispatched turn.
 
         Returns True if the guard took over (caller must NOT finalize IDLE).
         Re-prompts up to _REPORT_GUARD_MAX_RETRIES times; if the agent still
@@ -494,9 +494,9 @@ class AgentLoop:
             return False
 
         reminder = (
-            "[系统提醒] 你结束本轮但还没有调用 report。必须在结束前调用 "
-            "report(task_id, type, content)：type='reply' 表示完成，"
-            "'missing_data'/'quality' 表示卡住。请现在调用 report。"
+            "本轮需要调用 Respond 向 Main 回复。请调用 "
+            "respond(task_id, type, content)：type='reply' 表示完成，"
+            "'missing_data'/'quality' 表示卡住。"
         )
         while not self._turn_reported:
             self._report_retries += 1
@@ -509,8 +509,10 @@ class AgentLoop:
             await self.bus.publish(
                 SystemNotice(
                     agent_type=self.agent_type,
-                    content=f"[守卫] {self.agent_type.value} 结束本轮但未调用 report，"
-                    f"提醒重试 ({self._report_retries}/{self._REPORT_GUARD_MAX_RETRIES})。",
+                    content=(
+                        "本轮需要调用 Respond 向 Main 回复 "
+                        f"({self._report_retries}/{self._REPORT_GUARD_MAX_RETRIES})。"
+                    ),
                 )
             )
             await self._run_guard_round(message, reminder)
@@ -525,20 +527,21 @@ class AgentLoop:
         if self._task_board is None:
             return
         todos = self._task_board.get_todolist(self.agent_type, session_id=self._current_session_id)
+        if not todos:
+            todos = self._task_board.get_todolist(self.agent_type)
         task = next((t for t in todos if t.source_agent == AgentType.MAIN), None)
         if task is None:
             return
         try:
             self._task_board.block_task(
-                task.task_id, target_agent=self.agent_type, session_id=self._current_session_id
+                task.task_id, target_agent=self.agent_type, session_id=task.session_id
             )
         except ValueError:
             return
         await self.bus.publish(
             SystemNotice(
                 agent_type=self.agent_type,
-                content=f"[守卫] {self.agent_type.value} 多次未 report，"
-                f"任务 {task.task_id} 标记为 blocked，交回 Main 处理。",
+                content=f"多次未调用 Respond，任务 {task.task_id} 已标记为 blocked，交回 Main 处理。",
             )
         )
 
@@ -553,7 +556,7 @@ class AgentLoop:
             return False
 
         reminder = (
-            "[系统提醒] 你还有被阻塞的任务未处理。请用 send_to_agent 重派、"
+            "还有被阻塞的任务未处理。请用 send_to_agent 重派、"
             "转交其他 agent，或自行补齐所需输入后再结束。"
         )
         while True:
@@ -569,7 +572,7 @@ class AgentLoop:
                 await self.bus.publish(
                     SystemNotice(
                         agent_type=AgentType.MAIN,
-                        content=f"[守卫] Main 多次未解决被阻塞任务，暂停以便用户介入：{names}",
+                        content=f"Main 多次未解决被阻塞任务，暂停以便用户介入：{names}",
                     )
                 )
                 self._main_block_retries = 0
@@ -577,7 +580,7 @@ class AgentLoop:
             await self.bus.publish(
                 SystemNotice(
                     agent_type=AgentType.MAIN,
-                    content=f"[守卫] Main 还有被阻塞的任务：{names}，"
+                    content=f"Main 还有被阻塞的任务：{names}，"
                     f"请先解决 ({self._main_block_retries}/{self._REPORT_GUARD_MAX_RETRIES})。",
                 )
             )
@@ -1282,14 +1285,31 @@ class AgentLoop:
         - Incomplete tasks: show all
         - Completed tasks: show only 10 most recently completed (by completed_at)
         """
-        if self._loop_manager is None:
-            return ""
-        task_board = getattr(self._loop_manager, "_task_board", None)
+        task_board = self._task_board
+        if task_board is None and self._loop_manager is not None:
+            task_board = getattr(self._loop_manager, "_task_board", None)
         if task_board is None:
             return ""
 
-        todolist = task_board.get_todolist(self.agent_type, session_id=self._current_session_id)
-        waitlist = task_board.get_waitlist(self.agent_type, session_id=self._current_session_id)
+        def _merge_by_identity(primary, fallback):
+            seen = set()
+            merged = []
+            for task in [*primary, *fallback]:
+                key = (task.task_id, task.source_agent, task.target_agent)
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(task)
+            return merged
+
+        todolist = _merge_by_identity(
+            task_board.get_todolist(self.agent_type, session_id=self._current_session_id),
+            task_board.get_todolist(self.agent_type),
+        )
+        waitlist = _merge_by_identity(
+            task_board.get_waitlist(self.agent_type, session_id=self._current_session_id),
+            task_board.get_waitlist(self.agent_type),
+        )
 
         if not todolist and not waitlist:
             return ""
@@ -1315,7 +1335,7 @@ class AgentLoop:
                         if hasattr(t.target_agent, "value")
                         else str(t.target_agent)
                     )
-                    result.append(f"  - 等待{tgt} {t.brief}")
+                    result.append(f"  - task_id={t.task_id} 等待{tgt} {t.brief}")
                 else:
                     status_map = {
                         TaskStatus.PENDING: "待处理",
@@ -1324,7 +1344,7 @@ class AgentLoop:
                         TaskStatus.CANCELLED: "已取消",
                     }
                     s = status_map.get(t.status, t.status.value)
-                    result.append(f"  - {s} {t.brief}")
+                    result.append(f"  - task_id={t.task_id} {s} {t.brief}")
 
             # Show 10 most recently completed tasks
             if completed:
@@ -1340,9 +1360,9 @@ class AgentLoop:
                             if hasattr(t.target_agent, "value")
                             else str(t.target_agent)
                         )
-                        result.append(f"  - 等待{tgt} {t.brief} (已完成)")
+                        result.append(f"  - task_id={t.task_id} 等待{tgt} {t.brief} (已完成)")
                     else:
-                        result.append(f"  - 已完成 {t.brief}")
+                        result.append(f"  - task_id={t.task_id} 已完成 {t.brief}")
 
             return result
 

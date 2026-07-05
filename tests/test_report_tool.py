@@ -36,6 +36,28 @@ async def test_reply_completes_task_and_publishes_report(board, bus):
 
 
 @pytest.mark.asyncio
+async def test_reply_finds_main_dispatched_task_from_different_agent_session(board, bus):
+    board.create_task(
+        AgentType.MAIN,
+        AgentType.PLOTTING,
+        "draw",
+        task_id="tk1",
+        session_id="main-session",
+    )
+    tool = ReportTool(
+        bus=bus,
+        agent_type=AgentType.PLOTTING,
+        task_board=board,
+        session_id_resolver=lambda: "plotting-session",
+    )
+
+    result = await tool(task_id="tk1", type="reply", content="done")
+
+    assert result["status"] == "ok"
+    assert board.get_task("tk1", target_agent=AgentType.PLOTTING).status == TaskStatus.COMPLETED
+
+
+@pytest.mark.asyncio
 async def test_missing_data_blocks_task(board, bus):
     board.create_task(AgentType.MAIN, AgentType.PLOTTING, "draw", task_id="tk1")
     tool = ReportTool(bus=bus, agent_type=AgentType.PLOTTING, task_board=board)

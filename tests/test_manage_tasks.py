@@ -7,7 +7,7 @@ import pytest
 from autoreport.core.loops.bus import MessageBus
 from autoreport.core.tools.task_board import TaskBoard
 from autoreport.core.tools.task_tools import ManageTasksTool
-from autoreport.interfaces.types import AgentType, TaskStatus, TaskUpdateMessage
+from autoreport.interfaces.types import AgentType, ReportMessage, TaskStatus, TaskUpdateMessage
 
 
 @pytest.fixture
@@ -196,10 +196,11 @@ class TestManageTasksToolComplete:
         assert result["auto_replied"] == 1
 
         messages = [await asyncio.wait_for(bus._queue.get(), timeout=1) for _ in range(2)]
-        reply = next(msg for msg in messages if hasattr(msg, "source") and getattr(msg, "source", None) == "plotting")
-        assert reply.agent_type == AgentType.MAIN
-        assert reply.content.startswith("✅ plotting completed task: draw")
-        assert "plot done" in reply.content
+        reply = next(msg for msg in messages if isinstance(msg, ReportMessage))
+        assert reply.agent_type == AgentType.PLOTTING
+        assert reply.task_id == task.task_id
+        assert reply.report_type == "reply"
+        assert reply.content == "plot done"
 
     @pytest.mark.asyncio
     async def test_complete_sub_main_sub_chain_auto_replies_to_main_and_origin(self, board, bus):
@@ -227,9 +228,11 @@ class TestManageTasksToolComplete:
         assert board.get_task(child.task_id).status == TaskStatus.COMPLETED
 
         messages = [await asyncio.wait_for(bus._queue.get(), timeout=1) for _ in range(3)]
-        replies = [msg for msg in messages if hasattr(msg, "source") and getattr(msg, "source", None) == "theory"]
+        replies = [msg for msg in messages if isinstance(msg, ReportMessage)]
         assert len(replies) == 1
-        assert replies[0].agent_type == AgentType.DATA_ANALYSIS
+        assert replies[0].agent_type == AgentType.THEORY
+        assert replies[0].task_id == child.task_id
+        assert replies[0].content == "formulas ready"
 
     @pytest.mark.asyncio
     async def test_complete_response_alias_still_supported(self, board, bus):
@@ -240,9 +243,9 @@ class TestManageTasksToolComplete:
 
         assert result["status"] == "ok"
         messages = [await asyncio.wait_for(bus._queue.get(), timeout=1) for _ in range(2)]
-        reply = next(msg for msg in messages if hasattr(msg, "source") and getattr(msg, "source", None) == "plotting")
-        assert reply.content.startswith("✅ plotting completed task: draw")
-        assert "legacy alias" in reply.content
+        reply = next(msg for msg in messages if isinstance(msg, ReportMessage))
+        assert reply.agent_type == AgentType.PLOTTING
+        assert reply.content == "legacy alias"
 
 
 class TestManageTasksToolCancel:
