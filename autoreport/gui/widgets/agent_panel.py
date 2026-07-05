@@ -668,13 +668,20 @@ class AgentPanel(QWidget):
                 color: {c["tree_sel_fg"]};
             }}
         """)
-        self._cmd_popup.show()
-        row_height = self._cmd_popup.sizeHintForRow(0)
-        if row_height <= 0:
-            row_height = self._cmd_popup.fontMetrics().lineSpacing() + 12
-        h = min(row_height * max(1, self._cmd_popup.count()) + 12, 200)
-        self._position_popup_above_composer(self._cmd_popup, h)
-        self._cmd_popup.raise_()
+        # Defer show+position to the next event-loop tick so the composer
+        # layout has settled (scrollbar show/hide can shift the input
+        # container's geometry after this call returns); positioning
+        # synchronously here pins the popup to stale geometry.
+        def _show_and_position() -> None:
+            row_height = self._cmd_popup.sizeHintForRow(0)
+            if row_height <= 0:
+                row_height = self._cmd_popup.fontMetrics().lineSpacing() + 12
+            h = min(row_height * max(1, self._cmd_popup.count()) + 12, 200)
+            self._cmd_popup.show()
+            self._position_popup_above_composer(self._cmd_popup, h)
+            self._cmd_popup.raise_()
+
+        QTimer.singleShot(0, _show_and_position)
 
     def _on_command_selected(self, item: QListWidgetItem) -> None:
         cmd = item.data(Qt.ItemDataRole.UserRole)
