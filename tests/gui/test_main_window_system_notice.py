@@ -31,7 +31,7 @@ def test_system_notice_renders_in_target_agent_panel():
 
     MainWindow._handle_system_notice(
         fake,
-        SystemNotice(agent_type=AgentType.MAIN, content="[守卫] Waiting for user input"),
+        SystemNotice(agent_type=AgentType.MAIN, content="本轮需要调用 Respond 向 Main 回复"),
     )
 
     # Check panel was called with correct bubble parameters
@@ -39,13 +39,13 @@ def test_system_notice_renders_in_target_agent_panel():
     call_name, args, kwargs = panel_calls[0]
     assert call_name == "message"
     assert args[0] == "agent"
-    assert args[1] == "[守卫] Waiting for user input"
+    assert args[1] == "本轮需要调用 Respond 向 Main 回复"
     assert kwargs["source"] == "system"
     assert kwargs["display_mode"] == "bubble"
     assert kwargs["bubble_align"] == "left"
-    assert kwargs["bubble_on_timeline"] is True
+    assert kwargs["bubble_on_timeline"] is False
     assert kwargs["bubble_collapsible"] is True
-    assert "[守卫]" in kwargs["bubble_title"]
+    assert kwargs["bubble_title"] is None
 
     # Check store was called with persistence parameters
     assert len(store_calls) == 1
@@ -53,11 +53,11 @@ def test_system_notice_renders_in_target_agent_panel():
     assert call_name == "message"
     assert args[0] == "main"
     assert args[1] == "agent"
-    assert args[2] == "[守卫] Waiting for user input"
+    assert args[2] == "本轮需要调用 Respond 向 Main 回复"
     assert kwargs["extra"]["source"] == "system"
     assert kwargs["extra"]["display_mode"] == "bubble"
     assert kwargs["extra"]["bubble_align"] == "left"
-    assert kwargs["extra"]["bubble_on_timeline"] is True
+    assert kwargs["extra"]["bubble_on_timeline"] is False
     assert kwargs["extra"]["bubble_collapsible"] is True
     assert kwargs["extra"]["system_notice"] is True
 
@@ -105,12 +105,9 @@ def test_report_message_renders_in_main_panel():
     assert kwargs["source"] == "plotting"
     assert kwargs["display_mode"] == "bubble"
     assert kwargs["bubble_align"] == "left"
-    assert kwargs["bubble_on_timeline"] is True
+    assert kwargs["bubble_on_timeline"] is False
     assert kwargs["bubble_collapsible"] is True
-    assert (
-        "report" in kwargs["bubble_title"].lower()
-        or "missing_data" in kwargs["bubble_title"].lower()
-    )
+    assert kwargs["bubble_title"] == "Sub to Main"
 
     # Check store was called with persistence parameters
     assert len(store_calls) == 1
@@ -122,7 +119,7 @@ def test_report_message_renders_in_main_panel():
     assert kwargs["extra"]["source"] == "plotting"
     assert kwargs["extra"]["display_mode"] == "bubble"
     assert kwargs["extra"]["bubble_align"] == "left"
-    assert kwargs["extra"]["bubble_on_timeline"] is True
+    assert kwargs["extra"]["bubble_on_timeline"] is False
     assert kwargs["extra"]["bubble_collapsible"] is True
     assert kwargs["extra"]["report_type"] == "missing_data"
     assert kwargs["extra"]["task_id"] == "tk1"
@@ -153,7 +150,7 @@ def test_system_notice_for_invisible_agent_skips_panel():
 
     MainWindow._handle_system_notice(
         fake,
-        SystemNotice(agent_type=AgentType.PLOTTING, content="[守卫] Processing data"),
+        SystemNotice(agent_type=AgentType.PLOTTING, content="正在处理数据"),
     )
 
     # Panel should not be called since plotting agent is not visible

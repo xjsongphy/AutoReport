@@ -1356,8 +1356,6 @@ class MainWindow(QMainWindow):
             state.phase = "idle"
 
         if getattr(message, "thinking", None):
-            if state.answer_started:
-                return
             panel.append_thinking(message.thinking or "")
             state.phase = "thinking"
             return
@@ -1473,14 +1471,22 @@ class MainWindow(QMainWindow):
         panel.finish_thinking()
         state.phase = "tool"
         summary = None
+        detail = None
+        expandable = True
         if agent_str == "main" and message.tool_name == "send_to_agent":
-            target = self._get_agent_display_name(str(message.arguments.get("agent_type", "sub")))
-            summary = f"Main To {target}"
+            summary = "Main to Sub"
+            expandable = False
+        elif message.tool_name == "respond":
+            summary = "Sub to Main"
+            detail = str(message.arguments.get("content") or "").strip() or None
+            expandable = bool(detail)
 
         panel.add_tool_call(
             message.tool_name,
             message.arguments,
             summary=summary,
+            detail=detail,
+            expandable=expandable,
         )
         self._conv_store.append_tool_call(
             agent_str,
@@ -1501,6 +1507,10 @@ class MainWindow(QMainWindow):
             expandable = None
             if agent_str == "main" and message.tool_name == "send_to_agent":
                 summary, detail = self._format_send_to_agent_bubble(message.result, message.error)
+                expandable = bool(detail)
+                result_str = detail or summary
+            elif message.tool_name == "respond":
+                summary, detail = self._format_respond_bubble(message.result, message.error)
                 expandable = bool(detail)
                 result_str = detail or summary
             self._conv_store.append_tool_result(
@@ -1528,6 +1538,10 @@ class MainWindow(QMainWindow):
 
         if agent_str == "main" and message.tool_name == "send_to_agent":
             summary, detail = self._format_send_to_agent_bubble(message.result, message.error)
+            expandable = bool(detail)
+            result_str = detail or summary
+        elif message.tool_name == "respond":
+            summary, detail = self._format_respond_bubble(message.result, message.error)
             expandable = bool(detail)
             result_str = detail or summary
         elif message.tool_name == "manage_tasks":
@@ -1599,34 +1613,42 @@ class MainWindow(QMainWindow):
 
     def _format_send_to_agent_bubble(self, result, error: str | None) -> tuple[str, str | None]:
         if error:
-            return ("Send To Agent", error)
+            return ("Main to Sub", error)
 
         if not isinstance(result, dict):
             text = str(result).strip() if result is not None else ""
-            return ("Sub-agent replied", text or None)
+            return ("Main to Sub", text or None)
 
-        target = self._get_agent_display_name(str(result.get("agent_type", "sub")))
         status = str(result.get("status", "success"))
         response = str(result.get("response", "") or "").strip()
 
         if status == "delegated":
             detail = str(result.get("message", "") or "").strip() or None
-            return (f"Delegated To {target}", detail)
+            return ("Main to Sub", detail)
 
         if status == "timeout":
             detail = str(result.get("error", "") or "").strip() or None
-            return (f"{target} did not reply in time", detail)
+            return ("Main to Sub", detail)
 
         if status == "error":
             detail = str(result.get("error", "") or "").strip() or None
-            return (f"Send To {target}", detail)
+            return ("Main to Sub", detail)
 
         if not response:
-            return (f"{target} replied", None)
+            return ("Main to Sub", None)
 
-        first_line = response.splitlines()[0].strip()
-        summary = f"{target} replied: {first_line}" if first_line else f"{target} replied"
-        return (summary, response)
+        return ("Main to Sub", response)
+
+    def _format_respond_bubble(self, result, error: str | None) -> tuple[str, str | None]:
+        if error:
+            return ("Sub to Main", error)
+        if not isinstance(result, dict):
+            text = str(result).strip() if result is not None else ""
+            return ("Sub to Main", text or None)
+        detail = str(result.get("content") or "").strip()
+        if not detail:
+            detail = str(result.get("message") or "").strip()
+        return ("Sub to Main", detail or None)
 
     def _format_manage_tasks_result(
         self, result, error: str | None
@@ -1708,10 +1730,7 @@ class MainWindow(QMainWindow):
             if isinstance(message.agent_type, Enum)
             else str(message.agent_type)
         )
-        bubble_title = self._build_inter_agent_title(
-            f"{self._get_agent_display_name(agent_str)} report: {message.report_type}",
-            message.content,
-        )
+        bubble_title = "Sub to Main"
         if self._is_visible_agent("main"):
             self.agent_panel.add_message(
                 "agent",
@@ -1720,7 +1739,7 @@ class MainWindow(QMainWindow):
                 display_mode="bubble",
                 bubble_title=bubble_title,
                 bubble_align="left",
-                bubble_on_timeline=True,
+                bubble_on_timeline=False,
                 bubble_collapsible=True,
             )
         self._conv_store.append_message(
@@ -1732,7 +1751,7 @@ class MainWindow(QMainWindow):
                 "display_mode": "bubble",
                 "bubble_title": bubble_title,
                 "bubble_align": "left",
-                "bubble_on_timeline": True,
+                "bubble_on_timeline": False,
                 "bubble_collapsible": True,
                 "report_type": message.report_type,
                 "task_id": message.task_id,
@@ -1748,7 +1767,7 @@ class MainWindow(QMainWindow):
             if isinstance(message.agent_type, Enum)
             else str(message.agent_type)
         )
-        bubble_title = self._build_inter_agent_title("System", message.content)
+        bubble_title = None
         if self._is_visible_agent(agent_str):
             panel = self._get_panel_for_agent(agent_str)
             panel.add_message(
@@ -1758,7 +1777,7 @@ class MainWindow(QMainWindow):
                 display_mode="bubble",
                 bubble_title=bubble_title,
                 bubble_align="left",
-                bubble_on_timeline=True,
+                bubble_on_timeline=False,
                 bubble_collapsible=True,
             )
         self._conv_store.append_message(
@@ -1770,7 +1789,7 @@ class MainWindow(QMainWindow):
                 "display_mode": "bubble",
                 "bubble_title": bubble_title,
                 "bubble_align": "left",
-                "bubble_on_timeline": True,
+                "bubble_on_timeline": False,
                 "bubble_collapsible": True,
                 "system_notice": True,
             },

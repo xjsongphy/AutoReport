@@ -39,6 +39,22 @@ def test_exec_tool_displays_as_bash(qtbot):
     assert "Exec" not in summary
 
 
+def test_apply_patch_displays_as_edit(qtbot):
+    widget = ToolCallGroup()
+    qtbot.addWidget(widget)
+
+    widget.add_tool_call(
+        "apply_patch",
+        {"file_path": "main.py"},
+        success=True,
+        duration_ms=10,
+    )
+
+    summary = widget.get_summary_text()
+    assert "Edit" in summary
+    assert "Patch" not in summary
+
+
 def test_bash_alias_renders_exec_detail(qtbot):
     widget = ToolCallGroup()
     qtbot.addWidget(widget)
@@ -96,12 +112,12 @@ def test_send_to_agent_result_can_expand_detail(qtbot):
         "send_to_agent",
         {"agent_type": "plotting"},
         success=None,
-        summary="Delegated To Plotting",
+        summary="Main to Sub",
     )
     widget.complete_tool_call(
         "send_to_agent",
         result={"status": "delegated"},
-        summary="Delegated To Plotting",
+        summary="Main to Sub",
         detail="Plotting will continue in background",
         expandable=True,
     )

@@ -149,7 +149,7 @@ def test_label_context_menu_includes_rollback_when_checkpoint_is_bound(qtbot, mo
 
 
 def test_coordination_message_shows_prefix(qtbot):
-    """Coordination message shows mute source label."""
+    """Coordination messages keep their content without the legacy source label."""
     widget = MessageRow(
         role="user",
         content="Calling data analysis agent...",
@@ -160,6 +160,7 @@ def test_coordination_message_shows_prefix(qtbot):
 
     display_text = widget.get_display_text()
     assert "Calling data analysis agent..." in display_text
+    assert widget.findChild(QLabel, "msgCoordination") is None
 
 
 def test_empty_timestamp_is_handled(qtbot):

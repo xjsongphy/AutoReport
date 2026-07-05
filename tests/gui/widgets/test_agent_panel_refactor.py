@@ -228,13 +228,13 @@ def test_send_to_agent_result_stays_in_tool_group_without_agent_bubble(agent_pan
     agent_panel.add_tool_call(
         "send_to_agent",
         {"agent_type": "plotting"},
-        summary="Main To Plotting",
+        summary="Main to Sub",
         expandable=False,
     )
     agent_panel.add_tool_result(
         "send_to_agent",
         {"status": "delegated", "agent_type": "plotting", "message": "delegated"},
-        summary="Delegated To Plotting",
+        summary="Main to Sub",
         detail="delegated",
         expandable=True,
     )
@@ -244,7 +244,7 @@ def test_send_to_agent_result_stays_in_tool_group_without_agent_bubble(agent_pan
 
     assert before_rows == after_rows
     assert len(groups) == 1
-    assert groups[0].get_summary_text() == "Delegated To Plotting"
+    assert groups[0].get_summary_text() == "Main to Sub"
 
 
 def test_adjacent_manage_tasks_status_change_updates_in_place(agent_panel):

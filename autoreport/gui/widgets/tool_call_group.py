@@ -471,7 +471,7 @@ class ToolCallGroup(QWidget):
             return f"<b>Edit</b>{sep}{files}".strip()
         if call.name == "apply_patch":
             files = " ".join(call.file_names) if call.file_names else ""
-            return f"<b>Patch</b>{sep}{files}".strip()
+            return f"<b>Edit</b>{sep}{files}".strip()
         if call.name == "delete_file":
             files = " ".join(call.file_names) if call.file_names else ""
             return f"<b>Delete</b>{sep}{files}".strip()

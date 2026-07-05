@@ -299,6 +299,10 @@ def scrollbar_stylesheet(
             {selector}::handle:{orientation}:pressed {{
                 background-color: {colors["scrollbar_hover"]};
             }}
+            {selector}::groove:{orientation} {{
+                background-color: {background_color};
+                border: none;
+            }}
             {selector}::add-line:{orientation},
             {selector}::sub-line:{orientation} {{
                 {line_extent_prop}: 0;

@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 from autoreport.gui.main_window import MainWindow
-from autoreport.interfaces.types import AgentType, ToolResult
+from autoreport.interfaces.types import AgentType, ToolCallMessage, ToolResult
 
 
 def test_manage_tasks_format_omits_empty_sections():
@@ -83,6 +83,51 @@ def test_send_to_agent_tool_result_does_not_append_delegate_bubble():
 
     assert [call[0] for call in panel_calls] == ["tool_result"]
     assert [call[0] for call in store_calls] == ["tool_result"]
+
+
+def test_send_to_agent_tool_call_displays_main_to_sub_summary():
+    panel_calls: list[tuple[str, tuple, dict]] = []
+    store_calls: list[tuple[str, tuple, dict]] = []
+
+    class _Panel:
+        def finish_thinking(self):
+            pass
+
+        def add_tool_call(self, *args, **kwargs):
+            panel_calls.append(("tool_call", args, kwargs))
+
+    class _Store:
+        def append_tool_call(self, *args, **kwargs):
+            store_calls.append(("tool_call", args, kwargs))
+
+    fake = SimpleNamespace()
+    fake._conv_store = _Store()
+    fake._is_visible_agent = lambda agent_type: agent_type == "main"
+    fake._get_panel_for_agent = lambda agent_type: _Panel()
+    fake._state_for_agent = lambda agent_type: SimpleNamespace(phase="idle")
+
+    MainWindow._handle_tool_call(
+        fake,
+        ToolCallMessage(
+            agent_type=AgentType.MAIN,
+            tool_name="send_to_agent",
+            arguments={"agent_type": "plotting"},
+        ),
+    )
+
+    assert panel_calls[0][2]["summary"] == "Main to Sub"
+    assert store_calls[0][2]["extra"]["summary"] == "Main to Sub"
+
+
+def test_respond_tool_result_displays_sub_to_main_summary_and_detail():
+    summary, detail = MainWindow._format_respond_bubble(
+        None,
+        {"status": "ok", "report_type": "reply", "content": "full response"},
+        None,
+    )
+
+    assert summary == "Sub to Main"
+    assert detail == "full response"
 
 
 def test_rollback_finished_truncates_current_session_and_refreshes_visible_panel():

@@ -883,11 +883,6 @@ class MessageRow(QWidget):
         self._outer_layout.setContentsMargins(16, 0, 16, 0)
         self._outer_layout.setSpacing(0)
 
-        if self._is_coordination:
-            coord = QLabel("[Main Agent → Sub Agent]")
-            coord.setObjectName("msgCoordination")
-            self._outer_layout.addWidget(coord)
-
         if self._uses_bubble_layout() and self._bubble_align == "right":
             self._outer_layout.setContentsMargins(16, 6, 16, 6)
             row = QWidget(outer)
@@ -971,8 +966,9 @@ class MessageRow(QWidget):
                 rl.addWidget(self._timeline_rail, 0, Qt.AlignmentFlag.AlignLeft)
 
             self._agent_content_layout = QVBoxLayout()
+            left_gutter = TIMELINE_TEXT_LEFT_GUTTER if self._uses_timeline() else 0
             self._agent_content_layout.setContentsMargins(
-                0,
+                left_gutter,
                 0,
                 0,
                 _timeline_bottom_padding(self),
@@ -1188,7 +1184,7 @@ class MessageRow(QWidget):
     def _build_detail_widget(self) -> QWidget:
         widget = QWidget(self)
         layout = QVBoxLayout(widget)
-        layout.setContentsMargins(TIMELINE_TEXT_LEFT_GUTTER, 2, 0, 0)
+        layout.setContentsMargins(0, 2, 0, 0)
         layout.setSpacing(0)
         label = self._build_agent_markdown_label(self._content or "")
         self._detail_label = label

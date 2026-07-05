@@ -112,7 +112,7 @@ class ExecTool(Tool):
             normalized = token.replace("\\", "/")
             if is_internal_metadata_rel(normalized):
                 raise ValueError(
-                    f"Access to internal metadata directories (.autoreport, .checkpoints) is not allowed."
+                    "Access to internal metadata directories (.autoreport, .checkpoints) is not allowed."
                 )
 
         # Also check the raw command string for patterns
@@ -125,7 +125,7 @@ class ExecTool(Tool):
             ]
             if any(pattern in command for pattern in patterns):
                 raise ValueError(
-                    f"Access to internal metadata directories (.autoreport, .checkpoints) is not allowed."
+                    "Access to internal metadata directories (.autoreport, .checkpoints) is not allowed."
                 )
 
     async def __call__(self, command: str, command_description: str) -> dict[str, Any]:
