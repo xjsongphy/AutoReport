@@ -8,9 +8,14 @@ from loguru import logger
 
 from ...config import ConfigManager
 from ...core.providers import ProviderFactory, ProviderManager
-from ...interfaces.types import AgentType, FileRollbackRequest, Message, RestartRequest, RollbackStatus
+from ...interfaces.types import (
+    AgentType,
+    FileRollbackRequest,
+    Message,
+    RestartRequest,
+    RollbackStatus,
+)
 from ..checkpoints import CheckpointManager
-from ..tools import SkillLoader
 from ..tools import (
     ApplyPatchTool,
     DeleteFileTool,
@@ -256,6 +261,7 @@ class LoopManager:
             manifest_manager=self.manifest_manager,
             agent_type=agent_type.value,
             file_state_manager=file_state_manager,
+            checkpoint_manager=self.checkpoint_manager,
         )
         if agent_type == AgentType.PLOTTING:
             from ..tools.file_tools import _validate_plotting_script
@@ -268,6 +274,7 @@ class LoopManager:
             manifest_manager=self.manifest_manager,
             agent_type=agent_type.value,
             file_state_manager=file_state_manager,
+            checkpoint_manager=self.checkpoint_manager,
         ))
 
         # Execution tool (for data analysis, plotting, report agents only — MAIN delegates, does not execute)
@@ -361,21 +368,10 @@ class LoopManager:
         cp = self.checkpoint_manager.get_checkpoint(agent_type, checkpoint_id)
         if cp:
             from ...interfaces.types import Checkpoint as CheckpointMsg
-            # For baseline: use file_states hashes directly.
-            # For subsequent: derive from file_diffs (sha256_after for each file).
-            if cp.file_states:
-                file_hashes = {path: state.hash for path, state in cp.file_states.items()}
-            else:
-                file_hashes = {
-                    path: d.sha256_after
-                    for path, d in cp.file_diffs.items()
-                    if d.sha256_after
-                }
             msg = CheckpointMsg(
                 agent_type=agent_type,
                 checkpoint_id=checkpoint_id,
                 description=cp.description,
-                file_states=file_hashes,
                 message_id=message_id,
             )
             await self.bus.publish(msg)

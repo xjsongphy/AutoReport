@@ -19,7 +19,6 @@ class MessageType(str, Enum):
 
     # Backend → GUI
     AGENT_RESPONSE = "agent_response"
-    AGENT_FEEDBACK = "agent_feedback"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
     STATUS_CHANGE = "status_change"
@@ -99,19 +98,6 @@ class AgentResponse(Message):
     thinking: str | None = None
 
 
-class AgentFeedback(Message):
-    """Sub-agent feedback to main agent for coordination.
-
-    Sub-agents send this when they detect issues that require
-    main agent intervention (e.g., other agent's output is wrong).
-    """
-
-    type: MessageType = MessageType.AGENT_FEEDBACK
-    agent_type: AgentType
-    content: str
-    feedback_type: str = "missing_data"  # "missing_data", "quality", "query"
-
-
 class ToolCallMessage(Message):
     """Tool being executed by agent."""
 
@@ -163,7 +149,9 @@ class Checkpoint(Message):
     agent_type: str  # "main", "data_analysis", "plotting", "theory", "report"
     checkpoint_id: str
     description: str
-    file_states: dict[str, str]  # path -> hash
+    # Deprecated: kept for backward compatibility. The operation-log checkpoint
+    # model no longer publishes per-file hashes (the GUI doesn't consume them).
+    file_states: dict[str, str] = Field(default_factory=dict)
     message_id: str | None = None  # The message that triggered this checkpoint
 
 

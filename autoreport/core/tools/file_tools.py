@@ -1,12 +1,14 @@
 """File operation tools."""
 
 import asyncio
+import base64
 import re
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
+from ..checkpoints import CheckpointManager, FileOperation, _is_binary
 from ..tools.registry import Tool
 from .file_state import FileStateManager
 from .manifest_tool import ManifestManager
@@ -50,6 +52,7 @@ class WriteEnabledTool(Tool, FileSafetyMixin):
         manifest_manager: ManifestManager | None = None,
         agent_type: str | None = None,
         file_state_manager: FileStateManager | None = None,
+        checkpoint_manager: CheckpointManager | None = None,
     ):
         if (manifest_manager is None) != (agent_type is None):
             raise ValueError(
@@ -60,6 +63,7 @@ class WriteEnabledTool(Tool, FileSafetyMixin):
         self._manifest_manager = manifest_manager
         self._agent_type = agent_type
         self._file_state_manager = file_state_manager
+        self._checkpoint_manager = checkpoint_manager
 
     def _check_write_permission(self, file_path: Path, action: str = "Write") -> None:
         if is_internal_metadata_path(file_path, self.workspace):
@@ -78,6 +82,11 @@ class WriteEnabledTool(Tool, FileSafetyMixin):
                 f"Your allowed write directory is: {rel_dir}/. "
                 f"Please write your output files under {rel_dir}/ instead."
             )
+
+    async def _record_checkpoint_op(self, op: FileOperation) -> None:
+        """Record a file mutation into the agent's current checkpoint (if any)."""
+        if self._checkpoint_manager is not None and self._agent_type:
+            await self._checkpoint_manager.record_operations(self._agent_type, [op])
 
 
 class ReadTool(Tool):
@@ -408,6 +417,15 @@ class ApplyPatchTool(WriteEnabledTool):
             if self._file_state_manager:
                 self._file_state_manager.record_read(file_path)
 
+            # Record the mutation for checkpoint rollback (text-only, reversible).
+            rel_path = file_path.relative_to(self.workspace).as_posix() if file_path.is_relative_to(self.workspace) else str(file_path)
+            await self._record_checkpoint_op(FileOperation(
+                path=rel_path,
+                kind="add" if not file_exists else "modify",
+                before=content if file_exists else None,
+                after=new_content,
+            ))
+
             out: dict[str, Any] = {
                 "path": str(file_path),
                 "replacements_applied": len(result.replacements),
@@ -442,13 +460,39 @@ class DeleteFileTool(WriteEnabledTool):
         self._check_write_permission(file_path, action="Delete")
 
         try:
-            existed = True
-            try:
-                await asyncio.to_thread(file_path.unlink)
-            except FileNotFoundError:
-                existed = False
+            existed = file_path.exists()
+            before_text: str | None = None
+            before_b64: str | None = None
+            if existed:
+                try:
+                    if _is_binary(file_path):
+                        before_b64 = base64.b64encode(
+                            file_path.read_bytes()
+                        ).decode("ascii")
+                    else:
+                        before_text = await asyncio.to_thread(
+                            file_path.read_text, encoding="utf-8"
+                        )
+                except (UnicodeDecodeError, OSError):
+                    # Best effort: record deletion without restorable content.
+                    before_b64 = base64.b64encode(
+                        file_path.read_bytes()
+                    ).decode("ascii")
+
+            await asyncio.to_thread(file_path.unlink)
+
+            # Record deletion for checkpoint rollback (text or binary bytes).
+            rel_path = file_path.relative_to(self.workspace).as_posix() if file_path.is_relative_to(self.workspace) else str(file_path)
+            await self._record_checkpoint_op(FileOperation(
+                path=rel_path,
+                kind="delete",
+                before=before_text,
+                before_binary_b64=before_b64,
+            ))
 
             return {"path": str(file_path), "deleted": existed}
+        except FileNotFoundError:
+            return {"path": str(file_path), "deleted": False}
         except Exception as e:
             logger.error("Failed to delete file {}: {}", file_path, e)
             raise

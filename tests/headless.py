@@ -29,7 +29,6 @@ from autoreport.config import ConfigManager
 from autoreport.core.loops import LoopManager, MessageBus
 from autoreport.core.providers.factory import ProviderFactory
 from autoreport.interfaces.types import (
-    AgentFeedback,
     AgentResponse,
     AgentType,
     Error,
@@ -61,7 +60,6 @@ class MessageCollector:
             StatusChange,
             Error,
             UserMessage,
-            AgentFeedback,
         ):
             self._bus.subscribe(msg_type, self._on_message)
         self._subscribed = True
