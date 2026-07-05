@@ -68,7 +68,7 @@ Processed (g from h, t dataset):
   [✓] formula — g = 2h/t² from formulas.md
   [✓] uncertainty — σ_g propagated, 2 sig figs
   [✓] theory comparison — Δ = 1.2% vs 9.81
-  [✓] source — Data/raw/freefall.csv annotated, manifest updated
+  [✓] source — Data/Raw/freefall.csv annotated, manifest updated
   [✓] spot recompute — g at row 3 matches
   [✓] units — m/s² throughout
 ```

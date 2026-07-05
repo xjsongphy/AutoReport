@@ -127,13 +127,13 @@ def test_selection_context_label_uses_line_count(agent_panel):
 
 
 def test_context_attachment_uses_compact_tooltip(agent_panel):
-    agent_panel.set_opened_file("Plots/fig/fig6.pdf")
+    agent_panel.set_opened_file("Plots/Fig/fig6.pdf")
 
     btn = agent_panel._context_attachment_btn
 
     assert btn.toolTip() == ""
     assert hasattr(btn, "_compact_tooltip_filter")
-    assert btn._compact_tooltip_filter._text == "Plots/fig/fig6.pdf"
+    assert btn._compact_tooltip_filter._text == "Plots/Fig/fig6.pdf"
 
 
 def test_composer_side_gap_matches_bottom_mask_height(agent_panel, qtbot):

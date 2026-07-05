@@ -368,8 +368,8 @@ def test_selected_nested_dir_is_used_for_new_file(qtbot, tmp_path: Path) -> None
     widget.tree.blockSignals(False)
     widget._finalize_pending_new_item()
 
-    assert (tmp_path / "data" / "processed" / "a.txt").exists()
-    assert not (tmp_path / "data" / "a.txt").exists()
+    assert (tmp_path / "Data" / "Processed" / "a.txt").exists()
+    assert not (tmp_path / "Data" / "a.txt").exists()
 
 
 def test_hover_text_uses_tilde_prefixed_system_path(qtbot, tmp_path: Path) -> None:
@@ -377,7 +377,7 @@ def test_hover_text_uses_tilde_prefixed_system_path(qtbot, tmp_path: Path) -> No
     qtbot.addWidget(widget)
 
     item = QTreeWidgetItem()
-    file_path = tmp_path / "plots" / "plot.py"
+    file_path = tmp_path / "Plots" / "plot.py"
     item.setData(0, 257, str(file_path))
 
     assert widget._hover_text_for_item(item) == FileTreeWidget._tilde_path(file_path)
@@ -427,7 +427,7 @@ def test_repeat_new_click_keeps_typed_pending_and_starts_another(qtbot, tmp_path
     widget._new_file_in_dir("References")
     second_pending = widget._pending_new_item
 
-    assert (tmp_path / "references" / "first.txt").exists()
+    assert (tmp_path / "References" / "first.txt").exists()
     assert second_pending is not None
     assert first_pending is not second_pending
 
@@ -443,7 +443,7 @@ def test_repeat_new_click_uses_live_editor_text(qtbot, tmp_path: Path) -> None:
 
     widget._new_file_in_dir("References")
 
-    assert (tmp_path / "references" / "typed.txt").exists()
+    assert (tmp_path / "References" / "typed.txt").exists()
     assert widget._pending_new_item is not None
 
 
@@ -459,7 +459,7 @@ def test_close_editor_uses_live_editor_text(qtbot, tmp_path: Path) -> None:
 
     widget._on_close_editor(editor, QAbstractItemDelegate.EndEditHint.NoHint)
 
-    assert (tmp_path / "references" / "closed.txt").exists()
+    assert (tmp_path / "References" / "closed.txt").exists()
     assert widget._pending_new_item is None
 
 
@@ -564,7 +564,7 @@ def test_tree_row_states_paint_row_and_branch_with_same_color(qtbot, tmp_path: P
 
     refs_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("References"))
     assert refs_item is not None
-    widget._rename_directory(tmp_path / "references", refs_item)
+    widget._rename_directory(tmp_path / "References", refs_item)
     assert widget._editing_item is refs_item
     assert widget.tree._row_background_color(refs_item).name() == colors["tree_sel_bg"]
     widget._set_editing_item(None)
@@ -586,7 +586,7 @@ def test_tree_row_states_paint_row_and_branch_with_same_color(qtbot, tmp_path: P
 
 
 def test_processed_directory_is_not_draggable_but_files_inside_are(qtbot, tmp_path: Path) -> None:
-    processed_file = tmp_path / "data" / "processed" / "result.txt"
+    processed_file = tmp_path / "Data" / "Processed" / "result.txt"
     processed_file.parent.mkdir(parents=True, exist_ok=True)
     processed_file.write_text("ok", encoding="utf-8")
 
@@ -722,7 +722,7 @@ def test_directory_changed_restores_selected_file(qtbot, tmp_path: Path) -> None
     assert selected is not None
 
     widget.tree.setCurrentItem(selected)
-    widget._on_directory_changed(str((tmp_path / "references").resolve()))
+    widget._on_directory_changed(str((tmp_path / "References").resolve()))
 
     current = widget.tree.currentItem()
     assert current is not None

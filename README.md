@@ -67,12 +67,15 @@ autoreport
 
 ```
 my_experiment/
-├── data/            # Raw experimental data (user input) + analysis results
-│   └── processed/   # Data Analysis Agent output only
-├── references/      # Reference materials (PDF, images), custom templates
-├── theory/          # Theory Agent output only
-├── plots/           # Plotting Agent plots and generated images
-└── tex/             # Report Agent LaTeX source and compiled output
+├── Data/            # Raw experimental data (user input) + analysis results
+│   └── Processed/   # Data Analysis Agent output only
+├── References/      # Reference materials (PDF, images), custom templates
+├── Theory/          # Theory Agent output only
+├── Plots/           # Plotting Agent plots and generated images
+│   ├── Fig/         # Generated figures
+│   └── Scripts/     # Plotting scripts
+├── Outline/         # Main Agent report outline and routing notes
+└── Tex/             # Report Agent LaTeX source and compiled output
 ```
 
 #### Agent Permissions
@@ -80,11 +83,11 @@ my_experiment/
 | Agent | Write Directory | Read Scope |
 |-------|----------------|------------|
 | Main Agent | coordinates only | All directories |
-| Data Analysis | `data/processed/` | All directories |
-| Plotting | `plots/` | All directories |
-| Theory | `theory/` | All directories |
-| Report | `tex/` | All directories |
-| User | `data/`, `references/` | All directories |
+| Data Analysis | `Data/Processed/` | All directories |
+| Plotting | `Plots/` | All directories |
+| Theory | `Theory/` | All directories |
+| Report | `Tex/` | All directories |
+| User | `Data/`, `References/` | All directories |
 
 ### Architecture
 

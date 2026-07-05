@@ -27,6 +27,7 @@ import pytest
 
 from autoreport.config import ConfigManager
 from autoreport.core.loops import LoopManager, MessageBus
+from autoreport.core.project_structure import ensure_project_structure
 from autoreport.core.providers.factory import ProviderFactory
 from autoreport.interfaces.types import (
     AgentResponse,
@@ -352,12 +353,4 @@ class HeadlessBackend:
 
     def _ensure_project_structure(self) -> None:
         """Create project directories if they don't exist."""
-        for d in [
-            self.workspace / "data",
-            self.workspace / "data" / "processed",
-            self.workspace / "references",
-            self.workspace / "theory",
-            self.workspace / "plots",
-            self.workspace / "tex",
-        ]:
-            d.mkdir(parents=True, exist_ok=True)
+        ensure_project_structure(self.workspace)

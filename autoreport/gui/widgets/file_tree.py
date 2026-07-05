@@ -1975,7 +1975,7 @@ class FileTreeWidget(QWidget):
                     self._pending_new_item.setText(0, pending_text)
                 self._finalize_pending_new_item()
 
-        # Find the target directory item (could be nested like data/processed)
+        # Find the target directory item (could be nested like Data/Processed)
         target_item = None
 
         if "/" in dir_name:

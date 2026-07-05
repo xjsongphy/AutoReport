@@ -25,6 +25,7 @@ from rich.console import Console
 
 from .config import ConfigManager
 from .core.loops import LoopManager, MessageBus
+from .core.project_structure import ensure_project_structure
 from .gui import MainWindow
 from .interfaces.protocol import BackendAPI
 from .utils import add_project_logging, log_exception, setup_exception_handler, setup_logging
@@ -122,7 +123,8 @@ def _copy_builtin_templates(workspace: Path) -> None:
     Raises:
         RuntimeError: If critical template file (main.tex) fails to copy.
     """
-    tex_dir = workspace / "tex"
+    tex_dir = workspace / "Tex"
+    tex_dir.mkdir(parents=True, exist_ok=True)
     template_root = importlib.resources.files("autoreport.templates.reports")
 
     # main.tex (PKUMpLtX-based template) - CRITICAL for LaTeX compilation
@@ -241,20 +243,9 @@ class AutoReportApp:
         Args:
             workspace: Project workspace path.
         """
-        project_dirs = [
-            workspace / "data",
-            workspace / "data" / "processed",
-            workspace / "references",
-            workspace / "theory",
-            workspace / "Plots",
-            workspace / "Outline",
-            workspace / "tex",
-        ]
+        ensure_project_structure(workspace)
 
-        for dir_path in project_dirs:
-            dir_path.mkdir(parents=True, exist_ok=True)
-
-        # Copy built-in LaTeX template files to tex/ (only if not already present).
+        # Copy built-in LaTeX template files to Tex/ (only if not already present).
         # mpltx.cls must be in the same directory as main.tex for xelatex to find it.
         _copy_builtin_templates(workspace)
 

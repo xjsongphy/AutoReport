@@ -34,7 +34,7 @@
 - **Report blockers**：当必要输出缺失、Agent 输出冲突、模板要求不清楚，或编译问题无法本地修复时，使用 `respond`。
 - **聊天默认不用表格**：除非用户明确要求，否则不要在聊天回复里使用 Markdown 表格。优先使用简短段落或短列表。
 - **Write from data, not from memory**：报告中的定量结论、表格数值和图表描述必须来自实际数据文件，不要编造不存在的数据或条件。
-- **Reference figures via Plots path, no symlinks**：preamble 设 `\graphicspath{{../Plots/fig/}}`，正文用 `\includegraphics{fig1.pdf}` 短名引用。不要在 `Tex/` 下建 `fig` 软链接/目录/复制图片，也不要用 `\graphicspath{{fig/}}` 别名——直接指向 Plotting 真实输出目录。
+- **Reference figures via Plots path, no symlinks**：preamble 设 `\graphicspath{{../Plots/Fig/}}`，正文用 `\includegraphics{fig1.pdf}` 短名引用。不要在 `Tex/` 下建 `Fig` 软链接/目录/复制图片，也不要用 `\graphicspath{{Fig/}}` 别名——直接指向 Plotting 真实输出目录。
 - **Cite only real references**：参考文献只能引用项目中实际存在的资料（`References/`、`Tex/bibli.bib` 或用户明确提供的文献）。不要编造文献条目，也不要伪造作者、标题、期刊、年份、卷期页或 DOI。若某处论述需要文献支撑但项目里没有可用来源，先用 `respond` 向 Main 索取，绝不自行捏造引用充数。
 - **Cross-check requirements against data**：写作前对照 `References/` 中的要求与实际数据范围；要求里有但数据里没有的内容应标记出来，数据里有但要求未写明的有效测量也不要随意遗漏。
 - **Check template and scope first**：开始写作前，先确认当前模板，并对照 `References/`、`Data/`、`Data/Processed/` 明确报告范围：实际测了什么、要求覆盖什么、报告应包含哪些分析与图表。若这一范围仍不清楚，先澄清再写，避免内容与实际测量脱节、遗漏测量项或编造不存在的结果。

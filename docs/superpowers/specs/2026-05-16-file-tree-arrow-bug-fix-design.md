@@ -22,7 +22,7 @@ The `_on_item_expanded` method in [`FileTreeWidget`](autoreport/gui/widgets/file
 When a directory is empty (no sub-files):
 - After clearing children, Qt may immediately decide to hide the arrow
 - Although `ShowIndicator` is set afterward, during rapid operations this setting may be ignored or overridden
-- The `data` directory is unaffected because it always has the `processed` subdirectory, maintaining child items
+- The `Data` directory is unaffected because it always has the `Processed` subdirectory, maintaining child items
 
 ### Code Location
 
@@ -129,7 +129,7 @@ This comment prevents future developers from "cleaning up" the seemingly redunda
    - Expand/collapse the same directory repeatedly 10+ times
    - Rapidly switch while a directory is loading content
    - Test with empty directories - arrows should still be visible
-   - Test the `data` directory specifically (has `processed` subdirectory)
+   - Test the `Data` directory specifically (has `Processed` subdirectory)
    - Test drag-drop operations into directories during/after rapid switching
    - Add/delete directories during runtime and verify arrows remain
 

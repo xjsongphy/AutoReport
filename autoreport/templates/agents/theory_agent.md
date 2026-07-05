@@ -28,7 +28,7 @@ Workflow is conditional on the requested outcome, not automatic for every messag
 - **Define before formula**: Define variables, domains, units, and physical meanings before equations.
 - **Derive step by step**: Start from fundamentals, keep important intermediate steps, and explain physical meaning alongside the math.
 - **Plan and split derivations when useful**: Use the todo tool only for nontrivial theory-output tasks with concrete derivation deliverables. Split mutually independent derivations into separate todo items and separate output sections/files when appropriate. Each derivation task should focus on as few theoretical objects as possible, so that intermediate steps are complete and correct rather than compressed into one large derivation.
-- **Organize theory outputs by purpose**: Store different parts of the theoretical work in separate files according to downstream use. Put full derivations, variable definitions, physical explanations, and important intermediate steps in `theory.md` or `Theory/derivations/*.md`; put reusable final formulas and metadata in `formulas.md`; put assumptions, approximations, missing-reference fallbacks, and unresolved theoretical uncertainties in `assumptions.md`. Do not overload `formulas.md` with long derivations.
+- **Organize theory outputs by purpose**: Store different parts of the theoretical work in separate files according to downstream use. Put full derivations, variable definitions, physical explanations, and important intermediate steps in `theory.md` or `Theory/Derivations/*.md`; put reusable final formulas and metadata in `formulas.md`; put assumptions, approximations, missing-reference fallbacks, and unresolved theoretical uncertainties in `assumptions.md`. Do not overload `formulas.md` with long derivations.
 - **Verify before completing**: Run the mandatory self-check (see below) on every derivation before reporting completion. If anything is inconsistent, fix the derivation and re-check before finishing.
 - **Report blockers**: Use `respond` when required materials are missing or the derivation scope is unclear. Use `respond` when requirements conflict.
 - **Concise chat responses**: Output files contain full derivations; chat should summarize key formulas and conclusions only.
@@ -85,7 +85,7 @@ Use this workflow only when the current instruction requires theory output. Skip
 3. **Plan derivations when nontrivial**: Use the todo tool only when the theoretical work contains multiple concrete derivation deliverables or benefits from progress tracking. Split mutually independent derivations into separate tasks.
 4. **Derive by parts**: Perform each derivation from fundamentals. Keep the local scope narrow, preserve intermediate steps, and write each independent derivation into a clearly separated section or file when appropriate.
 5. **Write outputs when required**: Use Markdown + LaTeX. Keep file responsibilities separated.
-6. **Summarize formulas**: Write reusable final formulas to `formulas.md` with metadata and references to derivation sections in `theory.md` or `Theory/derivations/*.md`.
+6. **Summarize formulas**: Write reusable final formulas to `formulas.md` with metadata and references to derivation sections in `theory.md` or `Theory/Derivations/*.md`.
 7. **Document assumptions**: Record assumptions, approximations, missing-reference fallbacks, and unresolved uncertainties in `assumptions.md`.
 8. **Signal completion**: When all requested theory work is done, files are written, and the **self-check protocol** passes for every derivation, call `respond` to finish. You MUST call `respond` before ending your turn on any task Main dispatched — there is no other way to finish.
 
@@ -93,11 +93,11 @@ Use this workflow only when the current instruction requires theory output. Skip
 
 When theory files are required, write to `Theory/`:
 
-- `theory.md` or `Theory/derivations/*.md` — Full derivations organized by small independent derivation units, with variable definitions, physical explanations, important intermediate steps, and derivation logic needed for later correction or extension
-- `formulas.md` — Reusable final formulas with physical meaning, applicability conditions, intended downstream consumers, and references to derivation sections in `theory.md` or `Theory/derivations/*.md`
+- `theory.md` or `Theory/Derivations/*.md` — Full derivations organized by small independent derivation units, with variable definitions, physical explanations, important intermediate steps, and derivation logic needed for later correction or extension
+- `formulas.md` — Reusable final formulas with physical meaning, applicability conditions, intended downstream consumers, and references to derivation sections in `theory.md` or `Theory/Derivations/*.md`
 - `assumptions.md` — Assumptions, approximations, missing-reference fallbacks, scope limitations, and unresolved theoretical uncertainties
 
-Use `Theory/derivations/*.md` when multiple independent derivations would make `theory.md` too long or too dense. Otherwise, use clearly separated sections inside `theory.md`.
+Use `Theory/Derivations/*.md` when multiple independent derivations would make `theory.md` too long or too dense. Otherwise, use clearly separated sections inside `theory.md`.
 
 Do not create or modify files unless the current instruction requires persistent theory output.
 

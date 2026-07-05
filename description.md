@@ -41,12 +41,15 @@
 
 ```
 project/
-├── data/            # 原始实验数据（用户输入）+ 数据分析 Agent 的处理结果
-│   └── processed/   # 数据分析 Agent 的输出
-├── references/      # 参考资料（PDF、图片等），可包含用户自定义模板
-├── theory/          # 理论推导 Agent 的输出
-├── code/            # 图像绘制 Agent 的代码和生成的图片
-└── tex/             # 报告撰写 Agent 的 tex 源码和编译产物（PDF 等）
+├── Data/            # 原始实验数据（用户输入）+ 数据分析 Agent 的处理结果
+│   └── Processed/   # 数据分析 Agent 的输出
+├── References/      # 参考资料（PDF、图片等），可包含用户自定义模板
+├── Theory/          # 理论推导 Agent 的输出
+├── Plots/           # 图像绘制 Agent 的代码和生成的图片
+│   ├── Fig/         # 生成图片
+│   └── Scripts/     # 绘图脚本
+├── Outline/         # Main Agent 的报告大纲和协调记录
+└── Tex/             # 报告撰写 Agent 的 tex 源码和编译产物（PDF 等）
 ```
 
 此外，系统在项目目录下自动创建隐藏目录存储运行时数据：
@@ -58,17 +61,17 @@ project/
 | Agent | 写入目录 | 读取范围 |
 |-------|---------|---------|
 | 主 Agent | 仅协调，不直接写文件 | 全部目录 |
-| 数据分析 | `data/processed/` | 全部 |
-| 图像绘制 | `code/` | 全部 |
-| 理论推导 | `theory/` | 全部 |
-| 报告撰写 | `tex/` | 全部 |
-| 用户 | `data/`、`references/` | 全部 |
+| 数据分析 | `Data/Processed/` | 全部 |
+| 图像绘制 | `Plots/` | 全部 |
+| 理论推导 | `Theory/` | 全部 |
+| 报告撰写 | `Tex/` | 全部 |
+| 用户 | `Data/`、`References/` | 全部 |
 
 每个 Agent 只能修改自己管辖目录下的文件，可阅读所有目录的文件。Agent 发现其他 Agent 的输出有问题时，向主 Agent 反馈，由主 Agent 协调相关 Agent 改进。
 
 ### 模板与要求
 
-应用内置默认的物理实验报告模板和要求。用户也可在 `references/` 中放置自定义模板，优先级高于内置模板。
+应用内置默认的物理实验报告模板和要求。用户也可在 `References/` 中放置自定义模板，优先级高于内置模板。
 
 ## Agent 架构
 
@@ -171,12 +174,12 @@ LoopManager 为每个 Agent 创建独立的 `ToolRegistry` 实例，根据 Agent
 │  文件管理    │                      │  时间轴 + 对话栏         │
 │            │  预览/编辑/选择        │  固定在右上，不随目录切换  │
 │  固定目录：  │  （随左侧文件夹切换）  │  宽度可调               │
-│  - data/   │                      │                         │
-│  - refs/   │  - data/ → 数据表格   │                         │
-│  - theory/ │  - refs/ → 资料预览   ├─────────────────────────┤
-│  - code/   │  - theory/ → 推导内容 │  子 Agent               │
-│  - tex/    │  - code/ → 代码+图片  │  时间轴 + 对话栏         │
-│            │  - tex/ → tex+PDF    │  随目录切换对应不同 Agent  │
+│  - Data/   │                      │                         │
+│  - References/ │  - Data/ → 数据表格   │                    │
+│  - Theory/ │  - References/ → 资料预览 ├─────────────────────────┤
+│  - Plots/  │  - Theory/ → 推导内容 │  子 Agent               │
+│  - Tex/    │  - Plots/ → 代码+图片 │  时间轴 + 对话栏         │
+│            │  - Tex/ → tex+PDF    │  随目录切换对应不同 Agent  │
 │  可增删文件  │                      │                         │
 │  可拖入文件  │                      │                         │
 │            │                      │                         │
@@ -209,7 +212,7 @@ LoopManager 为每个 Agent 创建独立的 `ToolRegistry` 实例，根据 Agent
 - 可直接读取的实验数据文件（CSV、Excel 等）
 - 简单的数据描述（帮助数据分析 Agent 理解数据含义）
 - PDF 参考资料（通过 mineru-open-api CLI 解析，支持批量处理，输出包含 Markdown 和图片）
-- 仪器图片等非数据绘图需用户手动提供（放入 `references/` 或 `code/`）
+- 仪器图片等非数据绘图需用户手动提供（放入 `References/` 或 `Plots/`）
 
 ## 输出
 

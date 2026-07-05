@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..config import ConfigManager
+from ..core.project_structure import PROJECT_DIRECTORIES, ensure_project_structure, is_project_workspace
 from ..core.recent_projects import RecentProjects
 from .dialogs import critical_box, question_box
 from .theme import format_stylesheet, get_theme_colors, is_dark_mode
@@ -29,24 +30,15 @@ from .widgets.ui_utils import (
     secondary_filled_button_qss,
 )
 
-PROJECT_DIRECTORIES = ["Data", "Data/Processed", "References", "Theory", "Plots", "Outline", "Tex"]
-
-# Markers whose presence indicates an existing AutoReport project workspace.
-_PROJECT_MARKERS = ["data", "references", "theory", "plots", "tex"]
-
 
 def is_valid_project(path: Path) -> bool:
     """True if ``path`` looks like an AutoReport project workspace."""
-    for dir_name in _PROJECT_MARKERS:
-        if (path / dir_name).exists():
-            return True
-    return False
+    return is_project_workspace(path)
 
 
 def create_project_structure(path: Path) -> None:
     """Create the fixed project directory layout under ``path``."""
-    for dir_name in PROJECT_DIRECTORIES:
-        (path / dir_name).mkdir(parents=True, exist_ok=True)
+    ensure_project_structure(path)
     logger.debug("Created project structure in: {}", path)
 
 

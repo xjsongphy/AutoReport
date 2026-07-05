@@ -35,10 +35,10 @@ def _workspace():
     ws = Path(tmpdir) / "test_project"
     ws.mkdir(parents=True)
 
-    for d in ["data", "data/processed", "references", "theory", "plots", "tex"]:
+    for d in ["Data", "Data/Processed", "References", "Theory", "Plots", "Plots/Fig", "Plots/Scripts", "Tex"]:
         (ws / d).mkdir(parents=True, exist_ok=True)
 
-    (ws / "data" / "experiment.csv").write_text(
+    (ws / "Data" / "experiment.csv").write_text(
         "time,voltage,current\n"
         "0.0,1.0,0.5\n"
         "0.1,1.2,0.6\n"
@@ -106,13 +106,13 @@ class TestMainAgentTools:
     async def test_read_file_tool(self):
         """Main agent should be able to read files via tool calls."""
         ws = _workspace()
-        (ws / "data" / "test.txt").write_text("Hello from test file", encoding="utf-8")
+        (ws / "Data" / "test.txt").write_text("Hello from test file", encoding="utf-8")
 
         async with HeadlessBackend(ws) as b:
             collector = MessageCollector(b.bus)
             collector.start()
 
-            await b.send("main", "请读取 data/test.txt 文件的内容")
+            await b.send("main", "请读取 Data/test.txt 文件的内容")
             # Wait for at least one tool call
             tool_calls = await collector.wait_for(ToolCallMessage, timeout=60, count=1)
 
@@ -132,7 +132,7 @@ class TestMainAgentTools:
             collector = MessageCollector(b.bus)
             collector.start()
 
-            await b.send("main", "请列出 data/ 目录中的文件")
+            await b.send("main", "请列出 Data/ 目录中的文件")
             await collector.wait_for(ToolCallMessage, timeout=60, count=1)
 
             tool_names = [tc.tool_name for tc in collector.tool_calls]
@@ -150,7 +150,7 @@ class TestSubAgentInteraction:
             collector = MessageCollector(b.bus)
             collector.start()
 
-            await b.send("data_analysis", "请分析 data/experiment.csv 的数据结构")
+            await b.send("data_analysis", "请分析 Data/experiment.csv 的数据结构")
             # Wait for the first response to confirm it reacts, then wait for
             # IDLE so get_full_agent_text captures the final non-streaming text.
             await collector.wait_for(AgentResponse, timeout=60)
@@ -168,7 +168,7 @@ class TestSubAgentInteraction:
 
             await b.send(
                 "data_analysis",
-                "读取 data/experiment.csv 文件，告诉我数据的基本统计信息",
+                "读取 Data/experiment.csv 文件，告诉我数据的基本统计信息",
             )
             await collector.wait_for(ToolCallMessage, timeout=60, count=1)
 
@@ -202,7 +202,7 @@ class TestAgentCoordination:
 
             await b.send(
                 "main",
-                "请让数据分析 agent 分析 data/experiment.csv 文件中的电压和电流数据",
+                "请让数据分析 agent 分析 Data/experiment.csv 文件中的电压和电流数据",
             )
             # Wait for main agent to start processing
             await collector.wait_for(AgentResponse, timeout=120, count=1)

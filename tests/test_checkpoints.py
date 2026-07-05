@@ -126,14 +126,15 @@ async def test_rollback_reverses_delete_binary(temp_workspace):
     import base64
 
     manager = CheckpointManager(temp_workspace)
-    f = temp_workspace / "Plots" / "fig.png"
+    f = temp_workspace / "Plots" / "Fig" / "fig.png"
+    f.parent.mkdir(parents=True, exist_ok=True)
     raw = b"\x89PNG\r\n\x1a\n\x00\x00IHDR"
     f.write_bytes(raw)
 
     cp_id = await manager.create_checkpoint(agent_type="plotting", description="p1")
     await manager.record_operations("plotting", [
         FileOperation(
-            path="Plots/fig.png",
+            path="Plots/Fig/fig.png",
             kind="delete",
             before_binary_b64=base64.b64encode(raw).decode("ascii"),
         ),

@@ -131,11 +131,11 @@ def test_checkpoint_message():
         agent_type="main",
         checkpoint_id="cp_12345678",
         description="Before analysis",
-        file_states={"data/test.csv": "abc123"},
+        file_states={"Data/test.csv": "abc123"},
     )
     assert msg.type == "checkpoint"
     assert msg.agent_type == "main"
-    assert msg.file_states["data/test.csv"] == "abc123"
+    assert msg.file_states["Data/test.csv"] == "abc123"
 
 
 def test_error_message():

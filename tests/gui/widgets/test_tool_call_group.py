@@ -433,7 +433,7 @@ def test_exec_copy_button_is_vertically_centered_for_single_line_command(qtbot):
     widget.add_tool_call(
         "exec",
         {
-            "command": "ls -la Tex/fig && ls Tex/fig/*.pdf | head -6",
+            "command": "ls -la Plots/Fig && ls Plots/Fig/*.pdf | head -6",
             "command_description": "single line",
         },
         success=True,
@@ -445,7 +445,7 @@ def test_exec_copy_button_is_vertically_centered_for_single_line_command(qtbot):
         lab
         for lab in widget.findChildren(QLabel)
         if lab.objectName() == "execDetailText"
-        and lab.text() == "ls -la Tex/fig && ls Tex/fig/*.pdf | head -6"
+        and lab.text() == "ls -la Plots/Fig && ls Plots/Fig/*.pdf | head -6"
     )
     copy_button = next(
         btn

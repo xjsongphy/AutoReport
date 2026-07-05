@@ -12,7 +12,7 @@ from autoreport.core.tools.pdf_tool import PDFParseTool
 @pytest.fixture
 def workspace():
     ws = Path(tempfile.mkdtemp())
-    (ws / "references").mkdir()
+    (ws / "References").mkdir()
     yield ws
     import shutil
     shutil.rmtree(ws, ignore_errors=True)
@@ -33,14 +33,14 @@ async def test_parse_raises_when_not_available(workspace):
     tool = PDFParseTool(workspace=workspace)
     with patch.object(PDFParseTool, "is_available", return_value=False):
         with pytest.raises(RuntimeError, match="not installed"):
-            await tool(file_paths="references/test.pdf")
+            await tool(file_paths="References/test.pdf")
 
 
 @pytest.mark.asyncio
 async def test_parse_file_not_found(workspace):
     tool = PDFParseTool(workspace=workspace)
     with patch.object(PDFParseTool, "is_available", return_value=True):
-        result = await tool(file_paths="references/nonexistent.pdf")
+        result = await tool(file_paths="References/nonexistent.pdf")
         assert result["total"] == 1
         assert result["errors"] is not None
         assert "file not found" in result["errors"][0]
@@ -65,7 +65,7 @@ async def test_parse_accepts_list(workspace):
 @pytest.mark.asyncio
 async def test_parse_single_success(workspace):
     tool = PDFParseTool(workspace=workspace)
-    src_file = workspace / "references" / "test.pdf"
+    src_file = workspace / "References" / "test.pdf"
     src_file.write_bytes(b"%PDF-1.4 fake")
 
     mock_proc = AsyncMock()
@@ -75,12 +75,12 @@ async def test_parse_single_success(workspace):
     with (
         patch.object(PDFParseTool, "is_available", return_value=True),
         patch("autoreport.core.tools.pdf_tool.asyncio.create_subprocess_exec", return_value=mock_proc),
-        patch("pathlib.Path.rglob", return_value=[workspace / "references" / "test.md"]),
+        patch("pathlib.Path.rglob", return_value=[workspace / "References" / "test.md"]),
     ):
         # Create the expected output
-        (workspace / "references" / "test.md").write_text("# Parsed content", encoding="utf-8")
+        (workspace / "References" / "test.md").write_text("# Parsed content", encoding="utf-8")
 
-        result = await tool(file_paths="references/test.pdf")
+        result = await tool(file_paths="References/test.pdf")
         assert result["total"] == 1
         assert len(result["results"]) == 1
 

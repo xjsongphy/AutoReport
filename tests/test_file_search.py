@@ -58,12 +58,12 @@ class TestFuzzyMatcher:
 @pytest.fixture
 def search_workspace():
     ws = Path(tempfile.mkdtemp())
-    (ws / "data").mkdir()
-    (ws / "plots").mkdir()
-    (ws / "data" / "experiment_results.csv").write_text("data")
-    (ws / "data" / "analysis_output.json").write_text("{}")
-    (ws / "plots" / "plot_temperature.py").write_text("code")
-    (ws / "plots" / "plot_pressure.py").write_text("code")
+    (ws / "Data").mkdir()
+    (ws / "Plots").mkdir()
+    (ws / "Data" / "experiment_results.csv").write_text("data")
+    (ws / "Data" / "analysis_output.json").write_text("{}")
+    (ws / "Plots" / "plot_temperature.py").write_text("code")
+    (ws / "Plots" / "plot_pressure.py").write_text("code")
     (ws / "report.tex").write_text("latex")
     yield ws
     import shutil

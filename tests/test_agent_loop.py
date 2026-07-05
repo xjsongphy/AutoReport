@@ -2,6 +2,7 @@
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -65,7 +66,7 @@ def workspace():
     import shutil
     import tempfile
     ws = Path(tempfile.mkdtemp()).resolve()
-    for d in ["data", "plots", "theory", "tex", "references"]:
+    for d in ["Data", "Data/Processed", "Plots", "Plots/Fig", "Plots/Scripts", "Theory", "Tex", "References"]:
         (ws / d).mkdir()
     yield ws
     shutil.rmtree(ws, ignore_errors=True)
@@ -286,7 +287,7 @@ async def test_local_task_update_does_not_queue_llm_turn(agent_loop):
 
 
 @pytest.mark.asyncio
-async def test_delegated_task_update_still_queues_relevant_llm_turn(agent_loop):
+async def test_delegated_task_update_does_not_queue_llm_turn(agent_loop):
     msg = TaskUpdateMessage(
         task_id="tk002",
         action="completed",
@@ -297,9 +298,9 @@ async def test_delegated_task_update_still_queues_relevant_llm_turn(agent_loop):
 
     await agent_loop._handle_task_update(msg)
 
-    queued = await agent_loop._message_queue.get()
-    assert queued.source == "system"
-    assert "report 已完成" in queued.content
+    assert agent_loop._message_queue.empty()
+    published = list(agent_loop.bus._queue._queue)
+    assert not any(isinstance(item, QueueUpdateMessage) for item in published)
 
 
 def test_format_tool_result_dict(agent_loop):
@@ -359,6 +360,48 @@ async def test_loop_marks_turn_reported_on_own_report(agent_loop):
     msg = await asyncio.wait_for(agent_loop.bus._queue.get(), timeout=1)
     await agent_loop.bus._notify_subscribers(msg)
     assert agent_loop._turn_reported is True
+
+
+@pytest.mark.asyncio
+async def test_respond_tool_call_marks_turn_reported_synchronously(
+    workspace, config, mock_provider, mock_prompt_loader
+):
+    """A successful respond tool result marks the turn before bus delivery catches up."""
+    from autoreport.core.tools.agent_tools import RespondTool
+    from autoreport.core.tools.registry import ToolRegistry
+    from autoreport.core.tools.task_board import TaskBoard
+
+    board = TaskBoard()
+    board.create_task(AgentType.MAIN, AgentType.PLOTTING, "draw", task_id="tk1")
+    bus = MessageBus()
+    tools = ToolRegistry()
+    tools.register(RespondTool(bus=bus, agent_type=AgentType.PLOTTING, task_board=board))
+    loop = AgentLoop(
+        agent_type=AgentType.PLOTTING,
+        workspace=workspace,
+        tools=tools,
+        bus=bus,
+        config=config,
+        llm_provider=mock_provider,
+        prompt_loader=mock_prompt_loader,
+        loop_manager=None,
+        task_board=board,
+    )
+    response = SimpleNamespace(
+        content="",
+        thinking=None,
+        tool_calls=[
+            LLMToolCall(
+                id="call_respond",
+                name="respond",
+                arguments={"task_id": "tk1", "type": "reply", "content": "done"},
+            )
+        ],
+    )
+
+    await loop._handle_tool_calls(response, "blocking:tk1")
+
+    assert loop._turn_reported is True
 
 
 @pytest.mark.asyncio

@@ -24,6 +24,7 @@ Workflow is conditional on the requested outcome, not automatic for every messag
 - **Publication quality**: 300-1000 DPI, readable fonts, proper labels, error bars when appropriate.
 - **English by default**: Unless the user explicitly requests Chinese, all visible figure text must be in English, including titles, axis labels, legends, annotations, and any text embedded in the image.
 - **Never use default blue dots**: matplotlib's default (`plt.plot(x, y)` or a bare `plt.scatter`) renders an ugly filled blue circle — always pass explicit style. Each dataset gets a distinct color from a colorblind-safe qualitative palette (Okabe-Ito, or colors evenly sampled from viridis/plasma/cividis) **and** a distinct marker shape (`o`, `s`, `^`, `D`, `v`, …). Prefer **hollow markers** — `markerfacecolor='white'` (or `'none'`) with a colored `markeredgecolor` — so overlapping points stay legible; keep `markersize` small (4–6) and `markeredgewidth` thin (≈0.8). When a fit/theory curve is overlaid, plot measured data as markers only (no connecting line unless the data are genuinely ordered/continuous) and the fit as a thin solid line (`linewidth` ≈ 1–1.5) in a contrasting color. Avoid red-green combinations.
+- **Connect ordered trends**: If measured points are sampled along an ordered continuous variable and show a clear monotonic or smooth trend, use a thin connecting line with markers (`'o-'`, `'s-'`, etc.) so the reader can follow the trend. Keep pure scatter only for unordered categories, independent replicates, or cases where connecting points would imply false continuity. Always sort x first before drawing any connecting line.
 - **Overlay theory**: Show theoretical curves for comparison — pattern must be visually obvious.
 - **Cover the measured data**: Include every physically meaningful measured quantity from the data list, in a figure or a table. Do not pick a "representative" subset and omit the rest — if the user measured it, it must be reported. When multiple conditions measure the same quantity, cover all of them via multi-panel subplots or overlays. If you believe a dataset does not deserve its own figure, explain why and ask (via `respond` or directly to MAIN) before skipping it.
 - **Consolidate comparable measurements**: When multiple sub-datasets describe the same physical quantity vs the same independent variable under different conditions (temperature / frequency / bias / sample), prefer one multi-panel figure (`plt.subplots`) or a single overlay. Only split into separate figures when overlays exceed ~6 indistinguishable curves, when conditions have different y-units, or when a single figure would need >8 subpanels.
@@ -72,14 +73,14 @@ Any `[✗]` → fix the script → re-run → re-check.
 3. **Design plot**: Choose type, include error bars, overlay theory curves. Plan which data goes to which figure — all measured quantities must be covered.
 4. **Implement**: Write the plotting script. Use matplotlib with publication settings. Always include `plt.rcParams['axes.unicode_minus'] = False`.
 5. **Run & self-check**: Execute the script with the `exec` tool. Use shell commands that are valid for the current execution environment. Run the **self-check protocol** on every figure and report results per figure. Any failure → revise the script → re-run → re-check until all pass. This step is not optional.
-6. **Save outputs**: Confirm images in `Plots/fig/` and update manifest.
+6. **Save outputs**: Confirm images in `Plots/Fig/` and update manifest.
 7. **Signal completion**: When all requested plots are generated and all self-checks pass, call `respond` to finish. You MUST call `respond` before ending your turn on any task Main dispatched — there is no other way to finish. This unblocks the Report agent.
 
 **Automatic code validation**: Any `.py` script written through `write_file` is automatically validated for the `unicode_minus` setting and `plt.close` pairing. If validation fails, the write is rejected. Fix the reported issue and write the script again.
 
 **Output files** (`Plots/`):
-- `fig/` — Generated PNG images (300+ DPI)
-- `scripts/` — Python scripts
+- `Fig/` — Generated PNG images (300+ DPI)
+- `Scripts/` — Python scripts
 - Update manifest with figure descriptions
 
 **Technical standards**:
