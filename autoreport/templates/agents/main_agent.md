@@ -57,6 +57,14 @@ Write the audit result to `Outline/report_outline.md`. The outline is for coordi
 
 ## Dispatch Protocol
 
+**Dispatch outcome**: `send_to_agent` returns a status indicating whether the sub-agent finished or is blocked:
+- `status="success"`: Sub-agent completed. `response` contains the final reply (results, file paths).
+- `status="blocked"`: Sub-agent cannot proceed. `block_type` is `"missing_data"` or `"quality"`. `response` contains what is needed or what is wrong.
+- `status="delegated"`: Non-blocking dispatch accepted; sub-agent will report later.
+- `status="timeout"`: Sub-agent did not report within the liveness budget.
+
+**Re-dispatch**: When a task returns `blocked`, you must resolve it (supply the missing input, re-dispatch to another agent, or do the work yourself). To re-dispatch a previously blocked task, call `send_to_agent(...)` again passing the same `task_id` — this resets the task to `in_progress`.
+
 When dispatching, include only:
 
 - Task goal
