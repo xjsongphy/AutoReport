@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import QLineF, QPointF, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QLineF, QPointF, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPen
 from PyQt6.QtWidgets import (
     QApplication,
@@ -146,6 +146,69 @@ class _TaskStatusControl(QLabel):
 
         painter.setPen(self._color)
         painter.drawText(self._text_origin(), self.text())
+
+
+class _ExecPreviewText(QWidget):
+    """Plain-text preview that preserves hard line breaks and overlays a fade when clamped."""
+
+    def __init__(
+        self,
+        text: str,
+        *,
+        fade_color: str,
+        fade_object_name: str | None = None,
+        line_limit: int = 3,
+        parent: QWidget | None = None,
+    ):
+        super().__init__(parent)
+        self._text = str(text or "")
+        self._line_limit = max(1, int(line_limit))
+        self._fade = _FadeMask(fade_color, self)
+        self._fade.hide()
+        if fade_object_name:
+            self._fade.setObjectName(fade_object_name)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self._label = QLabel(self._text, self)
+        self._label.setObjectName("execDetailText")
+        self._label.setTextFormat(Qt.TextFormat.PlainText)
+        self._label.setWordWrap(False)
+        self._label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self._label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self._label.setMinimumWidth(0)
+        layout.addWidget(self._label)
+        self._refresh_clamp()
+
+    def label(self) -> QLabel:
+        return self._label
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._position_fade()
+
+    def _refresh_clamp(self) -> None:
+        line_height = self._label.fontMetrics().lineSpacing()
+        line_count = max(1, self._text.count("\n") + 1)
+        visible_lines = min(self._line_limit, line_count)
+        target_height = (visible_lines * line_height) + 2
+        self._label.setFixedHeight(target_height)
+        self._fade.setVisible(line_count > self._line_limit)
+        self._position_fade()
+
+    def _position_fade(self) -> None:
+        if not self._fade.isVisible():
+            return
+        fade_height = max(20, self._label.fontMetrics().lineSpacing() * 2)
+        self._fade.setGeometry(
+            0,
+            max(0, self.height() - fade_height),
+            self.width(),
+            min(fade_height, self.height()),
+        )
+        self._fade.raise_()
 
 
 class ToolCallGroup(QWidget):
@@ -412,11 +475,11 @@ class ToolCallGroup(QWidget):
         if call.name == "delete_file":
             files = " ".join(call.file_names) if call.file_names else ""
             return f"<b>Delete</b>{sep}{files}".strip()
-        if call.name == "exec":
+        if call.name in {"exec", "bash"}:
             desc = str(call.arguments.get("command_description") or "").strip()
             if desc:
                 desc = desc[0].upper() + desc[1:]
-            return f"<b>Exec</b>{sep}{desc}".strip()
+            return f"<b>Bash</b>{sep}{desc}".strip()
         return f"<b>{self._display_name(call.name)}</b>"
 
     def _task_status_from_line(self, line: str) -> str:
@@ -542,16 +605,15 @@ class ToolCallGroup(QWidget):
         card = QFrame(self)
         card.setObjectName("execDetailCard")
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(8, 6, 8, 10)
-        card_layout.setSpacing(4)
+        card_layout.setContentsMargins(0, 0, 0, 0)
+        card_layout.setSpacing(0)
 
-        def _row(tag: str, text: str, display_text: str | None = None) -> QWidget:
-            shown = text if display_text is None else display_text
+        def _row(tag: str, text: str) -> QWidget:
             row = QFrame(card)
             row.setObjectName("execDetailRow")
             row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.setSpacing(8)
+            row_layout.setContentsMargins(16, 9, 10, 9)
+            row_layout.setSpacing(16)
 
             label = QLabel(tag, row)
             label.setObjectName("execDetailTag")
@@ -562,7 +624,7 @@ class ToolCallGroup(QWidget):
             value_host = QWidget(row)
             value_host.setObjectName("execDetailValueHost")
             host_layout = QHBoxLayout(value_host)
-            host_layout.setContentsMargins(10, 8, 8, 8)
+            host_layout.setContentsMargins(0, 0, 0, 0)
             host_layout.setSpacing(8)
 
             text_stack = QWidget(value_host)
@@ -570,25 +632,20 @@ class ToolCallGroup(QWidget):
             text_stack_layout.setContentsMargins(0, 0, 0, 0)
             text_stack_layout.setSpacing(0)
 
-            value = QLabel(shown, text_stack)
-            value.setObjectName("execDetailText")
-            value.setTextFormat(Qt.TextFormat.PlainText)
-            value.setWordWrap(True)
-            value.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-            value.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-            value.setMinimumWidth(0)
-            text_stack_layout.addWidget(value)
-            if tag == "OUT" and shown != text:
-                fade = _FadeMask(get_theme_colors()["secondaryBtnBg"], text_stack)
-                fade.setObjectName("execOutFadeMask")
-                fade.setFixedHeight(max(20, value.fontMetrics().lineSpacing() * 2))
-                text_stack_layout.addWidget(fade)
+            preview = _ExecPreviewText(
+                text,
+                fade_color=get_theme_colors()["detail_card_bg"],
+                fade_object_name="execOutFadeMask" if tag == "OUT" else None,
+                parent=text_stack,
+            )
+            text_stack_layout.addWidget(preview)
             host_layout.addWidget(text_stack, 1, Qt.AlignmentFlag.AlignTop)
 
             copy_btn = QPushButton(row)
-            copy_btn.setObjectName("userCopyBtn")
+            copy_btn.setObjectName("execCopyBtn")
             copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            copy_btn.setFixedSize(30, 24)
+            copy_btn.setFixedSize(30, preview.label().fontMetrics().lineSpacing() + 2)
+            copy_btn.setIconSize(QSize(14, 14))
             install_compact_tooltip(copy_btn, "Copy")
             # Keep button width reserved so IN/OUT text width is stable before hover.
             copy_btn.setVisible(True)
@@ -596,7 +653,7 @@ class ToolCallGroup(QWidget):
             copy_btn.setFlat(True)
             copy_btn.setIcon(QIcon())
             copy_btn.clicked.connect(lambda _=False, t=text: QApplication.clipboard().setText(t))
-            host_layout.addWidget(copy_btn, 0, Qt.AlignmentFlag.AlignTop)
+            host_layout.addWidget(copy_btn, 0, Qt.AlignmentFlag.AlignVCenter)
             row_layout.addWidget(value_host, 1, Qt.AlignmentFlag.AlignTop)
 
             def _enter(_):
@@ -629,14 +686,12 @@ class ToolCallGroup(QWidget):
         divider.setObjectName("execDetailDivider")
         divider.setFixedHeight(1)
         card_layout.addWidget(divider)
-        out_preview = "\n".join(out.splitlines()[:3])
-        card_layout.addWidget(_row("OUT", out, out_preview))
-        card.setMaximumHeight(110)
+        card_layout.addWidget(_row("OUT", out))
         return card
 
     def _render_exec_detail(self) -> None:
         self._clear_detail()
-        exec_calls = [c for c in self._calls if c.name == "exec"]
+        exec_calls = [c for c in self._calls if c.name in {"exec", "bash"}]
         if not exec_calls:
             self._detail_host.setVisible(False)
             return
@@ -663,6 +718,7 @@ class ToolCallGroup(QWidget):
         if self._header_arrow is not None:
             self._header_arrow.setVisible(expandable_call is not None)
             self._header_arrow.set_expanded(self._expanded)
+            self._header_btn.align_arrow_to_first_line()
         self._header_btn.setCursor(
             Qt.CursorShape.PointingHandCursor if expandable_call is not None else Qt.CursorShape.ArrowCursor
         )

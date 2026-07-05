@@ -61,10 +61,10 @@ def get_theme_colors() -> dict[str, str]:
     disabled_fg = muted
     secondary_bg = "#313131" if dark else "#e5e5e5"
     secondary_border = "#3c3c3c" if dark else "#cecece"
-    detail_card_bg = "#23272f" if dark else "#ffffff"
-    detail_card_border = "#353b46" if dark else border
-    detail_muted = "#9aa3b2" if dark else muted
-    detail_fg = "#d5dbe5" if dark else fg
+    detail_card_bg = "#1f1f1f" if dark else "#ffffff"
+    detail_card_border = border
+    detail_muted = muted
+    detail_fg = fg
 
     return {
         # === Layout ===
@@ -302,6 +302,7 @@ def scrollbar_stylesheet(
             {selector}::add-line:{orientation},
             {selector}::sub-line:{orientation} {{
                 {line_extent_prop}: 0;
+                margin: 0;
                 border: none;
                 background-color: transparent;
             }}

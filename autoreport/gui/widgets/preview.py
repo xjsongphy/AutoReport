@@ -35,6 +35,21 @@ from ..theme import get_theme_colors, scrollbar_stylesheet
 from .ui_utils import IconActionButton, create_isolated_context_menu, render_svg_icon
 
 
+def question_box(*args, **kwargs):
+    from ..dialogs import question_box as _question_box
+    return _question_box(*args, **kwargs)
+
+
+def warning_box(*args, **kwargs):
+    from ..dialogs import warning_box as _warning_box
+    return _warning_box(*args, **kwargs)
+
+
+def information_box(*args, **kwargs):
+    from ..dialogs import information_box as _information_box
+    return _information_box(*args, **kwargs)
+
+
 class _EmbeddedImageLabel(QLabel):
     """Image label that always fits image into available viewport."""
 
@@ -92,7 +107,7 @@ class _TabAffordanceButton(QPushButton):
 
 
 class _TabCloseButton(QPushButton):
-    """Always-visible close button for unified tabs."""
+    """Close affordance shown for hovered/active tabs."""
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__("✕", parent)
@@ -942,7 +957,6 @@ class PreviewWidget(QWidget):
                 color: {c["muted"]};
                 background: transparent;
                 border: none;
-                font-size: 11px;
                 padding: 0 1px 0 0;
             }}
             QLabel#tabAffordanceSpacer {{
@@ -1195,18 +1209,18 @@ class PreviewWidget(QWidget):
                 return
 
     def _confirm_close_modified_tab(self, path: Path) -> QMessageBox.StandardButton:
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Icon.Warning)
-        msg.setWindowTitle("保存更改")
-        msg.setText(f"是否保存对 {path.name} 的更改？")
-        msg.setInformativeText("你的更改尚未保存。")
-        msg.setStandardButtons(
+        return question_box(
+            self,
+            "保存更改",
+            f"是否保存对 {path.name} 的更改？",
+            buttons=(
             QMessageBox.StandardButton.Save
             | QMessageBox.StandardButton.Discard
             | QMessageBox.StandardButton.Cancel
+            ),
+            default=QMessageBox.StandardButton.Save,
+            affirmative=QMessageBox.StandardButton.Save,
         )
-        msg.setDefaultButton(QMessageBox.StandardButton.Save)
-        return QMessageBox.StandardButton(msg.exec())
 
     def _save_tab_by_key(self, key: str) -> bool:
         state = self._find_tab_state(key)
@@ -1220,7 +1234,7 @@ class PreviewWidget(QWidget):
             state.path.write_text(content, encoding="utf-8")
         except Exception as exc:
             logger.error("Failed to save file {}: {}", state.path, exc)
-            QMessageBox.warning(self, "保存失败", f"无法保存文件:\n{state.path}\n\n{exc}")
+            warning_box(self, "保存失败", f"无法保存文件:\n{state.path}\n\n{exc}")
             return False
         state.saved_text = content
         state.modified = False
@@ -1354,18 +1368,20 @@ class PreviewWidget(QWidget):
             hl = QHBoxLayout(host)
             hl.setContentsMargins(0, 0, 2, 0)
             hl.setSpacing(2)
+            hl.setAlignment(Qt.AlignmentFlag.AlignVCenter)
             path_width = 0
             path_height = 0
             if path_text:
                 path_label = QLabel(path_text, host)
                 path_label.setObjectName("tabDuplicatePath")
+                path_label.setFont(self._unified_tab_bar.font())
                 path_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                 path_label.setMinimumWidth(0)
                 path_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
                 path_label.setWordWrap(False)
                 path_label.setTextFormat(Qt.TextFormat.PlainText)
                 path_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-                hl.addWidget(path_label)
+                hl.addWidget(path_label, 0, Qt.AlignmentFlag.AlignVCenter)
                 path_width = path_label.sizeHint().width()
                 path_height = path_label.sizeHint().height()
             missing_height = 0
@@ -1373,9 +1389,9 @@ class PreviewWidget(QWidget):
                 missing_label = QLabel("D", host)
                 missing_label.setObjectName("tabMissingBadge")
                 missing_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                hl.addWidget(missing_label)
+                hl.addWidget(missing_label, 0, Qt.AlignmentFlag.AlignVCenter)
                 missing_height = missing_label.sizeHint().height()
-            hl.addWidget(inner)
+            hl.addWidget(inner, 0, Qt.AlignmentFlag.AlignVCenter)
             inner_w = max(12, inner.sizeHint().width())
             host_h = max(12, inner.sizeHint().height(), path_height, missing_height)
             host_w = inner_w + path_width + (12 if missing else 0) + 4
@@ -1411,7 +1427,12 @@ class PreviewWidget(QWidget):
             self._unified_tab_bar.setTabButton(
                 i,
                 QTabBar.ButtonPosition.RightSide,
-                _wrap_affordance(right, True, path_text=path_text, missing=missing),
+                _wrap_affordance(
+                    right,
+                    True,
+                    path_text=path_text,
+                    missing=missing,
+                ),
             )
 
     def _duplicate_tab_names(self) -> set[str]:
@@ -1531,7 +1552,7 @@ class PreviewWidget(QWidget):
             try:
                 subprocess.Popen(["python", str(self._current_file)], cwd=str(self._current_file.parent))
             except Exception as exc:
-                QMessageBox.warning(self, "Run Failed", f"Unable to run Python file:\n{exc}")
+                warning_box(self, "Run Failed", f"Unable to run Python file:\n{exc}")
 
     def _on_preview_clicked(self) -> None:
         if not self._current_file:
@@ -1540,14 +1561,14 @@ class PreviewWidget(QWidget):
             return
         pdf_path = self._current_file.with_suffix(".pdf")
         if not pdf_path.exists():
-            QMessageBox.information(self, "Preview Not Found", f"Please compile first to generate PDF:\n{pdf_path.name}")
+            information_box(self, "Preview Not Found", f"Please compile first to generate PDF:\n{pdf_path.name}")
             return
         self.load_file(pdf_path)
 
     def _compile_tex(self, tex_path: Path) -> None:
         compiler = shutil.which("xelatex") or shutil.which("lualatex") or shutil.which("pdflatex")
         if not compiler:
-            QMessageBox.warning(self, "Compile Failed", "No LaTeX compiler found (xelatex/lualatex/pdflatex).")
+            warning_box(self, "Compile Failed", "No LaTeX compiler found (xelatex/lualatex/pdflatex).")
             return
         try:
             subprocess.run(
@@ -1558,13 +1579,13 @@ class PreviewWidget(QWidget):
                 text=True,
                 timeout=120,
             )
-            QMessageBox.information(self, "Compile Complete", f"{tex_path.name} compiled successfully.")
+            information_box(self, "Compile Complete", f"{tex_path.name} compiled successfully.")
         except subprocess.CalledProcessError as exc:
             tail = (exc.stderr or exc.stdout or "").splitlines()[-6:]
             detail = "\n".join(tail) if tail else "No detailed output."
-            QMessageBox.warning(self, "Compile Failed", f"{tex_path.name}\n\n{detail}")
+            warning_box(self, "Compile Failed", f"{tex_path.name}\n\n{detail}")
         except Exception as exc:
-            QMessageBox.warning(self, "Compile Failed", f"{tex_path.name}\n\n{exc}")
+            warning_box(self, "Compile Failed", f"{tex_path.name}\n\n{exc}")
 
     # ------------------------------------------------------------------ #
     #  Selection tracking (for general mode editors)

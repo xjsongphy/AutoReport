@@ -26,7 +26,7 @@ from autoreport.gui.widgets.chat_input import ChatInput
 from autoreport.gui.widgets.conversation_history import ConversationHistoryDropdown
 from autoreport.gui.widgets.debug_panel import DebugPanel
 from autoreport.gui.widgets.file_search_popup import FileSearchPopup
-from autoreport.gui.widgets.ui_utils import IconActionButton, NoWheelComboBox, render_svg_icon
+from autoreport.gui.widgets.ui_utils import IconActionButton, NoWheelComboBox, install_compact_tooltip, render_svg_icon
 from autoreport.utils.agent_labels import get_agent_badge, get_agent_title, get_agent_icon
 from autoreport.gui.widgets.messages_area import MessagesArea
 from autoreport.interfaces.types import ApiDebugMessage
@@ -691,18 +691,21 @@ class AgentPanel(QWidget):
         """Clear attached file/selection context so next message won't include it."""
         self._opened_file = None
         self._preview_context = None
-        self._context_separator.setVisible(False)
-        self._context_attachment_btn.setVisible(False)
+        self._hide_context_attachment()
 
     def _set_context_attachment(self, label: str, tooltip_path: str) -> None:
         self._context_attachment_btn.setChecked(True)
         self._context_attachment_btn.setText(label)
-        self._context_attachment_btn.setToolTip(tooltip_path)
+        install_compact_tooltip(self._context_attachment_btn, tooltip_path)
         self._context_attachment_btn.setIcon(self._context_file_icon)
         self._context_separator.setVisible(True)
         self._context_attachment_btn.setVisible(True)
         self._sync_context_attachment_width()
         self._reflow_composer(stick_if_bottom=True, defer_once=True)
+
+    def _hide_context_attachment(self) -> None:
+        self._context_separator.setVisible(False)
+        self._context_attachment_btn.setVisible(False)
 
     def _sync_context_attachment_width(self) -> None:
         """Recompute attachment chip width so pasted/long labels expand immediately."""
@@ -1189,8 +1192,7 @@ class AgentPanel(QWidget):
         # Clear context state (after use)
         self._preview_context = None
         self._opened_file = None
-        self._context_separator.setVisible(False)
-        self._context_attachment_btn.setVisible(False)
+        self._hide_context_attachment()
 
     def _on_send_btn_clicked(self) -> None:
         """Handle send button click — send or interrupt based on state."""

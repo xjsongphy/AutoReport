@@ -3,9 +3,7 @@
 from pathlib import Path
 from typing import override
 
-from math import ceil
-
-from PyQt6.QtCore import QMimeData, QPoint, QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import QMimeData, QPoint, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QInputMethodEvent, QKeyEvent, QTextCursor
 from PyQt6.QtWidgets import QPlainTextEdit
 
@@ -116,23 +114,45 @@ class ChatInput(QPlainTextEdit):
     def _update_height(self) -> None:
         metrics = self.fontMetrics()
         line_h = metrics.lineSpacing()
-        frame = self.frameWidth() * 2
-        doc_margin = int(self.document().documentMargin() * 2)
-        pad_v = 12  # matches vertical padding in stylesheet (6 top + 6 bottom)
-        layout = self.document().documentLayout()
-        doc_height = layout.documentSize().height() if layout is not None else 0.0
-        wrapped_lines = ceil(max(0.0, doc_height) / max(1, line_h))
-        explicit_lines = self.document().blockCount()
-        logical_lines = max(self._MIN_LINES, explicit_lines, wrapped_lines)
-        visible_lines = min(self._MAX_LINES, logical_lines)
-        target = (visible_lines * line_h) + frame + doc_margin + pad_v
+        # Vertical chrome around the text: stylesheet padding (contents margins)
+        # + the plain-text frame + the document margin. All derived from the
+        # widget itself, so no hardcoded magic numbers to drift out of sync.
+        cm = self.contentsMargins()
+        overhead = (
+            cm.top() + cm.bottom()
+            + self.frameWidth() * 2
+            + int(self.document().documentMargin() * 2)
+        )
+
+        content_h = self._content_pixel_height()
+        max_content_h = self._MAX_LINES * line_h
+        visible_h = min(content_h, max_content_h)
+        target = int(round(visible_h)) + overhead
         self.setFixedHeight(target)
-        max_visible_doc_h = (self._MAX_LINES * line_h) + doc_margin
-        content_doc_h = max(0.0, doc_height)
-        needs_scroll = logical_lines > self._MAX_LINES or (content_doc_h > (max_visible_doc_h + 0.5))
+
+        # Show the vertical scrollbar only when content truly overflows the
+        # capped height. A half-line hysteresis avoids flicker at the boundary.
+        needs_scroll = content_h > max_content_h + (line_h * 0.5)
         self.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOn if needs_scroll else Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
+
+    def _content_pixel_height(self) -> float:
+        """Total pixel height of all (wrapped) content.
+
+        ``QPlainTextDocumentLayout.documentSize().height()`` does NOT return
+        pixels, so wrapping was never counted (long pasted lines failed to grow
+        the box). ``blockBoundingRect`` forces each block to lay out and returns
+        its true wrapped height, so this works for both explicit newlines and
+        word-wrap. Always at least one line.
+        """
+        line_h = max(1, self.fontMetrics().lineSpacing())
+        total = 0.0
+        block = self.document().firstBlock()
+        while block.isValid():
+            total += self.blockBoundingRect(block).height()
+            block = block.next()
+        return max(line_h, total)
 
     @override
     def keyPressEvent(self, event: QKeyEvent) -> None:

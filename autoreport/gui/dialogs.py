@@ -9,10 +9,11 @@ buttons stay visually consistent.
 
 from __future__ import annotations
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QMessageBox, QWidget
 
 from .theme import get_theme_colors
-from .widgets.ui_utils import filled_button_qss, secondary_filled_button_qss
+from .widgets.ui_utils import text_button_qss
 
 _StandardButton = QMessageBox.StandardButton
 
@@ -76,6 +77,7 @@ def styled_message_box(
             btn = box.button(role)
             if btn is not None:
                 btn.setText(_BUTTON_LABELS_ZH[role])
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
     if default != QMessageBox.StandardButton.NoButton:
         box.setDefaultButton(default)
     if affirmative is not None:
@@ -94,19 +96,21 @@ def styled_message_box(
         QMessageBox QLabel, QMessageBox QTextEdit {{
             color: {c["fg"]};
         }}
-        {secondary_filled_button_qss(
-            "QPushButton",
+        {text_button_qss(
+            "",
+            color=c["fg"],
+            border=c["border"],
             radius=radius,
             padding=padding,
             font_size=13,
         )}
-        {filled_button_qss(
+        {text_button_qss(
             "#msgPrimaryBtn",
-            bg=c["buttonBlue"],
-            fg=c["primaryBtnFg"],
-            hover_bg=c["buttonBlue"],
-            disabled_bg=c["border"],
-            disabled_fg=c["muted"],
+            color=c["buttonBlue"],
+            border=c["buttonBlue"],
+            hover_bg=c["hover"],
+            hover_color=c["buttonBlue"],
+            hover_border=c["buttonBlue"],
             radius=radius,
             padding=padding,
             font_size=13,
