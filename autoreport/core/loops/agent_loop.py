@@ -458,10 +458,7 @@ class AgentLoop:
             await self.bus.publish(
                 SystemNotice(
                     agent_type=self.agent_type,
-                    content=(
-                        "本轮需要调用 Respond 向 Main 回复 "
-                        f"({self._report_retries}/{self._REPORT_GUARD_MAX_RETRIES})。"
-                    ),
+                    content="本轮需要调用 Respond 向 Main 回复",
                 )
             )
             await self._run_guard_round(message, reminder)
