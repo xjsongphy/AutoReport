@@ -27,15 +27,15 @@ import pytest
 
 from autoreport.config import ConfigManager
 from autoreport.core.loops import LoopManager, MessageBus
+from autoreport.core.project_structure import ensure_project_structure
 from autoreport.core.providers.factory import ProviderFactory
 from autoreport.interfaces.types import (
-    AgentFeedback,
     AgentResponse,
     AgentType,
     Error,
     Message,
     StatusChange,
-    ToolCall,
+    ToolCallMessage,
     ToolResult,
     UserMessage,
 )
@@ -56,12 +56,11 @@ class MessageCollector:
             return
         for msg_type in (
             AgentResponse,
-            ToolCall,
+            ToolCallMessage,
             ToolResult,
             StatusChange,
             Error,
             UserMessage,
-            AgentFeedback,
         ):
             self._bus.subscribe(msg_type, self._on_message)
         self._subscribed = True
@@ -119,8 +118,8 @@ class MessageCollector:
         return [m for m in self._messages if isinstance(m, AgentResponse)]
 
     @property
-    def tool_calls(self) -> list[ToolCall]:
-        return [m for m in self._messages if isinstance(m, ToolCall)]
+    def tool_calls(self) -> list[ToolCallMessage]:
+        return [m for m in self._messages if isinstance(m, ToolCallMessage)]
 
     @property
     def tool_results(self) -> list[ToolResult]:
@@ -354,12 +353,4 @@ class HeadlessBackend:
 
     def _ensure_project_structure(self) -> None:
         """Create project directories if they don't exist."""
-        for d in [
-            self.workspace / "data",
-            self.workspace / "data" / "processed",
-            self.workspace / "references",
-            self.workspace / "theory",
-            self.workspace / "code",
-            self.workspace / "tex",
-        ]:
-            d.mkdir(parents=True, exist_ok=True)
+        ensure_project_structure(self.workspace)

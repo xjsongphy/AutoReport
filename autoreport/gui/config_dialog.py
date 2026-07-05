@@ -23,6 +23,7 @@ from ..config.manager import ConfigManager
 from ..config.presets import ProviderPreset, get_presets_by_category, load_presets
 from ..config.schema import ApiConfig
 from ..core.preset_sync import is_cached, sync_presets
+from ..core.providers.defaults import DEFAULT_API_BASES, DEFAULT_MODELS
 from .dialogs import information_box, question_box, warning_box
 from .theme import get_theme_colors
 from .widgets.ui_utils import (
@@ -161,25 +162,10 @@ class ConfigCard(QFrame):
         tooltip = "隐藏 API Key" if is_visible else "显示 API Key"
         self.show_key_btn.setToolTip(tooltip)
 
-    _DEFAULT_BASES: dict[str, str] = {
-        "deepseek": "https://api.deepseek.com",
-        "openrouter": "https://openrouter.ai/api/v1",
-        "groq": "https://api.groq.com/openai/v1",
-        "google": "https://generativelanguage.googleapis.com/v1beta/openai",
-        "openai": "https://api.openai.com/v1",
-    }
-    _DEFAULT_MODELS: dict[str, str] = {
-        "deepseek": "deepseek-chat",
-        "openrouter": "openai/gpt-4o",
-        "groq": "llama-3.3-70b-versatile",
-        "google": "gemini-2.0-flash",
-        "openai": "gpt-4o",
-    }
-
     def _on_provider_changed(self) -> None:
         provider = self.provider_combo.currentData()
-        default_base = self._DEFAULT_BASES.get(provider, "")
-        default_model = self._DEFAULT_MODELS.get(provider, "")
+        default_base = DEFAULT_API_BASES.get(provider, "")
+        default_model = DEFAULT_MODELS.get(provider, "")
 
         if provider == "anthropic":
             placeholder = "https://api.anthropic.com"

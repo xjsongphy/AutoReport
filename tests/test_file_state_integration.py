@@ -1,9 +1,8 @@
 """Integration tests for read-before-edit / file_state mechanism.
 
 Verifies the full lifecycle:
-  read  → records state
-  edit_file  → warns if not read / if stale
-  write_file → warns if not read / if stale
+  read        → records state
+  apply_patch → warns if not read / if stale (existing file); no warning for new file
   delete_file → (optional check)
 """
 import hashlib
@@ -13,13 +12,11 @@ import pytest
 
 from autoreport.core.tools.file_state import FileState, FileStateManager
 from autoreport.core.tools.file_tools import (
-    ReadTool,
-    WriteFileTool,
-    EditFileTool,
+    ApplyPatchTool,
     DeleteFileTool,
+    ReadTool,
 )
 from autoreport.core.tools.manifest_tool import ManifestManager
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -55,19 +52,8 @@ def read_tool(workspace: Path, fsm: FileStateManager) -> ReadTool:
 
 
 @pytest.fixture
-def write_tool(workspace: Path, allowed_dir: Path, fsm: FileStateManager, manifest: ManifestManager) -> WriteFileTool:
-    return WriteFileTool(
-        workspace=workspace,
-        write_allowed_dir=allowed_dir,
-        manifest_manager=manifest,
-        agent_type="test",
-        file_state_manager=fsm,
-    )
-
-
-@pytest.fixture
-def edit_tool(workspace: Path, allowed_dir: Path, fsm: FileStateManager, manifest: ManifestManager) -> EditFileTool:
-    return EditFileTool(
+def patch_tool(workspace: Path, allowed_dir: Path, fsm: FileStateManager, manifest: ManifestManager) -> ApplyPatchTool:
+    return ApplyPatchTool(
         workspace=workspace,
         write_allowed_dir=allowed_dir,
         manifest_manager=manifest,
@@ -207,41 +193,34 @@ class TestReadFileIntegration:
         assert "error" in result
         assert "binary" in result["error"].lower() or "utf-8" in result["error"].lower()
 
-    async def test_read_then_edit_passes(self, workspace: Path, allowed_dir: Path,
-                                         read_tool: ReadTool, edit_tool: EditFileTool):
+    async def test_read_then_patch_passes(self, workspace: Path, allowed_dir: Path,
+                                          read_tool: ReadTool, patch_tool: ApplyPatchTool):
         f = allowed_dir / "read_edit.txt"
         f.write_text("line1\nline2\nline3\n", encoding="utf-8")
         # Read first
         await read_tool(path="output/read_edit.txt")
-        # Edit should succeed without warning
-        result = await edit_tool(path="output/read_edit.txt", old_text="line2", new_text="modified")
+        # Patch should succeed without warning
+        result = await patch_tool(path="output/read_edit.txt", patch="-line2\n+modified\n")
         assert "warning" not in result, f"Unexpected warning: {result.get('warning')}"
-        assert result["replacements_made"] >= 1
+        assert result["replacements_applied"] >= 1
 
-    async def test_edit_without_read_returns_warning(self, allowed_dir: Path, edit_tool: EditFileTool):
+    async def test_patch_without_read_returns_warning(self, allowed_dir: Path, patch_tool: ApplyPatchTool):
         f = allowed_dir / "no_read.txt"
         f.write_text("content\n", encoding="utf-8")
-        result = await edit_tool(path="output/no_read.txt", old_text="content", new_text="changed")
+        result = await patch_tool(path="output/no_read.txt", patch="-content\n+changed\n")
         assert "warning" in result
         assert "without having read it" in result["warning"]
 
-    async def test_write_without_read_returns_warning(self, allowed_dir: Path, write_tool: WriteFileTool):
-        f = allowed_dir / "write_no_read.txt"
-        f.write_text("original\n", encoding="utf-8")
-        result = await write_tool(path="output/write_no_read.txt", content="new content\n")
-        assert "warning" in result
-        assert "without having read it" in result["warning"]
-
-    async def test_edit_stale_after_change(self, workspace: Path, allowed_dir: Path,
-                                           read_tool: ReadTool, edit_tool: EditFileTool):
+    async def test_patch_stale_after_change(self, workspace: Path, allowed_dir: Path,
+                                            read_tool: ReadTool, patch_tool: ApplyPatchTool):
         f = allowed_dir / "stale_edit.txt"
         f.write_text("original\n", encoding="utf-8")
         # Read
         await read_tool(path="output/stale_edit.txt")
         # External modification (simulated)
         f.write_text("externally modified\n", encoding="utf-8")
-        # Edit should warn about staleness
-        result = await edit_tool(path="output/stale_edit.txt", old_text="externally", new_text="changed")
+        # Patch should warn about staleness
+        result = await patch_tool(path="output/stale_edit.txt", patch="-externally modified\n+changed\n")
         assert "warning" in result
         assert "changed" in result["warning"]
 
@@ -252,19 +231,19 @@ class TestReadFileIntegration:
         result = await delete_tool(path="output/delete_me.txt")
         assert result["deleted"] is True
 
-    async def test_new_file_write_no_warning(self, allowed_dir: Path, write_tool: WriteFileTool):
-        """Writing a brand-new file (not yet existing) should NOT trigger safety warning."""
-        result = await write_tool(path="output/brand_new.txt", content="fresh\n")
+    async def test_new_file_patch_no_warning(self, allowed_dir: Path, patch_tool: ApplyPatchTool):
+        """A pure-addition patch on a brand-new file should NOT trigger safety warning."""
+        result = await patch_tool(path="output/brand_new.txt", patch="+fresh\n")
         assert "warning" not in result, f"Unexpected warning: {result.get('warning')}"
-        assert result["success"] is True
+        assert result["created"] is True
 
     async def test_read_state_isolated_between_agents(self, workspace: Path, allowed_dir: Path, manifest: ManifestManager):
         """Read state should be isolated per agent (no cross-agent sharing)."""
         fsm_a = FileStateManager()
         fsm_b = FileStateManager()
         read_a = ReadTool(workspace, file_state_manager=fsm_a)
-        edit_b = EditFileTool(
-            workspace,
+        patch_b = ApplyPatchTool(
+            workspace=workspace,
             write_allowed_dir=allowed_dir,
             manifest_manager=manifest,
             agent_type="agent_b",
@@ -276,7 +255,7 @@ class TestReadFileIntegration:
         # Agent A reads file
         await read_a(path="output/isolated.txt")
         # Agent B should still be blocked by read-before-edit
-        result = await edit_b(path="output/isolated.txt", old_text="hello", new_text="world")
+        result = await patch_b(path="output/isolated.txt", patch="-hello\n+world\n")
         assert "warning" in result
         assert result["has_read"] is False
 

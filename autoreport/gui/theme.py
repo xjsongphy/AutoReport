@@ -61,10 +61,10 @@ def get_theme_colors() -> dict[str, str]:
     disabled_fg = muted
     secondary_bg = "#313131" if dark else "#e5e5e5"
     secondary_border = "#3c3c3c" if dark else "#cecece"
-    detail_card_bg = "#23272f" if dark else "#ffffff"
-    detail_card_border = "#353b46" if dark else border
-    detail_muted = "#9aa3b2" if dark else muted
-    detail_fg = "#d5dbe5" if dark else fg
+    detail_card_bg = "#1f1f1f" if dark else "#ffffff"
+    detail_card_border = border
+    detail_muted = muted
+    detail_fg = fg
 
     return {
         # === Layout ===
@@ -110,6 +110,9 @@ def get_theme_colors() -> dict[str, str]:
         # === Chat/Agent Panel ===
         "bubble_bg": "#2a2a2a" if dark else "#ffffff",
         "bubble_hover": "#333333" if dark else "#ffffff",
+        # Neutral gray (R=G=B, no green/blue cast) for user-bubble and
+        # context-chip borders — light enough to read as ash-gray, not white.
+        "gray_white": "#a6a6a6" if dark else "#a6a6a6",
         "edit_bubble_bg": "#3c3c3c" if dark else "#ffffff",
         "edit_bubble_border": "transparent" if dark else "#cecece",
         "avatar_bg": "#3c3c3c" if dark else "#e0e0e0",
@@ -296,9 +299,14 @@ def scrollbar_stylesheet(
             {selector}::handle:{orientation}:pressed {{
                 background-color: {colors["scrollbar_hover"]};
             }}
+            {selector}::groove:{orientation} {{
+                background-color: {background_color};
+                border: none;
+            }}
             {selector}::add-line:{orientation},
             {selector}::sub-line:{orientation} {{
                 {line_extent_prop}: 0;
+                margin: 0;
                 border: none;
                 background-color: transparent;
             }}

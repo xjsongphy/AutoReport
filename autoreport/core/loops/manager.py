@@ -8,12 +8,17 @@ from loguru import logger
 
 from ...config import ConfigManager
 from ...core.providers import ProviderFactory, ProviderManager
-from ...interfaces.types import AgentType, FileRollbackRequest, Message, RestartRequest, RollbackStatus
+from ...interfaces.types import (
+    AgentType,
+    FileRollbackRequest,
+    Message,
+    RestartRequest,
+    RollbackStatus,
+)
 from ..checkpoints import CheckpointManager
-from ..tools import SkillLoader
 from ..tools import (
+    ApplyPatchTool,
     DeleteFileTool,
-    EditFileTool,
     ExecTool,
     FileStateManager,
     LoadSkillTool,
@@ -21,11 +26,10 @@ from ..tools import (
     ManifestManager,
     PDFParseTool,
     ReadTool,
-    ReportIssueTool,
+    RespondTool,
     SendToAgentTool,
     SkillLoader,
     TaskBoard,
-    WriteFileTool,
 )
 from ..tools.registry import ToolRegistry
 from .agent_loop import AgentLoop
@@ -200,6 +204,7 @@ class LoopManager:
                 loop_manager=self,
                 skill_loader=self.skill_loader,
                 manifest_manager=self.manifest_manager,
+                task_board=self._task_board,
             )
             self._loops[agent_type] = loop
 
@@ -241,7 +246,7 @@ class LoopManager:
         # Determine write allowed directory based on agent type
         write_dirs = {
             AgentType.DATA_ANALYSIS: self.workspace / "Data",
-            AgentType.PLOTTING: self.workspace / "Code",
+            AgentType.PLOTTING: self.workspace / "Plots",
             AgentType.THEORY: self.workspace / "Theory",
             AgentType.REPORT: self.workspace / "Tex",
             AgentType.MAIN: self.workspace / "Outline",  # MAIN only writes Outline/report_outline.md
@@ -256,25 +261,20 @@ class LoopManager:
             manifest_manager=self.manifest_manager,
             agent_type=agent_type.value,
             file_state_manager=file_state_manager,
+            checkpoint_manager=self.checkpoint_manager,
         )
         if agent_type == AgentType.PLOTTING:
             from ..tools.file_tools import _validate_plotting_script
             write_tool_kwargs["content_validator"] = _validate_plotting_script
 
-        registry.register(WriteFileTool(**write_tool_kwargs))
-        registry.register(EditFileTool(
-            workspace=self.workspace,
-            write_allowed_dir=write_dir,
-            manifest_manager=self.manifest_manager,
-            agent_type=agent_type.value,
-            file_state_manager=file_state_manager,
-        ))
+        registry.register(ApplyPatchTool(**write_tool_kwargs))
         registry.register(DeleteFileTool(
             workspace=self.workspace,
             write_allowed_dir=write_dir,
             manifest_manager=self.manifest_manager,
             agent_type=agent_type.value,
             file_state_manager=file_state_manager,
+            checkpoint_manager=self.checkpoint_manager,
         ))
 
         # Execution tool (for data analysis, plotting, report agents only — MAIN delegates, does not execute)
@@ -315,7 +315,7 @@ class LoopManager:
             )
         else:
             registry.register(
-                ReportIssueTool(
+                RespondTool(
                     bus=self.bus,
                     agent_type=agent_type,
                     task_board=self._task_board,
@@ -368,21 +368,10 @@ class LoopManager:
         cp = self.checkpoint_manager.get_checkpoint(agent_type, checkpoint_id)
         if cp:
             from ...interfaces.types import Checkpoint as CheckpointMsg
-            # For baseline: use file_states hashes directly.
-            # For subsequent: derive from file_diffs (sha256_after for each file).
-            if cp.file_states:
-                file_hashes = {path: state.hash for path, state in cp.file_states.items()}
-            else:
-                file_hashes = {
-                    path: d.sha256_after
-                    for path, d in cp.file_diffs.items()
-                    if d.sha256_after
-                }
             msg = CheckpointMsg(
                 agent_type=agent_type,
                 checkpoint_id=checkpoint_id,
                 description=cp.description,
-                file_states=file_hashes,
                 message_id=message_id,
             )
             await self.bus.publish(msg)

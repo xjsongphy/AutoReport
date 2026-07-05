@@ -5,7 +5,7 @@ from .base import (
     LLMProvider,
     LLMResponse,
     Message,
-    ToolCall,
+    LLMToolCall,
     ToolResult,
 )
 from .factory import ALL_PROVIDER_TYPES, ProviderFactory, ProviderManager
@@ -14,7 +14,7 @@ from .openai_provider import OpenAICompatProvider
 __all__ = [
     "LLMProvider",
     "Message",
-    "ToolCall",
+    "LLMToolCall",
     "ToolResult",
     "LLMResponse",
     "AnthropicProvider",

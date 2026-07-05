@@ -13,10 +13,10 @@ import json
 import sys
 
 from loguru import logger
-from PyQt6.QtCore import QFileInfo, QFileSystemWatcher, QPoint, QRect, QSize, QSignalBlocker, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QFileInfo, QFileSystemWatcher, QItemSelectionModel, QPoint, QRect, QSize, QSignalBlocker, Qt, QTimer, pyqtSignal
 
 from autoreport.utils.logging_config import ui_logger
-from PyQt6.QtGui import QColor, QCursor, QDrag, QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QDropEvent, QIcon, QMouseEvent, QPalette, QPainter, QPen, QPixmap
+from PyQt6.QtGui import QColor, QCursor, QDrag, QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QDropEvent, QIcon, QKeySequence, QMouseEvent, QPalette, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemDelegate,
     QAbstractItemView,
@@ -40,14 +40,27 @@ from PyQt6.QtWidgets import (
 from ..theme import get_theme_colors, scrollbar_stylesheet
 from .ui_utils import UI_HOVER_DELAY_MS, IconActionButton, compact_tooltip_qss, create_isolated_context_menu, render_svg_icon
 
+
+def question_box(*args, **kwargs):
+    from ..dialogs import question_box as _question_box
+    return _question_box(*args, **kwargs)
+
+
+def warning_box(*args, **kwargs):
+    from ..dialogs import warning_box as _warning_box
+    return _warning_box(*args, **kwargs)
+
 # Fixed directory structure
-FIXED_DIRECTORIES = ["Data", "References", "Theory", "Code", "Outline", "Tex"]
+FIXED_DIRECTORIES = ["Data", "References", "Theory", "Plots", "Outline", "Tex"]
 FILE_TREE_CONTENT_LEFT_INSET = 16
 _FILE_TEXT_ICON_GAP_ADJUST = 28
 _FILE_EDITOR_LEFT_ADJUST = -26
 _DIRECTORY_EDITOR_LEFT_ADJUST = 4
 _INDICATOR_PLACEHOLDER_ROLE = Qt.ItemDataRole.UserRole + 99
 _NON_DRAGGABLE_DIRS = {"Data/Processed"}
+# Coalesce bursty QFileSystemWatcher events (one save/compile fires many) into
+# a single tree refresh.
+DIR_CHANGE_DEBOUNCE_MS = 150
 
 
 # ================================================================== #
@@ -153,7 +166,7 @@ DIR_LABELS = {
     "Data": "Data",
     "References": "References",
     "Theory": "Theory",
-    "Code": "Code",
+    "Plots": "Plots",
     "Outline": "Outline",
     "Tex": "Tex",
     "Processed": "Processed",
@@ -444,11 +457,17 @@ class FileTreeWidget(QWidget):
         self._pending_hover_pos = QPoint()
         self._hovered_item: QTreeWidgetItem | None = None
         self._drop_target_item: QTreeWidgetItem | None = None
+        self._clipboard_paths: list[Path] = []
         self._root_selected = False
         self._state_save_timer = QTimer(self)
         self._state_save_timer.setSingleShot(True)
         self._state_save_timer.setInterval(200)
         self._state_save_timer.timeout.connect(self.save_state)
+        self._dir_change_timer = QTimer(self)
+        self._dir_change_timer.setSingleShot(True)
+        self._dir_change_timer.setInterval(DIR_CHANGE_DEBOUNCE_MS)
+        self._dir_change_timer.timeout.connect(self._flush_dir_changes)
+        self._pending_dir_changes: set[str] = set()
         self._setup_ui()
         self._init_directories()
         self._ensure_directory_indicators()
@@ -813,15 +832,57 @@ class FileTreeWidget(QWidget):
 
     def _setup_file_watcher(self) -> None:
         self._file_watcher = QFileSystemWatcher(self)
-        for dir_name in FIXED_DIRECTORIES:
-            dir_path = str(self.workspace / dir_name)
-            self._file_watcher.addPath(dir_path)
-        self._file_watcher.addPath(str(self.workspace / "Data" / "Processed"))
         self._file_watcher.directoryChanged.connect(self._on_directory_changed)
+        # QFileSystemWatcher does not recurse — watch every fixed top-level
+        # directory AND its current subdirectories. Newly created subdirs are
+        # added on the fly in _flush_dir_changes / _on_item_expanded, otherwise
+        # writes inside them would never trigger a refresh.
+        for dir_name in FIXED_DIRECTORIES:
+            top = self.workspace / dir_name
+            if top.is_dir():
+                self._watch_dir_recursive(top)
+
+    def _watch_dir_recursive(self, root_path: Path) -> None:
+        """Add root_path and all of its subdirectories to the file watcher."""
+        if not root_path.is_dir():
+            return
+        try:
+            existing = set(self._file_watcher.directories())
+        except Exception:
+            existing = set()
+        candidates = [str(root_path)]
+        try:
+            for entry in root_path.rglob("*"):
+                if entry.is_dir() and not entry.name.startswith("."):
+                    candidates.append(str(entry))
+        except (PermissionError, OSError) as e:
+            logger.warning("FileTree: cannot scan {}: {}", root_path, e)
+        for sp in candidates:
+            if sp not in existing:
+                self._file_watcher.addPath(sp)
 
     def _on_directory_changed(self, path: str) -> None:
-        path_obj = Path(path)
-        rel_path = self._workspace_rel(path_obj)
+        # A single save/compile burst can fire dozens of events. Debounce them
+        # into one refresh so we don't thrash the tree.
+        self._pending_dir_changes.add(path)
+        self._dir_change_timer.start()
+
+    def _flush_dir_changes(self) -> None:
+        paths = sorted(self._pending_dir_changes)
+        self._pending_dir_changes.clear()
+        if not paths:
+            return
+
+        # Pick up newly created subdirectories so their contents are watched
+        # going forward (the top-level event only fires once, on creation).
+        for raw in paths:
+            self._watch_dir_recursive(Path(raw))
+
+        pending_rel: str | None = None
+        if self._pending_new_item is not None:
+            pending_rel = self._pending_new_item.data(0, Qt.ItemDataRole.UserRole + 2)
+
+        # Snapshot selection once for the whole batch.
         selected_file = None
         selected_dir = None
         current_item = self.tree.currentItem()
@@ -829,24 +890,22 @@ class FileTreeWidget(QWidget):
             selected_file = current_item.data(0, Qt.ItemDataRole.UserRole + 1)
             if not selected_file:
                 selected_dir = current_item.data(0, Qt.ItemDataRole.UserRole)
-        if self._pending_new_item is not None:
-            pending_parent = self._pending_new_item.data(0, Qt.ItemDataRole.UserRole + 2)
-            if pending_parent == rel_path:
-                return
 
-        root = self.tree.invisibleRootItem()
-        for i in range(root.childCount()):
-            item = root.child(i)
-            item_dir = item.data(0, Qt.ItemDataRole.UserRole)
-            if item_dir == rel_path and item.isExpanded():
+        for raw in paths:
+            try:
+                rel_path = self._workspace_rel(Path(raw))
+            except ValueError:
+                continue
+            if pending_rel == rel_path:
+                continue
+            item = self._find_item_by_dir(rel_path)
+            if item is None:
+                continue
+            # Collapsed directories lazy-load from disk on expand, so only
+            # expanded items need an in-place refresh.
+            if item.isExpanded():
                 self._refresh_expanded_item_preserve_state(item)
-                break
-            for j in range(item.childCount()):
-                child = item.child(j)
-                child_dir = child.data(0, Qt.ItemDataRole.UserRole)
-                if child_dir == rel_path and child.isExpanded():
-                    self._refresh_expanded_item_preserve_state(child)
-                    break
+
         self._restore_selection(selected_file, selected_dir)
         self._ensure_directory_indicators()
         self.tree.viewport().update()
@@ -1052,7 +1111,7 @@ class FileTreeWidget(QWidget):
             old_path = Path(file_path_str)
             new_path = old_path.parent / new_name
             if old_path != new_path and new_path.exists():
-                QMessageBox.warning(self, "重命名失败", f"文件名 '{new_name}' 已存在")
+                self._show_warning("重命名失败", f"文件名 '{new_name}' 已存在")
                 self._revert_item_name(item)
                 self._set_editing_item(None)
                 return
@@ -1062,14 +1121,14 @@ class FileTreeWidget(QWidget):
                 self.path_changed.emit(old_path, new_path)
                 logger.info("Renamed file: {} -> {}", old_path, new_path)
             except Exception as e:
-                QMessageBox.warning(self, "重命名失败", f"无法重命名:\n{e}")
+                self._show_warning("重命名失败", f"无法重命名:\n{e}")
                 self._revert_item_name(item)
                 self._set_editing_item(None)
         elif dir_name:
             old_path = self.workspace / dir_name
             new_path = old_path.parent / new_name
             if old_path != new_path and new_path.exists():
-                QMessageBox.warning(self, "重命名失败", f"文件夹名 '{new_name}' 已存在")
+                self._show_warning("重命名失败", f"文件夹名 '{new_name}' 已存在")
                 self._revert_item_name(item)
                 self._set_editing_item(None)
                 return
@@ -1085,7 +1144,7 @@ class FileTreeWidget(QWidget):
                 self.path_changed.emit(old_path, new_path)
                 logger.info("Renamed directory: {} -> {}", old_path, new_path)
             except Exception as e:
-                QMessageBox.warning(self, "重命名失败", f"无法重命名:\n{e}")
+                self._show_warning("重命名失败", f"无法重命名:\n{e}")
                 self._revert_item_name(item)
                 self._set_editing_item(None)
 
@@ -1219,6 +1278,10 @@ class FileTreeWidget(QWidget):
                         self._mark_file_item(child)
                 if item.childCount() == 0:
                     self._ensure_indicator_placeholder(item)
+                # Keep the watcher in sync with directories the tree now knows
+                # about (covers subdirs created while this item was collapsed
+                # and not yet picked up by a change event).
+                self._watch_dir_recursive(dir_path)
 
         except PermissionError as e:
             logger.warning("Permission denied accessing {}: {}", dir_path, e)
@@ -1401,7 +1464,15 @@ class FileTreeWidget(QWidget):
         item = self._find_item_by_file(str(resolved))
         if item is None:
             return False
-        self.tree.setCurrentItem(item)
+        # Preserve an active multi-selection (Ctrl/Cmd-click). Setting the
+        # current item normally collapses the selection to just this file,
+        # which would wipe a user-driven multi-selection whenever the preview
+        # feeds a file-changed event back into the tree. When more than one
+        # item is already selected, only move the current item + scroll.
+        if len(self.tree.selectedItems()) > 1:
+            self.tree.setCurrentItem(item, 0, QItemSelectionModel.SelectionFlag.NoUpdate)
+        else:
+            self.tree.setCurrentItem(item)
         self.tree.scrollToItem(item)
         return True
 
@@ -1528,8 +1599,7 @@ class FileTreeWidget(QWidget):
                 logger.info("Moved {} to {}", source_path, target_path)
             except Exception as e:
                 logger.warning("Failed to move {} to {}: {}", source_path, target_dir, e)
-                QMessageBox.warning(
-                    self,
+                self._show_warning(
                     "移动失败",
                     f"无法移动 '{source_path.name}' 到 '{target_dir_name}':\n{e}"
                 )
@@ -1657,14 +1727,120 @@ class FileTreeWidget(QWidget):
         progress.close()
 
         if failed_files:
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.warning(
-                self,
+            self._show_warning(
                 "Copy Failed",
                 f"Failed to copy {len(failed_files)} file(s):\n" + "\n".join(failed_files[:5])
             )
         elif copied_count > 0:
             logger.info("Copied {} file(s) to {}", copied_count, target_dir)
+
+    def _path_for_item(self, item: QTreeWidgetItem | None) -> Path | None:
+        if item is None:
+            return None
+        file_path_str = item.data(0, Qt.ItemDataRole.UserRole + 1)
+        if file_path_str:
+            return Path(file_path_str)
+        dir_name = item.data(0, Qt.ItemDataRole.UserRole)
+        if dir_name:
+            return self.workspace / dir_name
+        return None
+
+    def _selected_existing_paths(self) -> list[Path]:
+        items = self.tree.selectedItems() or ([self.tree.currentItem()] if self.tree.currentItem() else [])
+        paths: list[Path] = []
+        seen: set[Path] = set()
+        for item in items:
+            path = self._path_for_item(item)
+            if path is None or not path.exists() or path in seen:
+                continue
+            seen.add(path)
+            paths.append(path)
+        return paths
+
+    def _clipboard_existing_paths(self) -> list[Path]:
+        paths = [path for path in self._clipboard_paths if path.exists()]
+        if paths:
+            return paths
+
+        text = QApplication.clipboard().text()
+        parsed: list[Path] = []
+        for line in text.splitlines():
+            value = line.strip()
+            if not value:
+                continue
+            path = Path(value)
+            if path.exists():
+                parsed.append(path)
+        return parsed
+
+    @staticmethod
+    def _unique_copy_target(source: Path, target_dir: Path) -> Path:
+        target = target_dir / source.name
+        if not target.exists():
+            return target
+        stem = source.stem
+        suffix = source.suffix
+        # "x.py" -> "x copy.py", then "x copy 2.py", "x copy 3.py", ...
+        candidate = target_dir / f"{stem} copy{suffix}"
+        if not candidate.exists():
+            return candidate
+        counter = 2
+        while True:
+            candidate = target_dir / f"{stem} copy {counter}{suffix}"
+            if not candidate.exists():
+                return candidate
+            counter += 1
+
+    def _copy_selected_items(self) -> bool:
+        paths = self._selected_existing_paths()
+        if not paths:
+            return False
+        self._clipboard_paths = paths
+        QApplication.clipboard().setText("\n".join(str(path) for path in paths))
+        return True
+
+    def _paste_clipboard_items(self, target_dir_name: str | None = None) -> bool:
+        paths = self._clipboard_existing_paths()
+        if not paths:
+            return False
+
+        if not target_dir_name:
+            target_dir_name = self._get_selected_dir()
+        target_dir = self.workspace / target_dir_name
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        changed = False
+        pasted_paths: list[Path] = []
+        for source in paths:
+            try:
+                source_resolved = source.resolve()
+                target_resolved = target_dir.resolve()
+                if source_resolved.is_dir():
+                    try:
+                        target_resolved.relative_to(source_resolved)
+                        continue
+                    except ValueError:
+                        pass
+                target = self._unique_copy_target(source_resolved, target_dir)
+                if source_resolved.is_dir():
+                    shutil.copytree(source_resolved, target)
+                else:
+                    shutil.copy2(source_resolved, target)
+                pasted_paths.append(target)
+                changed = True
+            except Exception as e:
+                logger.warning("Failed to paste {} into {}: {}", source, target_dir, e)
+
+        if not changed:
+            return False
+
+        self.refresh()
+        self._ensure_directory_path_loaded(target_dir)
+        self._ensure_directory_indicators()
+        self.tree.viewport().update()
+        if pasted_paths:
+            self._select_moved_path(pasted_paths[0])
+        return True
 
     # ------------------------------------------------------------------ #
     #  Context Menu
@@ -1676,9 +1852,17 @@ class FileTreeWidget(QWidget):
             return
         if len(self.tree.selectedItems()) > 1 and self.tree.selectionModel().isSelected(self.tree.indexFromItem(item, 0)):
             menu = create_isolated_context_menu(self)
+            copy_action = menu.addAction("复制")
+            paste_action = menu.addAction("粘贴")
+            paste_action.setEnabled(bool(self._clipboard_existing_paths()))
+            menu.addSeparator()
             delete_action = menu.addAction("删除选中项")
             action = menu.exec(self.tree.mapToGlobal(pos))
-            if action == delete_action:
+            if action == copy_action:
+                self._copy_selected_items()
+            elif action == paste_action:
+                self._paste_clipboard_items(self._resolve_target_dir(item))
+            elif action == delete_action:
                 self._delete_selected_items()
             return
 
@@ -1689,19 +1873,31 @@ class FileTreeWidget(QWidget):
 
         if file_path_str:
             file_path = Path(file_path_str)
+            copy_action = menu.addAction("复制")
+            paste_action = menu.addAction("粘贴")
+            paste_action.setEnabled(bool(self._clipboard_existing_paths()))
+            menu.addSeparator()
             rename_action = menu.addAction("重命名")
             delete_action = menu.addAction("删除")
 
             action = menu.exec(self.tree.mapToGlobal(pos))
-            if action == rename_action:
+            if action == copy_action:
+                self._copy_selected_items()
+            elif action == paste_action:
+                self._paste_clipboard_items(dir_name)
+            elif action == rename_action:
                 self._rename_file(file_path, item)
             elif action == delete_action:
                 self._delete_file(file_path, item)
         elif dir_name:
             new_file_action = menu.addAction("新建文件")
             new_folder_action = menu.addAction("新建文件夹")
+            copy_action = menu.addAction("复制")
+            paste_action = menu.addAction("粘贴")
+            paste_action.setEnabled(bool(self._clipboard_existing_paths()))
 
             if dir_name not in FIXED_DIRECTORIES:
+                menu.addSeparator()
                 rename_action = menu.addAction("重命名")
                 delete_action = menu.addAction("删除")
             else:
@@ -1714,6 +1910,10 @@ class FileTreeWidget(QWidget):
                 self._new_file_in_dir(dir_name)
             elif action == new_folder_action:
                 self._new_folder_in_dir(dir_name)
+            elif action == copy_action:
+                self._copy_selected_items()
+            elif action == paste_action:
+                self._paste_clipboard_items(dir_name)
             elif action == rename_action:
                 dir_path = self.workspace / dir_name
                 self._rename_directory(dir_path, item)
@@ -1775,7 +1975,7 @@ class FileTreeWidget(QWidget):
                     self._pending_new_item.setText(0, pending_text)
                 self._finalize_pending_new_item()
 
-        # Find the target directory item (could be nested like data/processed)
+        # Find the target directory item (could be nested like Data/Processed)
         target_item = None
 
         if "/" in dir_name:
@@ -1887,11 +2087,11 @@ class FileTreeWidget(QWidget):
                 logger.info("Created file: {}", new_file)
         except FileExistsError:
             kind = "文件夹" if is_folder else "文件"
-            QMessageBox.warning(self, "创建失败", f"{kind} '{new_name}' 已存在")
+            self._show_warning("创建失败", f"{kind} '{new_name}' 已存在")
             self._remove_item(item)
         except Exception as e:
             title = "无法创建文件夹" if is_folder else "无法创建文件"
-            QMessageBox.warning(self, "创建失败", f"{title}:\n{e}")
+            self._show_warning("创建失败", f"{title}:\n{e}")
             self._remove_item(item)
         finally:
             self._pending_new_item = None
@@ -1909,6 +2109,25 @@ class FileTreeWidget(QWidget):
         self._set_editing_item(item)
         self.tree.editItem(item, 0)
 
+    @staticmethod
+    def _is_copy_paste_modifier(mods: Qt.KeyboardModifier) -> bool:
+        """Accept either Ctrl (Win/Linux) or ⌘ Cmd (macOS), without Shift/Alt."""
+        has_mod = bool(mods & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier))
+        no_extra = not (mods & (Qt.KeyboardModifier.ShiftModifier | Qt.KeyboardModifier.AltModifier))
+        return has_mod and no_extra
+
+    def _is_copy_shortcut(self, event) -> bool:
+        # event.matches() alone misses ⌘C on macOS in this Qt build (it only
+        # recognises Ctrl+C there), so accept both modifiers explicitly.
+        if event.matches(QKeySequence.StandardKey.Copy):
+            return True
+        return event.key() == Qt.Key.Key_C and self._is_copy_paste_modifier(event.modifiers())
+
+    def _is_paste_shortcut(self, event) -> bool:
+        if event.matches(QKeySequence.StandardKey.Paste):
+            return True
+        return event.key() == Qt.Key.Key_V and self._is_copy_paste_modifier(event.modifiers())
+
     def _handle_tree_key(self, event) -> bool:
         if self.tree.state() == QAbstractItemView.State.EditingState:
             return False
@@ -1916,6 +2135,17 @@ class FileTreeWidget(QWidget):
         key = event.key()
         mods = event.modifiers()
         current = self.tree.currentItem()
+
+        if event.matches(QKeySequence.StandardKey.Copy) or (
+            key == Qt.Key.Key_C and self._is_copy_paste_modifier(mods)
+        ):
+            return self._copy_selected_items()
+
+        if event.matches(QKeySequence.StandardKey.Paste) or (
+            key == Qt.Key.Key_V and self._is_copy_paste_modifier(mods)
+        ):
+            return self._paste_clipboard_items()
+
         if current is None:
             return False
 
@@ -1942,71 +2172,18 @@ class FileTreeWidget(QWidget):
         if dir_name and dir_name not in FIXED_DIRECTORIES:
             self._rename_directory(self.workspace / dir_name, item)
 
-    def _styled_message_box(
-        self,
-        icon: QMessageBox.Icon,
-        title: str,
-        text: str,
-        buttons: QMessageBox.StandardButton,
-    ) -> QMessageBox:
-        c = get_theme_colors()
-        box = QMessageBox(self)
-        if hasattr(QMessageBox, "Option"):
-            box.setOption(QMessageBox.Option.DontUseNativeDialog, True)
-        box.setIcon(icon)
-        box.setWindowTitle(title)
-        box.setText(text)
-        box.setStandardButtons(buttons)
-        box.setStyleSheet(f"""
-            QMessageBox {{
-                background-color: {c["bg"]};
-                color: {c["fg"]};
-            }}
-            QMessageBox QLabel {{
-                color: {c["fg"]};
-            }}
-            QMessageBox QPushButton {{
-                background-color: {c["surface"]};
-                color: {c["fg"]};
-                border: 1px solid {c["border"]};
-                border-radius: {c["radius_sm"]};
-                min-width: 72px;
-                min-height: 28px;
-                padding: 2px 10px;
-            }}
-            QMessageBox QPushButton:hover {{
-                background-color: {c["hover"]};
-            }}
-        """)
-        return box
-
     def _ask_confirmation(self, title: str, text: str) -> QMessageBox.StandardButton:
-        box = self._styled_message_box(
-            QMessageBox.Icon.Warning,
+        return question_box(
+            self,
             title,
             text,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            default=QMessageBox.StandardButton.No,
+            affirmative=QMessageBox.StandardButton.Yes,
         )
-        box.setDefaultButton(QMessageBox.StandardButton.No)
-        yes_button = box.button(QMessageBox.StandardButton.Yes)
-        no_button = box.button(QMessageBox.StandardButton.No)
-        if yes_button is not None:
-            yes_button.setText("删除")
-        if no_button is not None:
-            no_button.setText("取消")
-        return QMessageBox.StandardButton(box.exec())
 
     def _show_warning(self, title: str, text: str) -> None:
-        box = self._styled_message_box(
-            QMessageBox.Icon.Warning,
-            title,
-            text,
-            QMessageBox.StandardButton.Ok,
-        )
-        ok_button = box.button(QMessageBox.StandardButton.Ok)
-        if ok_button is not None:
-            ok_button.setText("确定")
-        box.exec()
+        warning_box(self, title, text)
 
     def _collect_deletable_selected_items(self) -> list[tuple[str, Path, QTreeWidgetItem]]:
         entries: list[tuple[str, Path, QTreeWidgetItem]] = []

@@ -7,9 +7,8 @@ from pathlib import Path
 import pytest
 
 from autoreport.core.tools.file_tools import (
-    EditFileTool,
+    ApplyPatchTool,
     ReadTool,
-    WriteFileTool,
 )
 
 
@@ -47,93 +46,125 @@ async def test_read_file_pdf_rejected(temp_workspace):
 
 
 @pytest.mark.asyncio
-async def test_write_file(temp_workspace):
-    """Test writing a file."""
+async def test_apply_patch_creates_new_file(temp_workspace):
+    """A pure-addition patch creates a new file."""
     write_dir = temp_workspace / "output"
     write_dir.mkdir()
 
-    tool = WriteFileTool(
+    tool = ApplyPatchTool(
         workspace=temp_workspace,
         write_allowed_dir=write_dir,
     )
 
     result = await tool(
         path="output/test.txt",
-        content="Test content",
-        create_backup=False,
+        patch="+Hello\n+World\n",
     )
 
-    assert result["success"] is True
-    assert (write_dir / "test.txt").exists()
-    assert (write_dir / "test.txt").read_text(encoding="utf-8") == "Test content"
+    assert result["created"] is True
+    assert result["replacements_applied"] == 1
+    assert (write_dir / "test.txt").read_text(encoding="utf-8") == "Hello\nWorld\n"
 
 
 @pytest.mark.asyncio
-async def test_write_file_permission_denied(temp_workspace):
-    """Test that write permission is enforced."""
+async def test_apply_patch_permission_denied(temp_workspace):
+    """Write permission is enforced."""
     write_dir = temp_workspace / "output"
     write_dir.mkdir()
-
-    # Create another directory that's not allowed
     other_dir = temp_workspace / "other"
     other_dir.mkdir()
 
-    tool = WriteFileTool(
+    tool = ApplyPatchTool(
         workspace=temp_workspace,
         write_allowed_dir=write_dir,
     )
 
-    # Try to write in workspace but outside allowed directory
     with pytest.raises(PermissionError):
-        await tool(
-            path="other/unauthorized.txt",
-            content="Should fail",
-        )
+        await tool(path="other/unauthorized.txt", patch="+x\n")
 
 
 @pytest.mark.asyncio
-async def test_write_file_path_traversal_blocked(temp_workspace):
-    """Test that path traversal is blocked."""
+async def test_apply_patch_path_traversal_blocked(temp_workspace):
+    """Path traversal is blocked."""
     write_dir = temp_workspace / "output"
     write_dir.mkdir()
 
-    tool = WriteFileTool(
+    tool = ApplyPatchTool(
         workspace=temp_workspace,
         write_allowed_dir=write_dir,
     )
 
-    # Try to use path traversal
     with pytest.raises(ValueError, match="Path traversal"):
-        await tool(
-            path="../unauthorized.txt",
-            content="Should fail",
-        )
+        await tool(path="../unauthorized.txt", patch="+x\n")
 
 
 @pytest.mark.asyncio
-async def test_edit_file(temp_workspace):
-    """Test editing a file."""
+async def test_apply_patch_edits_existing_file(temp_workspace):
+    """A removal/addition patch edits an existing file in place."""
     write_dir = temp_workspace / "output"
     write_dir.mkdir()
-
-    # Create initial file
     test_file = write_dir / "test.txt"
-    test_file.write_text("Hello World", encoding="utf-8")
+    test_file.write_text("Hello World\n", encoding="utf-8")
 
-    tool = EditFileTool(
+    tool = ApplyPatchTool(
         workspace=temp_workspace,
         write_allowed_dir=write_dir,
     )
 
     result = await tool(
         path="output/test.txt",
-        old_text="World",
-        new_text="Universe",
+        patch="-Hello World\n+Hello Universe\n",
     )
 
     assert Path(result["path"]) == test_file.resolve()
-    assert result["replacements_made"] == 1
-    assert test_file.read_text(encoding="utf-8") == "Hello Universe"
+    assert result["replacements_applied"] == 1
+    assert result["created"] is False
+    assert test_file.read_text(encoding="utf-8") == "Hello Universe\n"
+    # Existing file was backed up before the change.
+    assert result.get("backup_path")
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_anchor_disambiguates(temp_workspace):
+    """@@ anchor picks the second of two identical lines."""
+    write_dir = temp_workspace / "output"
+    write_dir.mkdir()
+    test_file = write_dir / "test.txt"
+    test_file.write_text("def f():\n    return 0\n\ndef g():\n    return 0\n", encoding="utf-8")
+
+    tool = ApplyPatchTool(
+        workspace=temp_workspace,
+        write_allowed_dir=write_dir,
+    )
+
+    result = await tool(
+        path="output/test.txt",
+        patch="@@ def g():\n-    return 0\n+    return 1\n",
+    )
+
+    assert result["replacements_applied"] == 1
+    content = test_file.read_text(encoding="utf-8")
+    assert "def f():\n    return 0" in content  # first untouched
+    assert "def g():\n    return 1" in content
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_not_found_writes_nothing(temp_workspace):
+    """On a failed match the file is left unchanged and an error returned."""
+    write_dir = temp_workspace / "output"
+    write_dir.mkdir()
+    test_file = write_dir / "test.txt"
+    test_file.write_text("alpha\n", encoding="utf-8")
+
+    tool = ApplyPatchTool(
+        workspace=temp_workspace,
+        write_allowed_dir=write_dir,
+    )
+
+    result = await tool(path="output/test.txt", patch="-zzz\n+QQQ\n")
+
+    assert "error" in result
+    assert test_file.read_text(encoding="utf-8") == "alpha\n"
 
 
 @pytest.mark.asyncio

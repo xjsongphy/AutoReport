@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-_CANONICAL_TOP_DIRS = ("Data", "References", "Theory", "Code", "Tex")
+_CANONICAL_TOP_DIRS = ("Data", "References", "Theory", "Plots", "Tex")
 _INTERNAL_METADATA_DIRS = (".autoreport", ".checkpoints")
 
 
@@ -48,7 +48,7 @@ def is_internal_metadata_rel(rel_posix: str) -> bool:
     """Check if relative POSIX path is in internal metadata directories.
 
     Args:
-        rel_posix: Relative path as POSIX string (e.g., ".autoreport/file" or "data/test.csv").
+        rel_posix: Relative path as POSIX string (e.g., ".autoreport/file" or "Data/test.csv").
 
     Returns:
         True if path is within .autoreport or .checkpoints, False otherwise.

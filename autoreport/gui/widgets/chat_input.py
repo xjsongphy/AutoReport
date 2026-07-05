@@ -3,9 +3,7 @@
 from pathlib import Path
 from typing import override
 
-from math import ceil
-
-from PyQt6.QtCore import QMimeData, QPoint, QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import QMimeData, QPoint, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QInputMethodEvent, QKeyEvent, QTextCursor
 from PyQt6.QtWidgets import QPlainTextEdit
 
@@ -77,6 +75,7 @@ class ChatInput(QPlainTextEdit):
         layout = self.document().documentLayout()
         if layout is not None:
             layout.documentSizeChanged.connect(lambda _size: self._schedule_sync())
+        self.cursorPositionChanged.connect(self._check_current_token)
         self._sync_after_text_change()
 
     def resizeEvent(self, event) -> None:  # noqa: N802
@@ -116,23 +115,45 @@ class ChatInput(QPlainTextEdit):
     def _update_height(self) -> None:
         metrics = self.fontMetrics()
         line_h = metrics.lineSpacing()
-        frame = self.frameWidth() * 2
-        doc_margin = int(self.document().documentMargin() * 2)
-        pad_v = 12  # matches vertical padding in stylesheet (6 top + 6 bottom)
-        layout = self.document().documentLayout()
-        doc_height = layout.documentSize().height() if layout is not None else 0.0
-        wrapped_lines = ceil(max(0.0, doc_height) / max(1, line_h))
-        explicit_lines = self.document().blockCount()
-        logical_lines = max(self._MIN_LINES, explicit_lines, wrapped_lines)
-        visible_lines = min(self._MAX_LINES, logical_lines)
-        target = (visible_lines * line_h) + frame + doc_margin + pad_v
+        # Vertical chrome around the text: stylesheet padding (contents margins)
+        # + the plain-text frame + the document margin. All derived from the
+        # widget itself, so no hardcoded magic numbers to drift out of sync.
+        cm = self.contentsMargins()
+        overhead = (
+            cm.top() + cm.bottom()
+            + self.frameWidth() * 2
+            + int(self.document().documentMargin() * 2)
+        )
+
+        content_h = self._content_pixel_height()
+        max_content_h = self._MAX_LINES * line_h
+        visible_h = min(content_h, max_content_h)
+        target = int(round(visible_h)) + overhead
         self.setFixedHeight(target)
-        max_visible_doc_h = (self._MAX_LINES * line_h) + doc_margin
-        content_doc_h = max(0.0, doc_height)
-        needs_scroll = logical_lines > self._MAX_LINES or (content_doc_h > (max_visible_doc_h + 0.5))
+
+        # Show the vertical scrollbar only when content truly overflows the
+        # capped height. A half-line hysteresis avoids flicker at the boundary.
+        needs_scroll = content_h > max_content_h + (line_h * 0.5)
         self.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOn if needs_scroll else Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
+
+    def _content_pixel_height(self) -> float:
+        """Total pixel height of all (wrapped) content.
+
+        ``QPlainTextDocumentLayout.documentSize().height()`` does NOT return
+        pixels, so wrapping was never counted (long pasted lines failed to grow
+        the box). ``blockBoundingRect`` forces each block to lay out and returns
+        its true wrapped height, so this works for both explicit newlines and
+        word-wrap. Always at least one line.
+        """
+        line_h = max(1, self.fontMetrics().lineSpacing())
+        total = 0.0
+        block = self.document().firstBlock()
+        while block.isValid():
+            total += self.blockBoundingRect(block).height()
+            block = block.next()
+        return max(line_h, total)
 
     @override
     def keyPressEvent(self, event: QKeyEvent) -> None:
@@ -145,6 +166,9 @@ class ChatInput(QPlainTextEdit):
             if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
                 direction = "up" if key == Qt.Key.Key_Up else "down"
                 self.popup_navigate.emit(direction)
+                return
+            if key == Qt.Key.Key_Tab:
+                self.popup_navigate.emit("select")
                 return
             if key in (Qt.Key.Key_Enter, Qt.Key.Key_Return):
                 self.popup_navigate.emit("select")
@@ -173,7 +197,12 @@ class ChatInput(QPlainTextEdit):
 
         super().keyPressEvent(event)
 
-        if event.text():
+        if event.text() or key in (
+            Qt.Key.Key_Left,
+            Qt.Key.Key_Right,
+            Qt.Key.Key_Home,
+            Qt.Key.Key_End,
+        ):
             self._check_current_token()
 
     def insertFromMimeData(self, source: QMimeData | None) -> None:  # noqa: N802
@@ -252,13 +281,6 @@ class ChatInput(QPlainTextEdit):
         return "", -1, -1
 
     def insert_file_reference(self, file_path: Path) -> None:
-        text = self.toPlainText()
-        kind = getattr(self, "_popup_kind", "@")
-        at_idx = text.rfind(kind)
-        if at_idx < 0:
-            self._on_popup_closed()
-            return
-
         try:
             rel_path = file_path.relative_to(Path.cwd())
         except ValueError:
@@ -267,41 +289,44 @@ class ChatInput(QPlainTextEdit):
         filename = file_path.name
         link = f"[@{filename}](project://{rel_path})"
 
-        end = at_idx + 1
-        while end < len(text) and text[end] not in " \t\n\r":
-            end += 1
-
-        doc_len = self.document().characterCount()
-        cursor = self.textCursor()
-        cursor.setPosition(at_idx, QTextCursor.MoveMode.MoveAnchor)
-        cursor.setPosition(min(end, doc_len - 1), QTextCursor.MoveMode.KeepAnchor)
-        cursor.insertText(link)
-        self.setTextCursor(cursor)
+        if not self._replace_current_prefixed_token(link):
+            self._on_popup_closed()
+            return
         self._on_popup_closed()
 
     def insert_agent_reference(self, name: str) -> None:
-        text = self.toPlainText()
-        kind = getattr(self, "_popup_kind", "@")
-        at_idx = text.rfind(kind)
-        if at_idx < 0:
+        mention = f"@{name} "
+        if not self._replace_current_prefixed_token(mention):
             self._on_popup_closed()
             return
-
-        mention = f"@{name} "
-        end = at_idx + 1
-        while end < len(text) and text[end] not in " \t\n\r":
-            end += 1
-
-        doc_len = self.document().characterCount()
-        cursor = self.textCursor()
-        cursor.setPosition(at_idx, QTextCursor.MoveMode.MoveAnchor)
-        cursor.setPosition(min(end, doc_len - 1), QTextCursor.MoveMode.KeepAnchor)
-        cursor.insertText(mention)
-        self.setTextCursor(cursor)
         self._on_popup_closed()
+
+    def insert_command(self, command: str) -> None:
+        replacement = f"{str(command or '').strip()} "
+        if not self._replace_current_prefixed_token(replacement):
+            self._on_popup_closed()
+            return
+        self._on_popup_closed()
+
+    def _replace_current_prefixed_token(self, replacement: str) -> bool:
+        token, start, end = self.current_prefixed_token()
+        if not token or start < 0 or end < 0:
+            return False
+
+        text = self.toPlainText()
+        if replacement.endswith(" ") and end < len(text) and text[end] in " \t\n\r":
+            replacement = replacement.rstrip(" ")
+
+        cursor = self.textCursor()
+        cursor.setPosition(start, QTextCursor.MoveMode.MoveAnchor)
+        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+        cursor.insertText(replacement)
+        self.setTextCursor(cursor)
+        return True
 
     def _on_popup_closed(self) -> None:
         self._popup_active = False
+        self._popup_kind = ""
 
     def set_popup_active(self, active: bool) -> None:
         self._popup_active = active

@@ -18,13 +18,13 @@ def workspace():
 
 
 def test_resolve_relative_path(workspace):
-    resolved = resolve_and_validate_path("data/test.csv", workspace)
-    assert resolved == (workspace / "data" / "test.csv").resolve()
+    resolved = resolve_and_validate_path("Data/test.csv", workspace)
+    assert resolved == (workspace / "Data" / "test.csv").resolve()
 
 
 def test_resolve_nested_relative_path(workspace):
-    resolved = resolve_and_validate_path("data/processed/result.json", workspace)
-    assert resolved == (workspace / "data" / "processed" / "result.json").resolve()
+    resolved = resolve_and_validate_path("Data/Processed/result.json", workspace)
+    assert resolved == (workspace / "Data" / "Processed" / "result.json").resolve()
 
 
 def test_reject_absolute_path():
@@ -42,7 +42,7 @@ def test_reject_path_traversal(workspace):
 
 def test_reject_deep_path_traversal(workspace):
     with pytest.raises(ValueError, match="Path traversal"):
-        resolve_and_validate_path("data/../../etc/passwd", workspace)
+        resolve_and_validate_path("Data/../../etc/passwd", workspace)
 
 
 def test_resolve_dot_path(workspace):
@@ -51,5 +51,5 @@ def test_resolve_dot_path(workspace):
 
 
 def test_resolve_path_with_spaces(workspace):
-    resolved = resolve_and_validate_path("data/my file.csv", workspace)
-    assert resolved == (workspace / "data" / "my file.csv").resolve()
+    resolved = resolve_and_validate_path("Data/my file.csv", workspace)
+    assert resolved == (workspace / "Data" / "my file.csv").resolve()

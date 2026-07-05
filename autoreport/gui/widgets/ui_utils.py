@@ -188,6 +188,12 @@ def install_compact_tooltip(button: QPushButton, text: str) -> None:
     """Attach the shared compact tooltip to a button."""
     button.setToolTip("")
     button.setMouseTracking(True)
+    existing = getattr(button, "_compact_tooltip_filter", None)
+    if isinstance(existing, CompactTooltipFilter):
+        existing._text = text
+        existing._timer.stop()
+        existing._hide()
+        return
     tooltip_filter = CompactTooltipFilter(text, button)
     button.installEventFilter(tooltip_filter)
     button._compact_tooltip_filter = tooltip_filter  # keep QObject alive
@@ -424,24 +430,72 @@ class TextButton(QPushButton):
             self.setObjectName(object_name)
         if tooltip:
             install_compact_tooltip(self, tooltip)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         c = get_theme_colors()
-        _color = color or c["fg"]
-        _hover_bg = hover_bg or c["hover"]
-        self.setStyleSheet(
-            outlined_button_qss(
-                "",
-                fg=_color,
-                border=_color,
-                hover_bg=_hover_bg,
-                padding="4px 12px",
-                font_size=12,
-                radius=c["radius_sm"],
-            )
+        apply_text_button_style(
+            self,
+            color=color or c["fg"],
+            hover_bg=hover_bg or c["hover"],
         )
         if on_click is not None:
             self.clicked.connect(on_click)
+
+
+def text_button_qss(
+    selector: str = "",
+    *,
+    color: str = "",
+    hover_bg: str = "",
+    hover_color: str | None = None,
+    border: str | None = None,
+    hover_border: str | None = None,
+    padding: str = "4px 12px",
+    font_size: int = 12,
+    radius: str | None = None,
+) -> str:
+    """Build the shared outlined text-button style used by ``TextButton``."""
+    c = get_theme_colors()
+    effective_color = color or c["fg"]
+    return outlined_button_qss(
+        selector,
+        fg=effective_color,
+        border=border or effective_color,
+        hover_bg=hover_bg or c["hover"],
+        hover_fg=hover_color or effective_color,
+        hover_border=hover_border or border or effective_color,
+        padding=padding,
+        font_size=font_size,
+        radius=radius or c["radius_sm"],
+    )
+
+
+def apply_text_button_style(
+    button: QPushButton,
+    *,
+    color: str = "",
+    hover_bg: str = "",
+    hover_color: str | None = None,
+    border: str | None = None,
+    hover_border: str | None = None,
+    padding: str = "4px 12px",
+    font_size: int = 12,
+    radius: str | None = None,
+) -> None:
+    """Apply the shared ``TextButton`` styling to an existing QPushButton."""
+    button.setCursor(Qt.CursorShape.PointingHandCursor)
+    button.setStyleSheet(
+        text_button_qss(
+            "",
+            color=color,
+            hover_bg=hover_bg,
+            hover_color=hover_color,
+            border=border,
+            hover_border=hover_border,
+            padding=padding,
+            font_size=font_size,
+            radius=radius,
+        )
+    )
 
 
 def combo_box_qss(

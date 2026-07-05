@@ -73,6 +73,20 @@ class TestPopulate:
         row = dropdown._rows[0]
         assert row._session_id == "s1"
 
+    def test_populate_keeps_preview_row_even_when_preview_matches_name(self, dropdown: ConversationHistoryDropdown):
+        dropdown.populate([
+            {
+                "id": "s1",
+                "name": "hi",
+                "timestamp": "2026-07-01T12:43:00",
+                "preview": "hi",
+            }
+        ])
+
+        row = dropdown._rows[0]
+        assert row._preview_label is not None
+        assert row._preview_text == "hi"
+
 
 class TestSignals:
     """Signal emission."""

@@ -12,7 +12,7 @@ from .types import (
     MessageType,
     RestartRequest,
     StatusChange,
-    ToolCall,
+    ToolCallMessage,
     ToolResult,
     UserMessage,
 )
@@ -24,7 +24,7 @@ __all__ = [
     "Message",
     "UserMessage",
     "AgentResponse",
-    "ToolCall",
+    "ToolCallMessage",
     "ToolResult",
     "StatusChange",
     "ConfigChange",

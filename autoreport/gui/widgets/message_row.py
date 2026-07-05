@@ -85,6 +85,96 @@ class _SummaryHeader(QWidget):
             self.clicked.emit()
 
 
+class _DisclosureHeaderBar(QWidget):
+    """Shared collapsible-row header: clickable host laying out ``[text][arrow][stretch]``.
+
+    Used by both the think row (MessageRow) and tool-call groups so their
+    disclosure arrows sit immediately to the right of the text — not pushed to
+    the far edge — and align to the first text line. Callers keep working
+    against the same label/arrow/arrow-host objects they already style, via the
+    accessors below.
+    """
+
+    clicked = pyqtSignal()
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        text_format: Qt.TextFormat = Qt.TextFormat.PlainText,
+        contents_margins: tuple[int, int, int, int] = (0, 0, 0, 0),
+        spacing: int = 4,
+    ) -> None:
+        super().__init__(parent)
+        self._layout = QHBoxLayout(self)
+        self._layout.setContentsMargins(*contents_margins)
+        self._layout.setSpacing(spacing)
+
+        self._text_label = QLabel(self)
+        self._text_label.setObjectName("toolCallHeaderText")
+        self._text_label.setTextFormat(text_format)
+        self._text_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        # Single-line (no wrap) + Preferred so the label takes its natural width
+        # and the arrow follows the text; a trailing stretch pins the pair left.
+        # Long summaries clip the same way the think row already does; full
+        # content lives in the expanded body.
+        self._text_label.setWordWrap(False)
+        self._text_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+
+        self._arrow = _DisclosureArrow(False, self)
+        self._arrow_host = QWidget(self)
+        self._arrow_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+        ahl = QVBoxLayout(self._arrow_host)
+        ahl.setContentsMargins(0, 0, 0, 0)
+        ahl.setSpacing(0)
+        ahl.addWidget(self._arrow, 0, Qt.AlignmentFlag.AlignTop)
+
+        self._layout.addWidget(self._text_label, 0, Qt.AlignmentFlag.AlignTop)
+        self._layout.addWidget(self._arrow_host, 0, Qt.AlignmentFlag.AlignTop)
+        self._layout.addStretch(1)
+
+    def set_text(self, text: str) -> None:
+        self._text_label.setText(text or "")
+
+    def set_text_format(self, fmt: Qt.TextFormat) -> None:
+        self._text_label.setTextFormat(fmt)
+
+    def set_arrow_visible(self, visible: bool) -> None:
+        self._arrow.setVisible(visible)
+
+    def set_expanded(self, expanded: bool) -> None:
+        self._arrow.set_expanded(expanded)
+        self.align_arrow_to_first_line()
+
+    def text_label(self) -> QLabel:
+        return self._text_label
+
+    def arrow(self) -> _DisclosureArrow:
+        return self._arrow
+
+    def arrow_host(self) -> QWidget:
+        return self._arrow_host
+
+    def add(self, widget: QWidget, stretch: int = 0) -> None:
+        """Insert a widget before the trailing stretch (kept inline, left of it)."""
+        self._layout.insertWidget(self._layout.count() - 1, widget, stretch, Qt.AlignmentFlag.AlignTop)
+
+    def align_arrow_to_first_line(self) -> None:
+        """Center the arrow on the text's first line."""
+        line_height = max(1, self._text_label.fontMetrics().height())
+        arrow_height = max(1, self._arrow.height())
+        top_offset = max(0, (line_height - arrow_height) // 2)
+        self._arrow_host.layout().setContentsMargins(0, top_offset, 0, 0)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        super().mousePressEvent(event)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+
+    def click(self) -> None:
+        self.clicked.emit()
+
+
 class _ElidedLabel(QLabel):
     """Single-line label that preserves full text while displaying an elided copy."""
 
@@ -276,6 +366,32 @@ def _expand_inline_markdown_selection(raw_markdown: str, start: int, end: int) -
     return start, end
 
 
+_BLOCK_PREFIX_RE = re.compile(
+    r"[ \t]*(?:>{1,}\s*|#{1,6}\s+|[-*+]\s+|\d+[.)]\s+)"
+)
+
+
+def _expand_block_marker(raw: str, start: int, end: int) -> tuple[int, int]:
+    """Grow a raw range to include the leading block marker of its first line.
+
+    Rendered markdown drops line prefixes (``- ``, ``## ``, ``> ``, ``1. ``),
+    so a selection that starts at a line's content beginning maps to a raw
+    position just *after* the prefix \u2014 copying it would lose the prefix and
+    yield non-markdown text.  When the selection begins exactly at that
+    content start, pull ``start`` back over the prefix so the copied range is
+    valid markdown.
+    """
+    line_start = raw.rfind("\n", 0, start) + 1  # 0 when no preceding newline
+    m = _BLOCK_PREFIX_RE.match(raw, line_start)
+    if m and start <= m.end():
+        start = line_start
+    # Preserve the trailing newline when the selection ends at a line boundary,
+    # so multi-line copies keep their line breaks.
+    if end < len(raw) and raw[end] == "\n":
+        end += 1
+    return start, end
+
+
 def _raw_markdown_for_selected_text(raw_markdown: str, selected_text: str) -> str:
     selected = selected_text.replace("\u2029", "\n").replace("\u2028", "\n")
     if not selected:
@@ -292,6 +408,7 @@ def _raw_markdown_for_selected_text(raw_markdown: str, selected_text: str) -> st
     start_raw = raw_positions[start_plain]
     end_raw = raw_positions[end_plain - 1] + 1
     start_raw, end_raw = _expand_inline_markdown_selection(raw_markdown, start_raw, end_raw)
+    start_raw, end_raw = _expand_block_marker(raw_markdown, start_raw, end_raw)
     return raw_markdown[start_raw:end_raw]
 
 
@@ -664,6 +781,9 @@ class MessageRow(QWidget):
     # Signal emitted when user requests rollback to the checkpoint before this row.
     rollback_requested = pyqtSignal(str, object)
 
+    # Signal emitted when a collapsible row is expanded/collapsed.
+    expanded_changed = pyqtSignal()
+
     def __init__(
         self,
         role: str,
@@ -679,6 +799,7 @@ class MessageRow(QWidget):
         agent_name: str = "Agent",
         agent_chain_prev: bool = False,
         agent_chain_next: bool = False,
+        message_id: str | None = None,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
@@ -714,6 +835,7 @@ class MessageRow(QWidget):
         self._raw_markdown_labels: dict[QLabel, str] = {}
         self._agent_chain_prev = agent_chain_prev
         self._agent_chain_next = agent_chain_next
+        self._message_id = message_id
         self._timeline_rail: TimelineRail | None = None
         self._bubble_header: QWidget | None = None
         self._bubble_arrow_widget: _DisclosureArrow | None = None
@@ -760,11 +882,6 @@ class MessageRow(QWidget):
         self._outer_layout = QVBoxLayout(outer)
         self._outer_layout.setContentsMargins(16, 0, 16, 0)
         self._outer_layout.setSpacing(0)
-
-        if self._is_coordination:
-            coord = QLabel("[Main Agent → Sub Agent]")
-            coord.setObjectName("msgCoordination")
-            self._outer_layout.addWidget(coord)
 
         if self._uses_bubble_layout() and self._bubble_align == "right":
             self._outer_layout.setContentsMargins(16, 6, 16, 6)
@@ -849,8 +966,9 @@ class MessageRow(QWidget):
                 rl.addWidget(self._timeline_rail, 0, Qt.AlignmentFlag.AlignLeft)
 
             self._agent_content_layout = QVBoxLayout()
+            left_gutter = TIMELINE_TEXT_LEFT_GUTTER if self._uses_timeline() else 0
             self._agent_content_layout.setContentsMargins(
-                0,
+                left_gutter,
                 0,
                 0,
                 _timeline_bottom_padding(self),
@@ -1038,40 +1156,20 @@ class MessageRow(QWidget):
         return bool(self._content)
 
     def _build_summary_widget(self) -> QWidget:
-        widget = _SummaryHeader(self)
+        widget = _DisclosureHeaderBar(
+            self,
+            text_format=Qt.TextFormat.PlainText,
+            contents_margins=(0, 2, 0, 6),
+            spacing=4,
+        )
         widget.setMinimumHeight(TIMELINE_EVENT_ROW_HEIGHT)
-        layout = QHBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        self._summary_header = widget
         widget.setObjectName("toolCallHeader")
-
-        # Content host with same margins as regular agent message labels (0,2,0,6)
-        content_host = QWidget(widget)
-        content_host_layout = QHBoxLayout(content_host)
-        content_host_layout.setContentsMargins(0, 2, 0, 6)
-        content_host_layout.setSpacing(4)
-
-        self._summary_arrow_widget = _DisclosureArrow(self._expanded, content_host)
-        self._summary_arrow_widget.setVisible(self._bubble_collapsible and self._has_detail())
-        self._summary_arrow_host = QWidget(content_host)
-        self._summary_arrow_host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
-        ahl = QVBoxLayout(self._summary_arrow_host)
-        ahl.setContentsMargins(0, 0, 0, 0)
-        ahl.setSpacing(0)
-        ahl.addWidget(self._summary_arrow_widget, 0, Qt.AlignmentFlag.AlignTop)
-
-        self._summary_text_label = QLabel(self._bubble_title or "", content_host)
-        self._summary_text_label.setObjectName("toolCallHeaderText")
-        self._summary_text_label.setTextFormat(Qt.TextFormat.PlainText)
-        self._summary_text_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        self._summary_text_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
-
-        content_host_layout.addWidget(self._summary_text_label, 0, Qt.AlignmentFlag.AlignTop)
-        content_host_layout.addWidget(self._summary_arrow_host, 0, Qt.AlignmentFlag.AlignTop)
-        content_host_layout.addStretch(1)
-
-        layout.addWidget(content_host, 1, Qt.AlignmentFlag.AlignTop)
+        self._summary_header = widget
+        self._summary_text_label = widget.text_label()
+        self._summary_arrow_widget = widget.arrow()
+        self._summary_arrow_host = widget.arrow_host()
+        widget.set_text(self._bubble_title or "")
+        widget.set_arrow_visible(self._bubble_collapsible and self._has_detail())
         self._sync_summary_arrow_alignment()
         self._sync_timeline_dot_alignment()
         widget.setCursor(
@@ -1086,7 +1184,7 @@ class MessageRow(QWidget):
     def _build_detail_widget(self) -> QWidget:
         widget = QWidget(self)
         layout = QVBoxLayout(widget)
-        layout.setContentsMargins(TIMELINE_TEXT_LEFT_GUTTER, 2, 0, 0)
+        layout.setContentsMargins(0, 2, 0, 0)
         layout.setSpacing(0)
         label = self._build_agent_markdown_label(self._content or "")
         self._detail_label = label
@@ -1100,6 +1198,7 @@ class MessageRow(QWidget):
         if self._detail_widget is not None:
             self._detail_widget.setVisible(self._expanded)
         self._refresh_summary_header()
+        self.expanded_changed.emit()
 
     def set_summary_text(self, summary: str) -> None:
         self._bubble_title = summary
@@ -1187,6 +1286,7 @@ class MessageRow(QWidget):
         if self._body_content_widget is not None:
             self._body_content_widget.set_expanded(self._expanded)
         self._refresh_bubble_header()
+        self.expanded_changed.emit()
 
     def set_bubble_title(self, title: str | None) -> None:
         if self._display_mode == "thought":
@@ -1519,6 +1619,9 @@ class MessageRow(QWidget):
     def set_checkpoint_id(self, checkpoint_id: str | None) -> None:
         self._checkpoint_id = checkpoint_id
 
+    def set_message_id(self, message_id: str | None) -> None:
+        self._message_id = message_id
+
     def contextMenuEvent(self, event) -> None:
         """Show VS Code-like context menu for message actions."""
         menu = create_isolated_context_menu(self)
@@ -1530,7 +1633,7 @@ class MessageRow(QWidget):
             edit_action = menu.addAction("编辑并重发")
             edit_action.triggered.connect(self._request_edit)
 
-        if self._is_outbound_message() and self._checkpoint_id:
+        if self._checkpoint_id:
             rollback_action = menu.addAction("回滚到此消息之前")
             rollback_action.triggered.connect(
                 lambda _=False, cp_id=self._checkpoint_id: self.rollback_requested.emit(cp_id, self)
@@ -1593,8 +1696,15 @@ class MessageRow(QWidget):
                 and self._editable
             ):
                 edit_action = menu.addAction("编辑并重发")
+            rollback_action = None
+            if self._checkpoint_id:
+                rollback_action = menu.addAction("回滚到此消息之前")
             action = menu.exec(event.globalPos())
             if not action:
+                return True
+
+            if action == rollback_action and self._checkpoint_id:
+                self.rollback_requested.emit(self._checkpoint_id, self)
                 return True
 
             clipboard = QApplication.clipboard()

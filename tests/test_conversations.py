@@ -216,6 +216,16 @@ class TestMessagePersistence:
         # Should be the most recent 5
         assert msgs[0]["content"] == "msg 5"
 
+    def test_truncate_from_message_removes_matched_record_and_following(self, store: ConversationStore):
+        store.append_message("main", "user", "first", extra={"message_id": "m1"})
+        store.append_message("main", "agent", "second")
+        store.append_message("main", "user", "third", extra={"message_id": "m3"})
+
+        assert store.truncate_from_message("main", message_id="m3", role="user") is True
+
+        msgs = store.load_messages("main")
+        assert [m["content"] for m in msgs] == ["first", "second"]
+
 
 class TestAutoNaming:
     """Auto-name session from first user message."""

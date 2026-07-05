@@ -117,6 +117,22 @@ class TaskBoard:
     ) -> list[TaskItem]:
         return self._update_chain(task_id, TaskStatus.CANCELLED, target_agent=target_agent, session_id=session_id)
 
+    def block_task(
+        self,
+        task_id: str,
+        target_agent: AgentType | None = None,
+        session_id: str | None = None,
+    ) -> list[TaskItem]:
+        """Mark a delegated task BLOCKED and propagate up the chain to the dispatcher.
+
+        BLOCKED means the target cannot proceed and needs the dispatcher
+        (source agent) to act. Propagation reuses _update_chain so the
+        source's waitlist entry is also marked blocked.
+        """
+        return self._update_chain(
+            task_id, TaskStatus.BLOCKED, target_agent=target_agent, session_id=session_id
+        )
+
     def _update_chain(
         self,
         task_id: str,
@@ -185,6 +201,16 @@ class TaskBoard:
             if t.source_agent == agent_type
             and t.target_agent != agent_type
             and t.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS)
+            and (session_id is None or t.session_id == session_id)
+        ]
+
+    def get_blocked_waitlist(self, agent_type: AgentType, session_id: str | None = None) -> list[TaskItem]:
+        """Tasks this agent dispatched that are currently BLOCKED (need its action)."""
+        return [
+            t for t in self._tasks
+            if t.source_agent == agent_type
+            and t.target_agent != agent_type
+            and t.status == TaskStatus.BLOCKED
             and (session_id is None or t.session_id == session_id)
         ]
 

@@ -12,7 +12,7 @@ from autoreport.interfaces.types import (
     MessageType,
     RestartRequest,
     StatusChange,
-    ToolCall,
+    ToolCallMessage,
     ToolResult,
     UserMessage,
 )
@@ -73,7 +73,7 @@ def test_agent_response():
 
 
 def test_tool_call_message():
-    msg = ToolCall(
+    msg = ToolCallMessage(
         agent_type=AgentType.DATA_ANALYSIS,
         tool_name="read",
         arguments={"path": "data.csv"},
@@ -131,11 +131,11 @@ def test_checkpoint_message():
         agent_type="main",
         checkpoint_id="cp_12345678",
         description="Before analysis",
-        file_states={"data/test.csv": "abc123"},
+        file_states={"Data/test.csv": "abc123"},
     )
     assert msg.type == "checkpoint"
     assert msg.agent_type == "main"
-    assert msg.file_states["data/test.csv"] == "abc123"
+    assert msg.file_states["Data/test.csv"] == "abc123"
 
 
 def test_error_message():

@@ -19,7 +19,6 @@ class MessageType(str, Enum):
 
     # Backend → GUI
     AGENT_RESPONSE = "agent_response"
-    AGENT_FEEDBACK = "agent_feedback"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
     STATUS_CHANGE = "status_change"
@@ -29,6 +28,8 @@ class MessageType(str, Enum):
     API_DEBUG = "api_debug"  # API call debugging information
     TASK_UPDATE = "task_update"
     QUEUE_UPDATE = "queue_update"
+    REPORT = "report"
+    SYSTEM_NOTICE = "system_notice"
 
 
 class AgentType(str, Enum):
@@ -56,6 +57,7 @@ class TaskStatus(str, Enum):
 
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
+    BLOCKED = "blocked"  # sub-agent cannot proceed; needs dispatcher action
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -80,6 +82,9 @@ class UserMessage(Message):
 
     type: MessageType = MessageType.USER_MESSAGE
     content: str
+    # Short visible summary for inter-agent coordination. Tools enforce this
+    # for new coordination messages; default keeps older stored messages valid.
+    summary: str = ""
     agent_type: AgentType = AgentType.MAIN
     message_id: str | None = None
     source: str = "user"  # "user" | "system" | "main_agent" | "<agent_type>"
@@ -96,20 +101,7 @@ class AgentResponse(Message):
     thinking: str | None = None
 
 
-class AgentFeedback(Message):
-    """Sub-agent feedback to main agent for coordination.
-
-    Sub-agents send this when they detect issues that require
-    main agent intervention (e.g., other agent's output is wrong).
-    """
-
-    type: MessageType = MessageType.AGENT_FEEDBACK
-    agent_type: AgentType
-    content: str
-    feedback_type: str = "missing_data"  # "missing_data", "quality", "query"
-
-
-class ToolCall(Message):
+class ToolCallMessage(Message):
     """Tool being executed by agent."""
 
     type: MessageType = MessageType.TOOL_CALL
@@ -160,7 +152,9 @@ class Checkpoint(Message):
     agent_type: str  # "main", "data_analysis", "plotting", "theory", "report"
     checkpoint_id: str
     description: str
-    file_states: dict[str, str]  # path -> hash
+    # Deprecated: kept for backward compatibility. The operation-log checkpoint
+    # model no longer publishes per-file hashes (the GUI doesn't consume them).
+    file_states: dict[str, str] = Field(default_factory=dict)
     message_id: str | None = None  # The message that triggered this checkpoint
 
 
@@ -246,3 +240,34 @@ class ApiDebugMessage(Message):
     duration_ms: int  # Duration in milliseconds
     status: str  # "success" or "error"
     error: str | None = None  # Error message if status is "error"
+
+
+class ReportMessage(Message):
+    """Sub-agent's explicit report on a Main-dispatched task.
+
+    This is the single reply channel for blocking/non-blocking dispatch.
+    The sub-agent's loop subscribes to mark its turn "reported"; Main's
+    SendToAgentTool subscribes (matched by task_id) to resolve its wait.
+    """
+
+    type: MessageType = MessageType.REPORT
+    agent_type: AgentType
+    task_id: str
+    report_type: str  # "reply" | "missing_data" | "quality"
+    # Short visible summary shown in coordination bubbles.
+    summary: str = ""
+    content: str = ""
+
+
+class SystemNotice(Message):
+    """Backend -> GUI: a notice explaining why an agent is waiting/busy.
+
+    Rendered as a bubble so the user understands agent activity that is
+    NOT a normal LLM turn (loop guards, manifest wrap-up, etc.). The
+    AgentLoop does NOT subscribe to this type, so publishing it never
+    triggers an extra agent turn.
+    """
+
+    type: MessageType = MessageType.SYSTEM_NOTICE
+    agent_type: AgentType
+    content: str

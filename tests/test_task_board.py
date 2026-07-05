@@ -102,3 +102,30 @@ class TestTaskBoard:
         board = TaskBoard()
         with pytest.raises(ValueError, match="not found"):
             board.start_task("deadbeef")
+
+    def test_block_task_marks_target_and_propagates_upchain(self):
+        # Data -> Main -> Plotting delegation chain, shared task_id
+        board = TaskBoard()
+        board.create_task(
+            AgentType.DATA_ANALYSIS, AgentType.MAIN, "delegate plot", task_id="tk1",
+        )
+        board.create_task(
+            AgentType.MAIN, AgentType.PLOTTING, "draw", task_id="tk1",
+        )
+        affected = board.block_task("tk1", target_agent=AgentType.PLOTTING)
+        statuses = {t.target_agent: t.status for t in affected}
+        assert statuses[AgentType.PLOTTING].value == "blocked"
+        # The Main-side entry (source) is also blocked via chain
+        assert statuses[AgentType.MAIN].value == "blocked"
+
+    def test_get_blocked_waitlist_lists_only_blocked_delegated(self):
+        board = TaskBoard()
+        board.create_task(
+            AgentType.DATA_ANALYSIS, AgentType.MAIN, "delegate plot", task_id="tk1",
+        )
+        board.create_task(
+            AgentType.MAIN, AgentType.PLOTTING, "draw", task_id="tk1",
+        )
+        board.block_task("tk1", target_agent=AgentType.PLOTTING)
+        blocked = board.get_blocked_waitlist(AgentType.MAIN)
+        assert [t.task_id for t in blocked] == ["tk1"]

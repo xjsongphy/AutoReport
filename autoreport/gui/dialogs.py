@@ -9,12 +9,38 @@ buttons stay visually consistent.
 
 from __future__ import annotations
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QMessageBox, QWidget
 
 from .theme import get_theme_colors
-from .widgets.ui_utils import filled_button_qss, secondary_filled_button_qss
+from .widgets.ui_utils import text_button_qss
 
 _StandardButton = QMessageBox.StandardButton
+
+#: Chinese labels for ``QMessageBox`` standard buttons.  The non-native dialog
+#: otherwise renders English ("OK"/"Yes"/…) which is inconsistent with the
+#: rest of this Chinese-first UI.  Qt provides no built-in zh translator here,
+#: so we relabel the buttons explicitly.
+_BUTTON_LABELS_ZH: dict[_StandardButton, str] = {
+    _StandardButton.Ok: "确定",
+    _StandardButton.Yes: "是",
+    _StandardButton.No: "否",
+    _StandardButton.Cancel: "取消",
+    _StandardButton.Save: "保存",
+    _StandardButton.Close: "关闭",
+    _StandardButton.Discard: "放弃",
+    _StandardButton.Apply: "应用",
+    _StandardButton.Reset: "重置",
+    _StandardButton.RestoreDefaults: "恢复默认",
+    _StandardButton.Abort: "中止",
+    _StandardButton.Retry: "重试",
+    _StandardButton.Ignore: "忽略",
+    _StandardButton.Help: "帮助",
+    _StandardButton.YesToAll: "全部选是",
+    _StandardButton.NoToAll: "全部选否",
+    _StandardButton.SaveAll: "全部保存",
+    _StandardButton.Open: "打开",
+}
 
 
 def styled_message_box(
@@ -46,6 +72,12 @@ def styled_message_box(
     box.setWindowTitle(title)
     box.setText(text)
     box.setStandardButtons(buttons)
+    for role in _BUTTON_LABELS_ZH:
+        if buttons & role:
+            btn = box.button(role)
+            if btn is not None:
+                btn.setText(_BUTTON_LABELS_ZH[role])
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
     if default != QMessageBox.StandardButton.NoButton:
         box.setDefaultButton(default)
     if affirmative is not None:
@@ -64,19 +96,21 @@ def styled_message_box(
         QMessageBox QLabel, QMessageBox QTextEdit {{
             color: {c["fg"]};
         }}
-        {secondary_filled_button_qss(
-            "QPushButton",
+        {text_button_qss(
+            "",
+            color=c["fg"],
+            border=c["border"],
             radius=radius,
             padding=padding,
             font_size=13,
         )}
-        {filled_button_qss(
+        {text_button_qss(
             "#msgPrimaryBtn",
-            bg=c["buttonBlue"],
-            fg=c["primaryBtnFg"],
-            hover_bg=c["buttonBlue"],
-            disabled_bg=c["border"],
-            disabled_fg=c["muted"],
+            color=c["buttonBlue"],
+            border=c["buttonBlue"],
+            hover_bg=c["hover"],
+            hover_color=c["buttonBlue"],
+            hover_border=c["buttonBlue"],
             radius=radius,
             padding=padding,
             font_size=13,

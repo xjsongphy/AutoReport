@@ -4,9 +4,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from autoreport.core.providers.base import LLMProvider, LLMResponse, Message, ToolCall
+from autoreport.core.providers.base import LLMProvider, LLMResponse, LLMToolCall, Message
+from autoreport.core.providers.defaults import DEFAULT_MODELS
 from autoreport.core.providers.factory import (
-    _DEFAULT_MODELS,
     ProviderFactory,
     ProviderManager,
 )
@@ -16,7 +16,7 @@ from autoreport.core.providers.openai_provider import OpenAICompatProvider
 
 
 def test_tool_call_dataclass():
-    tc = ToolCall(id="call_1", name="read", arguments={"path": "test.txt"})
+    tc = LLMToolCall(id="call_1", name="read", arguments={"path": "test.txt"})
     assert tc.id == "call_1"
     assert tc.name == "read"
     assert tc.arguments["path"] == "test.txt"
@@ -32,7 +32,7 @@ def test_message_dataclass():
 
 
 def test_message_with_tool_calls():
-    tc = ToolCall(id="call_1", name="read", arguments={})
+    tc = LLMToolCall(id="call_1", name="read", arguments={})
     msg = Message(role="assistant", content="", tool_calls=[tc])
     assert msg.tool_calls is not None
     assert len(msg.tool_calls) == 1
@@ -80,7 +80,7 @@ def test_anthropic_convert_tool_calls():
     from autoreport.core.providers.anthropic_provider import AnthropicProvider
 
     provider = AnthropicProvider.__new__(AnthropicProvider)
-    tc = ToolCall(id="call_1", name="read", arguments={"path": "test.txt"})
+    tc = LLMToolCall(id="call_1", name="read", arguments={"path": "test.txt"})
     messages = [
         Message(role="user", content="Read file"),
         Message(role="assistant", content="", tool_calls=[tc]),
@@ -134,7 +134,7 @@ def test_openai_convert_simple_messages():
 
 def test_openai_convert_tool_calls():
     provider = OpenAICompatProvider.__new__(OpenAICompatProvider)
-    tc = ToolCall(id="call_1", name="read", arguments={"path": "test.txt"})
+    tc = LLMToolCall(id="call_1", name="read", arguments={"path": "test.txt"})
     messages = [
         Message(role="user", content="Read"),
         Message(role="assistant", content="", tool_calls=[tc]),
@@ -184,9 +184,9 @@ def test_factory_unknown_type():
 
 
 def test_factory_default_models():
-    assert "anthropic" in _DEFAULT_MODELS
-    assert "openai" in _DEFAULT_MODELS
-    assert "deepseek" in _DEFAULT_MODELS
+    assert "anthropic" in DEFAULT_MODELS
+    assert "openai" in DEFAULT_MODELS
+    assert "deepseek" in DEFAULT_MODELS
 
 
 # ── ProviderManager tests ───────────────────────────────────────────────

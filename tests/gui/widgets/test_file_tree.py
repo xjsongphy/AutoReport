@@ -14,8 +14,8 @@ verifying the API and methods exist and are callable, rather than full integrati
 from pathlib import Path
 
 import pytest
-from PyQt6.QtCore import QEvent, QPointF, Qt
-from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtCore import QEvent, QItemSelectionModel, QPointF, Qt
+from PyQt6.QtGui import QKeyEvent, QMouseEvent
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtWidgets import QAbstractItemDelegate, QTreeWidgetItem
 
@@ -32,7 +32,7 @@ from autoreport.gui.widgets.file_tree import (
 def test_fixed_directories_constant() -> None:
     """Test that fixed directories are correctly defined."""
     assert isinstance(FIXED_DIRECTORIES, list)
-    assert set(FIXED_DIRECTORIES) == {"Data", "References", "Theory", "Code", "Outline", "Tex"}
+    assert set(FIXED_DIRECTORIES) == {"Data", "References", "Theory", "Plots", "Outline", "Tex"}
 
 
 def test_file_tree_class_has_required_methods() -> None:
@@ -81,6 +81,8 @@ def test_file_tree_has_cross_platform_shortcut_handler() -> None:
     assert "Key_F2" in source
     assert "Key_Delete" in source
     assert "Key_Backspace" in source
+    assert "matches(QKeySequence.StandardKey.Copy)" in source
+    assert "matches(QKeySequence.StandardKey.Paste)" in source
 
 
 def test_blank_click_selects_project_root(qtbot, tmp_path: Path) -> None:
@@ -161,6 +163,76 @@ def test_context_menu_has_required_actions() -> None:
     # Should have actions for directories
     assert "new_file_action" in menu_source
     assert "new_folder_action" in menu_source
+    assert "copy_action" in menu_source
+    assert "paste_action" in menu_source
+
+
+def test_file_tree_copy_paste_shortcuts_duplicate_selected_file(qtbot, tmp_path: Path) -> None:
+    source = tmp_path / "References" / "note.txt"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("copied", encoding="utf-8")
+
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.select_file(source)
+
+    copy_event = QKeyEvent(
+        QEvent.Type.KeyPress,
+        Qt.Key.Key_C,
+        Qt.KeyboardModifier.ControlModifier,
+    )
+    paste_event = QKeyEvent(
+        QEvent.Type.KeyPress,
+        Qt.Key.Key_V,
+        Qt.KeyboardModifier.ControlModifier,
+    )
+
+    assert widget._handle_tree_key(copy_event) is True
+    assert widget._handle_tree_key(paste_event) is True
+    assert (tmp_path / "References" / "note copy.txt").read_text(encoding="utf-8") == "copied"
+
+
+def test_file_tree_copy_paste_cmd_shortcut_works_on_mac(qtbot, tmp_path: Path) -> None:
+    """⌘C / ⌘V must trigger copy/paste (matches() misses Cmd on macOS)."""
+    source = tmp_path / "References" / "note.txt"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("copied", encoding="utf-8")
+
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.select_file(source)
+
+    copy_cmd = QKeyEvent(
+        QEvent.Type.KeyPress,
+        Qt.Key.Key_C,
+        Qt.KeyboardModifier.MetaModifier,
+    )
+    paste_cmd = QKeyEvent(
+        QEvent.Type.KeyPress,
+        Qt.Key.Key_V,
+        Qt.KeyboardModifier.MetaModifier,
+    )
+
+    assert widget._handle_tree_key(copy_cmd) is True
+    assert widget._handle_tree_key(paste_cmd) is True
+    assert (tmp_path / "References" / "note copy.txt").read_text(encoding="utf-8") == "copied"
+
+
+def test_unique_copy_target_naming(tmp_path: Path) -> None:
+    from autoreport.gui.widgets.file_tree import FileTreeWidget
+
+    d = tmp_path
+    # no collision -> keep original name
+    assert FileTreeWidget._unique_copy_target(Path("x.py"), d).name == "x.py"
+    (d / "x.py").touch()
+    assert FileTreeWidget._unique_copy_target(Path("x.py"), d).name == "x copy.py"
+    (d / "x copy.py").touch()
+    assert FileTreeWidget._unique_copy_target(Path("x.py"), d).name == "x copy 2.py"
+    (d / "x copy 2.py").touch()
+    assert FileTreeWidget._unique_copy_target(Path("x.py"), d).name == "x copy 3.py"
+    # directory case: suffix is empty, stem is the dir name
+    (d / "foo").mkdir(exist_ok=True)
+    assert FileTreeWidget._unique_copy_target(Path("foo"), d).name == "foo copy"
 
 
 def test_delete_operations_use_confirmation() -> None:
@@ -185,6 +257,61 @@ def test_file_operations_use_correct_paths() -> None:
     # Should use workspace / dir_name for path construction
     assert "self.workspace" in new_file_source
     assert "self.workspace" in new_folder_source
+
+
+def _make_multi_select_tree(qtbot, tmp_path: Path) -> tuple:
+    """Build a tree with Theory/a.tex and Theory/b.tex; return (widget, a_item, b_item)."""
+    theory = tmp_path / "Theory"
+    theory.mkdir()
+    (theory / "a.tex").write_text("a", encoding="utf-8")
+    (theory / "b.tex").write_text("b", encoding="utf-8")
+    widget = FileTreeWidget(tmp_path)
+    qtbot.addWidget(widget)
+    tree = widget.tree
+    # select_file forces the directory to be populated and selects a.tex.
+    widget.select_file(theory / "a.tex")
+    root = tree.topLevelItem(FIXED_DIRECTORIES.index("Theory"))
+    items = {root.child(i).text(0): root.child(i) for i in range(root.childCount())}
+    return widget, items["a.tex"], items["b.tex"]
+
+
+def _click_item(tree, item, modifier) -> None:
+    rect = tree.visualItemRect(item)
+    pt = rect.center()
+    ev = QMouseEvent(
+        QEvent.Type.MouseButtonPress,
+        QPointF(pt),
+        QPointF(tree.mapToGlobal(pt)),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        modifier,
+    )
+    tree.mousePressEvent(ev)
+
+
+def test_ctrl_click_toggles_multi_selection(qtbot, tmp_path: Path) -> None:
+    """Ctrl/Cmd-click toggles a file into the selection (shift already worked)."""
+    widget, a, b = _make_multi_select_tree(qtbot, tmp_path)
+    tree = widget.tree
+
+    assert {i.text(0) for i in tree.selectedItems()} == {"a.tex"}
+    _click_item(tree, b, Qt.KeyboardModifier.ControlModifier)
+    assert {i.text(0) for i in tree.selectedItems()} == {"a.tex", "b.tex"}
+
+
+def test_select_file_preserves_active_multi_selection(qtbot, tmp_path: Path) -> None:
+    """Preview feedback (select_file) must not collapse a Ctrl/Cmd multi-selection."""
+    widget, a, b = _make_multi_select_tree(qtbot, tmp_path)
+    tree = widget.tree
+
+    # Establish multi-selection (a selected, ctrl-toggle b).
+    sm = tree.selectionModel()
+    sm.select(tree.indexFromItem(b), QItemSelectionModel.SelectionFlag.Toggle)
+    assert {i.text(0) for i in tree.selectedItems()} == {"a.tex", "b.tex"}
+
+    # The preview's file-changed feedback calls select_file; selection survives.
+    widget.select_file((tmp_path / "Theory" / "b.tex"))
+    assert {i.text(0) for i in tree.selectedItems()} == {"a.tex", "b.tex"}
 
 
 def test_drag_drop_handles_multiple_files() -> None:
@@ -241,8 +368,8 @@ def test_selected_nested_dir_is_used_for_new_file(qtbot, tmp_path: Path) -> None
     widget.tree.blockSignals(False)
     widget._finalize_pending_new_item()
 
-    assert (tmp_path / "data" / "processed" / "a.txt").exists()
-    assert not (tmp_path / "data" / "a.txt").exists()
+    assert (tmp_path / "Data" / "Processed" / "a.txt").exists()
+    assert not (tmp_path / "Data" / "a.txt").exists()
 
 
 def test_hover_text_uses_tilde_prefixed_system_path(qtbot, tmp_path: Path) -> None:
@@ -250,7 +377,7 @@ def test_hover_text_uses_tilde_prefixed_system_path(qtbot, tmp_path: Path) -> No
     qtbot.addWidget(widget)
 
     item = QTreeWidgetItem()
-    file_path = tmp_path / "code" / "plot.py"
+    file_path = tmp_path / "Plots" / "plot.py"
     item.setData(0, 257, str(file_path))
 
     assert widget._hover_text_for_item(item) == FileTreeWidget._tilde_path(file_path)
@@ -300,7 +427,7 @@ def test_repeat_new_click_keeps_typed_pending_and_starts_another(qtbot, tmp_path
     widget._new_file_in_dir("References")
     second_pending = widget._pending_new_item
 
-    assert (tmp_path / "references" / "first.txt").exists()
+    assert (tmp_path / "References" / "first.txt").exists()
     assert second_pending is not None
     assert first_pending is not second_pending
 
@@ -316,7 +443,7 @@ def test_repeat_new_click_uses_live_editor_text(qtbot, tmp_path: Path) -> None:
 
     widget._new_file_in_dir("References")
 
-    assert (tmp_path / "references" / "typed.txt").exists()
+    assert (tmp_path / "References" / "typed.txt").exists()
     assert widget._pending_new_item is not None
 
 
@@ -332,7 +459,7 @@ def test_close_editor_uses_live_editor_text(qtbot, tmp_path: Path) -> None:
 
     widget._on_close_editor(editor, QAbstractItemDelegate.EndEditHint.NoHint)
 
-    assert (tmp_path / "references" / "closed.txt").exists()
+    assert (tmp_path / "References" / "closed.txt").exists()
     assert widget._pending_new_item is None
 
 
@@ -437,7 +564,7 @@ def test_tree_row_states_paint_row_and_branch_with_same_color(qtbot, tmp_path: P
 
     refs_item = widget.tree.topLevelItem(FIXED_DIRECTORIES.index("References"))
     assert refs_item is not None
-    widget._rename_directory(tmp_path / "references", refs_item)
+    widget._rename_directory(tmp_path / "References", refs_item)
     assert widget._editing_item is refs_item
     assert widget.tree._row_background_color(refs_item).name() == colors["tree_sel_bg"]
     widget._set_editing_item(None)
@@ -459,7 +586,7 @@ def test_tree_row_states_paint_row_and_branch_with_same_color(qtbot, tmp_path: P
 
 
 def test_processed_directory_is_not_draggable_but_files_inside_are(qtbot, tmp_path: Path) -> None:
-    processed_file = tmp_path / "data" / "processed" / "result.txt"
+    processed_file = tmp_path / "Data" / "Processed" / "result.txt"
     processed_file.parent.mkdir(parents=True, exist_ok=True)
     processed_file.write_text("ok", encoding="utf-8")
 
@@ -595,7 +722,7 @@ def test_directory_changed_restores_selected_file(qtbot, tmp_path: Path) -> None
     assert selected is not None
 
     widget.tree.setCurrentItem(selected)
-    widget._on_directory_changed(str((tmp_path / "references").resolve()))
+    widget._on_directory_changed(str((tmp_path / "References").resolve()))
 
     current = widget.tree.currentItem()
     assert current is not None

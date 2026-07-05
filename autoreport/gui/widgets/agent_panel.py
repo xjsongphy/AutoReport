@@ -26,7 +26,7 @@ from autoreport.gui.widgets.chat_input import ChatInput
 from autoreport.gui.widgets.conversation_history import ConversationHistoryDropdown
 from autoreport.gui.widgets.debug_panel import DebugPanel
 from autoreport.gui.widgets.file_search_popup import FileSearchPopup
-from autoreport.gui.widgets.ui_utils import IconActionButton, NoWheelComboBox, render_svg_icon
+from autoreport.gui.widgets.ui_utils import IconActionButton, NoWheelComboBox, install_compact_tooltip, render_svg_icon
 from autoreport.utils.agent_labels import get_agent_badge, get_agent_title, get_agent_icon
 from autoreport.gui.widgets.messages_area import MessagesArea
 from autoreport.interfaces.types import ApiDebugMessage
@@ -503,18 +503,37 @@ class AgentPanel(QWidget):
 
     # ---- File reference handling ----
 
+    def _popup_anchor_global(self) -> QPoint:
+        return self._input_container.mapToGlobal(self._input_container.rect().topLeft())
+
+    def _position_popup_above_composer(self, popup: QWidget, preferred_height: int) -> None:
+        anchor = self._popup_anchor_global()
+        width = max(220, self._input_container.width())
+        popup.setFixedWidth(width)
+        height = max(1, int(preferred_height))
+        screen = popup.screen() or self.screen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            max_above = max(1, anchor.y() - available.top())
+            height = min(height, max_above, 260)
+        popup.setFixedHeight(height)
+        popup.move(anchor.x(), anchor.y() - height)
+        if popup.isVisible():
+            geo = popup.geometry()
+            dx = anchor.x() - geo.left()
+            dy = (anchor.y() - 1) - geo.bottom()
+            if dx or dy:
+                popup.move(popup.x() + dx, popup.y() + dy)
+
     def _on_file_reference_requested(self, query: str, position: QPoint) -> None:
         if not self._file_search_popup:
             return
-        # Position popup above input, same width
-        popup_w = self._input_field.width()
-        self._file_search_popup.setFixedWidth(popup_w)
-        # Calculate position: above the input field
-        input_top = self._input_field.mapToGlobal(self._input_field.rect().topLeft())
-        popup_h = self._file_search_popup.calculate_height()
-        self._file_search_popup.move(input_top.x(), input_top.y() - popup_h)
         self._file_search_popup.set_query(query, waiting=True)
         self._file_search_popup.show()
+        self._position_popup_above_composer(
+            self._file_search_popup,
+            self._file_search_popup.calculate_height(),
+        )
         self._file_search_popup.raise_()
 
         # Run search via persistent single-worker pool; discard stale completions.
@@ -532,6 +551,10 @@ class AgentPanel(QWidget):
             matches = []
         if self._file_search_popup and self._file_search_popup.isVisible():
             self._file_search_popup.set_matches(matches)
+            self._position_popup_above_composer(
+                self._file_search_popup,
+                self._file_search_popup.calculate_height(),
+            )
 
     def _on_file_selected(self, file_path: Path) -> None:
         self._file_search_popup.hide()
@@ -549,8 +572,7 @@ class AgentPanel(QWidget):
         self._file_search_popup.hide()
         self._close_popup()
         self._input_field.setFocus()
-        name = FileSearchPopup.AGENT_INFO.get(agent_type, (agent_type, ""))[0]
-        self._input_field.insert_agent_reference(name)
+        self._input_field.insert_agent_reference(get_agent_title(agent_type))
 
     def _on_popup_navigate(self, direction: str) -> None:
         """Forward popup navigation from ChatInput to active popup."""
@@ -560,12 +582,20 @@ class AgentPanel(QWidget):
             self._close_popup()
             return
         popup = self._file_search_popup if self._file_search_popup.isVisible() else self._cmd_popup
+        if popup is self._file_search_popup:
+            if direction == "up":
+                popup.move_up()
+            elif direction == "down":
+                popup.move_down()
+            elif direction == "select":
+                popup.select_current()
+            return
         if direction == "up":
-            popup.move_up()
+            self._move_command_popup(-1)
         elif direction == "down":
-            popup.move_down()
+            self._move_command_popup(1)
         elif direction == "select":
-            popup.select_current()
+            self._select_current_command()
 
     def _close_popup(self) -> None:
         self._input_field.set_popup_active(False)
@@ -617,13 +647,6 @@ class AgentPanel(QWidget):
         if self._cmd_popup.count() > 0:
             self._cmd_popup.setCurrentRow(0)
 
-        # Position above input, same width
-        popup_w = self._input_field.width()
-        self._cmd_popup.setFixedWidth(popup_w)
-        input_top = self._input_field.mapToGlobal(self._input_field.rect().topLeft())
-        h = min(self._cmd_popup.sizeHintForRow(0) * self._cmd_popup.count() + 12, 200)
-        self._cmd_popup.setFixedHeight(h)
-        self._cmd_popup.move(input_top.x(), input_top.y() - h)
         self._cmd_popup.setStyleSheet(f"""
             QListWidget {{
                 background-color: {c["bg"]};
@@ -646,6 +669,11 @@ class AgentPanel(QWidget):
             }}
         """)
         self._cmd_popup.show()
+        row_height = self._cmd_popup.sizeHintForRow(0)
+        if row_height <= 0:
+            row_height = self._cmd_popup.fontMetrics().lineSpacing() + 12
+        h = min(row_height * max(1, self._cmd_popup.count()) + 12, 200)
+        self._position_popup_above_composer(self._cmd_popup, h)
         self._cmd_popup.raise_()
 
     def _on_command_selected(self, item: QListWidgetItem) -> None:
@@ -655,10 +683,24 @@ class AgentPanel(QWidget):
         self._cmd_popup.hide()
         self._close_popup()
         self._input_field.setFocus()
-        # Execute the command directly
-        text = self._input_field.toPlainText()
-        self._input_field.clear_text()
-        self._execute_slash_command(cmd, text)
+        self._input_field.insert_command(cmd)
+
+    def _move_command_popup(self, step: int) -> None:
+        if not self._cmd_popup.isVisible() or self._cmd_popup.count() <= 0:
+            return
+        current = self._cmd_popup.currentRow()
+        if current < 0:
+            current = 0
+        next_row = max(0, min(self._cmd_popup.count() - 1, current + step))
+        self._cmd_popup.setCurrentRow(next_row)
+
+    def _select_current_command(self) -> None:
+        if not self._cmd_popup.isVisible():
+            return
+        item = self._cmd_popup.currentItem()
+        if item is None:
+            return
+        self._on_command_selected(item)
 
     def _execute_slash_command(self, cmd: str, original_text: str) -> None:
         """Execute a slash command."""
@@ -692,18 +734,21 @@ class AgentPanel(QWidget):
         """Clear attached file/selection context so next message won't include it."""
         self._opened_file = None
         self._preview_context = None
-        self._context_separator.setVisible(False)
-        self._context_attachment_btn.setVisible(False)
+        self._hide_context_attachment()
 
     def _set_context_attachment(self, label: str, tooltip_path: str) -> None:
         self._context_attachment_btn.setChecked(True)
         self._context_attachment_btn.setText(label)
-        self._context_attachment_btn.setToolTip(tooltip_path)
+        install_compact_tooltip(self._context_attachment_btn, tooltip_path)
         self._context_attachment_btn.setIcon(self._context_file_icon)
         self._context_separator.setVisible(True)
         self._context_attachment_btn.setVisible(True)
         self._sync_context_attachment_width()
         self._reflow_composer(stick_if_bottom=True, defer_once=True)
+
+    def _hide_context_attachment(self) -> None:
+        self._context_separator.setVisible(False)
+        self._context_attachment_btn.setVisible(False)
 
     def _sync_context_attachment_width(self) -> None:
         """Recompute attachment chip width so pasted/long labels expand immediately."""
@@ -773,6 +818,7 @@ class AgentPanel(QWidget):
         bubble_on_timeline: bool = False,
         bubble_collapsible: bool = True,
         allow_edit: bool | None = None,
+        message_id: str | None = None,
     ) -> None:
         resolved_display_mode = display_mode or ("bubble" if role == "user" else "agent_markdown")
         resolved_bubble_align = bubble_align or ("right" if role == "user" else "left")
@@ -808,6 +854,7 @@ class AgentPanel(QWidget):
             bubble_collapsible=bubble_collapsible,
             allow_edit=allow_edit,
             agent_name=agent_name,
+            message_id=message_id,
         )
         self._update_width()
         if streaming and role == "agent":
@@ -842,6 +889,8 @@ class AgentPanel(QWidget):
             success=None,
             duration_ms=0,
             summary=summary,
+            detail=detail,
+            expandable=expandable,
         )
 
     def add_tool_result(
@@ -866,6 +915,8 @@ class AgentPanel(QWidget):
                 error=error,
                 duration_ms=100,
                 summary=summary,
+                detail=detail,
+                expandable=expandable,
             )
             self._merge_adjacent_task_status_update(target_group)
 
@@ -976,10 +1027,10 @@ class AgentPanel(QWidget):
             timestamp=ts,
         )
 
-    def add_checkpoint(self, checkpoint_id: str, description: str) -> None:
+    def add_checkpoint(self, checkpoint_id: str, description: str, message_id: str | None = None) -> None:
         # Hide internal pre-message sentinel checkpoints from UI.
         if (description or "").strip().lower().startswith("pre:"):
-            self._messages_area.attach_checkpoint_to_latest_outbound(checkpoint_id)
+            self._messages_area.attach_checkpoint_to_latest_outbound(checkpoint_id, message_id)
             return
         ts = datetime.now().strftime("%H:%M")
         short_id = checkpoint_id[-12:] if len(checkpoint_id) > 12 else checkpoint_id
@@ -1052,16 +1103,16 @@ class AgentPanel(QWidget):
 
     def add_task_block(self, todolist: list[dict], waitlist: list[dict]) -> None:
         """Render Task block with Todo/Wait sections (empty sections omitted)."""
-        lines = ["Task"]
+        lines = ["<b>Task</b>"]
 
-        def render_items(items: list[dict]) -> list[str]:
+        def render_items(items: list[dict], *, wait: bool = False) -> list[str]:
             rows = []
             for item in items[:10]:
                 brief = str(item.get("brief", "")).strip() or "task"
                 status = str(item.get("status", "pending")).lower()
                 done = status in {"completed", "cancelled", "failed"}
-                marker = "☑" if done else "☐"
-                rows.append(f"- {marker} {brief}")
+                marker = "☑" if done else ("○" if wait else "☐")
+                rows.append(f"{marker} {brief}")
             return rows
 
         if todolist:
@@ -1072,14 +1123,20 @@ class AgentPanel(QWidget):
         if waitlist:
             lines.append("")
             lines.append("Wait")
-            lines.extend(render_items(waitlist))
+            lines.extend(render_items(waitlist, wait=True))
 
-        ts = datetime.now().strftime("%H:%M")
-        self._messages_area.add_message_row(
-            role="agent",
-            content="\n".join(lines),
-            timestamp=ts,
-            is_coordination=True,
+        summary = "\n".join(lines)
+        self.add_tool_call(
+            "manage_tasks",
+            {"action": "list"},
+            summary=summary,
+            expandable=False,
+        )
+        self.add_tool_result(
+            "manage_tasks",
+            {"status": "ok"},
+            summary=summary,
+            expandable=False,
         )
 
     # ---- Status ----
@@ -1184,8 +1241,7 @@ class AgentPanel(QWidget):
         # Clear context state (after use)
         self._preview_context = None
         self._opened_file = None
-        self._context_separator.setVisible(False)
-        self._context_attachment_btn.setVisible(False)
+        self._hide_context_attachment()
 
     def _on_send_btn_clicked(self) -> None:
         """Handle send button click — send or interrupt based on state."""

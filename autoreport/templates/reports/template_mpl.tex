@@ -5,6 +5,11 @@
 % 需要确保 font 选项指定的字体已安装! 具体参见 `README.md' 的说明.
 \documentclass[font=default]{mpltx}
 
+% 图片统一从 Plotting 的真实输出目录解析，正文里直接用文件名即可，无需复制或建软链接。
+\graphicspath{{../Plots/Fig/}}
+% 允许 \begin{figure}[H] / \begin{table}[H] 把图表强制固定在源码位置（不浮动）。
+\usepackage{float}
+
 % 以下至 \begin{document} 都仅是本文件为了方便额外定义的命令, 写报告时不需要.
 \hypersetup{colorlinks=false}% 超链接带颜色
 \usepackage{xcolor}
@@ -98,7 +103,7 @@
 
 \begin{figure}
   \centering
-  \includegraphics[width=0.85\linewidth]{fig/instruments.png}
+  \includegraphics[width=0.85\linewidth]{instruments.png}
   \caption{这个例子展示了如何插入图片以及加说明文字.
     \note{推荐使用相对大小插入图片, 比如这里是 0.8 倍当前区域文字宽度 (\cs{linewidth}).
       推荐对实验装置图和数据图使用矢量图插入}}
@@ -176,7 +181,7 @@
 
 \begin{figure}
   \centering
-  \includegraphics[width=0.8\textwidth]{fig/figsample.pdf}
+  \includegraphics[width=0.8\textwidth]{figsample.pdf}
   \caption{这是数据图的例子.
     \note{在图的 \cs{caption} 中应简要说明图中表达的内容, 并对各种符号、线型、颜色的意义做出说明.
       如果有多格数据图, 应清晰地分别做出解释说明.

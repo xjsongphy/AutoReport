@@ -6,7 +6,7 @@ from typing import Any
 from anthropic import AsyncAnthropic
 from loguru import logger
 
-from .base import LLMProvider, LLMResponse, Message, ToolCall
+from .base import LLMProvider, LLMResponse, Message, LLMToolCall
 
 
 class AnthropicProvider(LLMProvider):
@@ -257,7 +257,7 @@ class AnthropicProvider(LLMProvider):
             if block.type == "text":
                 content = block.text
             elif block.type == "tool_use":
-                tool_calls.append(ToolCall(
+                tool_calls.append(LLMToolCall(
                     id=block.id,
                     name=block.name,
                     arguments=block.input,
@@ -322,17 +322,24 @@ class AnthropicProvider(LLMProvider):
 
         try:
             async with self.client.messages.stream(**params) as stream:
-                # Stream text deltas for real-time display
-                stream_iter = stream.text_stream.__aiter__()
+                # Stream full events so thinking_delta is not dropped by
+                # Anthropic's text_stream convenience iterator.
+                stream_iter = stream.__aiter__()
                 while True:
                     try:
-                        text = await asyncio.wait_for(
+                        event = await asyncio.wait_for(
                             stream_iter.__anext__(),
                             timeout=idle_timeout,
                         )
                     except StopAsyncIteration:
                         break
-                    yield LLMStreamChunk(delta=text)
+                    if event.type != "content_block_delta":
+                        continue
+                    delta = event.delta
+                    if delta.type == "text_delta":
+                        yield LLMStreamChunk(delta=delta.text)
+                    elif delta.type == "thinking_delta":
+                        yield LLMStreamChunk(thinking=delta.thinking)
 
                 # After streaming completes, extract tool calls from final message
                 final_message = await asyncio.wait_for(
@@ -346,7 +353,7 @@ class AnthropicProvider(LLMProvider):
             final_thinking = None
             for block in final_message.content:
                 if block.type == "tool_use":
-                    final_tool_calls.append(ToolCall(
+                    final_tool_calls.append(LLMToolCall(
                         id=block.id,
                         name=block.name,
                         arguments=block.input,

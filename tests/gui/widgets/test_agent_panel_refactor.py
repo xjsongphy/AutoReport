@@ -2,8 +2,12 @@
 
 from pathlib import Path
 import pytest
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QKeyEvent
+from PyQt6.QtWidgets import QLabel
 
 from autoreport.gui.widgets.agent_panel import AgentPanel
+from autoreport.gui.widgets.file_search_popup import FileMatch
 
 
 @pytest.fixture
@@ -107,11 +111,33 @@ def test_file_context_lives_in_dock_bar_and_toggles(agent_panel):
     assert agent_panel._context_attachment_btn.icon().cacheKey() != file_icon_key
 
 
+def test_context_attachment_hidden_without_editor_context(agent_panel):
+    assert agent_panel._context_separator.isHidden()
+    assert agent_panel._context_attachment_btn.isHidden()
+
+    agent_panel.set_opened_file("sections/intro.tex")
+    agent_panel.clear_file_context()
+
+    assert agent_panel._context_separator.isHidden()
+    assert agent_panel._context_attachment_btn.isHidden()
+
+
 def test_selection_context_label_uses_line_count(agent_panel):
     agent_panel.set_preview_context("sections/intro.tex", "a\nb", 3, 4)
 
     assert agent_panel._context_attachment_btn.text() == "2 lines selected"
-    assert agent_panel._context_attachment_btn.toolTip() == "sections/intro.tex"
+    assert agent_panel._context_attachment_btn.toolTip() == ""
+    assert agent_panel._context_attachment_btn._compact_tooltip_filter._text == "sections/intro.tex"
+
+
+def test_context_attachment_uses_compact_tooltip(agent_panel):
+    agent_panel.set_opened_file("Plots/Fig/fig6.pdf")
+
+    btn = agent_panel._context_attachment_btn
+
+    assert btn.toolTip() == ""
+    assert hasattr(btn, "_compact_tooltip_filter")
+    assert btn._compact_tooltip_filter._text == "Plots/Fig/fig6.pdf"
 
 
 def test_composer_side_gap_matches_bottom_mask_height(agent_panel, qtbot):
@@ -198,6 +224,31 @@ def test_add_tool_result_updates_pending_group_item(agent_panel):
     groups = agent_panel._messages_area.get_tool_groups()
     assert len(groups) == 1
     assert "Theory replied: first line" in groups[0].get_summary_text()
+
+
+def test_send_to_agent_result_stays_in_tool_group_without_agent_bubble(agent_panel):
+    before_rows = len(agent_panel._messages_area.get_message_rows())
+
+    agent_panel.add_tool_call(
+        "send_to_agent",
+        {"agent_type": "plotting"},
+        summary="Main to Sub",
+        expandable=False,
+    )
+    agent_panel.add_tool_result(
+        "send_to_agent",
+        {"status": "delegated", "agent_type": "plotting", "message": "delegated"},
+        summary="Main to Sub",
+        detail="delegated",
+        expandable=True,
+    )
+
+    after_rows = len(agent_panel._messages_area.get_message_rows())
+    groups = agent_panel._messages_area.get_tool_groups()
+
+    assert before_rows == after_rows
+    assert len(groups) == 1
+    assert groups[0].get_summary_text() == "Main to Sub"
 
 
 def test_adjacent_manage_tasks_status_change_updates_in_place(agent_panel):
@@ -518,6 +569,57 @@ def test_task_update_waitlist_format(agent_panel):
     assert "derive formulas" in rows[0]._content
 
 
+def test_add_task_block_uses_task_tool_group_controls(agent_panel, qtbot):
+    agent_panel.add_task_block(
+        todolist=[{"brief": "Process data", "status": "pending"}],
+        waitlist=[{"brief": "Plot figures", "status": "pending"}],
+    )
+    qtbot.wait(20)
+
+    assert agent_panel._messages_area.get_message_rows() == []
+    groups = agent_panel._messages_area.get_tool_groups()
+    assert len(groups) == 1
+
+    controls = [
+        label
+        for label in groups[0].findChildren(QLabel)
+        if label.objectName() == "taskStatusControl"
+    ]
+    texts = [
+        label.text()
+        for label in groups[0].findChildren(QLabel)
+        if label.objectName() == "taskTextLabel"
+    ]
+
+    assert [control.text() for control in controls] == ["", ""]
+    assert texts == ["Process data", "Plot figures"]
+
+
+def test_task_block_can_precede_deferred_send_to_agent_group(agent_panel, qtbot):
+    agent_panel.add_task_block(
+        todolist=[],
+        waitlist=[{"brief": "Derive formulas", "status": "pending"}],
+    )
+    agent_panel.add_tool_call(
+        "send_to_agent",
+        {"agent_type": "theory"},
+        summary="Main to Theory",
+        expandable=False,
+    )
+    agent_panel.add_tool_result(
+        "send_to_agent",
+        {"status": "delegated", "agent_type": "theory"},
+        summary="Main to Theory",
+        expandable=False,
+    )
+    qtbot.wait(20)
+
+    groups = agent_panel._messages_area.get_tool_groups()
+    assert len(groups) == 2
+    assert groups[0].tool_names() == ["manage_tasks"]
+    assert groups[1].tool_names() == ["send_to_agent"]
+
+
 def test_add_checkpoint_creates_message(agent_panel):
     """add_checkpoint should create a checkpoint message row."""
     agent_panel.add_checkpoint("ckpt1", "Before tool execution")
@@ -540,6 +642,55 @@ def test_pre_checkpoint_attaches_to_latest_user_bubble(agent_panel):
 
     assert row._checkpoint_id == "ckpt_pre"
     assert agent_panel._messages_area.message_count() == 1
+
+
+def test_pre_checkpoint_attaches_to_matching_user_bubble_message_id(agent_panel):
+    agent_panel.add_message(role="user", content="first", message_id="msg-1")
+    first = agent_panel._messages_area.get_message_rows()[-1]
+    agent_panel.add_message(role="user", content="second", message_id="msg-2")
+    second = agent_panel._messages_area.get_message_rows()[-1]
+
+    agent_panel.add_checkpoint("ckpt_first", "pre:user", message_id="msg-1")
+
+    assert first._checkpoint_id == "ckpt_first"
+    assert second._checkpoint_id is None
+
+
+def test_pre_checkpoint_attaches_to_matching_reply_bubble_message_id(agent_panel):
+    agent_panel.add_message(role="user", content="dispatch", message_id="dispatch-1")
+    user_row = agent_panel._messages_area.get_message_rows()[-1]
+    agent_panel.add_message(
+        role="agent",
+        content="reply",
+        display_mode="bubble",
+        bubble_title="Report replied",
+        bubble_align="left",
+        message_id="dispatch-1",
+    )
+    reply_row = agent_panel._messages_area.get_message_rows()[-1]
+
+    agent_panel.add_checkpoint("ckpt_dispatch", "pre:main_agent", message_id="dispatch-1")
+
+    assert user_row._checkpoint_id is None
+    assert reply_row._checkpoint_id == "ckpt_dispatch"
+
+
+def test_left_reply_bubble_rollback_signal_reaches_panel(qtbot, agent_panel):
+    agent_panel.add_message(
+        role="agent",
+        content="reply",
+        display_mode="bubble",
+        bubble_title="Report replied",
+        bubble_align="left",
+        message_id="dispatch-1",
+    )
+    reply_row = agent_panel._messages_area.get_message_rows()[-1]
+    agent_panel.add_checkpoint("ckpt_dispatch", "pre:main_agent", message_id="dispatch-1")
+
+    with qtbot.waitSignal(agent_panel.rollback_requested, timeout=1000) as blocker:
+        reply_row.rollback_requested.emit("ckpt_dispatch", reply_row)
+
+    assert blocker.args == ["ckpt_dispatch", reply_row]
 
 
 def test_multiple_messages_and_tools(agent_panel):
@@ -635,6 +786,76 @@ def test_edit_saved_resends_plain_text_with_latest_file_context(qtbot, agent_pan
 
     assert message_blocker.args == ["new user"]
     assert context_blocker.args[0]["file"] == "latest.tex"
+
+
+def test_agent_selection_inserts_reference_without_property_error(agent_panel):
+    agent_panel._input_field.setPlainText("@rep")
+    agent_panel._input_field._popup_kind = "@"
+
+    agent_panel._on_agent_selected("report")
+
+    assert agent_panel._input_field.toPlainText() == "@Report Agent "
+
+
+def test_file_reference_popup_is_attached_above_composer(agent_panel, qtbot):
+    agent_panel.resize(520, 640)
+    agent_panel.show()
+    qtbot.waitExposed(agent_panel)
+    agent_panel.set_agent_type("theory")
+
+    agent_panel._on_file_reference_requested("", agent_panel._input_field.mapToGlobal(agent_panel._input_field.rect().topLeft()))
+    qtbot.wait(20)
+
+    popup = agent_panel._file_search_popup
+    anchor = agent_panel._input_container.mapToGlobal(agent_panel._input_container.rect().topLeft())
+    assert popup.isVisible()
+    assert popup.geometry().bottom() <= anchor.y()
+    assert popup.geometry().left() == anchor.x()
+    assert popup.width() == agent_panel._input_container.width()
+
+    class _Future:
+        def result(self):
+            return [FileMatch(Path(f"Data/file_{i}.txt"), score=10) for i in range(8)]
+
+    agent_panel._apply_file_search_result(agent_panel._file_search_ticket, _Future())
+    qtbot.wait(20)
+
+    assert popup.geometry().bottom() <= anchor.y()
+    assert popup.width() == agent_panel._input_container.width()
+    popup.hide()
+
+
+def test_command_popup_is_attached_above_composer_and_keyboard_selects(agent_panel, qtbot):
+    agent_panel.resize(520, 640)
+    agent_panel.show()
+    qtbot.waitExposed(agent_panel)
+    agent_panel._input_field.setPlainText("/he")
+    cursor = agent_panel._input_field.textCursor()
+    cursor.movePosition(cursor.MoveOperation.End)
+    agent_panel._input_field.setTextCursor(cursor)
+
+    agent_panel._on_command_palette_requested("he", agent_panel._input_field.mapToGlobal(agent_panel._input_field.rect().topLeft()))
+    qtbot.wait(20)
+
+    anchor = agent_panel._input_container.mapToGlobal(agent_panel._input_container.rect().topLeft())
+    assert agent_panel._cmd_popup.isVisible()
+    assert agent_panel._cmd_popup.geometry().bottom() <= anchor.y()
+    assert agent_panel._cmd_popup.geometry().left() == anchor.x()
+    assert agent_panel._cmd_popup.width() == agent_panel._input_container.width()
+
+    executed: list[str] = []
+    agent_panel._execute_slash_command = lambda cmd, original_text: executed.append(cmd)
+    key_event = QKeyEvent(
+        QKeyEvent.Type.KeyPress,
+        Qt.Key.Key_Tab,
+        Qt.KeyboardModifier.NoModifier,
+        "\t",
+    )
+    agent_panel._input_field.keyPressEvent(key_event)
+
+    assert executed == []
+    assert agent_panel._input_field.toPlainText() == "/help "
+    assert not agent_panel._cmd_popup.isVisible()
 
 
 def test_hide_conv_buttons(agent_panel):

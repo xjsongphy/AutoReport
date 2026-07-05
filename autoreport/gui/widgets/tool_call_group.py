@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QIcon
+from PyQt6.QtCore import QLineF, QPointF, QRectF, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPen
 from PyQt6.QtWidgets import (
     QApplication,
     QFrame,
@@ -20,6 +20,8 @@ from PyQt6.QtWidgets import (
 )
 
 from ..theme import get_theme_colors
+from .markdown_renderer import render_markdown
+from .message_row import _DisclosureArrow, _DisclosureHeaderBar, _FadeMask
 from .timeline import TimelineRail
 from .ui_utils import install_compact_tooltip, render_svg_icon
 
@@ -50,24 +52,179 @@ class ToolCall:
     result: Any | None = None
     error: str | None = None
     summary: str | None = None
+    detail: str | None = None
+    expandable: bool = False
     elapsed_seconds: int = 0
     file_names: list[str] = field(default_factory=list)
 
 
-class _ClickableHeaderWidget(QWidget):
-    clicked = pyqtSignal()
+class _TaskStatusControl(QLabel):
+    def __init__(self, status: str, color: str, parent: QWidget | None = None):
+        super().__init__(ToolCallGroup._task_control_text_for_status(status), parent)
+        self._status = status
+        self._color = QColor(color)
+        font = self.font()
+        font.setBold(True)
+        self.setFont(font)
+        self.setTextFormat(Qt.TextFormat.PlainText)
 
-    def mousePressEvent(self, event):  # noqa: N802
-        super().mousePressEvent(event)
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit()
+    @staticmethod
+    def _inner_rect(rect: QRectF) -> QRectF:
+        return rect.adjusted(2.5, 2.5, -2.5, -2.5)
 
-    def click(self) -> None:
-        self.clicked.emit()
+    def running_segments(self) -> list[QLineF]:
+        if self._status != "running":
+            return []
+        inner = self._inner_rect(QRectF(self.rect()))
+        center = inner.center()
+        half_span = min(inner.width(), inner.height()) * 0.28
+        diag_delta = half_span / (2 ** 0.5)
+        return [
+            QLineF(center.x() - half_span, center.y(), center.x() + half_span, center.y()),
+            QLineF(center.x(), center.y() - half_span, center.x(), center.y() + half_span),
+            QLineF(center.x() - diag_delta, center.y() - diag_delta, center.x() + diag_delta, center.y() + diag_delta),
+            QLineF(center.x() - diag_delta, center.y() + diag_delta, center.x() + diag_delta, center.y() - diag_delta),
+        ]
+
+    def completed_segments(self) -> list[QLineF]:
+        if self._status != "completed":
+            return []
+        inner = self._inner_rect(QRectF(self.rect()))
+        left = inner.left()
+        right = inner.right()
+        top = inner.top()
+        bottom = inner.bottom()
+        mid_x = left + (inner.width() * 0.46)
+        mid_y = top + (inner.height() * 0.68)
+        start = QPointF(left + (inner.width() * 0.20), top + (inner.height() * 0.56))
+        joint = QPointF(mid_x, mid_y)
+        end = QPointF(right - (inner.width() * 0.16), top + (inner.height() * 0.24))
+        return [
+            QLineF(start, joint),
+            QLineF(joint, end),
+        ]
+
+    def _text_origin(self) -> QPointF:
+        bounds = QRectF(self.fontMetrics().tightBoundingRect(self.text()))
+        inner = self._inner_rect(QRectF(self.rect()))
+        return QPointF(
+            inner.center().x() - bounds.center().x(),
+            inner.center().y() - bounds.center().y(),
+        )
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        border_pen = QPen(self._color)
+        border_pen.setWidthF(1.0)
+        painter.setPen(border_pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 5.0, 5.0)
+
+        if self._status == "running":
+            star_pen = QPen(self._color)
+            star_pen.setWidthF(1.35)
+            star_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(star_pen)
+            for segment in self.running_segments():
+                painter.drawLine(segment)
+            return
+
+        if self._status == "completed":
+            check_pen = QPen(self._color)
+            check_pen.setWidthF(1.6)
+            check_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            check_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(check_pen)
+            for segment in self.completed_segments():
+                painter.drawLine(segment)
+            return
+
+        if not self.text():
+            return
+
+        painter.setPen(self._color)
+        painter.drawText(self._text_origin(), self.text())
+
+
+class _ExecPreviewText(QWidget):
+    """Plain-text preview that preserves hard line breaks and overlays a fade when clamped."""
+
+    def __init__(
+        self,
+        text: str,
+        *,
+        fade_color: str,
+        fade_object_name: str | None = None,
+        line_limit: int = 3,
+        parent: QWidget | None = None,
+    ):
+        super().__init__(parent)
+        self._text = str(text or "")
+        self._line_limit = max(1, int(line_limit))
+        self._fade = _FadeMask(fade_color, self)
+        self._fade.hide()
+        if fade_object_name:
+            self._fade.setObjectName(fade_object_name)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self._label = QLabel(self._text, self)
+        self._label.setObjectName("execDetailText")
+        self._label.setTextFormat(Qt.TextFormat.PlainText)
+        self._label.setWordWrap(False)
+        self._label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self._label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self._label.setMinimumWidth(0)
+        layout.addWidget(self._label)
+        self._refresh_clamp()
+
+    def label(self) -> QLabel:
+        return self._label
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._position_fade()
+
+    def _refresh_clamp(self) -> None:
+        line_height = self._label.fontMetrics().lineSpacing()
+        line_count = max(1, self._text.count("\n") + 1)
+        visible_lines = min(self._line_limit, line_count)
+        target_height = (visible_lines * line_height) + 2
+        self._label.setFixedHeight(target_height)
+        self._fade.setVisible(line_count > self._line_limit)
+        self._position_fade()
+
+    def _position_fade(self) -> None:
+        if not self._fade.isVisible():
+            return
+        fade_height = max(20, self._label.fontMetrics().lineSpacing() * 2)
+        self._fade.setGeometry(
+            0,
+            max(0, self.height() - fade_height),
+            self.width(),
+            min(fade_height, self.height()),
+        )
+        self._fade.raise_()
 
 
 class ToolCallGroup(QWidget):
     """Tool calls in a compact summary row."""
+
+    expanded_changed = pyqtSignal()
+
+    @staticmethod
+    def _task_control_text_for_status(status: str) -> str:
+        if status == "running":
+            return "*"
+        if status == "completed":
+            return "✓"
+        if status == "failed":
+            return "!"
+        return ""
 
     @staticmethod
     def _display_name(name: str) -> str:
@@ -119,6 +276,9 @@ class ToolCallGroup(QWidget):
         self._tick_timer = QTimer(self)
         self._tick_timer.setInterval(1000)
         self._tick_timer.timeout.connect(self._tick_running)
+        self._expanded = False
+        self._detail_label: QLabel | None = None
+        self._header_arrow: _DisclosureArrow | None = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -135,22 +295,18 @@ class ToolCallGroup(QWidget):
         content_layout.setSpacing(0)
         layout.addWidget(content, 1)
 
-        self._header_btn = _ClickableHeaderWidget()
+        self._header_btn = _DisclosureHeaderBar(
+            self,
+            text_format=Qt.TextFormat.RichText,
+            contents_margins=(0, 4, 0, 6),
+            spacing=4,
+        )
         self._header_btn.setObjectName("toolCallHeader")
         self._header_btn.setMinimumHeight(TIMELINE_EVENT_ROW_HEIGHT)
-        self._header_btn.clicked.connect(lambda: None)
-        header_layout = QHBoxLayout(self._header_btn)
-        header_layout.setContentsMargins(0, 4, 0, 6)
-        header_layout.setSpacing(0)
-
-        self._header_text = QLabel()
-        self._header_text.setObjectName("toolCallHeaderText")
-        self._header_text.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        self._header_text.setWordWrap(True)
-        self._header_text.setTextFormat(Qt.TextFormat.RichText)
-        self._header_text.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self._header_text.setMinimumWidth(0)
-        header_layout.addWidget(self._header_text, 1, Qt.AlignmentFlag.AlignTop)
+        self._header_btn.clicked.connect(self._toggle_expanded)
+        self._header_text = self._header_btn.text_label()
+        self._header_arrow = self._header_btn.arrow()
+        self._header_arrow.setVisible(False)
 
         self._task_board_host = QWidget(self._header_btn)
         self._task_board_host.setObjectName("taskBoardHost")
@@ -158,13 +314,14 @@ class ToolCallGroup(QWidget):
         self._task_board_layout.setContentsMargins(0, 0, 0, 0)
         self._task_board_layout.setSpacing(2)
         self._task_board_host.setVisible(False)
-        header_layout.addWidget(self._task_board_host, 1, Qt.AlignmentFlag.AlignTop)
+        self._header_btn.add(self._task_board_host, 1)
         content_layout.addWidget(self._header_btn)
 
         self._detail_host = QWidget(self)
         self._detail_layout = QVBoxLayout(self._detail_host)
         self._detail_layout.setContentsMargins(0, 2, 0, 0)
         self._detail_layout.setSpacing(0)
+        self._detail_host.setVisible(False)
         content_layout.addWidget(self._detail_host)
         self._update_timeline_chain()
 
@@ -186,6 +343,8 @@ class ToolCallGroup(QWidget):
         result: Any = None,
         error: str | None = None,
         summary: str | None = None,
+        detail: str | None = None,
+        expandable: bool = False,
     ) -> None:
         self._calls.append(ToolCall(
             name=name,
@@ -195,6 +354,8 @@ class ToolCallGroup(QWidget):
             result=result,
             error=error,
             summary=summary,
+            detail=detail,
+            expandable=expandable,
             elapsed_seconds=0,
             file_names=self._extract_file_names(arguments),
         ))
@@ -207,6 +368,8 @@ class ToolCallGroup(QWidget):
         error: str | None = None,
         duration_ms: int = 100,
         summary: str | None = None,
+        detail: str | None = None,
+        expandable: bool | None = None,
     ) -> None:
         for call in reversed(self._calls):
             if call.name == name and call.success is None:
@@ -216,6 +379,10 @@ class ToolCallGroup(QWidget):
                 call.error = error
                 if summary is not None:
                     call.summary = summary
+                if detail is not None:
+                    call.detail = detail
+                if expandable is not None:
+                    call.expandable = expandable
                 self._update_display()
                 return
 
@@ -227,6 +394,8 @@ class ToolCallGroup(QWidget):
             result=result if error is None else None,
             error=error,
             summary=summary,
+            detail=detail,
+            expandable=bool(expandable),
         )
 
     def can_merge_with_last(self, name: str) -> bool:
@@ -300,14 +469,17 @@ class ToolCallGroup(QWidget):
         if call.name == "edit_file":
             files = " ".join(call.file_names) if call.file_names else ""
             return f"<b>Edit</b>{sep}{files}".strip()
+        if call.name == "apply_patch":
+            files = " ".join(call.file_names) if call.file_names else ""
+            return f"<b>Edit</b>{sep}{files}".strip()
         if call.name == "delete_file":
             files = " ".join(call.file_names) if call.file_names else ""
             return f"<b>Delete</b>{sep}{files}".strip()
-        if call.name == "exec":
+        if call.name in {"exec", "bash"}:
             desc = str(call.arguments.get("command_description") or "").strip()
             if desc:
                 desc = desc[0].upper() + desc[1:]
-            return f"<b>Exec</b>{sep}{desc}".strip()
+            return f"<b>Bash</b>{sep}{desc}".strip()
         return f"<b>{self._display_name(call.name)}</b>"
 
     def _task_status_from_line(self, line: str) -> str:
@@ -323,13 +495,7 @@ class ToolCallGroup(QWidget):
         return "pending"
 
     def _task_control_text(self, status: str) -> str:
-        if status == "running":
-            return "*"
-        if status == "completed":
-            return "✓"
-        if status == "failed":
-            return "!"
-        return ""
+        return self._task_control_text_for_status(status)
 
     def _clear_task_board(self) -> None:
         while self._task_board_layout.count():
@@ -375,29 +541,18 @@ class ToolCallGroup(QWidget):
         row.setObjectName("taskRow")
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(7)
 
-        control = QLabel(self._task_control_text(status), row)
-        control.setObjectName("taskStatusControl")
-        control.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        control.setFixedSize(18, 18)
-        control.setTextFormat(Qt.TextFormat.PlainText)
-        control.setProperty("taskStatus", status)
         color = {
             "running": c["status_running"],
             "completed": c["status_success"],
             "failed": c["status_error"],
         }.get(status, c["muted"])
-        control.setStyleSheet(f"""
-            QLabel#taskStatusControl {{
-                border: 1px solid {color};
-                border-radius: 5px;
-                color: {color};
-                font-weight: 700;
-                background: transparent;
-            }}
-        """)
-        layout.addWidget(control, 0, Qt.AlignmentFlag.AlignTop)
+        control = _TaskStatusControl(status, color, row)
+        control.setObjectName("taskStatusControl")
+        control.setFixedSize(16, 16)
+        control.setProperty("taskStatus", status)
+        layout.addWidget(control, 0, Qt.AlignmentFlag.AlignVCenter)
 
         label = QLabel(text, row)
         label.setObjectName("taskTextLabel")
@@ -418,42 +573,79 @@ class ToolCallGroup(QWidget):
                 self._add_task_section_label(text)
 
     def _clear_detail(self) -> None:
+        self._detail_label = None
         while self._detail_layout.count():
             item = self._detail_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
+    def _expandable_call(self) -> ToolCall | None:
+        if len(self._calls) != 1:
+            return None
+        call = self._calls[0]
+        if not (call.expandable and str(call.detail or "").strip()):
+            return None
+        return call
+
+    def _render_expandable_detail(self, call: ToolCall) -> None:
+        self._clear_detail()
+        self._detail_label = QLabel(render_markdown(str(call.detail or "")), self._detail_host)
+        self._detail_label.setObjectName("toolCallDetail")
+        self._detail_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self._detail_label.setWordWrap(True)
+        self._detail_label.setTextFormat(Qt.TextFormat.RichText)
+        self._detail_label.setOpenExternalLinks(False)
+        self._detail_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._detail_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._detail_label.setMinimumWidth(0)
+        self._detail_layout.addWidget(self._detail_label)
+        self._detail_host.setVisible(self._expanded)
+
     def _exec_card(self, call: ToolCall) -> QWidget:
         card = QFrame(self)
         card.setObjectName("execDetailCard")
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(8, 6, 8, 10)
-        card_layout.setSpacing(4)
+        card_layout.setContentsMargins(0, 0, 0, 0)
+        card_layout.setSpacing(0)
 
-        def _row(tag: str, text: str, display_text: str | None = None) -> QWidget:
-            shown = text if display_text is None else display_text
+        def _row(tag: str, text: str) -> QWidget:
             row = QFrame(card)
+            row.setObjectName("execDetailRow")
             row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.setSpacing(8)
+            row_layout.setContentsMargins(16, 9, 10, 9)
+            row_layout.setSpacing(16)
+
             label = QLabel(tag, row)
             label.setObjectName("execDetailTag")
             label.setFixedWidth(24)
-            row_layout.addWidget(label)
-            value = QLabel(shown, row)
-            value.setObjectName("execDetailText")
-            value.setTextFormat(Qt.TextFormat.PlainText)
-            value.setWordWrap(False)
-            # Allow long command/output text to shrink with panel width instead of
-            # forcing the whole row wider than the agent panel.
-            value.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
-            value.setMinimumWidth(0)
-            value.setFixedHeight(18)
-            row_layout.addWidget(value, 1)
+            label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+            row_layout.addWidget(label, 0, Qt.AlignmentFlag.AlignTop)
+
+            value_host = QWidget(row)
+            value_host.setObjectName("execDetailValueHost")
+            host_layout = QHBoxLayout(value_host)
+            host_layout.setContentsMargins(0, 0, 0, 0)
+            host_layout.setSpacing(8)
+
+            text_stack = QWidget(value_host)
+            text_stack_layout = QVBoxLayout(text_stack)
+            text_stack_layout.setContentsMargins(0, 0, 0, 0)
+            text_stack_layout.setSpacing(0)
+
+            preview = _ExecPreviewText(
+                text,
+                fade_color=get_theme_colors()["detail_card_bg"],
+                fade_object_name="execOutFadeMask" if tag == "OUT" else None,
+                parent=text_stack,
+            )
+            text_stack_layout.addWidget(preview)
+            host_layout.addWidget(text_stack, 1, Qt.AlignmentFlag.AlignTop)
+
             copy_btn = QPushButton(row)
-            copy_btn.setObjectName("userCopyBtn")
+            copy_btn.setObjectName("execCopyBtn")
             copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            copy_btn.setFixedSize(30, 24)
+            copy_btn.setFixedSize(30, preview.label().fontMetrics().lineSpacing() + 2)
+            copy_btn.setIconSize(QSize(14, 14))
             install_compact_tooltip(copy_btn, "Copy")
             # Keep button width reserved so IN/OUT text width is stable before hover.
             copy_btn.setVisible(True)
@@ -461,7 +653,8 @@ class ToolCallGroup(QWidget):
             copy_btn.setFlat(True)
             copy_btn.setIcon(QIcon())
             copy_btn.clicked.connect(lambda _=False, t=text: QApplication.clipboard().setText(t))
-            row_layout.addWidget(copy_btn, 0, Qt.AlignmentFlag.AlignRight)
+            host_layout.addWidget(copy_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+            row_layout.addWidget(value_host, 1, Qt.AlignmentFlag.AlignTop)
 
             def _enter(_):
                 copy_btn.setEnabled(True)
@@ -493,14 +686,12 @@ class ToolCallGroup(QWidget):
         divider.setObjectName("execDetailDivider")
         divider.setFixedHeight(1)
         card_layout.addWidget(divider)
-        out_preview = "\n".join(out.splitlines()[:3])
-        card_layout.addWidget(_row("OUT", out, out_preview))
-        card.setMaximumHeight(110)
+        card_layout.addWidget(_row("OUT", out))
         return card
 
     def _render_exec_detail(self) -> None:
         self._clear_detail()
-        exec_calls = [c for c in self._calls if c.name == "exec"]
+        exec_calls = [c for c in self._calls if c.name in {"exec", "bash"}]
         if not exec_calls:
             self._detail_host.setVisible(False)
             return
@@ -516,6 +707,7 @@ class ToolCallGroup(QWidget):
         success = not running and not failed
         lines = [self._header_text_for_call(call) for call in self._calls]
         self._header_text.setText("<br/>".join(lines))
+        expandable_call = self._expandable_call()
         show_task_board = len(self._calls) == 1 and self._calls[0].name == "manage_tasks" and bool(self._calls[0].summary)
         self._header_text.setVisible(not show_task_board)
         self._task_board_host.setVisible(show_task_board)
@@ -523,6 +715,13 @@ class ToolCallGroup(QWidget):
             self._render_task_board(self._calls[0].summary or "")
         else:
             self._clear_task_board()
+        if self._header_arrow is not None:
+            self._header_arrow.setVisible(expandable_call is not None)
+            self._header_arrow.set_expanded(self._expanded)
+            self._header_btn.align_arrow_to_first_line()
+        self._header_btn.setCursor(
+            Qt.CursorShape.PointingHandCursor if expandable_call is not None else Qt.CursorShape.ArrowCursor
+        )
 
         if len(self._calls) == 1:
             dot_color = self._status_dot_color(self._calls[0].success)
@@ -531,7 +730,11 @@ class ToolCallGroup(QWidget):
 
         if self._timeline_rail is not None:
             self._timeline_rail.set_dot_color(dot_color)
-        self._render_exec_detail()
+        if expandable_call is not None:
+            self._render_expandable_detail(expandable_call)
+        else:
+            self._expanded = False
+            self._render_exec_detail()
 
         if any(c.success is None for c in self._calls):
             if not self._tick_timer.isActive():
@@ -540,7 +743,7 @@ class ToolCallGroup(QWidget):
             self._tick_timer.stop()
 
     def is_expanded(self) -> bool:
-        return False
+        return self._expanded
 
     def get_summary_text(self) -> str:
         return self._header_text.text()
@@ -584,9 +787,18 @@ class ToolCallGroup(QWidget):
                 result=call.result,
                 error=call.error,
                 summary=call.summary,
+                detail=call.detail,
+                expandable=call.expandable,
                 elapsed_seconds=call.elapsed_seconds,
                 file_names=list(call.file_names),
             )
             for call in other._calls
         ]
         self._update_display()
+
+    def _toggle_expanded(self) -> None:
+        if self._expandable_call() is None:
+            return
+        self._expanded = not self._expanded
+        self._update_display()
+        self.expanded_changed.emit()

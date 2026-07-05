@@ -7,47 +7,52 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-from PyQt6.QtCore import QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
+    QFrame,
     QHBoxLayout,
     QMainWindow,
-    QMenu,
     QMenuBar,
     QMessageBox,
     QSplitter,
     QVBoxLayout,
     QWidget,
-    QFrame,
 )
 
 from ..core.conversations import ConversationStore
 from ..interfaces.protocol import BackendAPI
 from ..interfaces.types import (
-    AgentType,
-    AgentFeedback,
     AgentResponse,
+    AgentType,
     Checkpoint,
     Error,
     Message,
     QueueUpdateMessage,
+    ReportMessage,
     StatusChange,
-    ToolCall,
+    SystemNotice,
+    ToolCallMessage,
     ToolResult,
     UserMessage,
 )
 from ..utils.agent_labels import get_agent_badge, get_agent_title
 from ..utils.editor_context import build_editor_context_message, build_editor_context_prompt
 from ..utils.logging_config import ui_logger
-from .dialogs import question_box, warning_box
+from .dialogs import information_box, question_box, warning_box
 from .scale import dpi_scale
 from .theme import get_theme_colors, scrollbar_stylesheet
 from .title_bar import TitleBar
 from .widgets.agent_panel import AgentPanel
 from .widgets.file_tree import FileTreeWidget
 from .widgets.preview import PreviewWidget
-from .widgets.ui_utils import combo_box_qss, compact_tooltip_qss, filled_button_qss, outlined_button_qss
+from .widgets.ui_utils import (
+    combo_box_qss,
+    compact_tooltip_qss,
+    filled_button_qss,
+    outlined_button_qss,
+)
 
 
 @dataclass
@@ -55,6 +60,12 @@ class _TurnState:
     message_id: str | None = None
     answer_started: bool = False
     phase: str = "idle"
+
+
+# File-tree panel sizing (logical px, DPI-scaled at use sites).
+_FILE_TREE_DEFAULT_WIDTH = 440  # initial width — the tree needs little room
+_FILE_TREE_MAX_WIDTH = 1020  # cap so it can't hog the window when resized
+_FILE_TREE_MAX_FRACTION = 0.40  # never exceed 40% of the window width
 
 
 class MainWindow(QMainWindow):
@@ -85,6 +96,7 @@ class MainWindow(QMainWindow):
         self._initial_render_prepared = False
         # Cache file context to attach to next user message
         self._pending_file_context: dict[str, dict | None] = {}
+        self._pending_rollbacks: dict[str, dict[str, str | None]] = {}
         self._turn_state: dict[str, _TurnState] = {}
 
         self.setWindowTitle("AutoReport")
@@ -146,7 +158,6 @@ class MainWindow(QMainWindow):
         if sys.platform == "win32":
             # Windows: Use native DWM shadow
             import ctypes
-            from ctypes import wintypes
 
             # Enable DWM blur behind window
             try:
@@ -199,22 +210,26 @@ class MainWindow(QMainWindow):
                 margin: 0;
                 padding: 0;
             }}
-            {scrollbar_stylesheet(
+            {
+            scrollbar_stylesheet(
                 orientation="vertical",
                 background_color="transparent",
                 thickness=px(8),
                 min_handle_extent=px(30),
                 radius=px(4),
                 colors=c,
-            )}
-            {scrollbar_stylesheet(
+            )
+        }
+            {
+            scrollbar_stylesheet(
                 orientation="horizontal",
                 background_color="transparent",
                 thickness=px(8),
                 min_handle_extent=px(30),
                 radius=px(4),
                 colors=c,
-            )}
+            )
+        }
             {compact_tooltip_qss("QToolTip")}
 
             /* ---- Panel Header ---- */
@@ -237,7 +252,8 @@ class MainWindow(QMainWindow):
                 font-size: {px(11)};
                 color: {c["status_idle"]};
             }}
-            {combo_box_qss(
+            {
+            combo_box_qss(
                 "#subAgentSelector",
                 border_color=c["border"],
                 background_color=c["surface"],
@@ -250,7 +266,8 @@ class MainWindow(QMainWindow):
                 radius=c["radius_md"],
                 popup_radius=c["radius_md"],
                 item_radius=c["radius_sm"],
-            )}
+            )
+        }
             #headerAction {{
                 background-color: transparent;
                 border: none;
@@ -372,12 +389,12 @@ class MainWindow(QMainWindow):
             }}
             #userMessageBubble {{
                 background-color: {c["bubble_bg"]};
-                border: 1px solid {c["border"]};
+                border: 1px solid {c["gray_white"]};
                 border-radius: {px(12)};
             }}
             #userContextChip {{
-                background-color: {c["hover"]};
-                border: 1px solid {c["border"]};
+                background-color: {c["secondaryBtnBg"]};
+                border: 1px solid {c["gray_white"]};
                 border-radius: {px(8)};
             }}
             #userContextChipIcon {{
@@ -435,7 +452,8 @@ class MainWindow(QMainWindow):
                 background-color: {c["hover"]};
                 color: {c["fg"]};
             }}
-            {filled_button_qss(
+            {
+            filled_button_qss(
                 "#userSaveBtn",
                 bg=c["buttonBlue"],
                 fg=c["primaryBtnFg"],
@@ -445,11 +463,13 @@ class MainWindow(QMainWindow):
                 radius=px(4),
                 padding=f"{px(4)} {px(10)}",
                 font_size=round(12 * s),
-            )}
+            )
+        }
             QPushButton#userSaveBtn:disabled {{
                 opacity: 0.5;
             }}
-            {outlined_button_qss(
+            {
+            outlined_button_qss(
                 "#userCancelBtn",
                 fg=c["fg"],
                 border=c["border"],
@@ -458,7 +478,8 @@ class MainWindow(QMainWindow):
                 radius=px(4),
                 padding=f"{px(4)} {px(10)}",
                 font_size=round(12 * s),
-            )}
+            )
+        }
             #queuePreview {{
                 background-color: {c["surface"]};
                 border-bottom: 1px solid {c["border"]};
@@ -580,15 +601,15 @@ class MainWindow(QMainWindow):
                 font-weight: {c["fw_medium"]};
             }}
             #toolCallDetail {{
-                color: {c["tool_detail"]};
+                color: {c["fg"]};
                 font-family: "Segoe UI", "SF Pro", sans-serif;
-                font-size: {px(11)};
-                padding: {px(1)} 0 {px(2)} {px(12)};
+                font-size: {px(13)};
+                padding: 0;
             }}
             #execDetailCard {{
                 background-color: {c["detail_card_bg"]};
                 border: 1px solid {c["detail_card_border"]};
-                border-radius: {px(8)};
+                border-radius: {px(6)};
             }}
             #execDetailRow {{
                 background-color: transparent;
@@ -599,10 +620,16 @@ class MainWindow(QMainWindow):
                 font-weight: {c["fw_semibold"]};
                 min-width: {px(20)};
             }}
+            #execDetailValueHost {{
+                background-color: transparent;
+                border: none;
+                border-radius: 0;
+            }}
             #execDetailText {{
                 color: {c["detail_fg"]};
                 font-family: "Cascadia Code", "SF Mono", "Consolas", monospace;
                 font-size: {px(11)};
+                line-height: 1.45;
             }}
             #execDetailDivider {{
                 background-color: {c["detail_card_border"]};
@@ -642,11 +669,12 @@ class MainWindow(QMainWindow):
             #execCopyBtn {{
                 background-color: transparent;
                 border: none;
+                border-radius: {px(4)};
                 color: {c["detail_muted"]};
-                font-size: {px(10)};
-                padding: {px(2)} {px(4)};
+                padding: 0;
             }}
             #execCopyBtn:hover {{
+                background-color: {c["hover"]};
                 color: {c["detail_hover_fg"]};
             }}
 
@@ -681,6 +709,8 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
 
         open_file_act = file_menu.addAction("打开文件...")
+        open_file_act.setEnabled(False)
+        open_file_act.setToolTip("请通过左侧文件树添加文件（拖放或目录内右键新建）")
         open_file_act.triggered.connect(self._on_open_file)
 
         open_folder_act = file_menu.addAction("打开文件夹...")
@@ -695,6 +725,8 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
 
         new_window_act = file_menu.addAction("新建窗口")
+        new_window_act.setEnabled(False)
+        new_window_act.setToolTip("暂不支持多窗口；请新建/打开另一个项目")
         new_window_act.triggered.connect(self._on_new_window)
 
         file_menu.addSeparator()
@@ -713,7 +745,7 @@ class MainWindow(QMainWindow):
         base_title = "AutoReport"
 
         # Check if preview exists (may not during initialization)
-        if not hasattr(self, 'preview'):
+        if not hasattr(self, "preview"):
             self.setWindowTitle(base_title)
             return
 
@@ -736,13 +768,17 @@ class MainWindow(QMainWindow):
         self.file_tree._new_folder()
 
     def _on_open_file(self) -> None:
-        """Handle open file action."""
-        from PyQt6.QtWidgets import QFileDialog
+        """Handle open file action.
 
-        file_path, _ = QFileDialog.getOpenFileName(self, "打开文件")
-        if file_path:
-            # TODO: Import/open the file
-            logger.info("Open file requested: {}", file_path)
+        Currently unsupported — files are added via the file tree (drag-drop or
+        right-click within a directory). The menu entry is disabled; this
+        handler only guards against any future trigger path.
+        """
+        information_box(
+            self,
+            "暂不支持",
+            "请通过左侧文件树添加文件：将文件拖入对应目录，或在目录上右键新建。",
+        )
 
     def _on_open_folder(self) -> None:
         """Handle open folder action — switch workspace to the selected folder.
@@ -793,9 +829,12 @@ class MainWindow(QMainWindow):
             logger.debug("Save skipped: no editable active file")
 
     def _on_new_window(self) -> None:
-        """Handle new window action."""
-        # TODO: Launch new window
-        logger.info("New window requested")
+        """Handle new window action.
+
+        Currently unsupported — multi-window mode is not implemented. The menu
+        entry is disabled; this handler only guards against future triggers.
+        """
+        information_box(self, "暂不支持", "暂不支持多窗口，请新建或打开另一个项目。")
 
     def _setup_ui(self) -> None:
         # Create container
@@ -863,11 +902,15 @@ class MainWindow(QMainWindow):
         for index in range(main_splitter.count()):
             main_splitter.setCollapsible(index, False)
 
-        # Set stretch factors for proportional sizing
-        # file_tree: 20%, preview: 45%, agent_panel: 35%
-        main_splitter.setStretchFactor(0, 20)   # file_tree
-        main_splitter.setStretchFactor(1, 45)   # preview
-        main_splitter.setStretchFactor(2, 35)   # agent_panel
+        # Cap the file-tree width so it stays a narrow rail and never hogs the
+        # window — extra space should flow to the preview/agent panels.
+        self.file_tree.setMaximumWidth(_FILE_TREE_MAX_WIDTH)
+
+        # Set stretch factors: file_tree is non-stretching (it has a max width),
+        # extra space is split between preview and agent_panel.
+        main_splitter.setStretchFactor(0, 0)  # file_tree (fixed-ish rail)
+        main_splitter.setStretchFactor(1, 56)  # preview
+        main_splitter.setStretchFactor(2, 44)  # agent_panel
 
         # Store main_splitter for resize handling
         self._main_splitter = main_splitter
@@ -895,10 +938,14 @@ class MainWindow(QMainWindow):
         )
         self.agent_panel.delete_session_requested.connect(self._on_delete_session)
         self.agent_panel.rename_session_requested.connect(self._on_rename_session)
-        self.agent_panel.interrupt_requested.connect(lambda: self._on_interrupt(self.current_agent_type))
+        self.agent_panel.interrupt_requested.connect(
+            lambda: self._on_interrupt(self.current_agent_type)
+        )
         self.agent_panel.agent_type_changed.connect(self._on_agent_type_changed)
         self.agent_panel.rollback_requested.connect(
-            lambda checkpoint_id, row: self._on_rollback_requested(self.current_agent_type, checkpoint_id, row)
+            lambda checkpoint_id, row: self._on_rollback_requested(
+                self.current_agent_type, checkpoint_id, row
+            )
         )
         self.agent_panel.thinking_finished.connect(
             lambda summary, detail, expandable: self._on_thinking_finished(
@@ -912,7 +959,8 @@ class MainWindow(QMainWindow):
         self.agent_panel.set_agent_type("main")
         self.agent_panel.set_debug_mode("main" in self._debug_agents)
         self.agent_panel.conversation_cleared.connect(
-            lambda: self._on_conversation_cleared(self.current_agent_type))
+            lambda: self._on_conversation_cleared(self.current_agent_type)
+        )
 
     def _on_directory_selected(self, directory: str) -> None:
         ui_logger.debug("MainWindow: directory selected {}", directory)
@@ -922,7 +970,9 @@ class MainWindow(QMainWindow):
             self.agent_panel.clear_file_context()
         self._file_just_selected = False
 
-    def _on_preview_selection_changed(self, file_path: str, selected_text: str, start_line: int, end_line: int) -> None:
+    def _on_preview_selection_changed(
+        self, file_path: str, selected_text: str, start_line: int, end_line: int
+    ) -> None:
         if not selected_text:
             # Empty selection should not override selection context here.
             # File-path attachment is synchronized via _on_preview_file_changed.
@@ -1040,6 +1090,7 @@ class MainWindow(QMainWindow):
                     bubble_on_timeline=bool(rec.get("bubble_on_timeline", False)),
                     bubble_collapsible=bool(rec.get("bubble_collapsible", True)),
                     allow_edit=str(rec.get("source", "user")) == "user",
+                    message_id=rec.get("message_id"),
                 )
             elif role == "agent":
                 if rec.get("display_mode") == "bubble":
@@ -1051,9 +1102,10 @@ class MainWindow(QMainWindow):
                         bubble_align=str(rec.get("bubble_align") or "left"),
                         bubble_on_timeline=bool(rec.get("bubble_on_timeline", True)),
                         bubble_collapsible=bool(rec.get("bubble_collapsible", True)),
+                        message_id=rec.get("message_id"),
                     )
                 else:
-                    panel.add_message("agent", content)
+                    panel.add_message("agent", content, message_id=rec.get("message_id"))
             elif role == "thinking":
                 panel.add_message(
                     "agent",
@@ -1074,13 +1126,17 @@ class MainWindow(QMainWindow):
                     rec.get("result"),
                     rec.get("error"),
                     summary=rec.get("summary"),
+                    detail=rec.get("detail"),
+                    expandable=rec.get("expandable"),
                 )
             elif role == "error":
                 panel.add_error(rec.get("source", ""), content)
         panel._update_width()
         logger.info("Loaded {} messages for agent {}", len(records), agent_type)
 
-    def _on_thinking_finished(self, agent_type: str, summary: str, detail: str, expandable: bool) -> None:
+    def _on_thinking_finished(
+        self, agent_type: str, summary: str, detail: str, expandable: bool
+    ) -> None:
         if not (detail or "").strip():
             return
         self._conv_store.append_message(
@@ -1190,19 +1246,35 @@ class MainWindow(QMainWindow):
             return
 
         panel = self._get_panel_for_agent(agent_type)
+        self._pending_rollbacks[agent_type] = {
+            "message_id": getattr(row, "_message_id", None),
+            "content": getattr(row, "_content", None),
+            "role": getattr(row, "_role", None),
+        }
         panel._messages_area.retract_from_row(row)
-        future = self._submit_coroutine(self.backend.rollback_to_checkpoint(agent_type, checkpoint_id))
+        future = self._submit_coroutine(
+            self.backend.rollback_to_checkpoint(agent_type, checkpoint_id)
+        )
         if future is not None:
-            future.add_done_callback(lambda done: self._rollback_finished_signal.emit(agent_type, done))
+            future.add_done_callback(
+                lambda done: self._rollback_finished_signal.emit(agent_type, done)
+            )
 
     def _on_rollback_finished(self, agent_type: str, future) -> None:
+        rollback_target = self._pending_rollbacks.pop(agent_type, None)
         try:
             future.result()
         except Exception as exc:
             logger.warning("Rollback failed for {}: {}", agent_type, exc)
             warning_box(self, "Rollback Failed", str(exc))
+            if self._is_visible_agent(agent_type):
+                self._show_current_agent_conversation()
             return
 
+        if rollback_target:
+            self._conv_store.truncate_from_message(agent_type, **rollback_target)
+        if self._is_visible_agent(agent_type):
+            self._show_current_agent_conversation()
         self.file_tree.refresh()
         current_file = self.preview.current_file
         if current_file and current_file.exists():
@@ -1217,9 +1289,11 @@ class MainWindow(QMainWindow):
             Checkpoint,
             Error,
             QueueUpdateMessage,
+            ReportMessage,
             StatusChange,
+            SystemNotice,
             TaskUpdateMessage,
-            ToolCall,
+            ToolCallMessage,
             ToolResult,
             UserMessage,
         )
@@ -1228,7 +1302,7 @@ class MainWindow(QMainWindow):
             self._handle_agent_response(message)
         elif isinstance(message, UserMessage):
             self._handle_user_message(message)
-        elif isinstance(message, ToolCall):
+        elif isinstance(message, ToolCallMessage):
             self._handle_tool_call(message)
         elif isinstance(message, ToolResult):
             self._handle_tool_result(message)
@@ -1240,8 +1314,10 @@ class MainWindow(QMainWindow):
             self._handle_checkpoint(message)
         elif isinstance(message, TaskUpdateMessage):
             self._handle_task_update_msg(message)
-        elif isinstance(message, AgentFeedback):
-            self._handle_agent_feedback(message)
+        elif isinstance(message, ReportMessage):
+            self._handle_report_message(message)
+        elif isinstance(message, SystemNotice):
+            self._handle_system_notice(message)
         elif isinstance(message, QueueUpdateMessage):
             self._handle_queue_update(message)
 
@@ -1249,7 +1325,12 @@ class MainWindow(QMainWindow):
         agent_str = str(message.agent_type)
         if not self._is_visible_agent(agent_str):
             if not message.streaming and message.content:
-                self._conv_store.append_message(agent_str, "agent", message.content)
+                self._conv_store.append_message(
+                    agent_str,
+                    "agent",
+                    message.content,
+                    extra={"message_id": message.message_id},
+                )
             return
         panel = self._get_panel_for_agent(agent_str)
         state = self._state_for_agent(agent_str)
@@ -1275,8 +1356,6 @@ class MainWindow(QMainWindow):
             state.phase = "idle"
 
         if getattr(message, "thinking", None):
-            if state.answer_started:
-                return
             panel.append_thinking(message.thinking or "")
             state.phase = "thinking"
             return
@@ -1295,7 +1374,12 @@ class MainWindow(QMainWindow):
             row = _latest_incomplete_agent_row()
             if row is not None:
                 row.mark_complete()
-                self._conv_store.append_message(agent_str, "agent", row._content)
+                self._conv_store.append_message(
+                    agent_str,
+                    "agent",
+                    row._content,
+                    extra={"message_id": msg_id or None},
+                )
                 state.answer_started = False
                 state.phase = "idle"
                 return
@@ -1303,9 +1387,16 @@ class MainWindow(QMainWindow):
         panel.finish_thinking()
         state.answer_started = True
         state.phase = "answer"
-        panel.add_message("agent", message.content, streaming=message.streaming)
+        panel.add_message(
+            "agent", message.content, streaming=message.streaming, message_id=msg_id or None
+        )
         if not message.streaming:
-            self._conv_store.append_message(agent_str, "agent", message.content)
+            self._conv_store.append_message(
+                agent_str,
+                "agent",
+                message.content,
+                extra={"message_id": msg_id or None},
+            )
             rows = panel._messages_area.get_message_rows()
             if rows and rows[-1]._role == "agent":
                 rows[-1].mark_complete()
@@ -1319,7 +1410,11 @@ class MainWindow(QMainWindow):
                 agent_str,
                 "user",
                 message.content,
-                extra={"source": message.source},
+                extra={
+                    "source": message.source,
+                    "message_id": message.message_id,
+                    "summary": getattr(message, "summary", "") or "",
+                },
             )
             return
         source_key = str(message.source or "user")
@@ -1329,8 +1424,11 @@ class MainWindow(QMainWindow):
         bubble_on_timeline = False
         allow_edit = source_key == "user"
         if is_agent_message:
-            sender = "Main" if source_key == "main_agent" else self._get_agent_display_name(source_key)
-            bubble_title = self._build_inter_agent_title(
+            sender = (
+                "Main" if source_key == "main_agent" else self._get_agent_display_name(source_key)
+            )
+            summary = str(getattr(message, "summary", "") or "").strip()
+            bubble_title = summary or self._build_inter_agent_title(
                 f"Message From {sender}",
                 message.content,
             )
@@ -1347,6 +1445,7 @@ class MainWindow(QMainWindow):
             bubble_on_timeline=bubble_on_timeline,
             bubble_collapsible=True,
             allow_edit=allow_edit,
+            message_id=message.message_id,
         )
 
         self._conv_store.append_message(
@@ -1355,20 +1454,40 @@ class MainWindow(QMainWindow):
             message.content,
             extra={
                 "source": message.source,
+                "summary": getattr(message, "summary", "") or "",
                 "display_mode": "bubble",
                 "bubble_title": bubble_title,
                 "bubble_align": bubble_align,
                 "bubble_on_timeline": bubble_on_timeline,
                 "bubble_collapsible": True,
+                "message_id": message.message_id,
             },
         )
 
     def _get_agent_display_name(self, agent_type: str) -> str:
         return get_agent_badge(agent_type)
 
-    def _handle_tool_call(self, message: ToolCall) -> None:
+    def _route_summary(self, source: str, target: str) -> str:
+        return f"{get_agent_badge(source)} to {get_agent_badge(target)}"
+
+    def _respond_summary(self, agent_str: str, content: str | None) -> str:
+        route = MainWindow._route_summary(self, agent_str, "main")
+        text = str(content or "").strip()
+        if not text:
+            return route
+        first_line = text.splitlines()[0].strip()
+        if len(first_line) > 96:
+            first_line = first_line[:93].rstrip() + "..."
+        return f"{route}: {first_line}" if first_line else route
+
+    def _handle_tool_call(self, message: ToolCallMessage) -> None:
         agent_str = str(message.agent_type)
         state = self._state_for_agent(agent_str)
+        if agent_str == "main" and message.tool_name == "send_to_agent":
+            if self._is_visible_agent(agent_str):
+                self._get_panel_for_agent(agent_str).finish_thinking()
+            state.phase = "tool"
+            return
         if not self._is_visible_agent(agent_str):
             self._conv_store.append_tool_call(agent_str, message.tool_name, message.arguments)
             return
@@ -1376,14 +1495,29 @@ class MainWindow(QMainWindow):
         panel.finish_thinking()
         state.phase = "tool"
         summary = None
+        detail = None
+        expandable = True
         if agent_str == "main" and message.tool_name == "send_to_agent":
-            target = self._get_agent_display_name(str(message.arguments.get("agent_type", "sub")))
-            summary = f"Main To {target}"
+            target = str(message.arguments.get("agent_type") or "sub")
+            summary = MainWindow._route_summary(self, "main", target)
+            expandable = False
+        elif message.tool_name == "respond":
+            detail = str(message.arguments.get("content") or "").strip() or None
+            summary = (
+                str(message.arguments.get("summary") or "").strip()
+                or MainWindow._respond_summary(self, agent_str, detail)
+            )
+            expandable = bool(detail)
+        elif message.tool_name == "manage_tasks":
+            summary = "<b>Task</b>"
+            expandable = False
 
         panel.add_tool_call(
             message.tool_name,
             message.arguments,
             summary=summary,
+            detail=detail,
+            expandable=expandable,
         )
         self._conv_store.append_tool_call(
             agent_str,
@@ -1399,75 +1533,94 @@ class MainWindow(QMainWindow):
         state = self._state_for_agent(agent_str)
         if not self._is_visible_agent(agent_str):
             result_str = str(message.result) if message.result else None
+            summary = None
+            detail = None
+            expandable = None
             if agent_str == "main" and message.tool_name == "send_to_agent":
-                bubble_title, bubble_body = self._format_send_to_agent_bubble(message.result, message.error)
-                if bubble_title:
-                    self._conv_store.append_message(
-                        agent_str,
-                        "agent",
-                        bubble_body or "",
-                        extra={
-                            "display_mode": "bubble",
-                            "bubble_title": bubble_title,
-                            "bubble_align": "left",
-                            "bubble_on_timeline": True,
-                            "bubble_collapsible": True,
-                        },
-                    )
+                summary, detail = self._format_send_to_agent_bubble(message.result, message.error)
+                expandable = bool(detail)
+                result_str = detail or summary
+                self._conv_store.append_tool_call(
+                    agent_str,
+                    message.tool_name,
+                    self._send_to_agent_result_arguments(message.result),
+                    extra={"summary": summary},
+                )
+            elif message.tool_name == "respond":
+                summary, detail = self._format_respond_bubble(
+                    message.result, message.error, agent_str=agent_str
+                )
+                expandable = bool(detail)
+                result_str = detail or summary
+            elif message.tool_name == "manage_tasks":
+                message.result = self._augment_manage_tasks_result(agent_str, message.result)
+                summary, detail, expandable = self._format_manage_tasks_result(
+                    message.result, message.error
+                )
+                if summary:
+                    result_str = summary
             self._conv_store.append_tool_result(
                 agent_str,
                 message.tool_name,
                 result_str,
                 message.error,
+                extra={
+                    "summary": summary,
+                    "detail": detail,
+                    "expandable": expandable,
+                }
+                if summary or detail or expandable is not None
+                else None,
             )
             return
         panel = self._get_panel_for_agent(agent_str)
         result_str = str(message.result) if message.result else None
         summary = None
+        detail = None
+        expandable = None
         safe_error = None
         if message.error:
             safe_error = "Tool execution failed"
 
         if agent_str == "main" and message.tool_name == "send_to_agent":
-            summary, bubble_body = self._format_send_to_agent_bubble(message.result, message.error)
-            result_str = bubble_body or summary
+            summary, detail = self._format_send_to_agent_bubble(message.result, message.error)
+            expandable = bool(detail)
+            result_str = detail or summary
+        elif message.tool_name == "respond":
+            summary, detail = self._format_respond_bubble(
+                message.result, message.error, agent_str=agent_str
+            )
+            expandable = bool(detail)
+            result_str = detail or summary
         elif message.tool_name == "manage_tasks":
             message.result = self._augment_manage_tasks_result(agent_str, message.result)
             summary, _, _ = self._format_manage_tasks_result(message.result, message.error)
             if summary:
                 result_str = summary
 
+        if agent_str == "main" and message.tool_name == "send_to_agent":
+            panel.add_tool_call(
+                message.tool_name,
+                self._send_to_agent_result_arguments(message.result),
+                summary=summary,
+                detail=detail,
+                expandable=bool(expandable),
+            )
+            self._conv_store.append_tool_call(
+                agent_str,
+                message.tool_name,
+                self._send_to_agent_result_arguments(message.result),
+                extra={"summary": summary},
+            )
+
         panel.add_tool_result(
             message.tool_name,
             message.result,
             safe_error,
             summary=summary,
+            detail=detail,
+            expandable=expandable,
         )
-        if agent_str == "main" and message.tool_name == "send_to_agent":
-            bubble_title, bubble_body = self._format_send_to_agent_bubble(message.result, message.error)
-            if bubble_title:
-                if self._is_visible_agent(agent_str):
-                    panel.add_message(
-                        "agent",
-                        bubble_body or "",
-                        display_mode="bubble",
-                        bubble_title=bubble_title,
-                        bubble_align="left",
-                        bubble_on_timeline=True,
-                        bubble_collapsible=True,
-                    )
-                self._conv_store.append_message(
-                    agent_str,
-                    "agent",
-                    bubble_body or "",
-                    extra={
-                        "display_mode": "bubble",
-                        "bubble_title": bubble_title,
-                        "bubble_align": "left",
-                        "bubble_on_timeline": True,
-                        "bubble_collapsible": True,
-                    },
-                )
         state.phase = "tool"
         self._conv_store.append_tool_result(
             agent_str,
@@ -1476,8 +1629,20 @@ class MainWindow(QMainWindow):
             message.error,
             extra={
                 "summary": summary,
+                "detail": detail,
+                "expandable": expandable,
             },
         )
+
+    def _send_to_agent_result_arguments(self, result: Any) -> dict[str, Any]:
+        if isinstance(result, dict):
+            target = str(result.get("agent_type") or "sub").strip() or "sub"
+            task_id = str(result.get("task_id") or "").strip()
+            args: dict[str, Any] = {"agent_type": target}
+            if task_id:
+                args["task_id"] = task_id
+            return args
+        return {}
 
     def _augment_manage_tasks_result(self, agent_str: str, result: Any) -> Any:
         """Ensure manage_tasks result always carries todolist/waitlist for UI rendering."""
@@ -1486,7 +1651,9 @@ class MainWindow(QMainWindow):
         if isinstance(result.get("todolist"), list) and isinstance(result.get("waitlist"), list):
             return result
         loop_manager = getattr(self.backend, "loop_manager", None)
-        task_board = getattr(loop_manager, "_task_board", None) if loop_manager is not None else None
+        task_board = (
+            getattr(loop_manager, "_task_board", None) if loop_manager is not None else None
+        )
         if task_board is None:
             return result
         try:
@@ -1498,47 +1665,76 @@ class MainWindow(QMainWindow):
         waitlist = task_board.get_waitlist(agent_type, session_id=session_id)
         augmented = dict(result)
         augmented["todolist"] = [
-            {"task_id": t.task_id, "brief": t.brief, "status": t.status.value, "source_agent": t.source_agent.value}
+            {
+                "task_id": t.task_id,
+                "brief": t.brief,
+                "status": t.status.value,
+                "source_agent": t.source_agent.value,
+            }
             for t in todolist
         ]
         augmented["waitlist"] = [
-            {"task_id": t.task_id, "brief": t.brief, "status": t.status.value, "target_agent": t.target_agent.value}
+            {
+                "task_id": t.task_id,
+                "brief": t.brief,
+                "status": t.status.value,
+                "target_agent": t.target_agent.value,
+            }
             for t in waitlist
         ]
         return augmented
 
     def _format_send_to_agent_bubble(self, result, error: str | None) -> tuple[str, str | None]:
+        target = "sub"
+        if isinstance(result, dict):
+            target = str(result.get("agent_type") or target)
+        route = MainWindow._route_summary(self, "main", target)
         if error:
-            return ("Send To Agent", error)
+            return (route, error)
 
         if not isinstance(result, dict):
             text = str(result).strip() if result is not None else ""
-            return ("Sub-agent replied", text or None)
+            return (route, text or None)
 
-        target = self._get_agent_display_name(str(result.get("agent_type", "sub")))
         status = str(result.get("status", "success"))
         response = str(result.get("response", "") or "").strip()
+        request_summary = str(result.get("summary") or result.get("request_summary") or "").strip()
+        response_summary = str(result.get("response_summary") or "").strip()
 
         if status == "delegated":
             detail = str(result.get("message", "") or "").strip() or None
-            return (f"Delegated To {target}", detail)
+            return (request_summary or route, detail)
 
         if status == "timeout":
             detail = str(result.get("error", "") or "").strip() or None
-            return (f"{target} did not reply in time", detail)
+            return (request_summary or route, detail)
 
         if status == "error":
             detail = str(result.get("error", "") or "").strip() or None
-            return (f"Send To {target}", detail)
+            return (request_summary or route, detail)
 
         if not response:
-            return (f"{target} replied", None)
+            return (response_summary or request_summary or route, None)
 
-        first_line = response.splitlines()[0].strip()
-        summary = f"{target} replied: {first_line}" if first_line else f"{target} replied"
-        return (summary, response)
+        return (response_summary or request_summary or route, response)
 
-    def _format_manage_tasks_result(self, result, error: str | None) -> tuple[str | None, str | None, bool | None]:
+    def _format_respond_bubble(
+        self, result, error: str | None, *, agent_str: str = "sub"
+    ) -> tuple[str, str | None]:
+        if error:
+            return (MainWindow._respond_summary(self, agent_str, error), error)
+        if not isinstance(result, dict):
+            text = str(result).strip() if result is not None else ""
+            return (MainWindow._respond_summary(self, agent_str, text), text or None)
+        detail = str(result.get("content") or "").strip()
+        if not detail:
+            detail = str(result.get("message") or "").strip()
+        summary = str(result.get("summary") or "").strip()
+        return (summary or MainWindow._respond_summary(self, agent_str, detail), detail or None)
+
+    def _format_manage_tasks_result(
+        self, result, error: str | None
+    ) -> tuple[str | None, str | None, bool | None]:
         if error or not isinstance(result, dict):
             return (None, None, None)
 
@@ -1562,6 +1758,8 @@ class MainWindow(QMainWindow):
                     "failed": "⚠",
                     "cancelled": "✗",
                 }.get(status, "☐")
+                if title == "Wait" and status == "pending":
+                    marker = "○"
                 lines.append(f"{marker} {brief}")
                 shown += 1
             return lines
@@ -1603,18 +1801,21 @@ class MainWindow(QMainWindow):
     def _handle_error(self, message: Error) -> None:
         if self._is_visible_agent("main"):
             self.agent_panel.add_error(message.source, message.message)
-        self._conv_store.append_message("main", "error", message.message, extra={"source": message.source})
+        self._conv_store.append_message(
+            "main", "error", message.message, extra={"source": message.source}
+        )
 
-    def _handle_agent_feedback(self, message: AgentFeedback) -> None:
-        """Handle AgentFeedback and show collapsed sub-agent issue reports in main."""
+    def _handle_report_message(self, message: ReportMessage) -> None:
+        """Handle ReportMessage and show sub-agent reports in main panel."""
         from enum import Enum
 
-        agent_str = message.agent_type.value if isinstance(message.agent_type, Enum) else str(message.agent_type)
-        issue_type = message.feedback_type or "issue"
-        bubble_title = self._build_inter_agent_title(
-            f"{self._get_agent_display_name(agent_str)} reported {issue_type}",
-            message.content,
+        agent_str = (
+            message.agent_type.value
+            if isinstance(message.agent_type, Enum)
+            else str(message.agent_type)
         )
+        summary = str(getattr(message, "summary", "") or "").strip()
+        bubble_title = summary or MainWindow._respond_summary(self, agent_str, message.content)
         if self._is_visible_agent("main"):
             self.agent_panel.add_message(
                 "agent",
@@ -1623,7 +1824,7 @@ class MainWindow(QMainWindow):
                 display_mode="bubble",
                 bubble_title=bubble_title,
                 bubble_align="left",
-                bubble_on_timeline=True,
+                bubble_on_timeline=False,
                 bubble_collapsible=True,
             )
         self._conv_store.append_message(
@@ -1632,12 +1833,51 @@ class MainWindow(QMainWindow):
             message.content,
             extra={
                 "source": agent_str,
+                "summary": summary,
                 "display_mode": "bubble",
                 "bubble_title": bubble_title,
                 "bubble_align": "left",
-                "bubble_on_timeline": True,
+                "bubble_on_timeline": False,
                 "bubble_collapsible": True,
-                "feedback_type": issue_type,
+                "report_type": message.report_type,
+                "task_id": message.task_id,
+            },
+        )
+
+    def _handle_system_notice(self, message: SystemNotice) -> None:
+        """Handle SystemNotice and render in target agent panel."""
+        from enum import Enum
+
+        agent_str = (
+            message.agent_type.value
+            if isinstance(message.agent_type, Enum)
+            else str(message.agent_type)
+        )
+        bubble_title = None
+        if self._is_visible_agent(agent_str):
+            panel = self._get_panel_for_agent(agent_str)
+            panel.add_message(
+                "agent",
+                message.content,
+                source="system",
+                display_mode="bubble",
+                bubble_title=bubble_title,
+                bubble_align="left",
+                bubble_on_timeline=False,
+                bubble_collapsible=True,
+            )
+        self._conv_store.append_message(
+            agent_str,
+            "agent",
+            message.content,
+            extra={
+                "source": "system",
+                "display_mode": "bubble",
+                "bubble_title": bubble_title,
+                "bubble_align": "left",
+                "bubble_on_timeline": False,
+                "bubble_collapsible": True,
+                "system_notice": True,
             },
         )
 
@@ -1651,7 +1891,9 @@ class MainWindow(QMainWindow):
         agent_str = str(message.agent_type) if hasattr(message, "agent_type") else "main"
         if not self._is_visible_agent(agent_str):
             return
-        self.agent_panel.add_checkpoint(message.checkpoint_id, message.description)
+        self.agent_panel.add_checkpoint(
+            message.checkpoint_id, message.description, message.message_id
+        )
 
     def _handle_task_update_msg(self, message) -> None:
         """Handle TaskUpdateMessage — display task notification in relevant panels."""
@@ -1667,7 +1909,9 @@ class MainWindow(QMainWindow):
 
     def _render_task_block_for_current_agent(self) -> None:
         loop_manager = getattr(self.backend, "loop_manager", None)
-        task_board = getattr(loop_manager, "_task_board", None) if loop_manager is not None else None
+        task_board = (
+            getattr(loop_manager, "_task_board", None) if loop_manager is not None else None
+        )
         if task_board is None:
             return
         try:
@@ -1711,8 +1955,11 @@ class MainWindow(QMainWindow):
                     session_id=self._conv_store.get_current_session_id(agent_type),
                 )
             )
-        logger.info("New conversation session for {}: {}", agent_type,
-                     self._conv_store.get_current_session_id(agent_type))
+        logger.info(
+            "New conversation session for {}: {}",
+            agent_type,
+            self._conv_store.get_current_session_id(agent_type),
+        )
 
     def _on_conversation_cleared(self, agent_type: str) -> None:
         self._conv_store.new_session(agent_type=agent_type)
@@ -1724,8 +1971,11 @@ class MainWindow(QMainWindow):
                     session_id=self._conv_store.get_current_session_id(agent_type),
                 )
             )
-        logger.info("/clear for {}: new session {}", agent_type,
-                     self._conv_store.get_current_session_id(agent_type))
+        logger.info(
+            "/clear for {}: new session {}",
+            agent_type,
+            self._conv_store.get_current_session_id(agent_type),
+        )
 
     def _on_session_selected(self, session_id: str, agent_type: str) -> None:
         if self._conv_store.switch_session(session_id, agent_type):
@@ -1797,9 +2047,7 @@ class MainWindow(QMainWindow):
             if self._title_bar:
                 is_maximized = self.windowState() & Qt.WindowState.WindowMaximized
                 is_fullscreen = self.windowState() & Qt.WindowState.WindowFullScreen
-                self._title_bar.update_maximize_button(
-                    bool(is_maximized or is_fullscreen)
-                )
+                self._title_bar.update_maximize_button(bool(is_maximized or is_fullscreen))
 
     def _apply_splitter_sizes(self, force: bool = False) -> None:
         if not hasattr(self, "_main_splitter"):
@@ -1810,19 +2058,26 @@ class MainWindow(QMainWindow):
         if total_width <= 0:
             return
 
-        # Use the same proportions as stretch factors: 20%, 45%, 35%
-        # But respect minimum widths of each panel
-        total_factor = 20 + 45 + 35  # 100
-
-        # Calculate minimum widths
+        # file_tree gets a fixed default clamped on BOTH sides:
+        #  - lower bound: its own minimumWidth() and the default (never too small)
+        #  - upper bound: the default, the max cap, AND a fraction of the window
+        #    width (so it can never dominate on small/narrow screens).
+        file_tree_default = _FILE_TREE_DEFAULT_WIDTH
         file_tree_min = self.file_tree.minimumWidth()
+        file_tree_max = self.file_tree.maximumWidth() or file_tree_default
+        proportional_cap = int(total_width * _FILE_TREE_MAX_FRACTION)
+        file_tree_size = max(
+            file_tree_min,
+            min(file_tree_default, file_tree_max, proportional_cap),
+        )
+
         preview_min = self.preview.minimumWidth()
         agent_panel_min = self.agent_panel.minimumWidth()
 
-        # Calculate sizes based on proportions
-        file_tree_size = max(file_tree_min, int(total_width * 20 / total_factor))
-        preview_size = max(preview_min, int(total_width * 45 / total_factor))
-        agent_panel_size = max(agent_panel_min, int(total_width * 35 / total_factor))
+        remaining = max(0, total_width - file_tree_size)
+        # Split remaining 56:44 (matches stretch factors), honoring minimums.
+        preview_size = max(preview_min, int(remaining * 56 / 100))
+        agent_panel_size = max(agent_panel_min, remaining - preview_size)
 
         # If sum exceeds total, scale down proportionally
         total_calculated = file_tree_size + preview_size + agent_panel_size
