@@ -26,7 +26,7 @@ from ..tools import (
     ManifestManager,
     PDFParseTool,
     ReadTool,
-    ReportTool,
+    RespondTool,
     SendToAgentTool,
     SkillLoader,
     TaskBoard,
@@ -315,7 +315,7 @@ class LoopManager:
             )
         else:
             registry.register(
-                ReportTool(
+                RespondTool(
                     bus=self.bus,
                     agent_type=agent_type,
                     task_board=self._task_board,

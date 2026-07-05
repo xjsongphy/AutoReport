@@ -1,6 +1,6 @@
 """Agent tools for AutoReport."""
 
-from .agent_tools import ReportTool, SendToAgentTool
+from .agent_tools import RespondTool, SendToAgentTool
 from .exec_tools import ExecTool
 from .file_state import FileStateManager
 from .file_tools import ApplyPatchTool, DeleteFileTool, ReadTool
@@ -24,7 +24,7 @@ __all__ = [
     "ExecTool",
     "PDFParseTool",
     "SendToAgentTool",
-    "ReportTool",
+    "RespondTool",
     "FileStateManager",
     "SkillLoader",
     "LoadSkillTool",

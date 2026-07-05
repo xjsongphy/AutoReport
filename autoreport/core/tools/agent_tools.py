@@ -1,7 +1,7 @@
 """Inter-agent communication tools.
 
 SendToAgentTool: Main Agent dispatches tasks to sub-agents and waits for their respond.
-ReportTool: Sub-agents report the outcome (reply/blocked) of a Main-dispatched task.
+RespondTool: Sub-agents respond with the outcome (reply/blocked) of a Main-dispatched task.
 """
 
 import asyncio
@@ -301,7 +301,7 @@ class SendToAgentTool(Tool):
             self._bus.unsubscribe(StatusChange, _on_status)
 
 
-class ReportTool(Tool):
+class RespondTool(Tool):
     """Respond to Main with the outcome of a Main-dispatched task.
 
     Available to all sub-agents. This is the ONLY way to finish a task
@@ -395,7 +395,14 @@ class ReportTool(Tool):
                     affected = self._task_board.block_task(task_id, target_agent=self._agent_type, session_id=sid)
                     action = "blocked"
             except ValueError as e:
-                return {"status": "error", "error": str(e)}
+                if report_type == "reply" and task is not None and task.status == TaskStatus.COMPLETED:
+                    affected = []
+                    action = "completed"
+                elif report_type != "reply" and task is not None and task.status == TaskStatus.BLOCKED:
+                    affected = []
+                    action = "blocked"
+                else:
+                    return {"status": "error", "error": str(e)}
 
             # Notify UI task board (existing path)
             for t in affected:

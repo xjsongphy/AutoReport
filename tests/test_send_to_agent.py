@@ -1,11 +1,11 @@
-"""Tests for SendToAgentTool and ReportTool — inter-agent communication."""
+"""Tests for SendToAgentTool and RespondTool — inter-agent communication."""
 
 import asyncio
 
 import pytest
 
 from autoreport.core.loops.bus import MessageBus
-from autoreport.core.tools.agent_tools import ReportTool, SendToAgentTool
+from autoreport.core.tools.agent_tools import RespondTool, SendToAgentTool
 from autoreport.core.tools.task_board import TaskBoard
 from autoreport.interfaces.types import (
     AgentType,
@@ -36,13 +36,13 @@ async def _drain(bus) -> None:
 
 
 def _emit_report_on_dispatch(bus, board, target, report_type, content):
-    """Background task: when Main dispatches to `target`, drive a realistic ReportTool call.
+    """Background task: when Main dispatches to `target`, drive a realistic RespondTool call.
 
-    Uses ReportTool (not a raw ReportMessage) so the task status is updated
+    Uses RespondTool (not a raw ReportMessage) so the task status is updated
     exactly as in production. Drains the bus after each step so subscribers fire.
     """
     async def respond():
-        rtool = ReportTool(bus=bus, agent_type=target, task_board=board)
+        rtool = RespondTool(bus=bus, agent_type=target, task_board=board)
         while True:
             msg = await asyncio.wait_for(bus._queue.get(), timeout=2)
             await bus._notify_subscribers(msg)
@@ -54,7 +54,7 @@ def _emit_report_on_dispatch(bus, board, target, report_type, content):
                 tasks = board.get_waitlist(AgentType.MAIN)
                 tid = tasks[0].task_id if tasks else None
                 await rtool(task_id=tid, type=report_type, content=content)
-                await _drain(bus)  # flush ReportTool's TaskUpdateMessage + ReportMessage
+                await _drain(bus)  # flush RespondTool's TaskUpdateMessage + ReportMessage
                 break
 
     return asyncio.create_task(respond())
