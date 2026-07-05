@@ -337,8 +337,6 @@ class AgentLoop:
         if self.agent_type not in (src_enum, tgt_enum):
             return
 
-        am_source = self.agent_type == src_enum
-        am_target = self.agent_type == tgt_enum
         is_local = src_enum == tgt_enum
 
         if is_local:
@@ -349,68 +347,14 @@ class AgentLoop:
             )
             return
 
-        if message.action == "created":
-            if am_source and self.agent_type == AgentType.MAIN:
-                notification_text = f"[等待] {src_val} 等待 {tgt_val} 的：{message.brief}"
-            elif am_source:
-                notification_text = f"[等待] 等待 {tgt_val} 完成：{message.brief}"
-            elif am_target and is_local:
-                notification_text = f"[待办] 本地任务：{message.brief}"
-            elif am_target:
-                notification_text = f"[待办] 完成 {src_val} 的任务：{message.brief}"
-            else:
-                notification_text = f"[新任务] {src_val} → {tgt_val}：{message.brief}"
-
-        elif message.action == "completed":
-            if am_source:
-                notification_text = f"[完成] {tgt_val} 已完成：{message.brief}。请检查其输出。"
-            elif am_target:
-                notification_text = f"[完成] 已完成 {src_val} 的任务：{message.brief}"
-            elif self.agent_type == AgentType.MAIN:
-                notification_text = f"[完成] {src_val} 等待 {tgt_val} 的任务已完成：{message.brief}"
-            else:
-                notification_text = f"[完成] {src_val} 完成了 {tgt_val} 的任务：{message.brief}"
-
-        elif message.action == "started":
-            if am_source:
-                notification_text = f"[开始] {tgt_val} 已开始：{message.brief}"
-            elif self.agent_type == AgentType.MAIN:
-                notification_text = f"[开始] {tgt_val} 开始了 {src_val} 的任务：{message.brief}"
-            else:
-                notification_text = f"[开始] {src_val} 开始了：{message.brief}"
-
-        elif message.action == "failed":
-            if am_source:
-                notification_text = (
-                    f"[失败] {tgt_val} 失败：{message.brief}。请检查并决定如何处理。"
-                )
-            elif am_target:
-                notification_text = f"[失败] 来自 {src_val} 的任务失败：{message.brief}"
-            elif self.agent_type == AgentType.MAIN:
-                notification_text = f"[失败] {src_val} 等待 {tgt_val} 的任务失败：{message.brief}"
-            else:
-                notification_text = f"[失败] {src_val} 任务失败 ({tgt_val})：{message.brief}"
-
-        elif message.action == "cancelled":
-            if am_source:
-                notification_text = f"[取消] {tgt_val} 已取消：{message.brief}"
-            elif self.agent_type == AgentType.MAIN:
-                notification_text = f"[取消] {src_val} 等待 {tgt_val} 的任务已取消：{message.brief}"
-            else:
-                notification_text = f"[取消] {src_val} 任务已取消 ({tgt_val})：{message.brief}"
-
-        else:
-            notification_text = f"任务更新 {message.action}: {message.brief}"
-
-        await self._message_queue.put(
-            UserMessage(
-                content=notification_text,
-                agent_type=self.agent_type,
-                source="system",
-            )
+        logger.debug(
+            "Task update kept out of {} LLM queue: {} ({} -> {}, {})",
+            self.agent_type,
+            message.task_id,
+            src_val,
+            tgt_val,
+            message.action,
         )
-        await self._publish_queue_update()
-        logger.debug("Task update delivered to {}: {}", self.agent_type, message.task_id)
 
     async def _handle_report_message(self, message: Message) -> None:
         """Mark this turn 'reported' when this agent emits a ReportMessage.
@@ -491,6 +435,8 @@ class AgentLoop:
         if self.agent_type == AgentType.MAIN:
             return False
         if getattr(message, "source", None) != "main_agent":
+            return False
+        if self._turn_reported:
             return False
 
         reminder = (
@@ -959,6 +905,12 @@ class AgentLoop:
 
                     if tool_call.name in ("apply_patch", "delete_file"):
                         self._manifest_dirty = True
+                    if (
+                        tool_call.name == "respond"
+                        and isinstance(result, dict)
+                        and result.get("status") == "ok"
+                    ):
+                        self._turn_reported = True
 
                     await self.bus.publish(
                         ToolResultMsg(

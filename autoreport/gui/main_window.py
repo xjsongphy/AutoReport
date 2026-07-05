@@ -1461,6 +1461,19 @@ class MainWindow(QMainWindow):
     def _get_agent_display_name(self, agent_type: str) -> str:
         return get_agent_badge(agent_type)
 
+    def _route_summary(self, source: str, target: str) -> str:
+        return f"{get_agent_badge(source)} to {get_agent_badge(target)}"
+
+    def _respond_summary(self, agent_str: str, content: str | None) -> str:
+        route = MainWindow._route_summary(self, agent_str, "main")
+        text = str(content or "").strip()
+        if not text:
+            return route
+        first_line = text.splitlines()[0].strip()
+        if len(first_line) > 96:
+            first_line = first_line[:93].rstrip() + "..."
+        return f"{route}: {first_line}" if first_line else route
+
     def _handle_tool_call(self, message: ToolCallMessage) -> None:
         agent_str = str(message.agent_type)
         state = self._state_for_agent(agent_str)
@@ -1474,12 +1487,16 @@ class MainWindow(QMainWindow):
         detail = None
         expandable = True
         if agent_str == "main" and message.tool_name == "send_to_agent":
-            summary = "Main to Sub"
+            target = str(message.arguments.get("agent_type") or "sub")
+            summary = MainWindow._route_summary(self, "main", target)
             expandable = False
         elif message.tool_name == "respond":
-            summary = "Sub to Main"
             detail = str(message.arguments.get("content") or "").strip() or None
+            summary = MainWindow._respond_summary(self, agent_str, detail)
             expandable = bool(detail)
+        elif message.tool_name == "manage_tasks":
+            summary = "<b>Task</b>"
+            expandable = False
 
         panel.add_tool_call(
             message.tool_name,
@@ -1510,7 +1527,9 @@ class MainWindow(QMainWindow):
                 expandable = bool(detail)
                 result_str = detail or summary
             elif message.tool_name == "respond":
-                summary, detail = self._format_respond_bubble(message.result, message.error)
+                summary, detail = self._format_respond_bubble(
+                    message.result, message.error, agent_str=agent_str
+                )
                 expandable = bool(detail)
                 result_str = detail or summary
             self._conv_store.append_tool_result(
@@ -1541,7 +1560,9 @@ class MainWindow(QMainWindow):
             expandable = bool(detail)
             result_str = detail or summary
         elif message.tool_name == "respond":
-            summary, detail = self._format_respond_bubble(message.result, message.error)
+            summary, detail = self._format_respond_bubble(
+                message.result, message.error, agent_str=agent_str
+            )
             expandable = bool(detail)
             result_str = detail or summary
         elif message.tool_name == "manage_tasks":
@@ -1612,43 +1633,49 @@ class MainWindow(QMainWindow):
         return augmented
 
     def _format_send_to_agent_bubble(self, result, error: str | None) -> tuple[str, str | None]:
+        target = "sub"
+        if isinstance(result, dict):
+            target = str(result.get("agent_type") or target)
+        route = MainWindow._route_summary(self, "main", target)
         if error:
-            return ("Main to Sub", error)
+            return (route, error)
 
         if not isinstance(result, dict):
             text = str(result).strip() if result is not None else ""
-            return ("Main to Sub", text or None)
+            return (route, text or None)
 
         status = str(result.get("status", "success"))
         response = str(result.get("response", "") or "").strip()
 
         if status == "delegated":
             detail = str(result.get("message", "") or "").strip() or None
-            return ("Main to Sub", detail)
+            return (route, detail)
 
         if status == "timeout":
             detail = str(result.get("error", "") or "").strip() or None
-            return ("Main to Sub", detail)
+            return (route, detail)
 
         if status == "error":
             detail = str(result.get("error", "") or "").strip() or None
-            return ("Main to Sub", detail)
+            return (route, detail)
 
         if not response:
-            return ("Main to Sub", None)
+            return (route, None)
 
-        return ("Main to Sub", response)
+        return (route, response)
 
-    def _format_respond_bubble(self, result, error: str | None) -> tuple[str, str | None]:
+    def _format_respond_bubble(
+        self, result, error: str | None, *, agent_str: str = "sub"
+    ) -> tuple[str, str | None]:
         if error:
-            return ("Sub to Main", error)
+            return (MainWindow._respond_summary(self, agent_str, error), error)
         if not isinstance(result, dict):
             text = str(result).strip() if result is not None else ""
-            return ("Sub to Main", text or None)
+            return (MainWindow._respond_summary(self, agent_str, text), text or None)
         detail = str(result.get("content") or "").strip()
         if not detail:
             detail = str(result.get("message") or "").strip()
-        return ("Sub to Main", detail or None)
+        return (MainWindow._respond_summary(self, agent_str, detail), detail or None)
 
     def _format_manage_tasks_result(
         self, result, error: str | None
@@ -1730,7 +1757,7 @@ class MainWindow(QMainWindow):
             if isinstance(message.agent_type, Enum)
             else str(message.agent_type)
         )
-        bubble_title = "Sub to Main"
+        bubble_title = MainWindow._respond_summary(self, agent_str, message.content)
         if self._is_visible_agent("main"):
             self.agent_panel.add_message(
                 "agent",

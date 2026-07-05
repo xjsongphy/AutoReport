@@ -85,7 +85,7 @@ def test_send_to_agent_tool_result_does_not_append_delegate_bubble():
     assert [call[0] for call in store_calls] == ["tool_result"]
 
 
-def test_send_to_agent_tool_call_displays_main_to_sub_summary():
+def test_send_to_agent_tool_call_displays_main_to_target_summary():
     panel_calls: list[tuple[str, tuple, dict]] = []
     store_calls: list[tuple[str, tuple, dict]] = []
 
@@ -115,8 +115,8 @@ def test_send_to_agent_tool_call_displays_main_to_sub_summary():
         ),
     )
 
-    assert panel_calls[0][2]["summary"] == "Main to Sub"
-    assert store_calls[0][2]["extra"]["summary"] == "Main to Sub"
+    assert panel_calls[0][2]["summary"] == "Main to Plotting"
+    assert store_calls[0][2]["extra"]["summary"] == "Main to Plotting"
 
 
 def test_respond_tool_result_displays_sub_to_main_summary_and_detail():
@@ -124,10 +124,44 @@ def test_respond_tool_result_displays_sub_to_main_summary_and_detail():
         None,
         {"status": "ok", "report_type": "reply", "content": "full response"},
         None,
+        agent_str="plotting",
     )
 
-    assert summary == "Sub to Main"
+    assert summary == "Plotting to Main: full response"
     assert detail == "full response"
+
+
+def test_manage_tasks_tool_call_displays_task_summary():
+    panel_calls: list[tuple[str, tuple, dict]] = []
+    store_calls: list[tuple[str, tuple, dict]] = []
+
+    class _Panel:
+        def finish_thinking(self):
+            pass
+
+        def add_tool_call(self, *args, **kwargs):
+            panel_calls.append(("tool_call", args, kwargs))
+
+    class _Store:
+        def append_tool_call(self, *args, **kwargs):
+            store_calls.append(("tool_call", args, kwargs))
+
+    fake = SimpleNamespace()
+    fake._conv_store = _Store()
+    fake._is_visible_agent = lambda agent_type: agent_type == "theory"
+    fake._get_panel_for_agent = lambda agent_type: _Panel()
+    fake._state_for_agent = lambda agent_type: SimpleNamespace(phase="idle")
+
+    MainWindow._handle_tool_call(
+        fake,
+        ToolCallMessage(
+            agent_type=AgentType.THEORY,
+            tool_name="manage_tasks",
+            arguments={"action": "list"},
+        ),
+    )
+
+    assert panel_calls[0][2]["summary"] == "<b>Task</b>"
 
 
 def test_rollback_finished_truncates_current_session_and_refreshes_visible_panel():

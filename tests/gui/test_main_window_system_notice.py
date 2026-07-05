@@ -107,7 +107,7 @@ def test_report_message_renders_in_main_panel():
     assert kwargs["bubble_align"] == "left"
     assert kwargs["bubble_on_timeline"] is False
     assert kwargs["bubble_collapsible"] is True
-    assert kwargs["bubble_title"] == "Sub to Main"
+    assert kwargs["bubble_title"] == "Plotting to Main: Need x column data"
 
     # Check store was called with persistence parameters
     assert len(store_calls) == 1
