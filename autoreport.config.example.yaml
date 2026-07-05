@@ -1,0 +1,42 @@
+# AutoReport Configuration
+# Copy this file to autoreport.config.yaml and fill in your API keys.
+#
+#   cp autoreport.config.example.yaml autoreport.config.yaml
+#
+# API keys can also be set via environment variables:
+#   ANTHROPIC_API_KEY, OPENAI_API_KEY, DEEPSEEK_API_KEY, etc.
+#
+# On first launch, a GUI dialog will help you configure providers.
+
+agents:
+  defaults:
+    model: anthropic/claude-sonnet-4.5
+    provider: auto
+    temperature: 0.1
+    max_tokens: 8192
+    max_tool_iterations: 200
+    timezone: Asia/Shanghai
+    prompt_templates_dir: templates/agents
+
+mineru_api:
+  enabled: true
+  timeout: 300
+  validate_on_startup: true
+
+providers:
+  active: ""  # ID of the active configuration
+  configurations: []
+  # Example:
+  # - name: Anthropic
+  #   provider: anthropic
+  #   api_key: null          # Set via ANTHROPIC_API_KEY env var, or fill in directly
+  #   api_base: null
+  #   default_model: claude-sonnet-4-20250514
+  #   enabled: true
+  #
+  # - name: DeepSeek
+  #   provider: deepseek
+  #   api_key: null          # Set via DEEPSEEK_API_KEY env var
+  #   api_base: https://api.deepseek.com
+  #   default_model: deepseek-chat
+  #   enabled: true
