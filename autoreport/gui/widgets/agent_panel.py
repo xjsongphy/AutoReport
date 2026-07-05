@@ -503,18 +503,37 @@ class AgentPanel(QWidget):
 
     # ---- File reference handling ----
 
+    def _popup_anchor_global(self) -> QPoint:
+        return self._input_container.mapToGlobal(self._input_container.rect().topLeft())
+
+    def _position_popup_above_composer(self, popup: QWidget, preferred_height: int) -> None:
+        anchor = self._popup_anchor_global()
+        width = max(220, self._input_container.width())
+        popup.setFixedWidth(width)
+        height = max(1, int(preferred_height))
+        screen = popup.screen() or self.screen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            max_above = max(1, anchor.y() - available.top())
+            height = min(height, max_above, 260)
+        popup.setFixedHeight(height)
+        popup.move(anchor.x(), anchor.y() - height)
+        if popup.isVisible():
+            geo = popup.geometry()
+            dx = anchor.x() - geo.left()
+            dy = (anchor.y() - 1) - geo.bottom()
+            if dx or dy:
+                popup.move(popup.x() + dx, popup.y() + dy)
+
     def _on_file_reference_requested(self, query: str, position: QPoint) -> None:
         if not self._file_search_popup:
             return
-        # Position popup above input, same width
-        popup_w = self._input_field.width()
-        self._file_search_popup.setFixedWidth(popup_w)
-        # Calculate position: above the input field
-        input_top = self._input_field.mapToGlobal(self._input_field.rect().topLeft())
-        popup_h = self._file_search_popup.calculate_height()
-        self._file_search_popup.move(input_top.x(), input_top.y() - popup_h)
         self._file_search_popup.set_query(query, waiting=True)
         self._file_search_popup.show()
+        self._position_popup_above_composer(
+            self._file_search_popup,
+            self._file_search_popup.calculate_height(),
+        )
         self._file_search_popup.raise_()
 
         # Run search via persistent single-worker pool; discard stale completions.
@@ -532,6 +551,10 @@ class AgentPanel(QWidget):
             matches = []
         if self._file_search_popup and self._file_search_popup.isVisible():
             self._file_search_popup.set_matches(matches)
+            self._position_popup_above_composer(
+                self._file_search_popup,
+                self._file_search_popup.calculate_height(),
+            )
 
     def _on_file_selected(self, file_path: Path) -> None:
         self._file_search_popup.hide()
@@ -559,12 +582,20 @@ class AgentPanel(QWidget):
             self._close_popup()
             return
         popup = self._file_search_popup if self._file_search_popup.isVisible() else self._cmd_popup
+        if popup is self._file_search_popup:
+            if direction == "up":
+                popup.move_up()
+            elif direction == "down":
+                popup.move_down()
+            elif direction == "select":
+                popup.select_current()
+            return
         if direction == "up":
-            popup.move_up()
+            self._move_command_popup(-1)
         elif direction == "down":
-            popup.move_down()
+            self._move_command_popup(1)
         elif direction == "select":
-            popup.select_current()
+            self._select_current_command()
 
     def _close_popup(self) -> None:
         self._input_field.set_popup_active(False)
@@ -616,13 +647,6 @@ class AgentPanel(QWidget):
         if self._cmd_popup.count() > 0:
             self._cmd_popup.setCurrentRow(0)
 
-        # Position above input, same width
-        popup_w = self._input_field.width()
-        self._cmd_popup.setFixedWidth(popup_w)
-        input_top = self._input_field.mapToGlobal(self._input_field.rect().topLeft())
-        h = min(self._cmd_popup.sizeHintForRow(0) * self._cmd_popup.count() + 12, 200)
-        self._cmd_popup.setFixedHeight(h)
-        self._cmd_popup.move(input_top.x(), input_top.y() - h)
         self._cmd_popup.setStyleSheet(f"""
             QListWidget {{
                 background-color: {c["bg"]};
@@ -645,6 +669,11 @@ class AgentPanel(QWidget):
             }}
         """)
         self._cmd_popup.show()
+        row_height = self._cmd_popup.sizeHintForRow(0)
+        if row_height <= 0:
+            row_height = self._cmd_popup.fontMetrics().lineSpacing() + 12
+        h = min(row_height * max(1, self._cmd_popup.count()) + 12, 200)
+        self._position_popup_above_composer(self._cmd_popup, h)
         self._cmd_popup.raise_()
 
     def _on_command_selected(self, item: QListWidgetItem) -> None:
@@ -654,10 +683,24 @@ class AgentPanel(QWidget):
         self._cmd_popup.hide()
         self._close_popup()
         self._input_field.setFocus()
-        # Execute the command directly
-        text = self._input_field.toPlainText()
-        self._input_field.clear_text()
-        self._execute_slash_command(cmd, text)
+        self._input_field.insert_command(cmd)
+
+    def _move_command_popup(self, step: int) -> None:
+        if not self._cmd_popup.isVisible() or self._cmd_popup.count() <= 0:
+            return
+        current = self._cmd_popup.currentRow()
+        if current < 0:
+            current = 0
+        next_row = max(0, min(self._cmd_popup.count() - 1, current + step))
+        self._cmd_popup.setCurrentRow(next_row)
+
+    def _select_current_command(self) -> None:
+        if not self._cmd_popup.isVisible():
+            return
+        item = self._cmd_popup.currentItem()
+        if item is None:
+            return
+        self._on_command_selected(item)
 
     def _execute_slash_command(self, cmd: str, original_text: str) -> None:
         """Execute a slash command."""

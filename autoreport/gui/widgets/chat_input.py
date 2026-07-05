@@ -75,6 +75,7 @@ class ChatInput(QPlainTextEdit):
         layout = self.document().documentLayout()
         if layout is not None:
             layout.documentSizeChanged.connect(lambda _size: self._schedule_sync())
+        self.cursorPositionChanged.connect(self._check_current_token)
         self._sync_after_text_change()
 
     def resizeEvent(self, event) -> None:  # noqa: N802
@@ -165,6 +166,9 @@ class ChatInput(QPlainTextEdit):
             if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
                 direction = "up" if key == Qt.Key.Key_Up else "down"
                 self.popup_navigate.emit(direction)
+                return
+            if key == Qt.Key.Key_Tab:
+                self.popup_navigate.emit("select")
                 return
             if key in (Qt.Key.Key_Enter, Qt.Key.Key_Return):
                 self.popup_navigate.emit("select")
@@ -293,6 +297,13 @@ class ChatInput(QPlainTextEdit):
     def insert_agent_reference(self, name: str) -> None:
         mention = f"@{name} "
         if not self._replace_current_prefixed_token(mention):
+            self._on_popup_closed()
+            return
+        self._on_popup_closed()
+
+    def insert_command(self, command: str) -> None:
+        replacement = f"{str(command or '').strip()} "
+        if not self._replace_current_prefixed_token(replacement):
             self._on_popup_closed()
             return
         self._on_popup_closed()

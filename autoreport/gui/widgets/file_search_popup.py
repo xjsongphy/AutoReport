@@ -82,6 +82,7 @@ class FileSearchPopup(QWidget):
         self._list_widget.setSpacing(1)
         self._list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._list_widget.currentRowChanged.connect(self._on_current_row_changed)
+        self._list_widget.itemClicked.connect(self._on_item_clicked)
         self._list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
         layout.addWidget(self._list_widget)
 
@@ -272,6 +273,9 @@ class FileSearchPopup(QWidget):
 
     def _on_current_row_changed(self, row: int) -> None:
         self._selected_idx = row
+
+    def _on_item_clicked(self, item: QListWidgetItem) -> None:
+        self.select_current()
 
     def _on_item_double_clicked(self, item: QListWidgetItem) -> None:
         self.select_current()

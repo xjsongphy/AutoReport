@@ -2,9 +2,12 @@
 
 from pathlib import Path
 import pytest
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import QLabel
 
 from autoreport.gui.widgets.agent_panel import AgentPanel
+from autoreport.gui.widgets.file_search_popup import FileMatch
 
 
 @pytest.fixture
@@ -792,6 +795,67 @@ def test_agent_selection_inserts_reference_without_property_error(agent_panel):
     agent_panel._on_agent_selected("report")
 
     assert agent_panel._input_field.toPlainText() == "@Report Agent "
+
+
+def test_file_reference_popup_is_attached_above_composer(agent_panel, qtbot):
+    agent_panel.resize(520, 640)
+    agent_panel.show()
+    qtbot.waitExposed(agent_panel)
+    agent_panel.set_agent_type("theory")
+
+    agent_panel._on_file_reference_requested("", agent_panel._input_field.mapToGlobal(agent_panel._input_field.rect().topLeft()))
+    qtbot.wait(20)
+
+    popup = agent_panel._file_search_popup
+    anchor = agent_panel._input_container.mapToGlobal(agent_panel._input_container.rect().topLeft())
+    assert popup.isVisible()
+    assert popup.geometry().bottom() <= anchor.y()
+    assert popup.geometry().left() == anchor.x()
+    assert popup.width() == agent_panel._input_container.width()
+
+    class _Future:
+        def result(self):
+            return [FileMatch(Path(f"Data/file_{i}.txt"), score=10) for i in range(8)]
+
+    agent_panel._apply_file_search_result(agent_panel._file_search_ticket, _Future())
+    qtbot.wait(20)
+
+    assert popup.geometry().bottom() <= anchor.y()
+    assert popup.width() == agent_panel._input_container.width()
+    popup.hide()
+
+
+def test_command_popup_is_attached_above_composer_and_keyboard_selects(agent_panel, qtbot):
+    agent_panel.resize(520, 640)
+    agent_panel.show()
+    qtbot.waitExposed(agent_panel)
+    agent_panel._input_field.setPlainText("/he")
+    cursor = agent_panel._input_field.textCursor()
+    cursor.movePosition(cursor.MoveOperation.End)
+    agent_panel._input_field.setTextCursor(cursor)
+
+    agent_panel._on_command_palette_requested("he", agent_panel._input_field.mapToGlobal(agent_panel._input_field.rect().topLeft()))
+    qtbot.wait(20)
+
+    anchor = agent_panel._input_container.mapToGlobal(agent_panel._input_container.rect().topLeft())
+    assert agent_panel._cmd_popup.isVisible()
+    assert agent_panel._cmd_popup.geometry().bottom() <= anchor.y()
+    assert agent_panel._cmd_popup.geometry().left() == anchor.x()
+    assert agent_panel._cmd_popup.width() == agent_panel._input_container.width()
+
+    executed: list[str] = []
+    agent_panel._execute_slash_command = lambda cmd, original_text: executed.append(cmd)
+    key_event = QKeyEvent(
+        QKeyEvent.Type.KeyPress,
+        Qt.Key.Key_Tab,
+        Qt.KeyboardModifier.NoModifier,
+        "\t",
+    )
+    agent_panel._input_field.keyPressEvent(key_event)
+
+    assert executed == []
+    assert agent_panel._input_field.toPlainText() == "/help "
+    assert not agent_panel._cmd_popup.isVisible()
 
 
 def test_hide_conv_buttons(agent_panel):

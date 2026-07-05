@@ -213,3 +213,39 @@ def test_cursor_motion_rechecks_popup_token(qtbot):
     widget.keyPressEvent(key_event)
 
     assert widget._popup_active is False
+
+
+def test_tab_selects_active_popup_item(qtbot):
+    widget = ChatInput()
+    qtbot.addWidget(widget)
+    widget.set_popup_active(True)
+
+    events = []
+    widget.popup_navigate.connect(events.append)
+
+    key_event = QKeyEvent(
+        QKeyEvent.Type.KeyPress,
+        Qt.Key.Key_Tab,
+        Qt.KeyboardModifier.NoModifier,
+        "\t",
+    )
+    widget.keyPressEvent(key_event)
+
+    assert events == ["select"]
+
+
+def test_cursor_move_back_to_prefixed_token_reopens_popup(qtbot):
+    widget = ChatInput()
+    qtbot.addWidget(widget)
+    widget.setPlainText("go @rep now")
+
+    requests = []
+    widget.file_reference_requested.connect(lambda query, _pos: requests.append(query))
+
+    cursor = widget.textCursor()
+    cursor.setPosition(5)
+    widget.setTextCursor(cursor)
+    qtbot.wait(20)
+
+    assert requests[-1] == "rep"
+    assert widget._popup_active is True
