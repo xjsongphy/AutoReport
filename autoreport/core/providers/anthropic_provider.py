@@ -87,6 +87,53 @@ class AnthropicProvider(LLMProvider):
             sanitized.append(clean)
         return sanitized
 
+    def _drop_historical_tool_replay(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Drop completed tool-use/result pairs for Anthropic-compatible replay.
+
+        DeepSeek/MiniMax-style endpoints can handle the immediate tool round,
+        but may reject replaying old structured ``tool_use`` / ``tool_result``
+        blocks on a later user turn. Once a normal assistant reply already
+        followed that tool exchange, the old structured pair no longer carries
+        essential state and can be omitted from replay history.
+        """
+        compacted: list[dict[str, Any]] = []
+        i = 0
+        while i < len(messages):
+            current = messages[i]
+            nxt = messages[i + 1] if i + 1 < len(messages) else None
+            future = messages[i + 2:]
+
+            current_blocks = current.get("content")
+            next_blocks = nxt.get("content") if nxt else None
+            current_has_tool_use = isinstance(current_blocks, list) and any(
+                isinstance(block, dict) and block.get("type") == "tool_use"
+                for block in current_blocks
+            )
+            next_has_tool_result = isinstance(next_blocks, list) and any(
+                isinstance(block, dict) and block.get("type") == "tool_result"
+                for block in next_blocks
+            )
+            later_has_assistant_reply = any(
+                msg.get("role") == "assistant" and msg.get("content")
+                for msg in future
+            )
+
+            if (
+                current.get("role") == "assistant"
+                and nxt
+                and nxt.get("role") == "user"
+                and current_has_tool_use
+                and next_has_tool_result
+                and later_has_assistant_reply
+            ):
+                i += 2
+                continue
+
+            compacted.append(current)
+            i += 1
+
+        return compacted
+
     def _convert_messages(
         self, messages: list[Message],
     ) -> tuple[str | list[dict] | None, list[dict]]:
@@ -134,8 +181,13 @@ class AnthropicProvider(LLMProvider):
             # Assistant message with tool calls -> structured content blocks
             if msg.role == "assistant" and msg.tool_calls:
                 content_blocks: list[dict] = []
-                if msg.thinking:
-                    content_blocks.append({"type": "thinking", "thinking": msg.thinking})
+                # NOTE: thinking blocks are intentionally NOT replayed. The
+                # streaming path only captures the thinking *text*, not the
+                # encrypted ``signature`` the API attaches to every thinking
+                # block. Re-sending a fabricated thinking block (missing the
+                # signature) makes the API reject the whole request with a
+                # deserialization error on the next turn. Thinking is kept on
+                # the Message for UI/debugging only.
                 if msg.content:
                     content_blocks.append({"type": "text", "text": msg.content})
                 for tc in msg.tool_calls:
@@ -173,6 +225,9 @@ class AnthropicProvider(LLMProvider):
                 "content": self._normalize_message_content(pending_tool_results),
             })
 
+        if not self._supports_cache_control():
+            anthropic_messages = self._drop_historical_tool_replay(anthropic_messages)
+
         # Merge consecutive same-role messages (Anthropic requirement)
         merged = self._sanitize_messages_payload(self._merge_consecutive(anthropic_messages))
 
@@ -186,11 +241,38 @@ class AnthropicProvider(LLMProvider):
 
         return system_message, merged
 
+    @staticmethod
+    def _content_to_blocks(content: Any) -> list[dict[str, Any]]:
+        """View content as a list of blocks (strings become single text blocks)."""
+        if isinstance(content, list):
+            return list(content)
+        return [{"type": "text", "text": AnthropicProvider._safe_text(content)}]
+
+    @staticmethod
+    def _collapse_text_blocks(blocks: list[dict[str, Any]]) -> str | list[dict[str, Any]]:
+        """Collapse a block list to a plain string when it is text-only.
+
+        Native Anthropic accepts content as either a string or an array of
+        blocks, but Anthropic-compatible endpoints (DeepSeek, MiniMax, …) only
+        accept the string form for plain text — an array of text blocks is
+        rejected as ``invalid type: null, expected a string``. Merging two
+        consecutive same-role text messages used to produce exactly that array,
+        so collapse text-only results back to a string. Mixed blocks that
+        contain ``tool_use`` / ``tool_result`` must stay as arrays.
+        """
+        if all(isinstance(b, dict) and b.get("type") == "text" for b in blocks):
+            return "\n".join(
+                AnthropicProvider._safe_text(b.get("text")) for b in blocks
+            )
+        return blocks
+
     def _merge_consecutive(self, msgs: list[dict]) -> list[dict]:
         """Merge consecutive same-role messages for Anthropic API.
 
         Anthropic requires alternating user/assistant turns. Consecutive
-        same-role messages must be collapsed into one.
+        same-role messages must be collapsed into one. When the merged content
+        is plain text only, it is emitted as a string (see
+        ``_collapse_text_blocks``) for compatibility with non-native endpoints.
         """
         merged: list[dict] = []
         for msg in msgs:
@@ -198,20 +280,11 @@ class AnthropicProvider(LLMProvider):
                 merged
                 and merged[-1].get("role") == msg.get("role")
             ):
-                prev_c = merged[-1]["content"]
-                cur_c = msg["content"]
-                if prev_c is None:
-                    prev_c = ""
-                if cur_c is None:
-                    cur_c = ""
-                # Normalize both to lists for concatenation
-                if isinstance(prev_c, str):
-                    prev_c = [{"type": "text", "text": prev_c}]
-                if isinstance(cur_c, str):
-                    cur_c = [{"type": "text", "text": cur_c}]
-                if isinstance(cur_c, list):
-                    prev_c.extend(cur_c)
-                merged[-1]["content"] = prev_c
+                combined = (
+                    self._content_to_blocks(merged[-1].get("content"))
+                    + self._content_to_blocks(msg.get("content"))
+                )
+                merged[-1]["content"] = self._collapse_text_blocks(combined)
             else:
                 merged.append(msg)
         for msg in merged:

@@ -554,6 +554,7 @@ class BackendAPIImpl(BackendAPI):
         agent_type: str,
         messages: list[dict[str, str]] | None = None,
         session_id: str | None = None,
+        clear_pending: bool = False,
     ) -> None:
         """Replace in-memory conversation history for an agent loop."""
         if self.loop_manager is None:
@@ -578,6 +579,14 @@ class BackendAPIImpl(BackendAPI):
             return
 
         loop._current_session_id = session_id  # noqa: SLF001
+        if clear_pending:
+            loop.cancel_current()  # noqa: SLF001
+            while not loop._message_queue.empty():  # noqa: SLF001
+                try:
+                    loop._message_queue.get_nowait()  # noqa: SLF001
+                except asyncio.QueueEmpty:
+                    break
+            await loop._publish_queue_update()  # noqa: SLF001
 
         loop._conversation_history.clear()  # noqa: SLF001
         for msg in messages or []:

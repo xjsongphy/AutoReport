@@ -152,10 +152,15 @@ class TestManageTasksToolComplete:
         main_tool = ManageTasksTool(task_board=board, agent_type=AgentType.MAIN, bus=bus)
         listed = await main_tool(action="list")
         assert any(
-            item["task_id"] == task.task_id and item["status"] == "completed"
+            item["task_id"] == task.task_id
+            and item["status"] == "pending"
+            and item["brief"] == "Check Plotting completed: draw"
             for item in listed["todolist"]
         )
-        assert all(item["task_id"] != task.task_id for item in listed["waitlist"])
+        assert any(
+            item["task_id"] == task.task_id and item["status"] == "completed"
+            for item in listed["waitlist"]
+        )
 
     @pytest.mark.asyncio
     async def test_complete_chain_notifies_all(self, board, bus):

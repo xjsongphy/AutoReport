@@ -369,6 +369,69 @@ class ConversationStore:
             payload.update(extra)
         self.append_message(agent_type, "tool_result", tool_name, payload)
 
+    def upsert_task_snapshot(self, agent_type: str, summary: str) -> None:
+        """Persist the latest live task snapshot, rewriting the tail snapshot in place."""
+        self._ensure_session(agent_type)
+        session_id = self._current_session_ids[agent_type]
+        path = self._dir / agent_type / f"{session_id}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        is_new = not path.exists()
+        if is_new:
+            sessions = self._load_sessions_metadata()
+            if not any(s.get("id") == session_id for s in sessions):
+                timestamp = datetime.now().isoformat(timespec="seconds")
+                sessions.insert(0, {"id": session_id, "name": "新对话", "timestamp": timestamp, "preview": ""})
+                self._save_sessions_metadata(sessions)
+
+        record = {
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "role": "tool_result",
+            "content": "manage_tasks",
+            "tool": "manage_tasks",
+            "result": str(summary or "")[:2000],
+            "summary": str(summary or ""),
+            "expandable": False,
+            "task_snapshot": True,
+        }
+
+        try:
+            lines: list[str] = []
+            if path.exists():
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    lines = [line.rstrip("\n") for line in f]
+
+            last_index = -1
+            last_record: dict[str, Any] | None = None
+            for index in range(len(lines) - 1, -1, -1):
+                line = lines[index].strip()
+                if not line:
+                    continue
+                last_index = index
+                try:
+                    last_record = json.loads(line)
+                except json.JSONDecodeError:
+                    last_record = None
+                break
+
+            if (
+                last_index >= 0
+                and isinstance(last_record, dict)
+                and last_record.get("role") == "tool_result"
+                and last_record.get("content") == "manage_tasks"
+                and bool(last_record.get("task_snapshot"))
+            ):
+                lines[last_index] = json.dumps(record, ensure_ascii=False)
+                with open(path, "w", encoding="utf-8") as f:
+                    for line in lines:
+                        f.write(line + "\n")
+                return
+
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except OSError as e:
+            logger.warning("Failed to persist task snapshot: {}", e)
+
     # ---- Read ----
 
     def load_messages(self, agent_type: str, limit: int = 500) -> list[dict[str, Any]]:

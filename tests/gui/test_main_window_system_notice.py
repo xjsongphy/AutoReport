@@ -99,6 +99,44 @@ def test_interrupt_notice_renders_as_inline_notice_without_timeline_bubble():
     assert kwargs["extra"]["system_notice"] is True
 
 
+def test_load_conversations_restores_interrupt_notice_as_inline_notice():
+    panel_calls: list[tuple[str, tuple, dict]] = []
+
+    class _Panel:
+        def __init__(self):
+            self._messages_area = SimpleNamespace(clear=lambda: None)
+
+        def add_message(self, *args, **kwargs):
+            panel_calls.append(("message", args, kwargs))
+
+        def _update_width(self):
+            pass
+
+    class _Store:
+        def load_messages(self, agent_type):
+            return [
+                {
+                    "role": "agent",
+                    "content": "Interrupted",
+                    "source": "system",
+                    "display_mode": "inline_notice",
+                    "muted_italic": True,
+                }
+            ]
+
+    fake = SimpleNamespace()
+    fake._conv_store = _Store()
+
+    panel = _Panel()
+    MainWindow._load_conversations_for_agent(fake, "main", panel)
+
+    assert len(panel_calls) == 1
+    _, args, kwargs = panel_calls[0]
+    assert args == ("agent", "Interrupted")
+    assert kwargs["display_mode"] == "inline_notice"
+    assert kwargs["muted_italic"] is True
+
+
 def test_report_message_renders_in_main_panel():
     """ReportMessage should render a collapsed bubble in the main panel."""
     panel_calls: list[tuple[str, tuple, dict]] = []

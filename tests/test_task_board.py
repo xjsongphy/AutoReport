@@ -65,12 +65,19 @@ class TestTaskBoard:
         delegated = board.create_task(AgentType.MAIN, AgentType.PLOTTING, "create plot")
         board.complete_task(delegated.task_id, target_agent=AgentType.PLOTTING)
         main_todo = board.get_todolist(AgentType.MAIN)
+        main_wait = board.get_waitlist(AgentType.MAIN)
         assert any(
             t.task_id == delegated.task_id
             and t.source_agent == AgentType.MAIN
             and t.target_agent == AgentType.PLOTTING
-            and t.status == TaskStatus.COMPLETED
+            and t.status == TaskStatus.PENDING
+            and t.brief == "Check Plotting completed: create plot"
             for t in main_todo
+        )
+        assert any(
+            t.task_id == delegated.task_id
+            and t.status == TaskStatus.COMPLETED
+            for t in main_wait
         )
 
     def test_fail_task_chain_with_shared_id(self):

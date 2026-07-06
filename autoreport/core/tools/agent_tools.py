@@ -155,6 +155,7 @@ class SendToAgentTool(Tool):
         sid = self._session_id()
 
         # --- Create or re-dispatch task ---
+        created_new_task = False
         if task_id and self._task_board is not None:
             existing = self._task_board.get_task(
                 task_id, target_agent=target, active_only=False, session_id=sid
@@ -174,13 +175,14 @@ class SendToAgentTool(Tool):
                 ):
                     t.status = TaskStatus.IN_PROGRESS
                     t.completed_at = None
-            await self._bus.publish(TaskUpdateMessage(
-                task_id=task_id,
-                action="started",
-                source_agent=AgentType.MAIN,
-                target_agent=target,
-                brief=existing.brief,
-            ))
+            if not blocking:
+                await self._bus.publish(TaskUpdateMessage(
+                    task_id=task_id,
+                    action="started",
+                    source_agent=AgentType.MAIN,
+                    target_agent=target,
+                    brief=existing.brief,
+                ))
         elif self._task_board is not None:
             item = task_items[0] if task_items else {}
             brief = (
@@ -195,14 +197,16 @@ class SendToAgentTool(Tool):
                 session_id=sid,
             )
             task_id = new_task.task_id
-            await self._bus.publish(TaskUpdateMessage(
-                task_id=task_id,
-                action="created",
-                source_agent=new_task.source_agent,
-                target_agent=new_task.target_agent,
-                brief=new_task.brief,
-                previous_status=None,
-            ))
+            created_new_task = True
+            if not blocking:
+                await self._bus.publish(TaskUpdateMessage(
+                    task_id=task_id,
+                    action="created",
+                    source_agent=new_task.source_agent,
+                    target_agent=new_task.target_agent,
+                    brief=new_task.brief,
+                    previous_status=None,
+                ))
 
         # Non-blocking: dispatch and return immediately
         if not blocking:
@@ -258,6 +262,12 @@ class SendToAgentTool(Tool):
         try:
             report = await self._await_with_liveness(future, target, loop)
         except asyncio.TimeoutError:
+            if created_new_task and self._task_board is not None and task_id:
+                self._task_board.remove_tasks_by_id(
+                    task_id,
+                    target_agent=target,
+                    session_id=sid,
+                )
             return {
                 "status": "timeout",
                 "agent_type": target.value,
@@ -460,6 +470,18 @@ class RespondTool(Tool):
                     return {"status": "error", "error": str(e)}
 
             # Notify UI task board (existing path)
+        await self._bus.publish(ReportMessage(
+            agent_type=self._agent_type,
+            task_id=task_id,
+            report_type=report_type,
+            summary=summary,
+            content=str(content or ""),
+        ))
+
+        # Single reply channel: resolves Main's wait + marks this loop's turn reported.
+        # Task timeline updates follow the reply so the report bubble stays above
+        # the subsequent task snapshot in chat order.
+        if self._task_board is not None:
             for t in affected:
                 await self._bus.publish(TaskUpdateMessage(
                     task_id=t.task_id,
@@ -468,15 +490,6 @@ class RespondTool(Tool):
                     target_agent=t.target_agent,
                     brief=t.brief,
                 ))
-
-        # Single reply channel: resolves Main's wait + marks this loop's turn reported
-        await self._bus.publish(ReportMessage(
-            agent_type=self._agent_type,
-            task_id=task_id,
-            report_type=report_type,
-            summary=summary,
-            content=str(content or ""),
-        ))
 
         logger.info("{} responded {} for task {}", self._agent_type, report_type, task_id)
         return {

@@ -247,16 +247,21 @@ async def test_process_message_with_tool_calls(agent_loop, mock_provider, mock_g
     tc = LLMToolCall(id="call_1", name="read", arguments={"path": "test.txt"})
 
     # Mock streaming: first yields chunks, then tool calls at end
+    stream_calls = 0
+
     async def mock_chat_stream_with_tools(*args, **kwargs):
+        nonlocal stream_calls
         from autoreport.core.providers.base import LLMStreamChunk
-        yield LLMStreamChunk(delta="Reading file...")
-        # At end, yield tool calls
-        yield LLMStreamChunk(delta=None, tool_calls=[tc], done=True)
+        stream_calls += 1
+        if stream_calls == 1:
+            yield LLMStreamChunk(delta="Reading file...")
+            # At end, yield tool calls
+            yield LLMStreamChunk(delta=None, tool_calls=[tc], done=True)
+        else:
+            yield LLMStreamChunk(delta="Done!")
+            yield LLMStreamChunk(done=True)
 
     mock_provider.chat_stream = mock_chat_stream_with_tools
-
-    # Second call (after tool execution) returns final response
-    mock_provider.chat.return_value = LLMResponse(content="Done!", tool_calls=[])
 
     tool_called = []
     async def mock_tool(**kwargs):
@@ -487,6 +492,154 @@ async def test_respond_tool_call_marks_turn_reported_synchronously(
     await loop._handle_tool_calls(response, "blocking:tk1")
 
     assert loop._turn_reported is True
+
+
+@pytest.mark.asyncio
+async def test_respond_tool_suppresses_followup_agent_text(
+    workspace, config, mock_provider, mock_prompt_loader
+):
+    """After respond succeeds, extra model prose must not render as a plain reply."""
+    from autoreport.core.tools.agent_tools import RespondTool
+    from autoreport.core.tools.registry import ToolRegistry
+    from autoreport.core.tools.task_board import TaskBoard
+
+    board = TaskBoard()
+    board.create_task(AgentType.MAIN, AgentType.PLOTTING, "draw", task_id="tk1")
+    bus = MessageBus()
+    tools = ToolRegistry()
+    tools.register(RespondTool(bus=bus, agent_type=AgentType.PLOTTING, task_board=board))
+    loop = AgentLoop(
+        agent_type=AgentType.PLOTTING,
+        workspace=workspace,
+        tools=tools,
+        bus=bus,
+        config=config,
+        llm_provider=mock_provider,
+        prompt_loader=mock_prompt_loader,
+        loop_manager=None,
+        task_board=board,
+    )
+    mock_provider.chat.return_value = LLMResponse(content="extra follow-up", tool_calls=[])
+    response = SimpleNamespace(
+        content="",
+        thinking=None,
+        tool_calls=[
+            LLMToolCall(
+                id="call_respond",
+                name="respond",
+                arguments={
+                    "task_id": "tk1",
+                    "type": "reply",
+                    "summary": "Done",
+                    "content": "done",
+                },
+            )
+        ],
+    )
+
+    await loop._handle_tool_calls(response, "blocking:tk1")
+
+    published = []
+    while not bus._queue.empty():
+        published.append(bus._queue.get_nowait())
+
+    assert loop._turn_reported is True
+    assert not [
+        msg for msg in published
+        if isinstance(msg, AgentResponse) and msg.content
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_tool_result_stops_before_next_llm_call(
+    workspace, config, mock_provider, mock_prompt_loader
+):
+    bus = MessageBus()
+    loop_ref = {}
+
+    async def cancellable_tool(**kwargs):
+        loop_ref["loop"].cancel_current()
+        return {"status": "ok"}
+
+    tools = MagicMock()
+    tools.get.return_value = cancellable_tool
+    tools.get_definitions.return_value = []
+    loop = AgentLoop(
+        agent_type=AgentType.PLOTTING,
+        workspace=workspace,
+        tools=tools,
+        bus=bus,
+        config=config,
+        llm_provider=mock_provider,
+        prompt_loader=mock_prompt_loader,
+        loop_manager=None,
+    )
+    loop_ref["loop"] = loop
+    response = SimpleNamespace(
+        content="",
+        thinking=None,
+        tool_calls=[
+            LLMToolCall(
+                id="call_cancel",
+                name="slow_tool",
+                arguments={"path": "Plots/out.txt"},
+            )
+        ],
+    )
+
+    await loop._handle_tool_calls(response, "msg-1")
+
+    mock_provider.chat.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_tool_followup_streams_thinking_chunks(
+    workspace, config, mock_provider, mock_prompt_loader
+):
+    bus = MessageBus()
+
+    async def read_tool(**kwargs):
+        return {"content": "file data"}
+
+    async def followup_stream(*args, **kwargs):
+        yield LLMStreamChunk(thinking="checking result")
+        yield LLMStreamChunk(delta="Done")
+        yield LLMStreamChunk(done=True)
+
+    mock_provider.chat_stream = followup_stream
+    tools = MagicMock()
+    tools.get.return_value = read_tool
+    tools.get_definitions.return_value = []
+    loop = AgentLoop(
+        agent_type=AgentType.MAIN,
+        workspace=workspace,
+        tools=tools,
+        bus=bus,
+        config=config,
+        llm_provider=mock_provider,
+        prompt_loader=mock_prompt_loader,
+        loop_manager=None,
+    )
+    response = SimpleNamespace(
+        content="",
+        thinking=None,
+        tool_calls=[
+            LLMToolCall(
+                id="call_read",
+                name="read",
+                arguments={"path": "test.txt"},
+            )
+        ],
+    )
+
+    await loop._handle_tool_calls(response, "msg-1")
+
+    published = list(bus._queue._queue)
+    assert [
+        msg.thinking
+        for msg in published
+        if isinstance(msg, AgentResponse) and msg.thinking
+    ] == ["checking result"]
 
 
 @pytest.mark.asyncio

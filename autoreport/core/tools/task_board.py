@@ -80,6 +80,29 @@ class TaskBoard:
     def get_tasks_by_id(self, task_id: str) -> list[TaskItem]:
         return [task for task in self._tasks if task.task_id == task_id]
 
+    def remove_tasks_by_id(
+        self,
+        task_id: str,
+        *,
+        target_agent: AgentType | None = None,
+        session_id: str | None = None,
+    ) -> list[TaskItem]:
+        removed: list[TaskItem] = []
+        kept: list[TaskItem] = []
+        for task in self._tasks:
+            if task.task_id != task_id:
+                kept.append(task)
+                continue
+            if target_agent is not None and task.target_agent != target_agent:
+                kept.append(task)
+                continue
+            if session_id is not None and task.session_id != session_id:
+                kept.append(task)
+                continue
+            removed.append(task)
+        self._tasks = kept
+        return removed
+
     def start_task(
         self,
         task_id: str,
@@ -169,21 +192,45 @@ class TaskBoard:
         task.status = new_status
         task.completed_at = datetime.now(timezone.utc)
 
+    @staticmethod
+    def _agent_label(agent_type: AgentType) -> str:
+        return agent_type.value.replace("_", " ").title()
+
+    def _source_followup_view(self, task: TaskItem) -> TaskItem:
+        if task.status == TaskStatus.COMPLETED:
+            brief = f"Check {self._agent_label(task.target_agent)} completed: {task.brief}"
+        elif task.status == TaskStatus.FAILED:
+            brief = f"Handle {self._agent_label(task.target_agent)} failure: {task.brief}"
+        elif task.status == TaskStatus.CANCELLED:
+            brief = f"Handle {self._agent_label(task.target_agent)} cancellation: {task.brief}"
+        else:
+            brief = task.brief
+        return task.model_copy(update={"brief": brief, "status": TaskStatus.PENDING})
+
     def get_todolist(self, agent_type: AgentType, session_id: str | None = None) -> list[TaskItem]:
         active_assigned = [
             t for t in self._tasks
             if t.target_agent == agent_type and t.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS)
             and (session_id is None or t.session_id == session_id)
         ]
-        resolved_followups = [
+        local_resolved = [
             t for t in self._tasks
             if t.source_agent == agent_type
+            and t.target_agent == agent_type
+            and t.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)
+            and (session_id is None or t.session_id == session_id)
+        ]
+        resolved_followups = [
+            self._source_followup_view(t)
+            for t in self._tasks
+            if t.source_agent == agent_type
+            and t.target_agent != agent_type
             and t.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)
             and (session_id is None or t.session_id == session_id)
         ]
         seen = set()
         merged: list[TaskItem] = []
-        for t in [*active_assigned, *resolved_followups]:
+        for t in [*active_assigned, *local_resolved, *resolved_followups]:
             key = (t.task_id, t.source_agent, t.target_agent, t.created_at)
             if key in seen:
                 continue
@@ -192,15 +239,21 @@ class TaskBoard:
         return merged
 
     def get_waitlist(self, agent_type: AgentType, session_id: str | None = None) -> list[TaskItem]:
-        # Waitlist = tasks this agent delegated to *another* agent and is still
-        # waiting on. A local todo (source == target == self) is the agent's own
-        # work and belongs only in the todolist — never in its own waitlist,
-        # otherwise the agent sees "waiting on myself" and can never clear it.
+        # Waitlist = tasks this agent delegated to *another* agent. Keep
+        # resolved delegated tasks visible as completed/failed/cancelled wait
+        # entries so the source agent retains the "what I was waiting on"
+        # history while also seeing the resolved follow-up in todolist.
         return [
             t for t in self._tasks
             if t.source_agent == agent_type
             and t.target_agent != agent_type
-            and t.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS)
+            and t.status in (
+                TaskStatus.PENDING,
+                TaskStatus.IN_PROGRESS,
+                TaskStatus.COMPLETED,
+                TaskStatus.FAILED,
+                TaskStatus.CANCELLED,
+            )
             and (session_id is None or t.session_id == session_id)
         ]
 

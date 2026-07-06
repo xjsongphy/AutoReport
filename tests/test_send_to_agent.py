@@ -229,6 +229,8 @@ class TestSendToAgentTool:
         result = await tool(agent_type="plotting", summary="Draw plot", content="draw plot")
         assert result["status"] == "timeout"
         assert result["agent_type"] == "plotting"
+        assert board.get_todolist(AgentType.PLOTTING) == []
+        assert board.get_waitlist(AgentType.MAIN) == []
 
 
 class TestTaskBriefFallback:
@@ -265,3 +267,23 @@ class TestTaskBriefFallback:
         assert len(tasks) == 1
         expected = "Derive uncertainty formula"[:30]
         assert tasks[0].brief == expected
+
+
+class TestRespondOrdering:
+    @pytest.mark.asyncio
+    async def test_respond_publishes_report_before_task_updates(self, bus, board):
+        task = board.create_task(AgentType.MAIN, AgentType.THEORY, "derive")
+        tool = RespondTool(bus=bus, agent_type=AgentType.THEORY, task_board=board)
+
+        result = await tool(
+            task_id=task.task_id,
+            type="reply",
+            summary="Derived",
+            content="done",
+        )
+
+        assert result["status"] == "ok"
+        first = await asyncio.wait_for(bus._queue.get(), timeout=1)
+        second = await asyncio.wait_for(bus._queue.get(), timeout=1)
+        assert isinstance(first, ReportMessage)
+        assert second.__class__.__name__ == "TaskUpdateMessage"
