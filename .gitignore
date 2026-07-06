@@ -4,14 +4,11 @@ __pycache__/
 *.egg-info/
 dist/
 .uv/
-CLAUDE.md
 logs/
 external/cc-switch/
 external/skills/
 
 TODO.md
-bug.md
-ref
 images
 image*.png
 docs
