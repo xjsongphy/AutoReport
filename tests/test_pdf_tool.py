@@ -94,3 +94,28 @@ async def test_parse_batch_with_errors(workspace):
 
     assert result["total"] == 2
     assert len(result["errors"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_parse_surfaces_auth_failure_with_actionable_hint(workspace):
+    tool = PDFParseTool(workspace=workspace)
+    src_file = workspace / "References" / "auth.pdf"
+    src_file.write_bytes(b"%PDF-1.4 fake")
+
+    mock_proc = AsyncMock()
+    mock_proc.communicate.return_value = (
+        b"",
+        b'HTTP 401, body: {"detail":"user authenticate failed"}',
+    )
+    mock_proc.returncode = 1
+
+    with (
+        patch.object(PDFParseTool, "is_available", return_value=True),
+        patch("autoreport.core.tools.pdf_tool.asyncio.create_subprocess_exec", return_value=mock_proc),
+    ):
+        result = await tool(file_paths="References/auth.pdf")
+
+    assert result["total"] == 1
+    assert result["errors"] is not None
+    assert "authenticated" in result["errors"][0]
+    assert "mineru-open-api auth" in result["errors"][0]
