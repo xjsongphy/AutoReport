@@ -113,6 +113,9 @@ class PDFParseTool(Tool):
                 logger.error("Failed to parse {}: {}", raw_path, e)
                 errors.append(f"{raw_path}: {e}")
 
+        if errors:
+            raise RuntimeError("; ".join(errors))
+
         return {
             "results": results,
             "total": len(paths),

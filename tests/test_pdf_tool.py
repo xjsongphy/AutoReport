@@ -40,10 +40,8 @@ async def test_parse_raises_when_not_available(workspace):
 async def test_parse_file_not_found(workspace):
     tool = PDFParseTool(workspace=workspace)
     with patch.object(PDFParseTool, "is_available", return_value=True):
-        result = await tool(file_paths="References/nonexistent.pdf")
-        assert result["total"] == 1
-        assert result["errors"] is not None
-        assert "file not found" in result["errors"][0]
+        with pytest.raises(RuntimeError, match="file not found"):
+            await tool(file_paths="References/nonexistent.pdf")
 
 
 @pytest.mark.asyncio
@@ -90,10 +88,8 @@ async def test_parse_batch_with_errors(workspace):
     tool = PDFParseTool(workspace=workspace)
 
     with patch.object(PDFParseTool, "is_available", return_value=True):
-        result = await tool(file_paths=["missing1.pdf", "missing2.pdf"])
-
-    assert result["total"] == 2
-    assert len(result["errors"]) == 2
+        with pytest.raises(RuntimeError, match="missing1.pdf: file not found"):
+            await tool(file_paths=["missing1.pdf", "missing2.pdf"])
 
 
 @pytest.mark.asyncio
@@ -113,9 +109,5 @@ async def test_parse_surfaces_auth_failure_with_actionable_hint(workspace):
         patch.object(PDFParseTool, "is_available", return_value=True),
         patch("autoreport.core.tools.pdf_tool.asyncio.create_subprocess_exec", return_value=mock_proc),
     ):
-        result = await tool(file_paths="References/auth.pdf")
-
-    assert result["total"] == 1
-    assert result["errors"] is not None
-    assert "authenticated" in result["errors"][0]
-    assert "mineru-open-api auth" in result["errors"][0]
+        with pytest.raises(RuntimeError, match="mineru-open-api auth"):
+            await tool(file_paths="References/auth.pdf")
