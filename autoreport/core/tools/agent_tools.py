@@ -45,7 +45,8 @@ class SendToAgentTool(Tool):
         "summary is required and must be non-empty; content is required and must be non-empty. "
         "Modes (choose one):\n"
         "- blocking=True (default): Wait for the sub-agent's `respond` (reply or blocked).\n"
-        "- blocking=False: Return immediately; the sub-agent's later `respond` notifies you.\n"
+        "- blocking=False: Return immediately; the sub-agent's later `respond` notifies you. "
+        "Prefer this for independent work so multiple sub-agents can run in parallel without blocking Main.\n"
         "task_id: omit on first dispatch; pass an existing task_id to RE-DISPATCH a "
         "previously blocked task (resets it to in_progress)."
     )

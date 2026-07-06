@@ -1101,36 +1101,28 @@ class MainWindow(QMainWindow):
                     message_id=rec.get("message_id"),
                 )
             elif role == "agent":
-                display_mode = str(rec.get("display_mode") or "agent_markdown")
-                if display_mode in {"bubble", "inline_notice"}:
-                    panel.add_message(
-                        "agent",
-                        content,
-                        display_mode=display_mode,
-                        bubble_title=rec.get("bubble_title"),
-                        bubble_align=str(rec.get("bubble_align") or "left"),
-                        bubble_on_timeline=bool(rec.get("bubble_on_timeline", display_mode == "bubble")),
-                        bubble_collapsible=bool(rec.get("bubble_collapsible", True)),
-                        muted_italic=bool(rec.get("muted_italic", False)),
-                        message_id=rec.get("message_id"),
-                    )
-                else:
-                    panel.add_message("agent", content, message_id=rec.get("message_id"))
+                MainWindow._render_agent_record(self, panel, content, rec)
             elif role == "thinking":
                 panel.add_message(
                     "agent",
                     content,
                     display_mode="thought",
-                    bubble_title=rec.get("bubble_title") or "Thought",
+                    bubble_title=rec.get("summary") or rec.get("bubble_title") or "Thought",
                     bubble_collapsible=bool(rec.get("bubble_collapsible", True)),
                 )
             elif role == "tool_call":
                 if content == "manage_tasks":
                     continue
+                arguments = rec.get("arguments", {})
+                summary, detail, expandable = MainWindow._load_tool_call_render_state(
+                    self, str(content), arguments, rec
+                )
                 panel.add_tool_call(
                     content,
-                    rec.get("arguments", {}),
-                    summary=rec.get("summary"),
+                    arguments,
+                    summary=summary,
+                    detail=detail,
+                    expandable=expandable,
                 )
             elif role == "tool_result":
                 if content == "manage_tasks":
@@ -1140,13 +1132,16 @@ class MainWindow(QMainWindow):
                 if rec.get("task_snapshot"):
                     panel.add_task_snapshot_summary(str(rec.get("summary") or rec.get("result") or ""))
                 else:
+                    summary, detail, expandable, result_value, error_value = (
+                        MainWindow._load_tool_result_render_state(self, str(content), rec)
+                    )
                     panel.add_tool_result(
                         content,
-                        rec.get("result"),
-                        rec.get("error"),
-                        summary=rec.get("summary"),
-                        detail=rec.get("detail"),
-                        expandable=rec.get("expandable"),
+                        result_value,
+                        error_value,
+                        summary=summary,
+                        detail=detail,
+                        expandable=expandable,
                     )
             elif role == "error":
                 panel.add_error(rec.get("source", ""), content)
@@ -1163,11 +1158,62 @@ class MainWindow(QMainWindow):
             "thinking",
             detail or "",
             extra={
-                "display_mode": "thought",
-                "bubble_title": summary,
-                "bubble_collapsible": expandable,
+                "summary": summary,
             },
         )
+
+    def _render_agent_record(self, panel: AgentPanel, content: str, rec: dict[str, Any]) -> None:
+        source = str(rec.get("source") or "")
+        message_id = rec.get("message_id")
+
+        if rec.get("system_notice") or source == "system":
+            kind = str(rec.get("kind") or "").strip().lower()
+            is_interrupt = kind == "interrupt"
+            display_mode = "inline_notice" if is_interrupt else "bubble"
+            panel.add_message(
+                "agent",
+                content,
+                display_mode=display_mode,
+                bubble_title=None,
+                bubble_align="left",
+                bubble_on_timeline=False,
+                bubble_collapsible=True,
+                muted_italic=is_interrupt,
+                message_id=message_id,
+            )
+            return
+
+        if rec.get("report_type"):
+            summary = str(rec.get("summary") or "").strip()
+            bubble_title = summary or MainWindow._respond_summary(self, source or "sub", content)
+            panel.add_message(
+                "agent",
+                content,
+                display_mode="bubble",
+                bubble_title=bubble_title,
+                bubble_align="left",
+                bubble_on_timeline=False,
+                bubble_collapsible=True,
+                message_id=message_id,
+            )
+            return
+
+        display_mode = str(rec.get("display_mode") or "agent_markdown")
+        if display_mode in {"bubble", "inline_notice"}:
+            panel.add_message(
+                "agent",
+                content,
+                display_mode=display_mode,
+                bubble_title=rec.get("bubble_title"),
+                bubble_align=str(rec.get("bubble_align") or "left"),
+                bubble_on_timeline=bool(rec.get("bubble_on_timeline", display_mode == "bubble")),
+                bubble_collapsible=bool(rec.get("bubble_collapsible", True)),
+                muted_italic=bool(rec.get("muted_italic", False)),
+                message_id=message_id,
+            )
+            return
+
+        panel.add_message("agent", content, message_id=message_id)
 
     def _records_to_backend_messages(self, agent_type: str) -> list[dict[str, str]]:
         """Convert stored records to backend chat history messages."""
@@ -1582,9 +1628,14 @@ class MainWindow(QMainWindow):
             agent_str,
             message.tool_name,
             message.arguments,
-            extra={
-                "summary": summary,
-            },
+            extra=MainWindow._tool_call_store_extra(
+                self,
+                message.tool_name,
+                message.arguments,
+                summary=summary,
+                detail=detail,
+                expandable=expandable,
+            ),
         )
 
     def _handle_tool_result(self, message: ToolResult) -> None:
@@ -1624,13 +1675,15 @@ class MainWindow(QMainWindow):
                 message.tool_name,
                 result_str,
                 message.error,
-                extra={
-                    "summary": summary,
-                    "detail": detail,
-                    "expandable": expandable,
-                }
-                if summary or detail or expandable is not None
-                else None,
+                extra=MainWindow._tool_result_store_extra(
+                    self,
+                    message.tool_name,
+                    message.result,
+                    message.error,
+                    summary=summary,
+                    detail=detail,
+                    expandable=expandable,
+                ),
             )
             return
         panel = self._get_panel_for_agent(agent_str)
@@ -1677,11 +1730,117 @@ class MainWindow(QMainWindow):
             message.tool_name,
             result_str,
             message.error,
-            extra={
-                "summary": summary,
-                "detail": detail,
-                "expandable": expandable,
-            },
+            extra=MainWindow._tool_result_store_extra(
+                self,
+                message.tool_name,
+                message.result,
+                message.error,
+                summary=summary,
+                detail=detail,
+                expandable=expandable,
+            ),
+        )
+
+    def _tool_call_store_extra(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        summary: str | None,
+        detail: str | None,
+        expandable: bool | None,
+    ) -> dict[str, Any] | None:
+        if tool_name == "send_to_agent":
+            return None
+
+        extra: dict[str, Any] = {}
+        if summary is not None:
+            extra["summary"] = summary
+        if detail is not None:
+            extra["detail"] = detail
+        if expandable is not None:
+            extra["expandable"] = expandable
+        return extra or None
+
+    def _tool_result_store_extra(
+        self,
+        tool_name: str,
+        result: Any,
+        error: str | None,
+        *,
+        summary: str | None,
+        detail: str | None,
+        expandable: bool | None,
+    ) -> dict[str, Any] | None:
+        if tool_name == "send_to_agent":
+            return {"result_data": result} if isinstance(result, dict) else None
+
+        extra: dict[str, Any] = {}
+        if summary is not None:
+            extra["summary"] = summary
+        if detail is not None:
+            extra["detail"] = detail
+        if expandable is not None:
+            extra["expandable"] = expandable
+        if isinstance(result, dict):
+            extra["result_data"] = result
+        if error is not None:
+            extra["error"] = error
+        return extra or None
+
+    def _load_tool_call_render_state(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        rec: dict[str, Any],
+    ) -> tuple[str | None, str | None, bool | None]:
+        summary = rec.get("summary")
+        detail = rec.get("detail")
+        expandable = rec.get("expandable")
+
+        if tool_name == "send_to_agent":
+            target = str(arguments.get("agent_type") or "sub").strip() or "sub"
+            request_text = str(arguments.get("content") or "").strip()
+            summary = MainWindow._route_summary(self, "main", target)
+            detail = request_text or None
+            expandable = bool(detail)
+        elif tool_name == "respond":
+            detail = str(arguments.get("content") or "").strip() or detail
+            summary = "Respond"
+            expandable = bool(detail)
+
+        return (
+            str(summary) if summary is not None else None,
+            str(detail) if detail is not None else None,
+            None if expandable is None else bool(expandable),
+        )
+
+    def _load_tool_result_render_state(
+        self,
+        tool_name: str,
+        rec: dict[str, Any],
+    ) -> tuple[str | None, str | None, bool | None, Any, str | None]:
+        result_value = rec.get("result_data", rec.get("result"))
+        error_value = rec.get("error")
+        summary = rec.get("summary")
+        detail = rec.get("detail")
+        expandable = rec.get("expandable")
+
+        if tool_name == "send_to_agent":
+            summary, detail = self._format_send_to_agent_bubble(result_value, error_value)
+            expandable = bool(detail)
+            result_value = rec.get("result")
+        elif tool_name == "respond":
+            summary, detail = self._format_respond_bubble(result_value, error_value)
+            expandable = bool(detail)
+            result_value = rec.get("result")
+
+        return (
+            str(summary) if summary is not None else None,
+            str(detail) if detail is not None else None,
+            None if expandable is None else bool(expandable),
+            result_value,
+            error_value,
         )
 
     def _send_to_agent_result_arguments(self, result: Any) -> dict[str, Any]:
@@ -1901,11 +2060,6 @@ class MainWindow(QMainWindow):
             extra={
                 "source": agent_str,
                 "summary": summary,
-                "display_mode": "bubble",
-                "bubble_title": bubble_title,
-                "bubble_align": "left",
-                "bubble_on_timeline": False,
-                "bubble_collapsible": True,
                 "report_type": message.report_type,
                 "task_id": message.task_id,
             },
@@ -1942,13 +2096,8 @@ class MainWindow(QMainWindow):
             message.content,
             extra={
                 "source": "system",
-                "display_mode": display_mode,
-                "bubble_title": bubble_title,
-                "bubble_align": "left",
-                "bubble_on_timeline": False,
-                "bubble_collapsible": True,
                 "system_notice": True,
-                "muted_italic": is_interrupt,
+                "kind": "interrupt" if is_interrupt else "notice",
             },
         )
 

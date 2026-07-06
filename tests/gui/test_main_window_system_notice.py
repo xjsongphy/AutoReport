@@ -55,11 +55,11 @@ def test_system_notice_renders_in_target_agent_panel():
     assert args[1] == "agent"
     assert args[2] == "本轮需要调用 Respond 向 Main 回复"
     assert kwargs["extra"]["source"] == "system"
-    assert kwargs["extra"]["display_mode"] == "bubble"
-    assert kwargs["extra"]["bubble_align"] == "left"
-    assert kwargs["extra"]["bubble_on_timeline"] is False
-    assert kwargs["extra"]["bubble_collapsible"] is True
     assert kwargs["extra"]["system_notice"] is True
+    assert kwargs["extra"]["kind"] == "notice"
+    assert "display_mode" not in kwargs["extra"]
+    assert "bubble_align" not in kwargs["extra"]
+    assert "bubble_title" not in kwargs["extra"]
 
 
 def test_interrupt_notice_renders_as_inline_notice_without_timeline_bubble():
@@ -94,9 +94,10 @@ def test_interrupt_notice_renders_as_inline_notice_without_timeline_bubble():
 
     _, args, kwargs = store_calls[0]
     assert args == ("main", "agent", "Interrupted")
-    assert kwargs["extra"]["display_mode"] == "inline_notice"
-    assert kwargs["extra"]["muted_italic"] is True
     assert kwargs["extra"]["system_notice"] is True
+    assert kwargs["extra"]["kind"] == "interrupt"
+    assert "display_mode" not in kwargs["extra"]
+    assert "muted_italic" not in kwargs["extra"]
 
 
 def test_load_conversations_restores_interrupt_notice_as_inline_notice():
@@ -119,8 +120,8 @@ def test_load_conversations_restores_interrupt_notice_as_inline_notice():
                     "role": "agent",
                     "content": "Interrupted",
                     "source": "system",
-                    "display_mode": "inline_notice",
-                    "muted_italic": True,
+                    "system_notice": True,
+                    "kind": "interrupt",
                 }
             ]
 
@@ -193,13 +194,12 @@ def test_report_message_renders_in_main_panel():
     assert args[1] == "agent"
     assert args[2] == "Need x column data"
     assert kwargs["extra"]["source"] == "plotting"
-    assert kwargs["extra"]["display_mode"] == "bubble"
-    assert kwargs["extra"]["bubble_align"] == "left"
-    assert kwargs["extra"]["bubble_on_timeline"] is False
-    assert kwargs["extra"]["bubble_collapsible"] is True
     assert kwargs["extra"]["report_type"] == "missing_data"
     assert kwargs["extra"]["task_id"] == "tk1"
     assert kwargs["extra"]["summary"] == "Need x data"
+    assert "display_mode" not in kwargs["extra"]
+    assert "bubble_align" not in kwargs["extra"]
+    assert "bubble_title" not in kwargs["extra"]
 
 
 def test_main_dispatch_message_uses_summary_bubble():
@@ -327,3 +327,86 @@ def test_report_message_for_invisible_main_skips_panel():
     call_name, args, kwargs = store_calls[0]
     assert call_name == "message"
     assert args[0] == "main"
+
+
+def test_load_conversations_reconstructs_report_bubble_from_semantic_record():
+    panel_calls: list[tuple[str, tuple, dict]] = []
+
+    class _Panel:
+        def __init__(self):
+            self._messages_area = SimpleNamespace(clear=lambda: None)
+
+        def add_message(self, *args, **kwargs):
+            panel_calls.append(("message", args, kwargs))
+
+        def _update_width(self):
+            pass
+
+    class _Store:
+        def load_messages(self, agent_type):
+            return [
+                {
+                    "role": "agent",
+                    "content": "Need x column data",
+                    "source": "plotting",
+                    "summary": "Need x data",
+                    "report_type": "missing_data",
+                    "task_id": "tk1",
+                }
+            ]
+
+    fake = SimpleNamespace()
+    fake._conv_store = _Store()
+    fake._render_agent_record = lambda panel, content, rec: MainWindow._render_agent_record(
+        fake, panel, content, rec
+    )
+
+    panel = _Panel()
+    MainWindow._load_conversations_for_agent(fake, "main", panel)
+
+    _, args, kwargs = panel_calls[0]
+    assert args == ("agent", "Need x column data")
+    assert kwargs["display_mode"] == "bubble"
+    assert kwargs["bubble_title"] == "Need x data"
+    assert kwargs["bubble_align"] == "left"
+
+
+def test_load_conversations_reconstructs_regular_notice_bubble_from_semantic_record():
+    panel_calls: list[tuple[str, tuple, dict]] = []
+
+    class _Panel:
+        def __init__(self):
+            self._messages_area = SimpleNamespace(clear=lambda: None)
+
+        def add_message(self, *args, **kwargs):
+            panel_calls.append(("message", args, kwargs))
+
+        def _update_width(self):
+            pass
+
+    class _Store:
+        def load_messages(self, agent_type):
+            return [
+                {
+                    "role": "agent",
+                    "content": "正在处理数据",
+                    "source": "system",
+                    "system_notice": True,
+                    "kind": "notice",
+                }
+            ]
+
+    fake = SimpleNamespace()
+    fake._conv_store = _Store()
+    fake._render_agent_record = lambda panel, content, rec: MainWindow._render_agent_record(
+        fake, panel, content, rec
+    )
+
+    panel = _Panel()
+    MainWindow._load_conversations_for_agent(fake, "plotting", panel)
+
+    _, args, kwargs = panel_calls[0]
+    assert args == ("agent", "正在处理数据")
+    assert kwargs["display_mode"] == "bubble"
+    assert kwargs["bubble_align"] == "left"
+    assert kwargs["bubble_title"] is None
