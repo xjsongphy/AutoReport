@@ -175,14 +175,8 @@ class SendToAgentTool(Tool):
                 ):
                     t.status = TaskStatus.IN_PROGRESS
                     t.completed_at = None
-            if not blocking:
-                await self._bus.publish(TaskUpdateMessage(
-                    task_id=task_id,
-                    action="started",
-                    source_agent=AgentType.MAIN,
-                    target_agent=target,
-                    brief=existing.brief,
-                ))
+            if existing.status == TaskStatus.PENDING:
+                existing.status = TaskStatus.IN_PROGRESS
         elif self._task_board is not None:
             item = task_items[0] if task_items else {}
             brief = (
@@ -196,16 +190,21 @@ class SendToAgentTool(Tool):
                 blocking=blocking,
                 session_id=sid,
             )
+            new_task.status = TaskStatus.IN_PROGRESS
             task_id = new_task.task_id
             created_new_task = True
-            if not blocking:
+            existing = new_task
+        if self._task_board is not None and task_id:
+            task_for_update = self._task_board.get_task(
+                task_id, target_agent=target, active_only=False, session_id=sid
+            ) or self._task_board.get_task(task_id, target_agent=target, active_only=False)
+            if task_for_update is not None:
                 await self._bus.publish(TaskUpdateMessage(
                     task_id=task_id,
-                    action="created",
-                    source_agent=new_task.source_agent,
-                    target_agent=new_task.target_agent,
-                    brief=new_task.brief,
-                    previous_status=None,
+                    action="started",
+                    source_agent=task_for_update.source_agent,
+                    target_agent=task_for_update.target_agent,
+                    brief=task_for_update.brief,
                 ))
 
         # Non-blocking: dispatch and return immediately
