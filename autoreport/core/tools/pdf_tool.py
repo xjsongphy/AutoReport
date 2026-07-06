@@ -113,6 +113,9 @@ class PDFParseTool(Tool):
                 logger.error("Failed to parse {}: {}", raw_path, e)
                 errors.append(f"{raw_path}: {e}")
 
+        if errors:
+            raise RuntimeError("; ".join(errors))
+
         return {
             "results": results,
             "total": len(paths),
@@ -151,6 +154,12 @@ class PDFParseTool(Tool):
 
             if proc.returncode != 0:
                 err_msg = stderr.decode(errors="replace").strip()
+                lower_err = err_msg.lower()
+                if "http 401" in lower_err or "authenticate failed" in lower_err:
+                    raise RuntimeError(
+                        "mineru-open-api is installed but not authenticated. "
+                        "Run: mineru-open-api auth"
+                    )
                 raise RuntimeError(
                     f"mineru-open-api exited with code {proc.returncode}: {err_msg}"
                 )

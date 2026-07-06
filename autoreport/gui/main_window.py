@@ -1583,6 +1583,10 @@ class MainWindow(QMainWindow):
     def _handle_tool_result(self, message: ToolResult) -> None:
         agent_str = str(message.agent_type)
         state = self._state_for_agent(agent_str)
+        latest_task_summary_fn = getattr(self, "_latest_persisted_task_summary", None)
+        latest_task_summary = (
+            latest_task_summary_fn(agent_str) if callable(latest_task_summary_fn) else None
+        )
         if not self._is_visible_agent(agent_str):
             result_str = str(message.result) if message.result else None
             summary = None
@@ -1603,6 +1607,8 @@ class MainWindow(QMainWindow):
                 summary, detail, expandable = self._format_manage_tasks_result(
                     message.result, message.error
                 )
+                if summary and latest_task_summary == summary:
+                    return
                 if summary:
                     result_str = summary
             self._conv_store.append_tool_result(
@@ -1641,6 +1647,8 @@ class MainWindow(QMainWindow):
         elif message.tool_name == "manage_tasks":
             message.result = self._augment_manage_tasks_result(agent_str, message.result)
             summary, _, _ = self._format_manage_tasks_result(message.result, message.error)
+            if summary and latest_task_summary == summary:
+                return
             if summary:
                 result_str = summary
 
@@ -1956,7 +1964,11 @@ class MainWindow(QMainWindow):
         tgt = message.target_agent
         tgt_str = tgt.value if isinstance(tgt, Enum) else str(tgt)
 
-        for agent_str in {"main", src_str, tgt_str}:
+        agents_to_sync = {src_str, tgt_str}
+        if "main" in agents_to_sync:
+            agents_to_sync.add("main")
+
+        for agent_str in agents_to_sync:
             self._sync_task_snapshot_for_agent(
                 agent_str,
                 render=self.current_agent_type == agent_str,
