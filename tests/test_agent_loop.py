@@ -693,6 +693,102 @@ async def test_apply_patch_error_payload_publishes_tool_error(
 
 
 @pytest.mark.asyncio
+async def test_missing_apply_patch_argument_reports_required_schema(
+    workspace, config, mock_provider, mock_prompt_loader
+):
+    bus = MessageBus()
+
+    async def patch_tool(**kwargs):
+        return {"ok": True, **kwargs}
+
+    tools = MagicMock()
+    tools.get.return_value = patch_tool
+    tools.get_definitions.return_value = [
+        {
+            "name": "apply_patch",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "patch": {"type": "string"},
+                },
+                "required": ["path", "patch"],
+            },
+        }
+    ]
+    loop = AgentLoop(
+        agent_type=AgentType.THEORY,
+        workspace=workspace,
+        tools=tools,
+        bus=bus,
+        config=config,
+        llm_provider=mock_provider,
+        prompt_loader=mock_prompt_loader,
+        loop_manager=None,
+    )
+    response = SimpleNamespace(
+        content="",
+        thinking=None,
+        tool_calls=[
+            LLMToolCall(
+                id="call_patch",
+                name="apply_patch",
+                arguments={"path": "test.md"},
+            )
+        ],
+        usage=None,
+    )
+
+    await loop._handle_tool_calls(response, "msg-1")
+
+    published = list(bus._queue._queue)
+    tool_results = [msg for msg in published if isinstance(msg, ToolResultMsg)]
+    assert len(tool_results) == 1
+    assert "requires arguments: path, patch" in (tool_results[0].error or "")
+    assert "missing required arguments: patch" in (tool_results[0].error or "")
+
+
+@pytest.mark.asyncio
+async def test_truncated_tool_call_error_mentions_apply_patch_not_write_file(
+    workspace, config, mock_provider, mock_prompt_loader
+):
+    bus = MessageBus()
+    tools = MagicMock()
+    tools.get.return_value = AsyncMock()
+    tools.get_definitions.return_value = []
+    loop = AgentLoop(
+        agent_type=AgentType.PLOTTING,
+        workspace=workspace,
+        tools=tools,
+        bus=bus,
+        config=config,
+        llm_provider=mock_provider,
+        prompt_loader=mock_prompt_loader,
+        loop_manager=None,
+    )
+    response = SimpleNamespace(
+        content="",
+        thinking=None,
+        tool_calls=[
+            LLMToolCall(
+                id="call_exec",
+                name="exec",
+                arguments={},
+            )
+        ],
+        usage={"output_tokens": 8192},
+    )
+
+    await loop._handle_tool_calls(response, "msg-1")
+
+    published = list(bus._queue._queue)
+    tool_results = [msg for msg in published if isinstance(msg, ToolResultMsg)]
+    assert len(tool_results) == 1
+    assert "write them one at a time using apply_patch" in (tool_results[0].error or "")
+    assert "write_file" not in (tool_results[0].error or "")
+
+
+@pytest.mark.asyncio
 async def test_loop_ignores_report_from_other_agent(agent_loop):
     """A ReportMessage from a different agent does not set our flag."""
     agent_loop._turn_reported = False
