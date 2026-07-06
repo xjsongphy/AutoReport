@@ -13,8 +13,6 @@ English | [中文](README_zh.md)
 
 </div>
 
----
-
 ## Overview
 
 A multi-agent collaborative automated physics experiment report writing system. Users provide experimental data and reference materials, then agents collaboratively generate LaTeX reports through theoretical derivation, data analysis, visualization, and typesetting.
