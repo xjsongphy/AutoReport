@@ -1125,12 +1125,18 @@ class MainWindow(QMainWindow):
                     bubble_collapsible=bool(rec.get("bubble_collapsible", True)),
                 )
             elif role == "tool_call":
+                if content == "manage_tasks":
+                    continue
                 panel.add_tool_call(
                     content,
                     rec.get("arguments", {}),
                     summary=rec.get("summary"),
                 )
             elif role == "tool_result":
+                if content == "manage_tasks":
+                    if rec.get("task_snapshot"):
+                        panel.add_task_snapshot_summary(str(rec.get("summary") or rec.get("result") or ""))
+                    continue
                 if rec.get("task_snapshot"):
                     panel.add_task_snapshot_summary(str(rec.get("summary") or rec.get("result") or ""))
                 else:
@@ -1532,6 +1538,12 @@ class MainWindow(QMainWindow):
     def _handle_tool_call(self, message: ToolCallMessage) -> None:
         agent_str = str(message.agent_type)
         state = self._state_for_agent(agent_str)
+        if message.tool_name == "manage_tasks":
+            state.phase = "tool"
+            if self._is_visible_agent(agent_str):
+                panel = self._get_panel_for_agent(agent_str)
+                panel.finish_thinking()
+            return
         if not self._is_visible_agent(agent_str):
             self._conv_store.append_tool_call(agent_str, message.tool_name, message.arguments)
             return
@@ -1605,7 +1617,8 @@ class MainWindow(QMainWindow):
                 if summary and latest_task_summary == summary:
                     return
                 if summary:
-                    result_str = summary
+                    self._conv_store.upsert_task_snapshot(agent_str, summary)
+                return
             self._conv_store.append_tool_result(
                 agent_str,
                 message.tool_name,
@@ -1644,8 +1657,11 @@ class MainWindow(QMainWindow):
             summary, _, _ = self._format_manage_tasks_result(message.result, message.error)
             if summary and latest_task_summary == summary:
                 return
+            panel.add_task_snapshot_summary(summary or "")
+            state.phase = "tool"
             if summary:
-                result_str = summary
+                self._conv_store.upsert_task_snapshot(agent_str, summary)
+            return
 
         panel.add_tool_result(
             message.tool_name,
