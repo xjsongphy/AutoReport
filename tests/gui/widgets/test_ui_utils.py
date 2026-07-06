@@ -26,3 +26,23 @@ def test_combo_popup_host_applies_rounded_mask(qtbot) -> None:
     combo._apply_popup_mask(popup)
 
     assert popup.mask().isEmpty() is False
+
+
+def test_combo_tracks_popup_open_state_for_chevron_direction(qtbot) -> None:
+    combo = NoWheelComboBox()
+    qtbot.addWidget(combo)
+    combo.addItems(["DeepSeek", "OpenAI"])
+    combo.show()
+    qtbot.waitExposed(combo)
+
+    assert combo._popup_open is False
+
+    combo.showPopup()
+    qtbot.wait(20)
+
+    assert combo._popup_open is True
+
+    combo.hidePopup()
+    qtbot.wait(20)
+
+    assert combo._popup_open is False

@@ -4,14 +4,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import override
 
-from PyQt6.QtCore import QSize, Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QKeyEvent, QTextDocument, QIcon
+from PyQt6.QtCore import QEvent, QRect, QRectF, QSize, Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
+from PyQt6.QtGui import QKeyEvent, QIcon, QPainterPath, QRegion
 from PyQt6.QtWidgets import QGraphicsOpacityEffect, QApplication
 from PyQt6.QtWidgets import (
+    QFrame,
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QStyle,
     QStyledItemDelegate,
+    QStyleOptionViewItem,
     QVBoxLayout,
     QWidget,
 )
@@ -36,6 +39,7 @@ class FileSearchPopup(QWidget):
     file_selected = pyqtSignal(Path)
     agent_selected = pyqtSignal(str)
     cancelled = pyqtSignal()
+    unhandled_key_pressed = pyqtSignal(object)
 
     MAX_VISIBLE_ROWS = 10
 
@@ -64,34 +68,44 @@ class FileSearchPopup(QWidget):
         self._selected_idx = 0
         self._agents: list[tuple[str, str, QIcon]] = []
         self._current_agent: str = ""
+        self._workspace: Path | None = None
 
         self._setup_ui()
         self._setup_window_flags()
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(2)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self._frame = QFrame(self)
+        self._frame.setObjectName("fileSearchPopupFrame")
+        frame_layout = QVBoxLayout(self._frame)
+        frame_layout.setContentsMargins(8, 8, 8, 8)
+        frame_layout.setSpacing(4)
+        layout.addWidget(self._frame)
 
         self._status_label = QLabel()
         self._status_label.setVisible(False)
-        layout.addWidget(self._status_label)
+        frame_layout.addWidget(self._status_label)
 
         self._list_widget = QListWidget()
         self._list_widget.setItemDelegate(HTMLDelegate())
-        self._list_widget.setSpacing(1)
+        self._list_widget.setSpacing(2)
         self._list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._list_widget.currentRowChanged.connect(self._on_current_row_changed)
         self._list_widget.itemClicked.connect(self._on_item_clicked)
         self._list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
-        layout.addWidget(self._list_widget)
+        self._list_widget.installEventFilter(self)
+        self._list_widget.viewport().installEventFilter(self)
+        frame_layout.addWidget(self._list_widget)
 
         self.setFixedWidth(400)
 
         c = get_theme_colors()
 
-        self.setStyleSheet(f"""
-            FileSearchPopup {{
+        self._frame.setStyleSheet(f"""
+            QFrame#fileSearchPopupFrame {{
                 background-color: {c["bg"]};
                 border: 1px solid {c["border"]};
                 border-radius: {c["radius_md"]};
@@ -103,7 +117,7 @@ class FileSearchPopup(QWidget):
                 padding: 2px;
             }}
             QListWidget::item {{
-                padding: 5px 8px;
+                padding: 0 8px;
                 border-radius: {c["radius_sm"]};
                 color: {c["popup_fg"]};
             }}
@@ -123,6 +137,35 @@ class FileSearchPopup(QWidget):
             | Qt.WindowType.NoDropShadowWindowHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setAutoFillBackground(False)
+
+    def set_workspace(self, workspace: Path | str | None) -> None:
+        self._workspace = Path(workspace).resolve() if workspace else None
+
+    def _radius_px(self) -> float:
+        try:
+            return float(str(get_theme_colors().get("radius_md", "6px")).removesuffix("px"))
+        except ValueError:
+            return 6.0
+
+    def _update_rounded_mask(self) -> None:
+        rect = QRectF(QRect(self.rect()).adjusted(0, 0, -1, -1))
+        if rect.isEmpty():
+            return
+        path = QPainterPath()
+        radius = self._radius_px()
+        path.addRoundedRect(rect, radius, radius)
+        self.setMask(QRegion(path.toFillPolygon().toPolygon()))
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._update_rounded_mask()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._update_rounded_mask()
 
     def set_current_agent(self, agent_type: str) -> None:
         self._current_agent = agent_type
@@ -138,7 +181,7 @@ class FileSearchPopup(QWidget):
         if self._agents:
             self._status_label.setVisible(False)
             status = "searching files…" if waiting else (
-                "no file matches" if not self._matches else None
+                "no matching files" if not self._matches else None
             )
             self._populate_list(file_status=status)
         elif waiting:
@@ -155,7 +198,7 @@ class FileSearchPopup(QWidget):
 
         if self._agents:
             self._status_label.setVisible(False)
-            self._populate_list(file_status=None if matches else "no file matches")
+            self._populate_list(file_status=None if matches else "no matching files")
         elif not matches:
             self._show_status("no matches")
         else:
@@ -176,21 +219,25 @@ class FileSearchPopup(QWidget):
             item = QListWidgetItem(f"  {name}")
             item.setIcon(icon)
             item.setData(Qt.ItemDataRole.UserRole, ("agent", agent_type))
+            item.setSizeHint(QSize(0, 38))
             self._list_widget.addItem(item)
 
         has_files = file_status is None and self._matches
-        if self._agents and (has_files or file_status):
-            text = file_status if file_status else "── files ──"
+        if self._agents and file_status:
+            text = file_status
             sep = QListWidgetItem(f"  {text}")
             sep.setData(Qt.ItemDataRole.UserRole, ("separator", None))
             sep.setFlags(Qt.ItemFlag.NoItemFlags)
+            sep.setSizeHint(QSize(0, 32))
             self._list_widget.addItem(sep)
 
-        if file_status is None:
+        if has_files:
             for match in self._matches[:self.MAX_VISIBLE_ROWS]:
                 item = QListWidgetItem()
                 item.setData(Qt.ItemDataRole.UserRole, ("file", match))
                 item.setText(self._format_match_text(match))
+                item.setToolTip(str(match.path))
+                item.setSizeHint(QSize(0, 34))
                 self._list_widget.addItem(item)
 
         for i in range(self._list_widget.count()):
@@ -208,24 +255,13 @@ class FileSearchPopup(QWidget):
         return bool(item.flags() & Qt.ItemFlag.ItemIsSelectable)
 
     def _format_match_text(self, match: FileMatch) -> str:
-        path_str = str(match.path)
-        rel_path = path_str
-
-        if match.indices:
-            highlighted = []
-            for i, char in enumerate(path_str):
-                if i in match.indices:
-                    highlighted.append(f"<b>{char}</b>")
-                else:
-                    highlighted.append(char)
-            rel_path = "".join(highlighted)
-
-        if len(path_str) > 50:
-            parts = Path(path_str).parts
-            if len(parts) > 3:
-                rel_path = ".../" + "/".join(parts[-3:])
-
-        return rel_path
+        path = Path(match.path)
+        if self._workspace and path.is_absolute():
+            try:
+                return path.relative_to(self._workspace).as_posix()
+            except ValueError:
+                pass
+        return path.as_posix()
 
     def move_up(self) -> None:
         if not self._list_widget.isVisible():
@@ -280,13 +316,21 @@ class FileSearchPopup(QWidget):
     def _on_item_double_clicked(self, item: QListWidgetItem) -> None:
         self.select_current()
 
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        if obj in {self._list_widget, self._list_widget.viewport()} and event.type() == QEvent.Type.KeyPress:
+            self.keyPressEvent(event)
+            return True
+        return super().eventFilter(obj, event)
+
     @override
     def keyPressEvent(self, event: QKeyEvent) -> None:
         match event.key():
             case Qt.Key.Key_Up:
                 self.move_up()
+                return
             case Qt.Key.Key_Down:
                 self.move_down()
+                return
             case Qt.Key.Key_Enter | Qt.Key.Key_Return:
                 self.select_current()
                 return
@@ -294,7 +338,8 @@ class FileSearchPopup(QWidget):
                 self.cancel()
                 return
             case _:
-                super().keyPressEvent(event)
+                self.unhandled_key_pressed.emit(event)
+                event.accept()
 
     def calculate_height(self) -> int:
         if self._status_label.isVisible():
@@ -325,18 +370,27 @@ class HTMLDelegate(QStyledItemDelegate):
                 return
 
         if match_obj:
-            option.text = ""
-            super().paint(painter, option, index)
-
             text = index.model().data(index, Qt.ItemDataRole.DisplayRole)
             if text:
-                document = QTextDocument()
-                document.setHtml(text)
-                document.setTextWidth(option.rect.width())
+                opt = QStyleOptionViewItem(option)
+                self.initStyleOption(opt, index)
+                opt.text = ""
+                style = opt.widget.style() if opt.widget else QApplication.style()
+                style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
 
+                text_rect = option.rect.adjusted(8, 0, -8, 0)
+                elided = option.fontMetrics.elidedText(
+                    text,
+                    Qt.TextElideMode.ElideMiddle,
+                    text_rect.width(),
+                )
                 painter.save()
-                painter.translate(option.rect.topLeft())
-                document.drawContents(painter)
+                painter.setPen(opt.palette.color(opt.palette.ColorRole.Text))
+                painter.drawText(
+                    text_rect,
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                    elided,
+                )
                 painter.restore()
         else:
             super().paint(painter, option, index)
@@ -354,8 +408,5 @@ class HTMLDelegate(QStyledItemDelegate):
         if match_obj:
             text = index.model().data(index, Qt.ItemDataRole.DisplayRole)
             if text:
-                document = QTextDocument()
-                document.setHtml(text)
-                document.setTextWidth(400)
-                return QSize(400, int(document.size().height()) + 4)
+                return QSize(400, 34)
         return super().sizeHint(option, index)

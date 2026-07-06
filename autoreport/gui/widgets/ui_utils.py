@@ -246,6 +246,7 @@ class NoWheelComboBox(QComboBox):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._popup_open = False
         self.setFrame(False)
         # Force a cross-platform style path (avoid macOS native popup look).
         fusion = QStyleFactory.create("Fusion")
@@ -283,14 +284,20 @@ class NoWheelComboBox(QComboBox):
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
         painter.setPen(pen)
-        painter.drawLine(x, y, x + 5, y + 5)
-        painter.drawLine(x + 5, y + 5, x + 10, y)
+        if self._popup_open:
+            painter.drawLine(x, y + 5, x + 5, y)
+            painter.drawLine(x + 5, y, x + 10, y + 5)
+        else:
+            painter.drawLine(x, y, x + 5, y + 5)
+            painter.drawLine(x + 5, y + 5, x + 10, y)
         painter.end()
 
     def showPopup(self) -> None:  # noqa: N802
         if self.count() == 0:
             self.addItem("（无可用项）")
             self.model().item(0).setEnabled(False)
+        self._popup_open = True
+        self.update()
         self._apply_popup_style()
         super().showPopup()
         # Keep popup position consistent across platforms: directly below combo.
@@ -308,6 +315,11 @@ class NoWheelComboBox(QComboBox):
             popup.move(self.mapToGlobal(QPoint(0, self.height() - 2)))
             popup.show()
             self._apply_popup_mask(popup)
+
+    def hidePopup(self) -> None:  # noqa: N802
+        super().hidePopup()
+        self._popup_open = False
+        self.update()
 
     def eventFilter(self, obj, event):  # noqa: N802
         view = self.view()
