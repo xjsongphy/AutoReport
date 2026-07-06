@@ -27,6 +27,3 @@ pytest-of-*/
 */pytest-of-*/
 .ruff_cache/
 *.bak
-
-# Temporary test data
-着色测试/
