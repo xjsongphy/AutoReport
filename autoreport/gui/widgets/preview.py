@@ -12,6 +12,7 @@ from loguru import logger
 from PyQt6.QtCore import QEvent, QSignalBlocker, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtPdf import QPdfDocument
+from PyQt6.QtPdfWidgets import QPdfView
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
@@ -194,8 +195,6 @@ def _create_scintilla(path: Path, lexer_name: str) -> tuple:
 
 def _create_pdf_viewer(path: Path) -> tuple:
     """Create an embedded QPdfView for the given PDF file."""
-    from PyQt6.QtPdfWidgets import QPdfView
-
     c = get_theme_colors()
     doc = QPdfDocument(None)
     # QPdfDocument.load expects str/QIODevice, not pathlib.Path.
@@ -206,7 +205,7 @@ def _create_pdf_viewer(path: Path) -> tuple:
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         return label, "pdf"
 
-    view = QPdfView(None)
+    view = _ZoomablePdfView(None)
     view.setObjectName("filePdfView")
     view.setDocument(doc)
     # Keep a strong reference to avoid document being GC'd and rendering blank.
@@ -221,6 +220,36 @@ def _create_pdf_viewer(path: Path) -> tuple:
     """)
 
     return view, "pdf"
+
+
+class _ZoomablePdfView(QPdfView):  # type: ignore[name-defined]
+    """QPdfView with Ctrl+wheel zoom, no toolbar.
+
+    Note: Qt6's QPdfView has NO native text selection / copy — only zoom is
+    added here. Drag-select + clipboard would require a custom implementation
+    on top of QPdfSelection / QClipboard.
+    """
+
+    _ZOOM_MIN = 0.25
+    _ZOOM_MAX = 5.0
+    _ZOOM_STEP = 1.15
+
+    def wheelEvent(self, event) -> None:  # noqa: N802
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            # First Ctrl+wheel switches from FitInView to manual zoom,
+            # preserving the currently fitted scale as the starting point.
+            factor = self.zoomFactor()
+            if self.zoomMode() != self.ZoomMode.Custom:
+                self.setZoomMode(self.ZoomMode.Custom)
+                self.setZoomFactor(factor)
+            if event.angleDelta().y() > 0:
+                factor = min(self._ZOOM_MAX, factor * self._ZOOM_STEP)
+            else:
+                factor = max(self._ZOOM_MIN, factor / self._ZOOM_STEP)
+            self.setZoomFactor(factor)
+            event.accept()
+            return
+        super().wheelEvent(event)
 
 
 def _create_image_viewer(path: Path) -> tuple:
