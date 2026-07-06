@@ -36,6 +36,20 @@ class TestMarkdownRenderer:
         html = render_markdown("- item 1\n- item 2")
         assert "item 1" in html
         assert "item 2" in html
+        assert "<li>" in html
+
+    def test_list_immediately_after_text_line_renders_as_list(self):
+        html = render_markdown(
+            "**报告 (Tex/)**\n"
+            "- `main.tex` + `mpltx.cls` 模板\n"
+            "- 章节：sec-intro, sec-setup\n"
+            "- 已编译出 `main.pdf`"
+        )
+
+        assert "<ul>" in html
+        assert html.count("<li>") == 3
+        assert "main.tex" in html
+        assert "已编译出" in html
 
     def test_link_preserved(self):
         html = render_markdown("[click here](https://example.com)")

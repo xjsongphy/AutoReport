@@ -41,7 +41,11 @@ app = typer.Typer(
 
 
 # Known noisy macOS platform lines (byte patterns) to drop from stderr.
-_BLOCK_STDERR_PATTERNS = (b"IMKCFRunLoopWakeUpReliable",)
+_BLOCK_STDERR_PATTERNS = (
+    b"IMKCFRunLoopWakeUpReliable",
+    b"TSM AdjustCapsLockLEDForKeyTransitionHandling",
+    b"_ISSetPhysicalKeyboardCapsLockLED",
+)
 
 
 def _install_stderr_filter() -> None:

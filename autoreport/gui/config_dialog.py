@@ -142,8 +142,20 @@ class ConfigCard(QFrame):
             object_name="testBtn",
             on_click=self._test_connection,
         )
+        self._sync_action_column_width()
         grid.addWidget(self.test_btn, 4, 2)
         layout.addLayout(grid)
+
+    def _sync_action_column_width(self) -> None:
+        width = max(
+            self.delete_btn.sizeHint().width(),
+            self.show_key_btn.sizeHint().width(),
+            self.test_btn.sizeHint().width(),
+        )
+        height = self.delete_btn.height()
+        for button in (self.delete_btn, self.show_key_btn):
+            button.setFixedSize(width, height)
+        self.test_btn.setFixedWidth(width)
 
     def _toggle_key_visibility(self) -> None:
         is_visible = self.key_input.echoMode() == QLineEdit.EchoMode.Normal
