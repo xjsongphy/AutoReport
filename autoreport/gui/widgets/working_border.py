@@ -1,4 +1,4 @@
-"""Animated working border beam — VS Code Copilot Chat style.
+"""Animated working border beam — Claude Code style.
 
 VS Code uses a conic-gradient border beam (::before/::after pseudo-elements)
 that rotates around the input container while the agent is working.

@@ -1,4 +1,4 @@
-"""Message cell — VS Code Copilot Chat style.
+"""Message cell — Claude Code style.
 
 - User messages: right-aligned rounded bubble
 - Agent messages: flat layout with avatar + markdown content + bottom copy
@@ -21,7 +21,7 @@ from PyQt6.QtGui import (
     QWheelEvent,
 )
 
-from ..scale import scaled_size
+from ..scale import scaled, scaled_size
 from PyQt6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -611,10 +611,12 @@ class _ExpandableContentWidget(QWidget):
 
     def setMaximumContentWidth(self, width: int) -> None:
         width = max(40, int(width))
-        if self._max_content_width == width:
-            return
         self._max_content_width = width
         self._label.setMaximumWidth(width)
+        # Always recalculate overflow / label geometry — the toggle button and
+        # fade mask depend on the current layout, and the button-size deduction
+        # inside _label_width needs a fresh read when the widget is re-shown
+        # (the button's sizeHint may be 0 on early calls).
         self._refresh_clamp()
 
     def set_text(self, text: str) -> None:
@@ -695,10 +697,7 @@ class _ExpandableContentWidget(QWidget):
 
     def _label_width(self) -> int:
         width = self._max_content_width if self._max_content_width is not None else self.width()
-        width = max(40, int(width))
-        if not self._clamp_collapsed and self.can_toggle():
-            width -= self._toggle_btn.sizeHint().width() + 8
-        return max(40, width)
+        return max(40, int(width))
 
     def _refresh_clamp(self) -> None:
         display_text = self._display_text()
@@ -767,7 +766,7 @@ class _ExpandableContentWidget(QWidget):
 
 
 class MessageRow(QWidget):
-    """Render a chat message matching VS Code Copilot Chat's visual style."""
+    """Render a chat message matching Claude Code's visual style."""
 
     # Signal emitted when user clicks edit button on their message
     edit_requested = pyqtSignal(str)
@@ -898,12 +897,11 @@ class MessageRow(QWidget):
             rl = QHBoxLayout(row)
             rl.setContentsMargins(0, 0, 0, 0)
             rl.setSpacing(0)
-            rl.addStretch(1)
 
             self._user_bubble_container = QWidget(row)
             self._user_bubble_container.setObjectName("userMessageBubbleContainer")
             self._user_bubble_container.setSizePolicy(
-                QSizePolicy.Policy.Preferred,
+                QSizePolicy.Policy.Expanding,
                 QSizePolicy.Policy.Preferred,
             )
             bcl = QVBoxLayout(self._user_bubble_container)
@@ -956,7 +954,13 @@ class MessageRow(QWidget):
             bcl.addWidget(self._user_footer)
             self._set_user_actions_visible(False)
 
-            rl.addWidget(self._user_bubble_container, 0, Qt.AlignmentFlag.AlignHCenter)
+            # Center the bubble but let it fill the available width up to its
+            # maximumWidth (capped in _apply_bubble_width). A high stretch
+            # factor on the container makes it consume the space the two
+            # flanking stretches only take as slack — so the bubble is centered
+            # when narrower than the row and fills (wrapping) when wider.
+            rl.addStretch(1)
+            rl.addWidget(self._user_bubble_container, 100)
             rl.addStretch(1)
             self._outer_layout.addWidget(row)
         else:
@@ -997,8 +1001,25 @@ class MessageRow(QWidget):
                 bubble_layout.setSpacing(0)
                 self._user_bubble_widget = bubble
                 self._populate_bubble_content(bubble_layout, bubble_type="left")
-                host_layout.addWidget(bubble, 0, Qt.AlignmentFlag.AlignLeft)
-                self._agent_content_layout.addWidget(bubble_host)
+                # No alignment flag: let the bubble's Expanding policy fill the
+                # host up to its maximumWidth (capped to the row width in
+                # _apply_text_width_constraints). AlignLeft would defeat the
+                # policy and collapse the bubble to its sizeHint.
+                host_layout.addWidget(bubble)
+                bubble_host.setSizePolicy(
+                    QSizePolicy.Policy.Expanding,
+                    QSizePolicy.Policy.Preferred,
+                )
+                # Center the bubble on the row's center line (same axis as the
+                # user bubble). The high stretch on the host lets it fill up to
+                # its maximumWidth while the flanking stretches center it.
+                center_row = QHBoxLayout()
+                center_row.setContentsMargins(0, 0, 0, 0)
+                center_row.setSpacing(0)
+                center_row.addStretch(1)
+                center_row.addWidget(bubble_host, 100)
+                center_row.addStretch(1)
+                self._agent_content_layout.addLayout(center_row)
                 self._update_left_bubble_width()
             else:
                 self._rebuild_agent_content()
@@ -1854,28 +1875,21 @@ class MessageRow(QWidget):
         self._update_left_bubble_width()
 
     def _update_user_bubble_width(self) -> None:
-        if not self._is_outbound_message() or self._user_bubble_container is None:
-            return
-        if self._editing:
+        """Delegate: width capping is unified in _apply_text_width_constraints.
+
+        Only edit mode (which replaces the bubble with a fixed-width editor) and
+        the context-chip sync remain here.
+        """
+        if self._is_outbound_message() and self._user_bubble_container is not None and self._editing:
             width = max(80, self.width() - 32)
-        else:
-            width = self._target_user_bubble_width()
-        self._user_bubble_container.setMinimumWidth(width)
-        self._user_bubble_container.setMaximumWidth(width)
+            self._user_bubble_container.setMinimumWidth(width)
+            self._user_bubble_container.setMaximumWidth(width)
+        self._apply_text_width_constraints()
         self._sync_context_chip_width()
 
     def _update_left_bubble_width(self) -> None:
-        if not (self._uses_bubble_layout() and self._bubble_align == "left"):
-            return
-        if self._user_bubble_widget is None:
-            return
-        width = max(80, self.width() - 56)
-        self._user_bubble_widget.setMinimumWidth(width)
-        self._user_bubble_widget.setMaximumWidth(width)
-        if self._body_content_widget is not None:
-            self._body_content_widget.setMaximumContentWidth(
-                self._user_bubble_content_width_limit()
-            )
+        """Delegate: width capping is unified in _apply_text_width_constraints."""
+        self._apply_text_width_constraints()
 
     def _is_outbound_message(self) -> bool:
         """Right-side messages sent to an agent share the user bubble layout."""
@@ -1887,7 +1901,10 @@ class MessageRow(QWidget):
     def _uses_timeline(self) -> bool:
         if self._is_coordination:
             return False
-        return self._display_mode in {"agent_markdown", "thought"} or self._bubble_on_timeline
+        # Bubbles (user / agent / system) center on the row's center line and
+        # do not anchor to the timeline rail. Only inline agent markdown and
+        # thought rows carry the rail.
+        return self._display_mode in {"agent_markdown", "thought"}
 
     def _uses_summary_bubble(self) -> bool:
         return self._uses_bubble_layout() and bool(self._bubble_title) and not self._allow_edit
@@ -1898,10 +1915,35 @@ class MessageRow(QWidget):
         return (self._bubble_text, self._bubble_text, True)
 
     def _apply_text_width_constraints(self) -> None:
-        max_w = max(40, self._content_width_limit())
+        """Single source of truth for every content width in the row.
+
+        Caps bubbles (left/right), the right-side bubble container, inline agent
+        markdown labels, and the thought summary at the available content width
+        so text wraps and the bubble never overflows the panel. Minimums stay at
+        a small readable floor — never the full row width — so a hard minimum
+        cannot propagate up the layout and block the scroll area from shrinking
+        when the panel is narrowed (which was the root cause of bubble overflow
+        on resize). This is the one method every render mode funnels through.
+        """
+        available = max(80, self._content_width_limit())
+        floor = self._bubble_floor_width()
         for label in self._wrapping_labels:
-            label.setMaximumWidth(max_w)
+            label.setMaximumWidth(available)
+
         if self._uses_bubble_layout():
+            # Both left (agent/system) and right (user) bubbles share the same
+            # target width and center line, so they render with an identical
+            # footprint — only alignment differs (handled by the row layout).
+            target = self._target_user_bubble_width()
+            if self._user_bubble_widget is not None:
+                self._user_bubble_widget.setMaximumWidth(target)
+                self._user_bubble_widget.setMinimumWidth(min(floor, target))
+            # Right-side user bubble: the container holds bubble + footer and is
+            # the element centered in the row, so cap it too.
+            if self._bubble_align == "right" and self._user_bubble_container is not None:
+                self._user_bubble_container.setMaximumWidth(target)
+                self._user_bubble_container.setMinimumWidth(min(floor, target))
+
             bubble_max_w = self._user_bubble_content_width_limit()
             if self._bubble_title_label is not None:
                 self._bubble_title_label.setMaximumWidth(max(40, bubble_max_w - 24))
@@ -1909,8 +1951,14 @@ class MessageRow(QWidget):
                 self._body_content_widget.setMaximumContentWidth(bubble_max_w)
         elif self._display_mode == "thought" and self._summary_text_label is not None:
             self._summary_text_label.setMaximumWidth(
-                max(40, max_w - 24 - TIMELINE_TEXT_LEFT_GUTTER)
+                max(40, available - 24 - TIMELINE_TEXT_LEFT_GUTTER)
             )
+
+    @staticmethod
+    def _bubble_floor_width() -> int:
+        # Readable lower bound for a bubble. Kept well below the panel's own
+        # minimum width so it never blocks the row from shrinking.
+        return scaled(160)
 
     def _target_user_bubble_width(self) -> int:
         # Match the agent/tool timeline geometry: when the user bubble is

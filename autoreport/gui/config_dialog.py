@@ -84,7 +84,6 @@ class ConfigCard(QFrame):
         self.name_input = QLineEdit()
         self.name_input.setText(self.config.name)
         grid.addWidget(QLabel("名称"), 0, 0)
-        grid.addWidget(self.name_input, 0, 1)
 
         self.delete_btn = IconActionButton(
             text="×",
@@ -93,7 +92,7 @@ class ConfigCard(QFrame):
             button_size=(32, 28),
         )
         self.delete_btn.clicked.connect(self._on_delete_clicked)
-        grid.addWidget(self.delete_btn, 0, 2)
+        grid.addWidget(self._field_with_action(self.name_input, self.delete_btn), 0, 1, 1, 2)
 
         self.provider_combo = NoWheelComboBox()
         for pid, label in PROVIDER_LABELS.items():
@@ -110,7 +109,6 @@ class ConfigCard(QFrame):
         self.key_input.setText(self.config.api_key or "")
         self.key_input.setPlaceholderText("sk-...")
         grid.addWidget(QLabel("API Key"), 2, 0)
-        grid.addWidget(self.key_input, 2, 1)
 
         self.show_key_btn = IconActionButton(
             tooltip="显示 API Key",
@@ -120,7 +118,7 @@ class ConfigCard(QFrame):
             on_click=self._toggle_key_visibility,
         )
         self._update_key_visibility_icon(False)
-        grid.addWidget(self.show_key_btn, 2, 2)
+        grid.addWidget(self._field_with_action(self.key_input, self.show_key_btn), 2, 1, 1, 2)
 
         self.base_url_input = QLineEdit()
         self.base_url_input.setText(self.config.api_base or "")
@@ -142,20 +140,17 @@ class ConfigCard(QFrame):
             object_name="testBtn",
             on_click=self._test_connection,
         )
-        self._sync_action_column_width()
         grid.addWidget(self.test_btn, 4, 2)
         layout.addLayout(grid)
 
-    def _sync_action_column_width(self) -> None:
-        width = max(
-            self.delete_btn.sizeHint().width(),
-            self.show_key_btn.sizeHint().width(),
-            self.test_btn.sizeHint().width(),
-        )
-        height = self.delete_btn.height()
-        for button in (self.delete_btn, self.show_key_btn):
-            button.setFixedSize(width, height)
-        self.test_btn.setFixedWidth(width)
+    def _field_with_action(self, field: QLineEdit, button: QPushButton) -> QWidget:
+        row = QWidget(self)
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.addWidget(field, 1)
+        layout.addWidget(button, 0, Qt.AlignmentFlag.AlignRight)
+        return row
 
     def _toggle_key_visibility(self) -> None:
         is_visible = self.key_input.echoMode() == QLineEdit.EchoMode.Normal
