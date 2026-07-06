@@ -191,10 +191,33 @@ def get_theme_colors() -> dict[str, str]:
         # markup.heading / markup.bold — bold blue (dark) vs navy/maroon (light).
         "md_heading": "#569CD6" if dark else "#800000",
         "md_bold": "#569CD6" if dark else "#000080",
+        # markup.italic — *italic* / _italic_ (same hue as bold, italic via font).
+        "md_italic": "#569CD6" if dark else "#000080",
+        # markup.underline.link — [text](url) link target text.
+        "md_link": "#4CB9FF" if dark else "#0451A5",
+        # markup.strikethrough — ~~strikethrough~~ (muted grey).
+        "md_strikethrough": "#808080" if dark else "#555555",
+        # markup.inline.raw — inline `code` (own key so light mode uses blue,
+        # not the red from syntax_string).
+        "md_code": "#CE9178" if dark else "#0451A5",
         # punctuation.definition.list.begin — list markers (-, *, 1.).
         "md_list": "#6796E6" if dark else "#0451A5",
         # punctuation.definition.quote.begin — block-quote marker (>).
-        "md_quote": "#6A9955" if dark else "#0451A5",
+        "md_quote": "#6A9955" if dark else "#008000",
+        # markup.horizontal-rule — --- / *** (subtle, same as comment or muted).
+        "md_hr": "#6A9955" if dark else "#008000",
+
+        # === TeX tokens (VSCode dark-modern / light-modern) ===
+        # support.function.general.tex — \section, \textbf etc.
+        "tex_command": "#DCDCAA" if dark else "#795E26",
+        # keyword.control.tex — \begin, \end, \usepackage, \documentclass etc.
+        "tex_keyword": "#C586C0" if dark else "#AF00DB",
+        # constant.character.escape — $ # % & ~ _ ^ \ (foreground = punctuation).
+        "tex_special": "#D4D4D4" if dark else "#000000",
+        # punctuation.definition.group.brace — {…} (foreground = punctuation).
+        "tex_group": "#D4D4D4" if dark else "#000000",
+        # string.other.math — $E=mc^2$ math content (string, not number).
+        "tex_math": "#CE9178" if dark else "#A31515",
 
         # === Dialog/Config Specific ===
         "activeFg": "#ffffff" if dark else "#202020",
