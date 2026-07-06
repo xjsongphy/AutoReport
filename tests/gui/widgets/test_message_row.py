@@ -37,6 +37,24 @@ def test_agent_message_renders_inline(qtbot):
     assert "I will help you." in display_text
 
 
+def test_inline_notice_renders_muted_italic_without_bubble_or_timeline(qtbot):
+    widget = MessageRow(
+        role="agent",
+        content="Interrupted",
+        display_mode="inline_notice",
+        muted_italic=True,
+    )
+    qtbot.addWidget(widget)
+
+    label = widget.findChild(QLabel, "inlineNoticeText")
+    assert label is not None
+    assert label.text() == "Interrupted"
+    assert label.font().italic() is True
+    assert widget._timeline_rail is None
+    assert widget._user_bubble_widget is None
+    assert widget._body_content_widget is None
+
+
 def test_agent_message_renders_markdown_but_copies_raw_source(qtbot):
     widget = MessageRow(
         role="agent",

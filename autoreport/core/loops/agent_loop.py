@@ -691,6 +691,10 @@ class AgentLoop:
             accumulated_tool_calls = []
             accumulated_thinking = None
             last_error = None
+            # Whether the assistant turn has already been appended to history
+            # (set when the stream completes normally). Guards against a
+            # double-append if a cancel arrives in the same instant as `done`.
+            stream_committed = False
 
             try:
                 async for chunk in self.llm_provider.chat_stream(
@@ -716,15 +720,16 @@ class AgentLoop:
 
                     if chunk.thinking:
                         accumulated_thinking = chunk.thinking
-                        await self.bus.publish(
-                            AgentResponse(
-                                agent_type=self.agent_type,
-                                content="",
-                                message_id=message.message_id,
-                                streaming=True,
-                                thinking=chunk.thinking,
+                        if not chunk.done:
+                            await self.bus.publish(
+                                AgentResponse(
+                                    agent_type=self.agent_type,
+                                    content="",
+                                    message_id=message.message_id,
+                                    streaming=True,
+                                    thinking=chunk.thinking,
+                                )
                             )
-                        )
 
                     if chunk.done:
                         # Stream complete — only save to history if no tool calls.
@@ -733,6 +738,7 @@ class AgentLoop:
                             self._conversation_history.append(
                                 LLMMessage(role="assistant", content=accumulated_content)
                             )
+                            stream_committed = True
                         break
 
                     if self._cancel_event.is_set():
@@ -767,18 +773,36 @@ class AgentLoop:
                     )
                 )
 
-            # Handle cancellation — skip tool calls and send cancellation notice
+            # Handle cancellation — assemble the interrupt event into context,
+            # then emit a UI notice. Skip tool calls.
             if self._cancel_event.is_set():
-                if accumulated_content:
+                # If the stream already completed normally (done fired) a cancel
+                # that arrived in the same instant must not be treated as an
+                # interrupt — the turn already finished.
+                if not stream_committed:
+                    # Assemble the interrupt event into the conversation so the
+                    # NEXT turn can see that this response was cut off. Always
+                    # append an assistant turn to preserve user/assistant
+                    # alternation — even when no tokens were produced (otherwise
+                    # the queued user message would follow the previous user
+                    # message and break alternating-role APIs like Anthropic).
+                    partial = (accumulated_content or "").rstrip()
+                    if partial:
+                        interrupt_content = f"{partial}\n\n[Interrupted by user]"
+                    else:
+                        interrupt_content = (
+                            "[Interrupted by user — response stopped before any output.]"
+                        )
                     self._conversation_history.append(
-                        LLMMessage(role="assistant", content=accumulated_content)
+                        LLMMessage(role="assistant", content=interrupt_content)
                     )
+                # UI: render a muted italic "Interrupted" notice instead of a
+                # fake "[已取消]" assistant bubble.
                 await self.bus.publish(
-                    AgentResponse(
+                    SystemNotice(
                         agent_type=self.agent_type,
-                        content="[已取消]",
-                        message_id=message.message_id,
-                        streaming=False,
+                        content="Interrupted",
+                        kind="interrupt",
                     )
                 )
                 await self._set_status(AgentStatus.IDLE)

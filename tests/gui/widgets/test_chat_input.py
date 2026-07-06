@@ -215,6 +215,28 @@ def test_cursor_motion_rechecks_popup_token(qtbot):
     assert widget._popup_active is False
 
 
+def test_space_after_prefixed_token_closes_popup(qtbot):
+    widget = ChatInput()
+    qtbot.addWidget(widget)
+    widget.setPlainText("@rep")
+    widget.set_popup_active(True)
+
+    cursor = widget.textCursor()
+    cursor.movePosition(cursor.MoveOperation.End)
+    widget.setTextCursor(cursor)
+
+    key_event = QKeyEvent(
+        QKeyEvent.Type.KeyPress,
+        Qt.Key.Key_Space,
+        Qt.KeyboardModifier.NoModifier,
+        " ",
+    )
+    widget.keyPressEvent(key_event)
+
+    assert widget.toPlainText() == "@rep "
+    assert widget._popup_active is False
+
+
 def test_tab_selects_active_popup_item(qtbot):
     widget = ChatInput()
     qtbot.addWidget(widget)

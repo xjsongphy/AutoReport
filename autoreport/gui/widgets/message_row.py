@@ -800,6 +800,7 @@ class MessageRow(QWidget):
         agent_chain_prev: bool = False,
         agent_chain_next: bool = False,
         message_id: str | None = None,
+        muted_italic: bool = False,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
@@ -836,6 +837,9 @@ class MessageRow(QWidget):
         self._agent_chain_prev = agent_chain_prev
         self._agent_chain_next = agent_chain_next
         self._message_id = message_id
+        # When True the bubble text renders muted + italic (e.g. "Interrupted"
+        # notices) instead of normal foreground text.
+        self._muted_italic = muted_italic
         self._timeline_rail: TimelineRail | None = None
         self._bubble_header: QWidget | None = None
         self._bubble_arrow_widget: _DisclosureArrow | None = None
@@ -1021,7 +1025,13 @@ class MessageRow(QWidget):
         text.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         text.installEventFilter(self)
         c = get_theme_colors()
-        text.setStyleSheet(f"color: {c['editor_fg']}; background-color: transparent;")
+        if self._muted_italic:
+            font = text.font()
+            font.setItalic(True)
+            text.setFont(font)
+            text.setStyleSheet(f"color: {c['muted']}; background-color: transparent;")
+        else:
+            text.setStyleSheet(f"color: {c['editor_fg']}; background-color: transparent;")
         collapsed_text, expanded_text, clamp_collapsed = self._bubble_text_strategy()
         self._body_content_widget = self._build_expandable_content_widget(
             text,
@@ -1109,6 +1119,28 @@ class MessageRow(QWidget):
             self._detail_widget.setVisible(self._expanded and self._has_detail())
             self._apply_text_width_constraints()
             self._sync_timeline_dot_alignment()
+            return
+
+        if self._display_mode == "inline_notice":
+            label = QLabel(self._content)
+            label.setObjectName("inlineNoticeText")
+            label.setTextFormat(Qt.TextFormat.PlainText)
+            label.setWordWrap(True)
+            label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            label.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+            label.setContentsMargins(0, 2, 0, 6)
+            label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+            label.setMinimumWidth(0)
+            font = label.font()
+            font.setItalic(True)
+            label.setFont(font)
+            color = get_theme_colors()["muted"] if self._muted_italic else get_theme_colors()["editor_fg"]
+            label.setStyleSheet(f"color: {color}; background-color: transparent;")
+            label.installEventFilter(self)
+            self._wrapping_labels.append(label)
+            self._raw_markdown_labels[label] = self._content
+            self._agent_content_layout.addWidget(label)
+            self._apply_text_width_constraints()
             return
 
         text_label = self._build_agent_markdown_label(self._content)

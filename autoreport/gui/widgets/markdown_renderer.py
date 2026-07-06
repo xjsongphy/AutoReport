@@ -86,6 +86,47 @@ class QtCompatExtension(Extension):
         md.treeprocessors.register(_QtCompatTreeprocessor(md), "qt_compat", 175)
 
 
+_LIST_MARKER_RE = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)")
+
+
+def _separate_loose_list_blocks(text: str) -> str:
+    """Make LLM-style "label\n- item" parse as a Markdown list.
+
+    Python-Markdown follows the stricter rule that lists after a paragraph need
+    a blank line. Chat models often omit it, while users still expect a list.
+    """
+    if not text:
+        return text
+
+    lines = text.splitlines(keepends=True)
+    output: list[str] = []
+    in_fence = False
+    previous_content_line = ""
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+
+        is_list_line = bool(_LIST_MARKER_RE.match(line))
+        previous_is_blank = previous_content_line.strip() == ""
+        previous_is_list = bool(_LIST_MARKER_RE.match(previous_content_line))
+
+        if (
+            is_list_line
+            and not in_fence
+            and previous_content_line
+            and not previous_is_blank
+            and not previous_is_list
+        ):
+            output.append("\n")
+
+        output.append(line)
+        previous_content_line = line
+
+    return "".join(output)
+
+
 def render_markdown(text: str) -> str:
     """Convert markdown text to Qt-compatible HTML."""
     md = markdown.Markdown(
@@ -96,7 +137,7 @@ def render_markdown(text: str) -> str:
         ],
         tab_length=2,
     )
-    html = md.convert(text)
+    html = md.convert(_separate_loose_list_blocks(text))
 
     # Post-process: remove paragraph tags wrapping code blocks
     html = re.sub(r'<p>\s*(<div style="background-color)', r'\1', html)

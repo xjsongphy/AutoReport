@@ -62,6 +62,43 @@ def test_system_notice_renders_in_target_agent_panel():
     assert kwargs["extra"]["system_notice"] is True
 
 
+def test_interrupt_notice_renders_as_inline_notice_without_timeline_bubble():
+    panel_calls: list[tuple[str, tuple, dict]] = []
+    store_calls: list[tuple[str, tuple, dict]] = []
+
+    class _Panel:
+        def add_message(self, *args, **kwargs):
+            panel_calls.append(("message", args, kwargs))
+
+    class _Store:
+        def append_message(self, *args, **kwargs):
+            store_calls.append(("message", args, kwargs))
+
+    fake = SimpleNamespace()
+    fake._conv_store = _Store()
+    fake.current_agent_type = "main"
+    fake._is_visible_agent = lambda agent_type: agent_type == "main"
+    fake._get_panel_for_agent = lambda agent_type: _Panel()
+
+    MainWindow._handle_system_notice(
+        fake,
+        SystemNotice(agent_type=AgentType.MAIN, content="Interrupted", kind="interrupt"),
+    )
+
+    _, args, kwargs = panel_calls[0]
+    assert args == ("agent", "Interrupted")
+    assert kwargs["source"] == "system"
+    assert kwargs["display_mode"] == "inline_notice"
+    assert kwargs["bubble_on_timeline"] is False
+    assert kwargs["muted_italic"] is True
+
+    _, args, kwargs = store_calls[0]
+    assert args == ("main", "agent", "Interrupted")
+    assert kwargs["extra"]["display_mode"] == "inline_notice"
+    assert kwargs["extra"]["muted_italic"] is True
+    assert kwargs["extra"]["system_notice"] is True
+
+
 def test_report_message_renders_in_main_panel():
     """ReportMessage should render a collapsed bubble in the main panel."""
     panel_calls: list[tuple[str, tuple, dict]] = []

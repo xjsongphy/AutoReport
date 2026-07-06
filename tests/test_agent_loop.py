@@ -10,8 +10,9 @@ import pytest
 from autoreport.config.schema import AgentDefaults
 from autoreport.core.loops.agent_loop import AgentLoop
 from autoreport.core.loops.bus import MessageBus
-from autoreport.core.providers.base import LLMResponse, LLMToolCall
+from autoreport.core.providers.base import LLMResponse, LLMStreamChunk, LLMToolCall
 from autoreport.interfaces.types import (
+    AgentResponse,
     AgentStatus,
     AgentType,
     QueueUpdateMessage,
@@ -170,6 +171,31 @@ async def test_process_message(agent_loop, mock_provider, mock_gui):
 
     # Agent publishes AgentResponse to bus (not GUI call)
     assert agent_loop.status == AgentStatus.IDLE
+
+
+@pytest.mark.asyncio
+async def test_stream_final_thinking_snapshot_is_not_published_as_second_thought(agent_loop, mock_provider):
+    thought = "I should answer directly."
+
+    async def stream_with_final_thinking_snapshot(*args, **kwargs):
+        yield LLMStreamChunk(thinking=thought)
+        yield LLMStreamChunk(delta="Hi!")
+        yield LLMStreamChunk(done=True, thinking=thought)
+
+    mock_provider.chat_stream = stream_with_final_thinking_snapshot
+
+    await agent_loop._process_message(UserMessage(content="hi", agent_type=AgentType.MAIN))
+
+    published = [
+        message
+        for message in list(agent_loop.bus._queue._queue)
+        if isinstance(message, AgentResponse)
+    ]
+    thinking_messages = [m for m in published if m.thinking]
+    final_messages = [m for m in published if not m.streaming and m.content == "Hi!"]
+
+    assert [m.thinking for m in thinking_messages] == [thought]
+    assert len(final_messages) == 1
 
 
 @pytest.mark.asyncio

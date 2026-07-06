@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeyEvent
-from PyQt6.QtWidgets import QLabel
+from PyQt6.QtWidgets import QApplication, QLabel
 
 from autoreport.gui.widgets.agent_panel import AgentPanel
 from autoreport.gui.widgets.file_search_popup import FileMatch
@@ -675,6 +675,36 @@ def test_pre_checkpoint_attaches_to_matching_reply_bubble_message_id(agent_panel
     assert reply_row._checkpoint_id == "ckpt_dispatch"
 
 
+def test_pre_checkpoint_pending_until_its_bubble_arrives(agent_panel):
+    """A checkpoint whose bubble hasn't been created yet is queued, not dropped."""
+    agent_panel.add_checkpoint("ckpt_late", "pre:user", message_id="msg-late")
+
+    rows = agent_panel._messages_area.get_message_rows()
+    assert all(getattr(r, "_checkpoint_id", None) is None for r in rows)
+
+    agent_panel.add_message(role="user", content="hello", message_id="msg-late")
+    row = agent_panel._messages_area.get_message_rows()[-1]
+    assert getattr(row, "_message_id", None) == "msg-late"
+    assert row._checkpoint_id == "ckpt_late"
+
+
+def test_pre_checkpoint_matches_by_message_id_regardless_of_arrival_order(agent_panel):
+    """Each bubble gets its own checkpoint even when checkpoints arrive out of order."""
+    agent_panel.add_message(role="user", content="A", message_id="msg-A")
+    agent_panel.add_message(role="user", content="B", message_id="msg-B")
+
+    agent_panel.add_checkpoint("ckpt_B", "pre:user", message_id="msg-B")
+    agent_panel.add_checkpoint("ckpt_A", "pre:user", message_id="msg-A")
+
+    by_id = {
+        getattr(r, "_message_id", None): r
+        for r in agent_panel._messages_area.get_message_rows()
+        if getattr(r, "_message_id", None)
+    }
+    assert by_id["msg-A"]._checkpoint_id == "ckpt_A"
+    assert by_id["msg-B"]._checkpoint_id == "ckpt_B"
+
+
 def test_left_reply_bubble_rollback_signal_reaches_panel(qtbot, agent_panel):
     agent_panel.add_message(
         role="agent",
@@ -812,17 +842,253 @@ def test_file_reference_popup_is_attached_above_composer(agent_panel, qtbot):
     assert popup.geometry().bottom() <= anchor.y()
     assert popup.geometry().left() == anchor.x()
     assert popup.width() == agent_panel._input_container.width()
+    assert popup.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground) is True
+    assert popup.autoFillBackground() is False
+    assert popup.mask().isEmpty() is False
+    assert popup._frame.styleSheet()
 
     class _Future:
         def result(self):
             return [FileMatch(Path(f"Data/file_{i}.txt"), score=10) for i in range(8)]
 
-    agent_panel._apply_file_search_result(agent_panel._file_search_ticket, _Future())
+    ticket = agent_panel._file_search_ticket + 1
+    agent_panel._file_search_ticket = ticket
+    agent_panel._apply_file_search_result(ticket, _Future())
     qtbot.wait(20)
 
     assert popup.geometry().bottom() <= anchor.y()
     assert popup.width() == agent_panel._input_container.width()
     popup.hide()
+
+
+def test_file_reference_popup_displays_relative_file_paths(agent_panel, qtbot):
+    agent_panel.resize(520, 640)
+    agent_panel.show()
+    qtbot.waitExposed(agent_panel)
+    agent_panel.set_agent_type("theory")
+
+    agent_panel._on_file_reference_requested("Tex", agent_panel._input_field.mapToGlobal(agent_panel._input_field.rect().topLeft()))
+
+    class _Future:
+        def result(self):
+            return [FileMatch(agent_panel._workspace / "Tex" / "sections" / "sec-results.tex", score=10)]
+
+    ticket = agent_panel._file_search_ticket + 1
+    agent_panel._file_search_ticket = ticket
+    agent_panel._apply_file_search_result(ticket, _Future())
+    qtbot.wait(20)
+
+    popup = agent_panel._file_search_popup
+    file_items = [
+        popup._list_widget.item(row)
+        for row in range(popup._list_widget.count())
+        if popup._list_widget.item(row).data(Qt.ItemDataRole.UserRole)[0] == "file"
+    ]
+
+    assert len(file_items) == 1
+    assert file_items[0].text() == "Tex/sections/sec-results.tex"
+    assert str(agent_panel._workspace) not in file_items[0].text()
+
+
+def test_file_reference_popup_does_not_show_files_heading(agent_panel, qtbot):
+    agent_panel.resize(520, 640)
+    agent_panel.show()
+    qtbot.waitExposed(agent_panel)
+    agent_panel.set_agent_type("theory")
+
+    agent_panel._on_file_reference_requested("Tex", agent_panel._input_field.mapToGlobal(agent_panel._input_field.rect().topLeft()))
+
+    class _Future:
+        def result(self):
+            return [FileMatch(Path("Tex/main.tex"), score=10)]
+
+    ticket = agent_panel._file_search_ticket + 1
+    agent_panel._file_search_ticket = ticket
+    agent_panel._apply_file_search_result(ticket, _Future())
+    qtbot.wait(20)
+
+    popup = agent_panel._file_search_popup
+    texts = [popup._list_widget.item(row).text() for row in range(popup._list_widget.count())]
+
+    assert not any("files" in text for text in texts)
+    assert any("Tex/main.tex" in text for text in texts)
+
+
+def test_file_reference_popup_file_rows_have_stable_height(agent_panel, qtbot):
+    agent_panel.resize(520, 640)
+    agent_panel.show()
+    qtbot.waitExposed(agent_panel)
+    agent_panel.set_agent_type("theory")
+
+    agent_panel._on_file_reference_requested("Tex", agent_panel._input_field.mapToGlobal(agent_panel._input_field.rect().topLeft()))
+
+    class _Future:
+        def result(self):
+            return [
+                FileMatch(agent_panel._workspace / "Tex" / "main.pdf", score=10),
+                FileMatch(agent_panel._workspace / "Tex" / "main.out", score=10),
+            ]
+
+    ticket = agent_panel._file_search_ticket + 1
+    agent_panel._file_search_ticket = ticket
+    agent_panel._apply_file_search_result(ticket, _Future())
+    qtbot.wait(20)
+
+    popup = agent_panel._file_search_popup
+    file_rows = [
+        row
+        for row in range(popup._list_widget.count())
+        if popup._list_widget.item(row).data(Qt.ItemDataRole.UserRole)[0] == "file"
+    ]
+
+    assert len(file_rows) == 2
+    assert all(popup._list_widget.sizeHintForRow(row) >= 30 for row in file_rows)
+    first = popup._list_widget.visualItemRect(popup._list_widget.item(file_rows[0]))
+    second = popup._list_widget.visualItemRect(popup._list_widget.item(file_rows[1]))
+    assert first.bottom() < second.top()
+
+
+def test_file_reference_popup_mouse_click_selects_file(agent_panel, qtbot):
+    agent_panel.resize(520, 640)
+    agent_panel.show()
+    qtbot.waitExposed(agent_panel)
+    agent_panel.set_agent_type("theory")
+    agent_panel._input_field.setPlainText("@mai")
+    agent_panel._input_field._popup_kind = "@"
+    cursor = agent_panel._input_field.textCursor()
+    cursor.movePosition(cursor.MoveOperation.End)
+    agent_panel._input_field.setTextCursor(cursor)
+
+    agent_panel._on_file_reference_requested("mai", agent_panel._input_field.mapToGlobal(agent_panel._input_field.rect().topLeft()))
+
+    class _Future:
+        def result(self):
+            return [FileMatch(Path("Tex/main.tex"), score=10)]
+
+    ticket = agent_panel._file_search_ticket + 1
+    agent_panel._file_search_ticket = ticket
+    agent_panel._apply_file_search_result(ticket, _Future())
+    qtbot.wait(20)
+
+    popup = agent_panel._file_search_popup
+    file_row = next(
+        row
+        for row in range(popup._list_widget.count())
+        if popup._list_widget.item(row).data(Qt.ItemDataRole.UserRole)[0] == "file"
+    )
+    rect = popup._list_widget.visualItemRect(popup._list_widget.item(file_row))
+    qtbot.mouseClick(
+        popup._list_widget.viewport(),
+        Qt.MouseButton.LeftButton,
+        pos=rect.center(),
+    )
+
+    assert agent_panel._input_field.toPlainText() == "[@main.tex](project://Tex/main.tex)"
+    assert not popup.isVisible()
+
+
+def test_file_reference_popup_applies_async_file_search_results(qtbot, tmp_path):
+    (tmp_path / "Tex").mkdir()
+    (tmp_path / "Tex" / "main.tex").write_text("latex")
+    panel = AgentPanel(
+        panel_id="test_panel",
+        title="Test Agent",
+        workspace=tmp_path,
+    )
+    qtbot.addWidget(panel)
+    panel.resize(520, 640)
+    panel.show()
+    qtbot.waitExposed(panel)
+
+    panel._input_field.setPlainText("@Tex/")
+    cursor = panel._input_field.textCursor()
+    cursor.movePosition(cursor.MoveOperation.End)
+    panel._input_field.setTextCursor(cursor)
+    panel._on_file_reference_requested("Tex/", panel._input_field.mapToGlobal(panel._input_field.rect().topLeft()))
+
+    qtbot.waitUntil(
+        lambda: any(
+            panel._file_search_popup._list_widget.item(row).data(Qt.ItemDataRole.UserRole)[0] == "file"
+            for row in range(panel._file_search_popup._list_widget.count())
+        ),
+        timeout=2000,
+    )
+
+    file_items = [
+        panel._file_search_popup._list_widget.item(row).data(Qt.ItemDataRole.UserRole)[1]
+        for row in range(panel._file_search_popup._list_widget.count())
+        if panel._file_search_popup._list_widget.item(row).data(Qt.ItemDataRole.UserRole)[0] == "file"
+    ]
+    assert any(match.path.name == "main.tex" for match in file_items)
+
+
+def test_file_reference_popup_forwards_editing_keys_to_input(agent_panel, qtbot):
+    agent_panel.resize(520, 640)
+    agent_panel.show()
+    qtbot.waitExposed(agent_panel)
+    agent_panel._input_field.setPlainText("@abc")
+    cursor = agent_panel._input_field.textCursor()
+    cursor.movePosition(cursor.MoveOperation.End)
+    agent_panel._input_field.setTextCursor(cursor)
+
+    agent_panel._on_file_reference_requested("abc", agent_panel._input_field.mapToGlobal(agent_panel._input_field.rect().topLeft()))
+    qtbot.wait(20)
+
+    backspace = QKeyEvent(
+        QKeyEvent.Type.KeyPress,
+        Qt.Key.Key_Backspace,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    agent_panel._file_search_popup.keyPressEvent(backspace)
+
+    assert agent_panel._input_field.toPlainText() == "@ab"
+
+    letter = QKeyEvent(
+        QKeyEvent.Type.KeyPress,
+        Qt.Key.Key_D,
+        Qt.KeyboardModifier.NoModifier,
+        "d",
+    )
+    agent_panel._file_search_popup.keyPressEvent(letter)
+
+    assert agent_panel._input_field.toPlainText() == "@abd"
+
+
+def test_file_reference_popup_list_forwards_editing_keys_to_input(agent_panel, qtbot):
+    agent_panel.resize(520, 640)
+    agent_panel.show()
+    qtbot.waitExposed(agent_panel)
+    agent_panel._input_field.setPlainText("@abc")
+    cursor = agent_panel._input_field.textCursor()
+    cursor.movePosition(cursor.MoveOperation.End)
+    agent_panel._input_field.setTextCursor(cursor)
+
+    agent_panel._on_file_reference_requested("abc", agent_panel._input_field.mapToGlobal(agent_panel._input_field.rect().topLeft()))
+    qtbot.wait(20)
+
+    backspace = QKeyEvent(
+        QKeyEvent.Type.KeyPress,
+        Qt.Key.Key_Backspace,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(agent_panel._file_search_popup._list_widget, backspace)
+
+    assert agent_panel._input_field.toPlainText() == "@ab"
+
+
+def test_file_reference_popup_lists_other_agents_with_main_first(agent_panel):
+    agent_panel.set_agent_type("theory")
+    popup = agent_panel._file_search_popup
+    popup.set_current_agent("theory")
+    popup.set_query("", waiting=True)
+
+    agent_types = [
+        popup._list_widget.item(row).data(Qt.ItemDataRole.UserRole)[1]
+        for row in range(popup._list_widget.count())
+        if popup._list_widget.item(row).data(Qt.ItemDataRole.UserRole)[0] == "agent"
+    ]
+
+    assert agent_types == ["main", "data_analysis", "plotting", "report"]
 
 
 def test_command_popup_is_attached_above_composer_and_keyboard_selects(agent_panel, qtbot):
@@ -856,6 +1122,64 @@ def test_command_popup_is_attached_above_composer_and_keyboard_selects(agent_pan
     assert executed == []
     assert agent_panel._input_field.toPlainText() == "/help "
     assert not agent_panel._cmd_popup.isVisible()
+
+
+def test_command_popup_only_lists_slash_commands(agent_panel, qtbot):
+    agent_panel._on_command_palette_requested("", agent_panel._input_field.mapToGlobal(agent_panel._input_field.rect().topLeft()))
+    qtbot.wait(20)
+
+    assert agent_panel._cmd_popup.count() > 0
+    for row in range(agent_panel._cmd_popup.count()):
+        assert agent_panel._cmd_popup.item(row).data(Qt.ItemDataRole.UserRole).startswith("/")
+
+
+def test_command_popup_mouse_click_completes_selected_command(agent_panel, qtbot):
+    agent_panel.resize(520, 640)
+    agent_panel.show()
+    qtbot.waitExposed(agent_panel)
+    agent_panel._input_field.setPlainText("/he")
+    cursor = agent_panel._input_field.textCursor()
+    cursor.movePosition(cursor.MoveOperation.End)
+    agent_panel._input_field.setTextCursor(cursor)
+
+    agent_panel._on_command_palette_requested("he", agent_panel._input_field.mapToGlobal(agent_panel._input_field.rect().topLeft()))
+    qtbot.wait(20)
+
+    executed: list[str] = []
+    agent_panel._execute_slash_command = lambda cmd, original_text: executed.append(cmd)
+    item = agent_panel._cmd_popup.item(0)
+    rect = agent_panel._cmd_popup.visualItemRect(item)
+    qtbot.mouseClick(
+        agent_panel._cmd_popup.viewport(),
+        Qt.MouseButton.LeftButton,
+        pos=rect.center(),
+    )
+
+    assert executed == []
+    assert agent_panel._input_field.toPlainText() == "/help "
+    assert not agent_panel._cmd_popup.isVisible()
+
+
+def test_command_popup_forwards_editing_keys_to_input(agent_panel, qtbot):
+    agent_panel.resize(520, 640)
+    agent_panel.show()
+    qtbot.waitExposed(agent_panel)
+    agent_panel._input_field.setPlainText("/he")
+    cursor = agent_panel._input_field.textCursor()
+    cursor.movePosition(cursor.MoveOperation.End)
+    agent_panel._input_field.setTextCursor(cursor)
+
+    agent_panel._on_command_palette_requested("he", agent_panel._input_field.mapToGlobal(agent_panel._input_field.rect().topLeft()))
+    qtbot.wait(20)
+
+    backspace = QKeyEvent(
+        QKeyEvent.Type.KeyPress,
+        Qt.Key.Key_Backspace,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    agent_panel._cmd_popup.keyPressEvent(backspace)
+
+    assert agent_panel._input_field.toPlainText() == "/h"
 
 
 def test_hide_conv_buttons(agent_panel):

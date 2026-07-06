@@ -60,6 +60,7 @@ class _TurnState:
     message_id: str | None = None
     answer_started: bool = False
     phase: str = "idle"
+    thinking_text: str = ""
 
 
 # File-tree panel sizing (logical px, DPI-scaled at use sites).
@@ -1102,6 +1103,7 @@ class MainWindow(QMainWindow):
                         bubble_align=str(rec.get("bubble_align") or "left"),
                         bubble_on_timeline=bool(rec.get("bubble_on_timeline", True)),
                         bubble_collapsible=bool(rec.get("bubble_collapsible", True)),
+                        muted_italic=bool(rec.get("muted_italic", False)),
                         message_id=rec.get("message_id"),
                     )
                 else:
@@ -1207,6 +1209,8 @@ class MainWindow(QMainWindow):
         self.agent_panel.set_debug_mode(self.current_agent_type in self._debug_agents)
 
     def _on_agent_message(self, content: str) -> None:
+        import uuid
+
         agent_type = self.current_agent_type
         full_content = content
         file_context = self._pending_file_context.get(agent_type)
@@ -1214,7 +1218,12 @@ class MainWindow(QMainWindow):
             full_content = build_editor_context_prompt(file_context, content)
             self._pending_file_context[agent_type] = None
 
-        self._submit_coroutine(self.backend.send_user_message(full_content, agent_type))
+        # A client-generated message_id lets the pre-message checkpoint and the
+        # user bubble find each other precisely (see attach_checkpoint_*).
+        message_id = uuid.uuid4().hex
+        self._submit_coroutine(
+            self.backend.send_user_message(full_content, agent_type, message_id=message_id)
+        )
 
     def _on_agent_file_context(self, file_context: dict) -> None:
         self._pending_file_context[self.current_agent_type] = file_context
@@ -1354,9 +1363,17 @@ class MainWindow(QMainWindow):
             state.message_id = msg_id
             state.answer_started = False
             state.phase = "idle"
+            state.thinking_text = ""
 
         if getattr(message, "thinking", None):
-            panel.append_thinking(message.thinking or "")
+            thinking = message.thinking or ""
+            merged_thinking = panel._merge_thinking_chunk(state.thinking_text, thinking)
+            if state.thinking_text and merged_thinking == state.thinking_text:
+                return
+            if state.answer_started and state.thinking_text and merged_thinking.startswith(state.thinking_text):
+                return
+            panel.append_thinking(thinking)
+            state.thinking_text = merged_thinking
             state.phase = "thinking"
             return
 
@@ -1854,17 +1871,20 @@ class MainWindow(QMainWindow):
             else str(message.agent_type)
         )
         bubble_title = None
+        is_interrupt = getattr(message, "kind", "notice") == "interrupt"
+        display_mode = "inline_notice" if is_interrupt else "bubble"
         if self._is_visible_agent(agent_str):
             panel = self._get_panel_for_agent(agent_str)
             panel.add_message(
                 "agent",
                 message.content,
                 source="system",
-                display_mode="bubble",
+                display_mode=display_mode,
                 bubble_title=bubble_title,
                 bubble_align="left",
                 bubble_on_timeline=False,
                 bubble_collapsible=True,
+                muted_italic=is_interrupt,
             )
         self._conv_store.append_message(
             agent_str,
@@ -1872,12 +1892,13 @@ class MainWindow(QMainWindow):
             message.content,
             extra={
                 "source": "system",
-                "display_mode": "bubble",
+                "display_mode": display_mode,
                 "bubble_title": bubble_title,
                 "bubble_align": "left",
                 "bubble_on_timeline": False,
                 "bubble_collapsible": True,
                 "system_notice": True,
+                "muted_italic": is_interrupt,
             },
         )
 

@@ -271,3 +271,7 @@ class SystemNotice(Message):
     type: MessageType = MessageType.SYSTEM_NOTICE
     agent_type: AgentType
     content: str
+    # "notice" (default) renders as a normal system bubble.
+    # "interrupt" renders as a muted italic "Interrupted" marker — emitted when
+    # the user stops a running response so the UI avoids a fake "[已取消]" bubble.
+    kind: str = "notice"

@@ -64,6 +64,8 @@ def search_workspace():
     (ws / "Data" / "analysis_output.json").write_text("{}")
     (ws / "Plots" / "plot_temperature.py").write_text("code")
     (ws / "Plots" / "plot_pressure.py").write_text("code")
+    (ws / "Tex").mkdir()
+    (ws / "Tex" / "main.tex").write_text("latex")
     (ws / "report.tex").write_text("latex")
     yield ws
     import shutil
@@ -107,6 +109,15 @@ def test_do_search_finds_files(search_workspace):
     names = [r.path.name for r in results]
     assert "plot_temperature.py" in names
     assert "plot_pressure.py" in names
+
+
+def test_do_search_matches_directory_prefix(search_workspace):
+    mgr = FileSearchManager(search_workspace)
+
+    results = mgr._do_search("Tex/")
+    paths = [r.path.relative_to(mgr.workspace).as_posix() for r in results]
+
+    assert "Tex/main.tex" in paths
 
 
 def test_do_search_empty_query(search_workspace):

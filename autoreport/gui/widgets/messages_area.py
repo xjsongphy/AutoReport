@@ -43,6 +43,9 @@ class MessagesArea(QScrollArea):
         self._auto_scroll_timer.timeout.connect(self._run_scheduled_scroll_attempt)
         self._latest_user_row: MessageRow | None = None
         self._editing_row: MessageRow | None = None
+        # Checkpoints waiting for their owning message bubble to appear
+        # (key=message_id, value=checkpoint_id). Drained as bubbles are added.
+        self._pending_checkpoints: dict[str, str] = {}
 
         self._setup_ui()
         self._connect_scroll_signals()
@@ -190,6 +193,7 @@ class MessagesArea(QScrollArea):
         allow_edit: bool | None = None,
         agent_name: str = "Agent",
         message_id: str | None = None,
+        muted_italic: bool = False,
     ) -> MessageRow:
         """Add a message row to the container."""
         row = MessageRow(
@@ -207,6 +211,7 @@ class MessagesArea(QScrollArea):
             agent_chain_prev=False,
             agent_chain_next=False,
             message_id=message_id,
+            muted_italic=muted_italic,
             parent=self._container,
         )
 
@@ -244,6 +249,11 @@ class MessagesArea(QScrollArea):
         self._layout.insertWidget(stretch_index, row)
         self._update_timeline_chains()
 
+        # Drain any checkpoint that was waiting for this bubble to appear.
+        mid = getattr(row, "_message_id", None)
+        if mid and mid in self._pending_checkpoints and not getattr(row, "_checkpoint_id", None):
+            row.set_checkpoint_id(self._pending_checkpoints.pop(mid))
+
         # Auto-scroll if enabled
         if self._auto_scroll_enabled:
             QTimer.singleShot(0, lambda r=row: self.ensureWidgetVisible(r, 0, 0))
@@ -252,17 +262,26 @@ class MessagesArea(QScrollArea):
         return row
 
     def attach_checkpoint_to_latest_outbound(self, checkpoint_id: str, message_id: str | None = None) -> bool:
+        # Precise match by message_id — every user bubble and its pre-message
+        # checkpoint share the id generated at send time. When several bubbles
+        # share the id (e.g. user msg + coordination reply), prefer the latest.
         if message_id:
             for row in reversed(self.get_message_rows()):
                 if getattr(row, "_display_mode", "") != "bubble":
                     continue
-                if getattr(row, "_checkpoint_id", None):
-                    continue
                 if getattr(row, "_message_id", None) != message_id:
+                    continue
+                if getattr(row, "_checkpoint_id", None):
                     continue
                 row.set_checkpoint_id(checkpoint_id)
                 return True
+            # Bubble not created yet (checkpoint arrived first) — attach as
+            # soon as the matching bubble appears. Never silently drop it.
+            self._pending_checkpoints[message_id] = checkpoint_id
+            return True
 
+        # Fallback for messages without a message_id (legacy/restored): pin to
+        # the latest outbound bubble that has no checkpoint yet.
         for row in reversed(self.get_message_rows()):
             if getattr(row, "_display_mode", "") != "bubble":
                 continue

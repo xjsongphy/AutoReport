@@ -7,8 +7,9 @@ from typing import Any
 from concurrent.futures import ThreadPoolExecutor
 
 from PyQt6.QtCore import QEvent, QPoint, QSize, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QLinearGradient, QPainter
+from PyQt6.QtGui import QColor, QKeyEvent, QLinearGradient, QPainter
 from PyQt6.QtWidgets import (
+    QApplication,
     QStyle,
     QHBoxLayout,
     QLabel,
@@ -32,6 +33,31 @@ from autoreport.gui.widgets.messages_area import MessagesArea
 from autoreport.interfaces.types import ApiDebugMessage
 from autoreport.utils.logging_config import ui_logger
 from ..theme import get_theme_colors
+
+
+class _CommandPopupList(QListWidget):
+    popup_navigate = pyqtSignal(str)
+    unhandled_key_pressed = pyqtSignal(object)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        key = event.key()
+        if key == Qt.Key.Key_Up:
+            self.popup_navigate.emit("up")
+            return
+        if key == Qt.Key.Key_Down:
+            self.popup_navigate.emit("down")
+            return
+        if key == Qt.Key.Key_Tab:
+            self.popup_navigate.emit("select")
+            return
+        if key in (Qt.Key.Key_Enter, Qt.Key.Key_Return):
+            self.popup_navigate.emit("select")
+            return
+        if key == Qt.Key.Key_Escape:
+            self.popup_navigate.emit("cancel")
+            return
+        self.unhandled_key_pressed.emit(event)
+        event.accept()
 
 
 class _ComposerTopFade(QWidget):
@@ -81,6 +107,7 @@ class AgentPanel(QWidget):
     init_requested = pyqtSignal()
     agent_type_changed = pyqtSignal(str)
     rollback_requested = pyqtSignal(str, object)
+    _file_search_result_ready = pyqtSignal(int, object)
 
     def __init__(self, panel_id: str, title: str, workspace: Path | None = None):
         super().__init__()
@@ -109,6 +136,7 @@ class AgentPanel(QWidget):
 
         self._setup_ui(title)
         self._setup_file_search()
+        self._file_search_result_ready.connect(self._apply_file_search_result)
         self._update_width()
 
         self._debug_msg_signal.connect(self._handle_debug_msg)
@@ -349,12 +377,14 @@ class AgentPanel(QWidget):
 
     def _setup_file_search(self) -> None:
         self._file_search_popup = FileSearchPopup(self)
+        self._file_search_popup.set_workspace(self._workspace)
         self._file_search_popup.file_selected.connect(self._on_file_selected)
         self._file_search_popup.agent_selected.connect(self._on_agent_selected)
         self._file_search_popup.cancelled.connect(self._on_file_search_cancelled)
+        self._file_search_popup.unhandled_key_pressed.connect(self._forward_popup_key_to_input)
 
         # Command palette popup (lightweight, no file search)
-        self._cmd_popup = QListWidget()
+        self._cmd_popup = _CommandPopupList()
         self._cmd_popup.setWindowFlags(
             Qt.WindowType.Popup
             | Qt.WindowType.FramelessWindowHint
@@ -364,7 +394,21 @@ class AgentPanel(QWidget):
         self._cmd_popup.setFixedWidth(420)
         self._cmd_popup.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._cmd_popup.itemClicked.connect(self._on_command_selected)
+        self._cmd_popup.popup_navigate.connect(self._on_popup_navigate)
+        self._cmd_popup.unhandled_key_pressed.connect(self._forward_popup_key_to_input)
         self._cmd_popup.hide()
+
+    def _forward_popup_key_to_input(self, event: QKeyEvent) -> None:
+        clone = QKeyEvent(
+            event.type(),
+            event.key(),
+            event.modifiers(),
+            event.text(),
+            event.isAutoRepeat(),
+            event.count(),
+        )
+        self._input_field.setFocus()
+        QApplication.sendEvent(self._input_field, clone)
 
     def _update_width(self) -> None:
         """Update minimum width to fit header content.
@@ -534,13 +578,22 @@ class AgentPanel(QWidget):
             self._file_search_popup,
             self._file_search_popup.calculate_height(),
         )
+        QTimer.singleShot(
+            0,
+            lambda: self._position_popup_above_composer(
+                self._file_search_popup,
+                self._file_search_popup.calculate_height(),
+            )
+            if self._file_search_popup and self._file_search_popup.isVisible()
+            else None,
+        )
         self._file_search_popup.raise_()
 
         # Run search via persistent single-worker pool; discard stale completions.
         self._file_search_ticket += 1
         ticket = self._file_search_ticket
         future = self._file_search_executor.submit(self._file_search_manager._do_search, query)
-        future.add_done_callback(lambda f: QTimer.singleShot(0, lambda: self._apply_file_search_result(ticket, f)))
+        future.add_done_callback(lambda f: self._file_search_result_ready.emit(ticket, f))
 
     def _apply_file_search_result(self, ticket: int, future) -> None:
         if ticket != self._file_search_ticket:
@@ -554,6 +607,15 @@ class AgentPanel(QWidget):
             self._position_popup_above_composer(
                 self._file_search_popup,
                 self._file_search_popup.calculate_height(),
+            )
+            QTimer.singleShot(
+                0,
+                lambda: self._position_popup_above_composer(
+                    self._file_search_popup,
+                    self._file_search_popup.calculate_height(),
+                )
+                if self._file_search_popup and self._file_search_popup.isVisible()
+                else None,
             )
 
     def _on_file_selected(self, file_path: Path) -> None:
@@ -668,13 +730,20 @@ class AgentPanel(QWidget):
                 color: {c["tree_sel_fg"]};
             }}
         """)
-        self._cmd_popup.show()
-        row_height = self._cmd_popup.sizeHintForRow(0)
-        if row_height <= 0:
-            row_height = self._cmd_popup.fontMetrics().lineSpacing() + 12
-        h = min(row_height * max(1, self._cmd_popup.count()) + 12, 200)
-        self._position_popup_above_composer(self._cmd_popup, h)
-        self._cmd_popup.raise_()
+        # Defer show+position to the next event-loop tick so the composer
+        # layout has settled (scrollbar show/hide can shift the input
+        # container's geometry after this call returns); positioning
+        # synchronously here pins the popup to stale geometry.
+        def _show_and_position() -> None:
+            row_height = self._cmd_popup.sizeHintForRow(0)
+            if row_height <= 0:
+                row_height = self._cmd_popup.fontMetrics().lineSpacing() + 12
+            h = min(row_height * max(1, self._cmd_popup.count()) + 12, 200)
+            self._cmd_popup.show()
+            self._position_popup_above_composer(self._cmd_popup, h)
+            self._cmd_popup.raise_()
+
+        QTimer.singleShot(0, _show_and_position)
 
     def _on_command_selected(self, item: QListWidgetItem) -> None:
         cmd = item.data(Qt.ItemDataRole.UserRole)
@@ -819,6 +888,7 @@ class AgentPanel(QWidget):
         bubble_collapsible: bool = True,
         allow_edit: bool | None = None,
         message_id: str | None = None,
+        muted_italic: bool = False,
     ) -> None:
         resolved_display_mode = display_mode or ("bubble" if role == "user" else "agent_markdown")
         resolved_bubble_align = bubble_align or ("right" if role == "user" else "left")
@@ -855,6 +925,7 @@ class AgentPanel(QWidget):
             allow_edit=allow_edit,
             agent_name=agent_name,
             message_id=message_id,
+            muted_italic=muted_italic,
         )
         self._update_width()
         if streaming and role == "agent":
