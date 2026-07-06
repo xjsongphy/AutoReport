@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -146,6 +147,34 @@ def _trim_messages_to_budget(
         _estimate_tokens(result),
     )
     return result
+
+
+def _tool_required_args(tool_registry: ToolRegistry, tool_name: str, tool: Any | None = None) -> list[str]:
+    """Return required argument names from the registered tool schema or signature."""
+    for definition in tool_registry.get_definitions():
+        if definition.get("name") == tool_name:
+            schema = definition.get("input_schema") or {}
+            required = schema.get("required") or []
+            return [str(name) for name in required]
+    if tool is not None:
+        try:
+            sig = inspect.signature(tool)
+            return [
+                name
+                for name, param in sig.parameters.items()
+                if (
+                    name != "self"
+                    and param.kind
+                    not in (
+                        inspect.Parameter.VAR_POSITIONAL,
+                        inspect.Parameter.VAR_KEYWORD,
+                    )
+                    and param.default is inspect.Parameter.empty
+                )
+            ]
+        except (TypeError, ValueError):
+            return []
+    return []
 
 
 class AgentLoop:
@@ -373,6 +402,34 @@ class AgentLoop:
         """
         if not isinstance(message, ReportMessage):
             return
+        report_agent = (
+            message.agent_type.value
+            if isinstance(message.agent_type, Enum)
+            else str(message.agent_type)
+        )
+        if self.agent_type == AgentType.MAIN and self._task_board is not None:
+            task = self._task_board.get_task(
+                message.task_id,
+                target_agent=AgentType(report_agent),
+                source_agent=AgentType.MAIN,
+                active_only=False,
+                session_id=self._current_session_id,
+            ) or self._task_board.get_task(
+                message.task_id,
+                target_agent=AgentType(report_agent),
+                source_agent=AgentType.MAIN,
+                active_only=False,
+            )
+            if task is not None and not bool(getattr(task, "blocking", True)):
+                await self._message_queue.put(
+                    UserMessage(
+                        content=str(message.content or ""),
+                        summary=str(message.summary or ""),
+                        agent_type=AgentType.MAIN,
+                        source=report_agent,
+                    )
+                )
+                await self._publish_queue_update()
         if message.agent_type != self.agent_type:
             return
         self._turn_reported = True
@@ -1050,24 +1107,51 @@ class AgentLoop:
                     if tool is None:
                         raise ValueError(f"Tool not found: {tool_call.name}")
 
+                    required_args = _tool_required_args(self.tools, tool_call.name, tool)
+
                     # Detect truncated tool calls: output hit max_tokens before arguments were complete
                     if not tool_call.arguments:
                         usage = response.usage or {}
                         output_tokens = usage.get("output_tokens", 0)
+                        required_hint = (
+                            f" Required arguments: {', '.join(required_args)}."
+                            if required_args
+                            else ""
+                        )
                         if output_tokens >= 8192:
                             raise ValueError(
                                 f"Tool call to '{tool_call.name}' has no arguments — "
                                 f"the response was truncated at {output_tokens} output tokens. "
                                 f"Your output is too long. Break the file into smaller parts "
-                                f"and write them one at a time using write_file, or use a shorter response."
+                                f"and write them one at a time using apply_patch, or use a shorter response."
+                                f"{required_hint}"
                             )
                         else:
                             raise ValueError(
                                 f"Tool call to '{tool_call.name}' has no arguments. "
-                                f"Please provide the required parameters."
+                                f"Please provide the required parameters.{required_hint}"
                             )
 
+                    missing_required = [
+                        name for name in required_args
+                        if name not in tool_call.arguments or tool_call.arguments.get(name) is None
+                    ]
+                    if missing_required:
+                        raise ValueError(
+                            f"Tool call to '{tool_call.name}' is missing required arguments: "
+                            f"{', '.join(missing_required)}. "
+                            f"Tool '{tool_call.name}' requires arguments: {', '.join(required_args)}. "
+                            f"Call it again with a complete argument object."
+                        )
+
                     result = await tool(**tool_call.arguments)
+
+                    if (
+                        tool_call.name == "apply_patch"
+                        and isinstance(result, dict)
+                        and str(result.get("error") or "").strip()
+                    ):
+                        raise RuntimeError(str(result.get("error") or "").strip())
 
                     if tool_call.name in ("apply_patch", "delete_file"):
                         self._manifest_dirty = True

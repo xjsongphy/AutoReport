@@ -1222,8 +1222,13 @@ class AgentPanel(QWidget):
             for item in items[:10]:
                 brief = str(item.get("brief", "")).strip() or "task"
                 status = str(item.get("status", "pending")).lower()
-                done = status in {"completed", "cancelled", "failed"}
-                marker = "☑" if done else ("○" if wait else "☐")
+                marker = {
+                    "pending": "○" if wait else "☐",
+                    "in_progress": "●",
+                    "completed": "☑",
+                    "failed": "⚠",
+                    "cancelled": "✗",
+                }.get(status, "○" if wait else "☐")
                 rows.append(f"{marker} {brief}")
             return rows
 
@@ -1243,6 +1248,19 @@ class AgentPanel(QWidget):
     def add_task_snapshot_summary(self, summary: str) -> None:
         """Render a completed manage_tasks/list snapshot, merging only with snapshots."""
         previous = self._messages_area.last_timeline_widget()
+        if (
+            isinstance(previous, ToolCallGroup)
+            and previous.tool_names() == ["manage_tasks"]
+            and not previous.is_complete()
+        ):
+            previous.absorb_task_snapshot(summary)
+            if previous in self._pending_tool_groups:
+                self._pending_tool_groups = [
+                    group for group in self._pending_tool_groups if group is not previous
+                ]
+            if self._current_tool_group is previous:
+                self._current_tool_group = None
+            return
         if (
             getattr(previous, "represents_task_snapshot", lambda: False)()
             and getattr(previous, "is_complete", lambda: False)()

@@ -19,6 +19,7 @@ from autoreport.interfaces.types import (
     ReportMessage,
     SystemNotice,
     TaskUpdateMessage,
+    ToolResult as ToolResultMsg,
     UserMessage,
 )
 
@@ -643,6 +644,151 @@ async def test_tool_followup_streams_thinking_chunks(
 
 
 @pytest.mark.asyncio
+async def test_apply_patch_error_payload_publishes_tool_error(
+    workspace, config, mock_provider, mock_prompt_loader
+):
+    bus = MessageBus()
+
+    async def patch_tool(**kwargs):
+        return {
+            "error": "Failed to parse patch: bad hunk",
+            "path": str(workspace / "test.md"),
+            "current_content": "",
+        }
+
+    tools = MagicMock()
+    tools.get.return_value = patch_tool
+    tools.get_definitions.return_value = []
+    loop = AgentLoop(
+        agent_type=AgentType.THEORY,
+        workspace=workspace,
+        tools=tools,
+        bus=bus,
+        config=config,
+        llm_provider=mock_provider,
+        prompt_loader=mock_prompt_loader,
+        loop_manager=None,
+    )
+    response = SimpleNamespace(
+        content="",
+        thinking=None,
+        tool_calls=[
+            LLMToolCall(
+                id="call_patch",
+                name="apply_patch",
+                arguments={"path": "test.md", "patch": "+hello\n"},
+            )
+        ],
+        usage=None,
+    )
+
+    await loop._handle_tool_calls(response, "msg-1")
+
+    published = list(bus._queue._queue)
+    tool_results = [msg for msg in published if isinstance(msg, ToolResultMsg)]
+    assert len(tool_results) == 1
+    assert tool_results[0].tool_name == "apply_patch"
+    assert tool_results[0].error == "Error executing apply_patch: Failed to parse patch: bad hunk"
+    assert tool_results[0].result is None
+
+
+@pytest.mark.asyncio
+async def test_missing_apply_patch_argument_reports_required_schema(
+    workspace, config, mock_provider, mock_prompt_loader
+):
+    bus = MessageBus()
+
+    async def patch_tool(**kwargs):
+        return {"ok": True, **kwargs}
+
+    tools = MagicMock()
+    tools.get.return_value = patch_tool
+    tools.get_definitions.return_value = [
+        {
+            "name": "apply_patch",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "patch": {"type": "string"},
+                },
+                "required": ["path", "patch"],
+            },
+        }
+    ]
+    loop = AgentLoop(
+        agent_type=AgentType.THEORY,
+        workspace=workspace,
+        tools=tools,
+        bus=bus,
+        config=config,
+        llm_provider=mock_provider,
+        prompt_loader=mock_prompt_loader,
+        loop_manager=None,
+    )
+    response = SimpleNamespace(
+        content="",
+        thinking=None,
+        tool_calls=[
+            LLMToolCall(
+                id="call_patch",
+                name="apply_patch",
+                arguments={"path": "test.md"},
+            )
+        ],
+        usage=None,
+    )
+
+    await loop._handle_tool_calls(response, "msg-1")
+
+    published = list(bus._queue._queue)
+    tool_results = [msg for msg in published if isinstance(msg, ToolResultMsg)]
+    assert len(tool_results) == 1
+    assert "requires arguments: path, patch" in (tool_results[0].error or "")
+    assert "missing required arguments: patch" in (tool_results[0].error or "")
+
+
+@pytest.mark.asyncio
+async def test_truncated_tool_call_error_mentions_apply_patch_not_write_file(
+    workspace, config, mock_provider, mock_prompt_loader
+):
+    bus = MessageBus()
+    tools = MagicMock()
+    tools.get.return_value = AsyncMock()
+    tools.get_definitions.return_value = []
+    loop = AgentLoop(
+        agent_type=AgentType.PLOTTING,
+        workspace=workspace,
+        tools=tools,
+        bus=bus,
+        config=config,
+        llm_provider=mock_provider,
+        prompt_loader=mock_prompt_loader,
+        loop_manager=None,
+    )
+    response = SimpleNamespace(
+        content="",
+        thinking=None,
+        tool_calls=[
+            LLMToolCall(
+                id="call_exec",
+                name="exec",
+                arguments={},
+            )
+        ],
+        usage={"output_tokens": 8192},
+    )
+
+    await loop._handle_tool_calls(response, "msg-1")
+
+    published = list(bus._queue._queue)
+    tool_results = [msg for msg in published if isinstance(msg, ToolResultMsg)]
+    assert len(tool_results) == 1
+    assert "write them one at a time using apply_patch" in (tool_results[0].error or "")
+    assert "write_file" not in (tool_results[0].error or "")
+
+
+@pytest.mark.asyncio
 async def test_loop_ignores_report_from_other_agent(agent_loop):
     """A ReportMessage from a different agent does not set our flag."""
     agent_loop._turn_reported = False
@@ -655,6 +801,53 @@ async def test_loop_ignores_report_from_other_agent(agent_loop):
     msg = await asyncio.wait_for(agent_loop.bus._queue.get(), timeout=1)
     await agent_loop.bus._notify_subscribers(msg)
     assert agent_loop._turn_reported is False
+
+
+@pytest.mark.asyncio
+async def test_main_loop_enqueues_nonblocking_subagent_report(
+    workspace, config, mock_provider, mock_prompt_loader
+):
+    from autoreport.core.tools.task_board import TaskBoard
+
+    board = TaskBoard()
+    board.create_task(
+        AgentType.MAIN,
+        AgentType.THEORY,
+        "derive formulas",
+        task_id="tk1",
+        blocking=False,
+    )
+    bus = MessageBus()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    loop = AgentLoop(
+        agent_type=AgentType.MAIN,
+        workspace=workspace,
+        tools=tools,
+        bus=bus,
+        config=config,
+        llm_provider=mock_provider,
+        prompt_loader=mock_prompt_loader,
+        loop_manager=None,
+        task_board=board,
+    )
+
+    await loop._handle_report_message(
+        ReportMessage(
+            agent_type=AgentType.THEORY,
+            task_id="tk1",
+            report_type="reply",
+            summary="Theory complete",
+            content="done",
+        )
+    )
+
+    queued = list(loop._message_queue._queue)
+    assert len(queued) == 1
+    assert queued[0].agent_type == AgentType.MAIN
+    assert queued[0].source == "theory"
+    assert queued[0].summary == "Theory complete"
+    assert queued[0].content == "done"
 
 
 def _sub_loop(workspace, config, mock_provider, mock_prompt_loader, board):

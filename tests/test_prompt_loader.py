@@ -73,6 +73,13 @@ def test_report_prompt_pins_table_and_float_layout_rules():
     assert "图表强制固定在源码位置" in prompt
 
 
+def test_plotting_prompt_uses_apply_patch_not_write_file():
+    prompt = Path("autoreport/templates/agents/plotting_agent.md").read_text(encoding="utf-8")
+
+    assert "apply_patch" in prompt
+    assert "write_file" not in prompt
+
+
 def test_load_shared_context_available(agents_dir):
     d = agents_dir
     (d / "Common.md").write_text("## Shared\n\nCommon todo policy.", encoding="utf-8")
