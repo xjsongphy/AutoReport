@@ -800,6 +800,7 @@ class MessageRow(QWidget):
         agent_chain_prev: bool = False,
         agent_chain_next: bool = False,
         message_id: str | None = None,
+        muted_italic: bool = False,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
@@ -836,6 +837,9 @@ class MessageRow(QWidget):
         self._agent_chain_prev = agent_chain_prev
         self._agent_chain_next = agent_chain_next
         self._message_id = message_id
+        # When True the bubble text renders muted + italic (e.g. "Interrupted"
+        # notices) instead of normal foreground text.
+        self._muted_italic = muted_italic
         self._timeline_rail: TimelineRail | None = None
         self._bubble_header: QWidget | None = None
         self._bubble_arrow_widget: _DisclosureArrow | None = None
@@ -1021,7 +1025,13 @@ class MessageRow(QWidget):
         text.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         text.installEventFilter(self)
         c = get_theme_colors()
-        text.setStyleSheet(f"color: {c['editor_fg']}; background-color: transparent;")
+        if self._muted_italic:
+            font = text.font()
+            font.setItalic(True)
+            text.setFont(font)
+            text.setStyleSheet(f"color: {c['muted']}; background-color: transparent;")
+        else:
+            text.setStyleSheet(f"color: {c['editor_fg']}; background-color: transparent;")
         collapsed_text, expanded_text, clamp_collapsed = self._bubble_text_strategy()
         self._body_content_widget = self._build_expandable_content_widget(
             text,

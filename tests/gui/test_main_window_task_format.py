@@ -3,8 +3,9 @@
 from types import SimpleNamespace
 
 from autoreport.gui.main_window import MainWindow
+from autoreport.gui.widgets.agent_panel import AgentPanel
 from autoreport.core.tools.task_board import TaskBoard
-from autoreport.interfaces.types import AgentType, ToolCallMessage, ToolResult
+from autoreport.interfaces.types import AgentResponse, AgentType, ToolCallMessage, ToolResult
 
 
 def test_manage_tasks_format_omits_empty_sections():
@@ -294,3 +295,57 @@ def test_rollback_finished_truncates_current_session_and_refreshes_visible_panel
     )
     assert calls["show"] is True
     assert calls["refresh"] is True
+
+
+def test_final_thinking_snapshot_after_answer_does_not_create_duplicate_thought(qtbot, tmp_path):
+    thought = (
+        'The user is just saying "hi" - this is a greeting/communication test. '
+        "I should respond directly without using tools."
+    )
+    panel = AgentPanel(panel_id="main", title="Main", workspace=tmp_path)
+    qtbot.addWidget(panel)
+
+    fake = SimpleNamespace()
+    fake._turn_state = {}
+    fake._is_visible_agent = lambda agent_type: agent_type == "main"
+    fake._get_panel_for_agent = lambda agent_type: panel
+    fake._state_for_agent = lambda agent_type: MainWindow._state_for_agent(fake, agent_type)
+    fake._conv_store = SimpleNamespace(append_message=lambda *args, **kwargs: None)
+
+    MainWindow._handle_agent_response(
+        fake,
+        AgentResponse(
+            agent_type=AgentType.MAIN,
+            content="",
+            message_id="msg-1",
+            streaming=True,
+            thinking=thought,
+        ),
+    )
+    MainWindow._handle_agent_response(
+        fake,
+        AgentResponse(
+            agent_type=AgentType.MAIN,
+            content="Hi! How can I help?",
+            message_id="msg-1",
+            streaming=True,
+        ),
+    )
+    MainWindow._handle_agent_response(
+        fake,
+        AgentResponse(
+            agent_type=AgentType.MAIN,
+            content="",
+            message_id="msg-1",
+            streaming=True,
+            thinking=thought,
+        ),
+    )
+
+    rows = panel._messages_area.get_message_rows()
+    thought_rows = [row for row in rows if getattr(row, "_display_mode", "") == "thought"]
+    answer_rows = [row for row in rows if getattr(row, "_display_mode", "") == "agent_markdown"]
+
+    assert len(thought_rows) == 1
+    assert len(answer_rows) == 1
+    assert rows.index(thought_rows[0]) < rows.index(answer_rows[0])
