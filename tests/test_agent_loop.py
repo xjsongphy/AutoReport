@@ -707,6 +707,53 @@ async def test_loop_ignores_report_from_other_agent(agent_loop):
     assert agent_loop._turn_reported is False
 
 
+@pytest.mark.asyncio
+async def test_main_loop_enqueues_nonblocking_subagent_report(
+    workspace, config, mock_provider, mock_prompt_loader
+):
+    from autoreport.core.tools.task_board import TaskBoard
+
+    board = TaskBoard()
+    board.create_task(
+        AgentType.MAIN,
+        AgentType.THEORY,
+        "derive formulas",
+        task_id="tk1",
+        blocking=False,
+    )
+    bus = MessageBus()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    loop = AgentLoop(
+        agent_type=AgentType.MAIN,
+        workspace=workspace,
+        tools=tools,
+        bus=bus,
+        config=config,
+        llm_provider=mock_provider,
+        prompt_loader=mock_prompt_loader,
+        loop_manager=None,
+        task_board=board,
+    )
+
+    await loop._handle_report_message(
+        ReportMessage(
+            agent_type=AgentType.THEORY,
+            task_id="tk1",
+            report_type="reply",
+            summary="Theory complete",
+            content="done",
+        )
+    )
+
+    queued = list(loop._message_queue._queue)
+    assert len(queued) == 1
+    assert queued[0].agent_type == AgentType.MAIN
+    assert queued[0].source == "theory"
+    assert queued[0].summary == "Theory complete"
+    assert queued[0].content == "done"
+
+
 def _sub_loop(workspace, config, mock_provider, mock_prompt_loader, board):
     """A sub-agent (plotting) loop with a real task board, for guard tests."""
     from autoreport.core.loops.agent_loop import AgentLoop

@@ -373,6 +373,34 @@ class AgentLoop:
         """
         if not isinstance(message, ReportMessage):
             return
+        report_agent = (
+            message.agent_type.value
+            if isinstance(message.agent_type, Enum)
+            else str(message.agent_type)
+        )
+        if self.agent_type == AgentType.MAIN and self._task_board is not None:
+            task = self._task_board.get_task(
+                message.task_id,
+                target_agent=AgentType(report_agent),
+                source_agent=AgentType.MAIN,
+                active_only=False,
+                session_id=self._current_session_id,
+            ) or self._task_board.get_task(
+                message.task_id,
+                target_agent=AgentType(report_agent),
+                source_agent=AgentType.MAIN,
+                active_only=False,
+            )
+            if task is not None and not bool(getattr(task, "blocking", True)):
+                await self._message_queue.put(
+                    UserMessage(
+                        content=str(message.content or ""),
+                        summary=str(message.summary or ""),
+                        agent_type=AgentType.MAIN,
+                        source=report_agent,
+                    )
+                )
+                await self._publish_queue_update()
         if message.agent_type != self.agent_type:
             return
         self._turn_reported = True
