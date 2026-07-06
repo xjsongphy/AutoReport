@@ -93,7 +93,7 @@ async def test_parse_batch_with_errors(workspace):
 
 
 @pytest.mark.asyncio
-async def test_parse_surfaces_auth_failure_with_actionable_hint(workspace):
+async def test_parse_surfaces_auth_failure_as_tool_error(workspace):
     tool = PDFParseTool(workspace=workspace)
     src_file = workspace / "References" / "auth.pdf"
     src_file.write_bytes(b"%PDF-1.4 fake")
@@ -109,5 +109,5 @@ async def test_parse_surfaces_auth_failure_with_actionable_hint(workspace):
         patch.object(PDFParseTool, "is_available", return_value=True),
         patch("autoreport.core.tools.pdf_tool.asyncio.create_subprocess_exec", return_value=mock_proc),
     ):
-        with pytest.raises(RuntimeError, match="mineru-open-api auth"):
+        with pytest.raises(RuntimeError, match="user authenticate failed"):
             await tool(file_paths="References/auth.pdf")
