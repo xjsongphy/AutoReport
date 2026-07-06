@@ -1121,6 +1121,28 @@ class MessageRow(QWidget):
             self._sync_timeline_dot_alignment()
             return
 
+        if self._display_mode == "inline_notice":
+            label = QLabel(self._content)
+            label.setObjectName("inlineNoticeText")
+            label.setTextFormat(Qt.TextFormat.PlainText)
+            label.setWordWrap(True)
+            label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            label.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+            label.setContentsMargins(0, 2, 0, 6)
+            label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+            label.setMinimumWidth(0)
+            font = label.font()
+            font.setItalic(True)
+            label.setFont(font)
+            color = get_theme_colors()["muted"] if self._muted_italic else get_theme_colors()["editor_fg"]
+            label.setStyleSheet(f"color: {color}; background-color: transparent;")
+            label.installEventFilter(self)
+            self._wrapping_labels.append(label)
+            self._raw_markdown_labels[label] = self._content
+            self._agent_content_layout.addWidget(label)
+            self._apply_text_width_constraints()
+            return
+
         text_label = self._build_agent_markdown_label(self._content)
         self._agent_content_layout.addWidget(text_label)
         self._apply_text_width_constraints()

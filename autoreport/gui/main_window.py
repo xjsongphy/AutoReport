@@ -1872,13 +1872,14 @@ class MainWindow(QMainWindow):
         )
         bubble_title = None
         is_interrupt = getattr(message, "kind", "notice") == "interrupt"
+        display_mode = "inline_notice" if is_interrupt else "bubble"
         if self._is_visible_agent(agent_str):
             panel = self._get_panel_for_agent(agent_str)
             panel.add_message(
                 "agent",
                 message.content,
                 source="system",
-                display_mode="bubble",
+                display_mode=display_mode,
                 bubble_title=bubble_title,
                 bubble_align="left",
                 bubble_on_timeline=False,
@@ -1891,7 +1892,7 @@ class MainWindow(QMainWindow):
             message.content,
             extra={
                 "source": "system",
-                "display_mode": "bubble",
+                "display_mode": display_mode,
                 "bubble_title": bubble_title,
                 "bubble_align": "left",
                 "bubble_on_timeline": False,
