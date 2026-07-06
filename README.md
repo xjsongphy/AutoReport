@@ -26,13 +26,13 @@ A multi-agent collaborative automated physics experiment report writing system. 
 - **Checkpoint Rollback** — Automatically creates checkpoints at key nodes; roll back to any historical state
 - **Interactive Adjustment** — Users can message any agent at any time for intervention and optimization
 
-### UI/UX (VSCode/Copilot Chat Style)
+### UI/UX (Claude Code Style)
 - **Streaming Responses** — Real-time agent output, word-by-word streaming
 - **Switchable Agent Panel** — A single agent chat panel with a dropdown selector to switch among Main / Data Analysis / Plotting / Theory / Report
 - **Recent Projects Cache** — VSCode-style recent projects list, cached in `~/.autoreport/recent_projects.json`
 - **File Explorer** — VSCode-style file tree with 22px row height, 16px icons, concise labels (Data, References, Theory, Plots, Outline, Tex)
 - **Context Chip Bar** — Visual indicator for file/line selections with toggle to include/exclude from messages
-- **Chat Interface** — Copilot-style conversation display with proper Markdown rendering and grouped tool calls
+- **Chat Interface** — Claude Code-style conversation display with proper Markdown rendering and grouped tool calls
 - **Slash Commands** — `/clear`, `/new`, `/help`, `/compact`, `/init`
 
 ### Developer Tools
