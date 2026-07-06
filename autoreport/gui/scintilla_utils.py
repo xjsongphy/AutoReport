@@ -82,9 +82,19 @@ _ACCENT_BY_NAME: dict[str, str] = {
     "Decorator": "class_name",
     # TeX — QScintilla lumps \commands into "Text", so "Command" is unused by
     # the lexer; we repurpose it as the command-color bucket (VSCode scopes
-    # \commands as support.function.general.tex, i.e. the function color) and
-    # fill it via post-processing (apply_tex_command_coloring).
-    "Command": "function",
+    # \commands as support.function.general.tex).  Uses tex_command (not
+    # syntax_function) so the light-mode value can be darker for readability
+    # on white backgrounds.
+    "Command": "tex_command",
+    # TeX special chars: $ { } # % & ~ _ ^ \ | (math delimiters, comment
+    # prefix, alignment, sub/superscript).
+    "Special": "tex_special",
+    # TeX brace groups {…} — VSCode foreground/punctuation.
+    "Group": "tex_group",
+    # TeX math content $…$ — VSCode string.other.math = string color.
+    "Symbol": "tex_math",
+    # TeX body text — keep plain.
+    "Text": "fg",
     # Markdown — matches VSCode dark-modern / light-modern token colors.
     # markup.heading / markup.bold (bold kept via per-style font below).
     "Level 1 header": "md_heading",
@@ -95,17 +105,25 @@ _ACCENT_BY_NAME: dict[str, str] = {
     "Level 6 header": "md_heading",
     "Strong emphasis using double asterisks": "md_bold",
     "Strong emphasis using double underscores": "md_bold",
-    # markup.inline.raw (inline `code`) -> string orange.
-    "Code between backticks": "string",
-    "Code between double backticks": "string",
-    # punctuation.definition.list / quote markers.
+    # markup.italic — *italic* / _italic_.
+    "Emphasis using single asterisks": "md_italic",
+    "Emphasis using single underscores": "md_italic",
+    # markup.inline.raw — inline `code` (own key for correct light-mode blue).
+    "Code between backticks": "md_code",
+    "Code between double backticks": "md_code",
+    # markup.underline.link — [text](url).
+    "Link": "md_link",
+    # markup.strikethrough — ~~text~~.
+    "Strike out": "md_strikethrough",
+    # punctuation.definition.list / quote / hr markers.
     "Unordered list item": "md_list",
     "Ordered list item": "md_list",
     "Block quote": "md_quote",
-    # Everything else (links, horizontal rule, escapes, emphasis, code blocks,
-    # prose) -> foreground. VSCode's themes define NO token color for markdown
-    # links, so they render as plain foreground (the clickable blue is a
-    # separate editor decoration, not token coloring).
+    "Horizontal rule": "md_hr",
+    # Pre-char (``` fence marker) and code block body -> foreground (code-block
+    # body is handled by fenced-code post-processing; pre-char is punctuation).
+    "Pre-char": "fg",
+    "Code block": "fg",
 }
 
 
@@ -137,8 +155,18 @@ def _apply_vscode_token_palette(lexer: QsciLexer) -> None:
         "function": c["syntax_function"],
         "md_heading": c["md_heading"],
         "md_bold": c["md_bold"],
+        "md_italic": c["md_italic"],
+        "md_link": c["md_link"],
+        "md_strikethrough": c["md_strikethrough"],
+        "md_code": c["md_code"],
         "md_list": c["md_list"],
         "md_quote": c["md_quote"],
+        "md_hr": c["md_hr"],
+        "tex_command": c["tex_command"],
+        "tex_keyword": c["tex_keyword"],
+        "tex_special": c["tex_special"],
+        "tex_group": c["tex_group"],
+        "tex_math": c["tex_math"],
     }
     fg = palette["fg"]
 
@@ -158,6 +186,15 @@ def _apply_vscode_token_palette(lexer: QsciLexer) -> None:
         except Exception as e:
             logger.debug("Scintilla lexer color for style {} failed: {}", style, e)
             continue
+
+    # TeX lexer: set up the unused "Keyword" style slot (style 6) for
+    # keyword.control.tex commands (\begin, \end, \usepackage, etc.).
+    # The lexer itself never uses this index, so it is free for post-styling.
+    if "TeX" in type(lexer).__name__:
+        try:
+            lexer.setColor(QColor(palette["tex_keyword"]), 6)
+        except Exception:
+            pass
 
 
 def apply_scintilla_style(
@@ -290,10 +327,11 @@ def configure_lexer_colors(lexer: QsciLexer, paper_color: str | None = None) -> 
 # --- TeX command coloring ------------------------------------------------
 # QScintilla's TeX lexer lumps ``\commands`` together with body text and math
 # into a single "Text" style, so it cannot color commands. VSCode's LaTeX
-# grammar scopes ``\command`` as ``support.function.general.tex`` (the function
-# token color). We fill the lexer's unused "Command" style with that color and
-# re-style every ``\<name>`` sequence into it after the lexer.
-_TEX_COMMAND = re.compile(r"\\[a-zA-Z@]+")
+# grammar scopes ``\command`` as ``support.function.general.tex`` (function
+# color) or ``keyword.control.tex`` (keyword color). We fill the lexer's
+# unused "Command" style with the function color, use style 6 for keywords,
+# and re-style every ``\<name>`` sequence after the lexer.
+# See _TEX_COMMAND_RE, _TEX_KEYWORD_COMMANDS and apply_tex_post_styling below.
 
 
 def _char_to_byte_offsets(text: str) -> list[int]:
@@ -318,38 +356,128 @@ def _find_style_index(lexer: QsciLexer, name: str) -> int | None:
     return None
 
 
-def apply_tex_command_coloring(sci: QsciScintilla) -> None:
-    """Color LaTeX ``\\command`` sequences like VSCode (function color).
+# --- TeX post-styling (unified) -------------------------------------------
+# QScintilla's TeX lexer lumps \commands, % comments, and $math$ content
+# together with body text into "Text" / "Special".  VSCode's LaTeX grammar
+# scopes these as distinct tokens (support.function, comment, constant.math).
+# We apply all three corrections in a single pass so that SCI_COLOURISE is
+# called only once — otherwise successive calls would wipe each other's work.
 
-    Runs after the lexer; re-run on every edit (see
-    ``attach_tex_command_coloring``).
+# VSCode scopes \begin, \end, \usepackage etc. as keyword.control.tex
+# (keyword color) while \section, \textbf etc. are support.function.general.tex
+# (function color).  QScintilla lumps both into "Text" so we split them here.
+_TEX_KEYWORD_COMMANDS: frozenset[str] = frozenset({
+    "begin", "end",
+    "documentclass", "usepackage", "RequirePackage", "ProvidesPackage",
+    "DeclareOption", "ProcessOptions", "LoadClass",
+    "newcommand", "renewcommand", "providecommand",
+    "newenvironment", "renewenvironment",
+    "input", "include", "bibliography", "bibliographystyle",
+    "def", "let", "newif",
+})
+
+# Captures \command_name — we then dispatch on the captured name.
+_TEX_COMMAND_RE = re.compile(r"\\([a-zA-Z@*]+)")
+
+_TEX_COMMENT = re.compile(r"(?<!\\)%.*$", re.MULTILINE)
+_TEX_MATH_DISPLAY = re.compile(
+    r"(?<!\\)\$\$(?!\$)(.+?)(?<!\\)\$\$(?!\$)", re.DOTALL,
+)
+_TEX_MATH_INLINE = re.compile(
+    r"(?<!\\)\$(?!\$)([^$]+?)(?<!\\)\$(?!\$)",
+)
+
+
+def apply_tex_post_styling(sci: QsciScintilla) -> None:
+    """Apply VSCode-like TeX post-styling: commands, comments, math mode.
+
+    Colourises once, then applies all three corrections so they don't
+    overwrite each other.  Re-run on every edit via
+    ``attach_tex_post_styling``.
     """
     lexer = sci.lexer()
     if lexer is None or "TeX" not in type(lexer).__name__:
         return
-    command_style = _find_style_index(lexer, "Command")
-    if command_style is None:
-        return
 
+    # Single colourise — baseline lexer styles for all characters.
     sci.SendScintilla(sci.SCI_COLOURISE, 0, -1)
     text = sci.text()
-    if "\\" not in text:
-        return
-
     byte_off = _char_to_byte_offsets(text)
-    for m in _TEX_COMMAND.finditer(text):
-        bstart = byte_off[m.start()]
-        blen = byte_off[m.end()] - bstart
-        if blen <= 0:
-            continue
-        sci.SendScintilla(sci.SCI_STARTSTYLING, bstart)
-        sci.SendScintilla(sci.SCI_SETSTYLING, blen, command_style)
+
+    cmd_style = _find_style_index(lexer, "Command")
+    # Style 6 = tex_keyword, set up in _apply_vscode_token_palette.
+    kw_style: int | None = 6
+    special_style = _find_style_index(lexer, "Special")
+
+    # ── 1.  $math$ / $$math$$ → math colour (baseline)  ────────────────
+    # Applied FIRST so that subsequent \command styling can override it
+    # within math mode (VSCode scopes \mathrm \frac \sqrt inside $…$ as
+    # support.function.general.tex, not string.other.math).
+    math_style = _find_style_index(lexer, "Symbol")
+    if math_style is not None and "$" in text:
+        spans: list[tuple[int, int]] = []
+        for m in _TEX_MATH_DISPLAY.finditer(text):
+            spans.append((byte_off[m.start()], byte_off[m.end()]))
+        for m in _TEX_MATH_INLINE.finditer(text):
+            spans.append((byte_off[m.start()], byte_off[m.end()]))
+        for bstart, bend in spans:
+            blen = bend - bstart
+            if blen > 0:
+                sci.SendScintilla(sci.SCI_STARTSTYLING, bstart)
+                sci.SendScintilla(sci.SCI_SETSTYLING, blen, math_style)
+
+    # ── 2.  \command → keyword or function colour  ─────────────────────
+    # Applied AFTER math so that \mathrm \frac \sqrt etc. inside $…$ keep
+    # their command colour on top of the math background.
+    if cmd_style is not None and "\\" in text:
+        for m in _TEX_COMMAND_RE.finditer(text):
+            name = m.group(1)
+            # Strip trailing * from \section*{…} starred variants.
+            bare = name.rstrip("*")
+            use_style = kw_style if bare in _TEX_KEYWORD_COMMANDS else cmd_style
+            bstart = byte_off[m.start()]
+            blen = byte_off[m.end()] - bstart
+            if blen > 0:
+                sci.SendScintilla(sci.SCI_STARTSTYLING, bstart)
+                sci.SendScintilla(sci.SCI_SETSTYLING, blen, use_style)
+
+    # ── 2b.  Escaped special chars \$ \# \% \& \~ \_ \^ → Special  ──
+    # The TeX lexer lumps ALL backslash sequences into "Command".  After
+    # step 2 only \<letters>+ commands were recoloured; escaped non-letter
+    # chars like \$ \# \% \& \~ \_ \^ \{ \} are still lexer-style Command.
+    # Restore them to Special (constant.character.escape, foreground).
+    if special_style is not None and "\\" in text:
+        for m in re.finditer(r"\\.", text):
+            ch = m.group()[1]  # character after the backslash
+            if ch.isalpha() or ch == "@":
+                continue  # already handled as \command or left as Command
+            bstart = byte_off[m.start()]
+            blen = byte_off[m.end()] - bstart
+            if blen > 0:
+                sci.SendScintilla(sci.SCI_STARTSTYLING, bstart)
+                sci.SendScintilla(sci.SCI_SETSTYLING, blen, special_style)
+
+    # ── 3.  % comment → comment colour (virtual style)  ────────────────
+    # Applied LAST so that comments override any math/command styling
+    # within comment lines (VSCode: % turns the whole rest-of-line green).
+    if "%" in text:
+        colors = get_theme_colors()
+        comment_color = colors["syntax_comment"]
+        paper = colors["editor_bg"]
+        font = _code_font()
+        for m in _TEX_COMMENT.finditer(text):
+            bstart = byte_off[m.start()]
+            blen = byte_off[m.end()] - bstart
+            if blen > 0:
+                vidx = _virtual_style_for(sci, comment_color, font, paper)
+                sci.SendScintilla(sci.SCI_STARTSTYLING, bstart)
+                sci.SendScintilla(sci.SCI_SETSTYLING, blen, vidx)
 
 
-def attach_tex_command_coloring(sci: QsciScintilla) -> None:
-    """Color ``\\command`` sequences now and on every text change."""
-    apply_tex_command_coloring(sci)
-    sci.textChanged.connect(lambda: apply_tex_command_coloring(sci))
+def attach_tex_post_styling(sci: QsciScintilla) -> None:
+    """Apply TeX post-styling now and on every text change."""
+    apply_tex_post_styling(sci)
+    sci.textChanged.connect(lambda: apply_tex_post_styling(sci))
 
 
 # --- Markdown fenced-code highlighting -----------------------------------

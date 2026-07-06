@@ -177,10 +177,11 @@ def _create_scintilla(path: Path, lexer_name: str) -> tuple:
         # Auto-update margin width when content changes
         sci.textChanged.connect(lambda: update_margin_width(sci))
         if lexer_name == "QsciLexerTeX":
-            # TeX: QScintilla lumps \commands into the Text style, so color
-            # them post-lex like VSCode (support.function.general.tex -> gold).
-            from ..scintilla_utils import attach_tex_command_coloring
-            attach_tex_command_coloring(sci)
+            # TeX: unified post-styling — applies \command, % comment, and
+            # $math$ colouring in a single pass so they don't overwrite
+            # each other (each call to SCI_COLOURISE resets prior styling).
+            from ..scintilla_utils import attach_tex_post_styling
+            attach_tex_post_styling(sci)
         elif lexer_name == "QsciLexerMarkdown":
             # Markdown: VSCode colors whole heading lines and embeds language
             # grammars inside ```lang blocks; both done post-lex.
