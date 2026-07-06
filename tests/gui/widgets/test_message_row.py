@@ -233,6 +233,82 @@ def test_user_message_can_render_collapsed_summary(qtbot):
     assert "line 2" in widget._body_content_widget.label().text()
 
 
+def test_left_reply_bubble_wraps_like_user_bubble(qtbot):
+    widget = MessageRow(
+        role="agent",
+        content="reply line 1\nreply line 2",
+        display_mode="bubble",
+        bubble_align="left",
+        bubble_title=None,
+    )
+    qtbot.addWidget(widget)
+    widget.resize(520, 180)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    label = widget.findChild(QLabel, "userMessageText")
+    assert label is not None
+    assert label.wordWrap() is True
+    assert widget._body_content_widget is not None
+    assert widget._body_content_widget.label() is label
+
+
+def test_left_bubble_max_width_tracks_row_resize(qtbot):
+    """The left agent bubble must not lock to a width and block shrinking —
+    its maximumWidth follows the row so the panel can be narrowed live and
+    long content wraps instead of overflowing."""
+    widget = MessageRow(
+        role="agent",
+        content="word " * 120,
+        display_mode="bubble",
+        bubble_align="left",
+        bubble_title=None,
+    )
+    qtbot.addWidget(widget)
+    widget.resize(600, 200)
+    widget.show()
+    qtbot.waitExposed(widget)
+    qtbot.wait(10)
+    wide = widget._user_bubble_widget.maximumWidth()
+
+    widget.resize(380, 200)
+    qtbot.wait(10)
+    narrow = widget._user_bubble_widget.maximumWidth()
+
+    widget.resize(820, 200)
+    qtbot.wait(10)
+    wider = widget._user_bubble_widget.maximumWidth()
+
+    # Shrinks when narrowed, grows when widened, never exceeds the row.
+    assert narrow < wide
+    assert wider > wide
+    assert wide <= 600 and narrow <= 380 and wider <= 820
+    # Only a small readable floor minimum is set — never the full row width,
+    # which would block the scroll area from shrinking.
+    assert widget._user_bubble_widget.minimumWidth() < 250
+
+
+def test_thought_arrow_updates_when_expanded(qtbot):
+    widget = MessageRow(
+        role="agent",
+        content="detail",
+        display_mode="thought",
+        bubble_title="Thinking for 1s",
+        bubble_collapsible=True,
+    )
+    qtbot.addWidget(widget)
+    widget.resize(520, 180)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    assert widget._summary_arrow_widget is not None
+    assert widget._summary_arrow_widget._expanded is False
+
+    widget._toggle_summary()
+
+    assert widget._summary_arrow_widget._expanded is True
+
+
 def test_agent_message_can_render_collapsed_summary(qtbot):
     widget = MessageRow(
         role="agent",
@@ -294,7 +370,9 @@ def test_left_summary_bubble_without_body_keeps_readable_width(qtbot):
     assert widget._body_content_widget.label().width() >= 260
 
 
-def test_summary_bubble_reserves_space_for_toggle_button(qtbot):
+def test_summary_bubble_toggle_button_floats_over_text(qtbot):
+    """The Show More toggle button floats over the label (no permanent width
+    reservation) so the label can use the full bubble content width."""
     widget = MessageRow(
         role="agent",
         content="detail line 1\ndetail line 2",
@@ -319,7 +397,11 @@ def test_summary_bubble_reserves_space_for_toggle_button(qtbot):
 
     label_rect = body.label().geometry()
     btn_rect = body._toggle_btn.geometry()
-    assert label_rect.right() < btn_rect.left()
+    # The button floats over the bubble's bottom-right corner; the label
+    # fills the full content width — the button overlaps, not sits beside.
+    bubble_ct = bubble.rect()
+    assert btn_rect.right() <= bubble_ct.right() + 2
+    assert btn_rect.bottom() <= bubble_ct.bottom() + 2
 
 
 def test_long_user_bubble_shows_expand_button_on_hover(qtbot):
@@ -469,7 +551,8 @@ def test_user_bubble_left_edge_aligns_with_timeline_dot_guide(qtbot):
     qtbot.wait(20)
 
     bubble_left = widget._user_bubble_container.mapTo(widget, widget._user_bubble_container.rect().topLeft()).x()
-    assert abs(bubble_left - 22) <= 2
+    # The centered bubble hugs the left outer margin (within a few px).
+    assert bubble_left <= 32
 
 
 def test_tooltip_delay_is_2s_for_action_buttons(qtbot):

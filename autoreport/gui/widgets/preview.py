@@ -9,7 +9,7 @@ import subprocess
 
 import pandas as pd
 from loguru import logger
-from PyQt6.QtCore import QEvent, QSignalBlocker, QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QFileSystemWatcher, QSignalBlocker, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtPdf import QPdfDocument
 from PyQt6.QtPdfWidgets import QPdfView
@@ -396,6 +396,7 @@ class TabState:
     modified: bool = False
     saved_text: str = ""
     missing: bool = False
+    mtime_ns: int | None = None
 
 
 def _tab_key(path: Path) -> str:
@@ -476,7 +477,18 @@ class EditorPanel(QWidget):
         viewer, vtype = _create_missing_viewer(path) if missing else _create_viewer(path)
         self._stack.addWidget(viewer)
 
-        state = TabState(path=path, pinned=not preview, viewer=viewer, viewer_type=vtype, missing=missing)
+        try:
+            mtime_ns = path.stat().st_mtime_ns if not missing else None
+        except OSError:
+            mtime_ns = None
+        state = TabState(
+            path=path,
+            pinned=not preview,
+            viewer=viewer,
+            viewer_type=vtype,
+            missing=missing,
+            mtime_ns=mtime_ns,
+        )
         self._tabs[key] = state
         self._tab_order.append(key)
 
@@ -742,6 +754,9 @@ class PreviewWidget(QWidget):
         self._restoring_tabs = False
         self._tab_area_hovered = False
         self._tab_hovered_index = -1
+        self._tab_affordance_hovered_index = -1
+        self._file_watcher = QFileSystemWatcher(self)
+        self._file_watcher.fileChanged.connect(self._on_watched_file_changed)
 
         # Single editor panel
         self._panels: list[EditorPanel] = []
@@ -1110,6 +1125,7 @@ class PreviewWidget(QWidget):
         self._update_file_actions()
         if not self._restoring_tabs:
             self.save_open_tabs()
+        self._sync_file_watcher_paths()
 
         if self._unified_tab_bar.currentIndex() >= 0:
             current_key = self._unified_tab_bar.tabData(self._unified_tab_bar.currentIndex())
@@ -1267,6 +1283,10 @@ class PreviewWidget(QWidget):
             warning_box(self, "保存失败", f"无法保存文件:\n{state.path}\n\n{exc}")
             return False
         state.saved_text = content
+        try:
+            state.mtime_ns = state.path.stat().st_mtime_ns
+        except OSError:
+            state.mtime_ns = None
         state.modified = False
         for panel in self._panels:
             if key in panel._tabs:
@@ -1383,6 +1403,74 @@ class PreviewWidget(QWidget):
                 return state
         return None
 
+    def _sync_file_watcher_paths(self) -> None:
+        wanted = {
+            str(state.path)
+            for panel in self._panels
+            for state in panel._tabs.values()
+            if state.path.exists()
+        }
+        current = set(self._file_watcher.files())
+        remove = list(current - wanted)
+        add = list(wanted - current)
+        if remove:
+            self._file_watcher.removePaths(remove)
+        if add:
+            self._file_watcher.addPaths(add)
+
+    def _on_watched_file_changed(self, path_text: str) -> None:
+        QTimer.singleShot(50, lambda p=path_text: self._reload_open_file_if_clean(Path(p)))
+
+    def _reload_open_file_if_clean(self, path: Path) -> None:
+        key = _tab_key(path)
+        state = self._find_tab_state(key)
+        if state is None:
+            self._sync_file_watcher_paths()
+            return
+        state.missing = not state.path.exists()
+        if state.missing:
+            self._sync_tabs_from_panels()
+            return
+        if state.modified:
+            self._sync_file_watcher_paths()
+            return
+        try:
+            mtime_ns = state.path.stat().st_mtime_ns
+        except OSError:
+            self._sync_file_watcher_paths()
+            return
+        if state.mtime_ns == mtime_ns:
+            self._sync_file_watcher_paths()
+            return
+        self._replace_tab_viewer(state, key)
+        state.mtime_ns = mtime_ns
+        self._sync_tabs_from_panels()
+        self._connect_selection_tracking()
+
+    def _replace_tab_viewer(self, state: TabState, key: str) -> None:
+        viewer, viewer_type = _create_viewer(state.path)
+        old_viewer = state.viewer
+        for panel in self._panels:
+            if key not in panel._tabs:
+                continue
+            index = panel._stack.indexOf(old_viewer)
+            if index >= 0:
+                panel._stack.removeWidget(old_viewer)
+                panel._stack.insertWidget(index, viewer)
+                if panel._active_key == key:
+                    panel._stack.setCurrentWidget(viewer)
+            state.viewer = viewer
+            state.viewer_type = viewer_type
+            if hasattr(viewer, "text") and callable(viewer.text):
+                state.saved_text = viewer.text()
+            else:
+                state.saved_text = ""
+            if hasattr(viewer, "textChanged"):
+                viewer.textChanged.connect(lambda _k=key, _p=panel: _p._on_editor_text_changed(_k))
+                panel._on_editor_text_changed(key)
+            old_viewer.deleteLater()
+            break
+
     def _refresh_unified_tab_affordances(self) -> None:
         duplicate_names = self._duplicate_tab_names()
         current_index = self._unified_tab_bar.currentIndex()
@@ -1443,17 +1531,20 @@ class PreviewWidget(QWidget):
             rl = QHBoxLayout(right)
             rl.setContentsMargins(0, 0, 0, 0)
             rl.setSpacing(1)
-            if state and state.modified:
-                rl.addWidget(_TabAffordanceButton(self._unified_tab_bar))
-            show_close = bool(
-                i == current_index
-                or i == self._tab_hovered_index
-                or (state and state.modified)
+            dirty = bool(state and state.modified)
+            show_close = (
+                i == self._tab_affordance_hovered_index
+                if dirty
+                else bool(i == current_index or i == self._tab_hovered_index)
             )
             if show_close:
                 close_btn = _TabCloseButton(self._unified_tab_bar)
                 close_btn.clicked.connect(lambda _=False, _k=key: self._on_unified_tab_close_by_key(_k))
                 rl.addWidget(close_btn)
+            elif dirty:
+                rl.addWidget(_TabAffordanceButton(self._unified_tab_bar))
+            right.setProperty("tabAffordanceIndex", i)
+            right.installEventFilter(self)
             self._unified_tab_bar.setTabButton(
                 i,
                 QTabBar.ButtonPosition.RightSide,
@@ -1497,6 +1588,16 @@ class PreviewWidget(QWidget):
             elif event.type() in (QEvent.Type.Leave, QEvent.Type.HoverLeave):
                 if self._tab_hovered_index != -1:
                     self._tab_hovered_index = -1
+                    self._refresh_unified_tab_affordances()
+        idx = obj.property("tabAffordanceIndex") if isinstance(obj, QWidget) else None
+        if isinstance(idx, int):
+            if event.type() in (QEvent.Type.Enter, QEvent.Type.HoverEnter):
+                if self._tab_affordance_hovered_index != idx:
+                    self._tab_affordance_hovered_index = idx
+                    self._refresh_unified_tab_affordances()
+            elif event.type() in (QEvent.Type.Leave, QEvent.Type.HoverLeave):
+                if self._tab_affordance_hovered_index == idx:
+                    self._tab_affordance_hovered_index = -1
                     self._refresh_unified_tab_affordances()
         if obj in (self._tab_scroll, self._tab_scroll.viewport(), self._unified_tab_bar):
             if event.type() in (QEvent.Type.Wheel, QEvent.Type.NativeGesture):
@@ -1714,6 +1815,10 @@ class PreviewWidget(QWidget):
             state.viewer.setModified(False)
             panel._set_tab_modified(key, False)
             state.saved_text = state.viewer.text()
+            try:
+                state.mtime_ns = self._current_file.stat().st_mtime_ns
+            except OSError:
+                state.mtime_ns = None
             self._sync_tabs_from_panels()
             panel.tab_changed.emit()
             return True

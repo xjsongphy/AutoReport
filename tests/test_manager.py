@@ -175,3 +175,21 @@ def test_get_agent_debug_mode(manager):
     manager._loops[AgentType.DATA_ANALYSIS] = mock_loop
 
     assert manager.get_agent_debug_mode("data_analysis") is True
+
+
+def test_cancel_main_cascades_to_active_delegated_subagent(manager):
+    main_loop = MagicMock()
+    plotting_loop = MagicMock()
+    manager._loops[AgentType.MAIN] = main_loop
+    manager._loops[AgentType.PLOTTING] = plotting_loop
+    manager._task_board.create_task(
+        source=AgentType.MAIN,
+        target=AgentType.PLOTTING,
+        brief="Generate figures",
+        blocking=True,
+    )
+
+    manager.cancel_current_operation("main")
+
+    main_loop.cancel_current.assert_called_once()
+    plotting_loop.cancel_current.assert_called_once()

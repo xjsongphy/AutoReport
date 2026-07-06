@@ -3,6 +3,8 @@
 from autoreport.gui.widgets.message_row import MessageRow
 from autoreport.gui.widgets.markdown_renderer import render_markdown
 import autoreport.gui.theme as theme
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QLabel
 
 
 class TestMarkdownRenderer:
@@ -69,14 +71,55 @@ class TestMarkdownRenderer:
         html = render_markdown(md)
         assert "A" in html
         assert "1" in html
+        assert "overflow-wrap: anywhere" in html
+        assert "<table" not in html
+        assert "<strong>A</strong>" in html
 
     def test_table_header_uses_surface_color_in_light_mode(self, monkeypatch):
         monkeypatch.setattr(theme, "is_dark_mode", lambda: False)
         md = "| A | B |\n|---|---|\n| 1 | 2 |"
         html = render_markdown(md)
-        # Light-mode header uses the surface color (#f8f8f8) for a subtle
-        # distinction from the white page background (no longer pure white).
-        assert 'bgcolor="#f8f8f8"' in html
+        assert "<table" not in html
+        assert "A" in html
+        assert "B" in html
+
+    def test_table_with_long_cells_respects_label_width(self, qtbot):
+        md = (
+            "| A | B |\n"
+            "|---|---|\n"
+            "| verylongtokenverylongtokenverylongtokenverylongtokenverylongtoken "
+            "| 另一个很长很长很长很长很长很长很长很长的中文内容 |"
+        )
+        label = QLabel(render_markdown(md))
+        qtbot.addWidget(label)
+        label.setTextFormat(Qt.TextFormat.RichText)
+        label.setWordWrap(True)
+        label.setMaximumWidth(360)
+        label.adjustSize()
+
+        assert label.sizeHint().width() <= 360
+
+    def test_raw_html_table_is_rewritten_before_rendering(self, qtbot):
+        html_table = (
+            "<table><thead><tr><th>路径</th><th>说明</th></tr></thead>"
+            "<tbody><tr><td><code>project_outline.md</code></td>"
+            "<td>项目大纲 — 数据范围、章节规划、依赖关系</td></tr>"
+            "<tr><td><code>Theory/derivation.md</code> (及 formulas/assumptions)</td>"
+            "<td>理论推导 — MIS C-V、1ω/2ω 检测、串联电阻修正</td></tr></tbody></table>"
+        )
+        rendered = render_markdown(html_table)
+        assert "<table" not in rendered
+        assert "路径" in rendered
+        assert "说明" in rendered
+
+        label = QLabel(rendered)
+        qtbot.addWidget(label)
+        label.setTextFormat(Qt.TextFormat.RichText)
+        label.setWordWrap(True)
+        label.setMaximumWidth(360)
+        label.adjustSize()
+
+        assert label.sizeHint().width() <= 360
 
 
 class TestMessageRowCopyButton:

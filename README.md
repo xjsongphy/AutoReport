@@ -1,8 +1,17 @@
-# ![title](assets/screenshots/title.png)
+<div align="center">
 
-[中文](README_zh.md)
+![title](assets/screenshots/title.png)
 
----
+### A Multi-Agent Collaborative System for Automated Physics Experiment Report Writing
+
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#)
+[![Python](https://img.shields.io/badge/python-%E2%89%A5%203.12-blue.svg)](https://www.python.org/)
+[![Built with PyQt6](https://img.shields.io/badge/built%20with-PyQt6-green.svg)](https://www.riverbankcomputing.com/software/pyqt/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+English | [中文](README_zh.md)
+
+</div>
 
 ## Overview
 
@@ -17,13 +26,13 @@ A multi-agent collaborative automated physics experiment report writing system. 
 - **Checkpoint Rollback** — Automatically creates checkpoints at key nodes; roll back to any historical state
 - **Interactive Adjustment** — Users can message any agent at any time for intervention and optimization
 
-### UI/UX (VSCode/Copilot Chat Style)
+### UI/UX (Claude Code Style)
 - **Streaming Responses** — Real-time agent output, word-by-word streaming
 - **Switchable Agent Panel** — A single agent chat panel with a dropdown selector to switch among Main / Data Analysis / Plotting / Theory / Report
 - **Recent Projects Cache** — VSCode-style recent projects list, cached in `~/.autoreport/recent_projects.json`
 - **File Explorer** — VSCode-style file tree with 22px row height, 16px icons, concise labels (Data, References, Theory, Plots, Outline, Tex)
 - **Context Chip Bar** — Visual indicator for file/line selections with toggle to include/exclude from messages
-- **Chat Interface** — Copilot-style conversation display with proper Markdown rendering and grouped tool calls
+- **Chat Interface** — Claude Code-style conversation display with proper Markdown rendering and grouped tool calls
 - **Slash Commands** — `/clear`, `/new`, `/help`, `/compact`, `/init`
 
 ### Developer Tools
@@ -198,6 +207,7 @@ Agent type icons are from [Tabler Icons](https://tabler-icons.io/) — 6000+ fre
 - [openclaw](https://github.com/openclaw/openclaw) — Personal AI assistant, skills system, multi-channel agent design
 - [VS Code](https://github.com/microsoft/vscode) — Editor UI/UX patterns, panel layout, command and extension architecture
 - [Claude Code](https://claude.com/claude-code) — Agent chat panel UI/UX (bubble messages, grouped tool calls, streaming, `@` references, slash commands)
+- [PKUMpLtX](https://github.com/CastleStar14654/PKUMpLtX) — Built-in LaTeX report template (PKU Modern Physics Laboratory, revtex4-2 based)
 
 ## Star History
 

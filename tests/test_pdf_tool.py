@@ -40,10 +40,8 @@ async def test_parse_raises_when_not_available(workspace):
 async def test_parse_file_not_found(workspace):
     tool = PDFParseTool(workspace=workspace)
     with patch.object(PDFParseTool, "is_available", return_value=True):
-        result = await tool(file_paths="References/nonexistent.pdf")
-        assert result["total"] == 1
-        assert result["errors"] is not None
-        assert "file not found" in result["errors"][0]
+        with pytest.raises(RuntimeError, match="file not found"):
+            await tool(file_paths="References/nonexistent.pdf")
 
 
 @pytest.mark.asyncio
@@ -90,7 +88,26 @@ async def test_parse_batch_with_errors(workspace):
     tool = PDFParseTool(workspace=workspace)
 
     with patch.object(PDFParseTool, "is_available", return_value=True):
-        result = await tool(file_paths=["missing1.pdf", "missing2.pdf"])
+        with pytest.raises(RuntimeError, match="missing1.pdf: file not found"):
+            await tool(file_paths=["missing1.pdf", "missing2.pdf"])
 
-    assert result["total"] == 2
-    assert len(result["errors"]) == 2
+
+@pytest.mark.asyncio
+async def test_parse_surfaces_auth_failure_with_actionable_hint(workspace):
+    tool = PDFParseTool(workspace=workspace)
+    src_file = workspace / "References" / "auth.pdf"
+    src_file.write_bytes(b"%PDF-1.4 fake")
+
+    mock_proc = AsyncMock()
+    mock_proc.communicate.return_value = (
+        b"",
+        b'HTTP 401, body: {"detail":"user authenticate failed"}',
+    )
+    mock_proc.returncode = 1
+
+    with (
+        patch.object(PDFParseTool, "is_available", return_value=True),
+        patch("autoreport.core.tools.pdf_tool.asyncio.create_subprocess_exec", return_value=mock_proc),
+    ):
+        with pytest.raises(RuntimeError, match="mineru-open-api auth"):
+            await tool(file_paths="References/auth.pdf")

@@ -170,6 +170,16 @@ class LoopManager:
             return
 
         loop.cancel_current()
+        for delegated in self._task_board.get_waitlist(agent_enum):
+            target_loop = self._loops.get(delegated.target_agent)
+            if target_loop is None or target_loop is loop:
+                continue
+            target_loop.cancel_current()
+            logger.info(
+                "Cancelled delegated operation for agent: {} (task {})",
+                delegated.target_agent.value,
+                delegated.task_id,
+            )
         logger.info("Cancelled current operation for agent: {}", agent_type)
 
     async def restart(self, reason: str = "user_request") -> None:

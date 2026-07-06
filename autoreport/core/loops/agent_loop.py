@@ -49,6 +49,15 @@ _TOKENS_PER_CHAR = 0.3
 _SAFETY_BUFFER = 1024  # Extra buffer for tool definitions and overhead
 
 
+@dataclass
+class _LoopLLMResponse:
+    content: str
+    tool_calls: list
+    thinking: str | None = None
+    usage: dict[str, int] | None = None
+    streamed: bool = False
+
+
 def _estimate_tokens(messages: list[LLMMessage]) -> int:
     """Rough token count — ~4 chars per token, plus per-message overhead."""
     total = 0
@@ -823,6 +832,8 @@ class AgentLoop:
                     thinking=accumulated_thinking,
                 )
                 await self._handle_tool_calls(response, message.message_id)
+                if self._cancel_event.is_set():
+                    return
 
             # Send final completion signal.
             # For tool-call paths, _handle_tool_calls already published the
@@ -919,6 +930,74 @@ class AgentLoop:
                 self._conversation_history.append(LLMMessage(role="user", content=hint))
         except Exception as e:
             logger.warning("Failed to flush manifest for {}: {}", self.agent_type, e)
+
+    async def _chat_followup(
+        self,
+        messages: list[LLMMessage],
+        tool_definitions: list[dict] | None,
+        user_message_id: str | None,
+    ) -> _LoopLLMResponse:
+        """Run a post-tool LLM round, streaming UI deltas when supported."""
+        try:
+            accumulated_content = ""
+            accumulated_tool_calls = []
+            accumulated_thinking = ""
+            async for chunk in self.llm_provider.chat_stream(
+                messages=messages,
+                tools=tool_definitions if tool_definitions else None,
+                temperature=self.config.temperature,
+                max_tokens=self.config.max_tokens,
+            ):
+                if chunk.delta:
+                    accumulated_content += chunk.delta
+                    await self.bus.publish(
+                        AgentResponse(
+                            agent_type=self.agent_type,
+                            content=chunk.delta,
+                            message_id=user_message_id,
+                            streaming=True,
+                        )
+                    )
+
+                if chunk.tool_calls:
+                    accumulated_tool_calls = chunk.tool_calls
+
+                if chunk.thinking:
+                    accumulated_thinking += chunk.thinking
+                    if not chunk.done:
+                        await self.bus.publish(
+                            AgentResponse(
+                                agent_type=self.agent_type,
+                                content="",
+                                message_id=user_message_id,
+                                streaming=True,
+                                thinking=chunk.thinking,
+                            )
+                        )
+
+                if chunk.done or self._cancel_event.is_set():
+                    break
+
+            return _LoopLLMResponse(
+                content=accumulated_content,
+                tool_calls=accumulated_tool_calls,
+                thinking=accumulated_thinking or None,
+                streamed=True,
+            )
+        except NotImplementedError:
+            response = await self.llm_provider.chat(
+                messages=messages,
+                tools=tool_definitions,
+                temperature=self.config.temperature,
+                max_tokens=self.config.max_tokens,
+            )
+            return _LoopLLMResponse(
+                content=response.content or "",
+                tool_calls=response.tool_calls,
+                thinking=getattr(response, "thinking", None),
+                usage=getattr(response, "usage", None),
+                streamed=False,
+            )
 
     async def _handle_tool_calls(
         self,
@@ -1042,6 +1121,31 @@ class AgentLoop:
                     )
                 )
 
+                if self._cancel_event.is_set():
+                    logger.info(
+                        "Tool loop cancelled for agent {} after {}",
+                        self.agent_type,
+                        tool_call.name,
+                    )
+                    self._conversation_history = [
+                        m for m in current_messages if m.role != "system"
+                    ]
+                    await self.bus.publish(
+                        SystemNotice(
+                            agent_type=self.agent_type,
+                            content="Interrupted",
+                            kind="interrupt",
+                        )
+                    )
+                    await self._set_status(AgentStatus.IDLE)
+                    return
+
+                if self._turn_reported:
+                    self._conversation_history = [
+                        m for m in current_messages if m.role != "system"
+                    ]
+                    return
+
             # Call LLM again with updated conversation
             await self._set_status(AgentStatus.THINKING)
 
@@ -1052,11 +1156,10 @@ class AgentLoop:
             last_error = None
 
             try:
-                response = await self.llm_provider.chat(
-                    messages=current_messages,
-                    tools=tool_definitions,
-                    temperature=self.config.temperature,
-                    max_tokens=self.config.max_tokens,
+                response = await self._chat_followup(
+                    current_messages,
+                    tool_definitions,
+                    user_message_id,
                 )
             except Exception as e:
                 last_error = str(e)
@@ -1084,18 +1187,35 @@ class AgentLoop:
             # Publish it so the thinking indicator fills between tool calls —
             # without this the dots row is empty and gets removed on finish.
             if getattr(response, "thinking", None):
+                # Streaming providers have already published the thinking
+                # deltas. The fallback chat() path still needs one UI update.
+                if not getattr(response, "streamed", False):
+                    await self.bus.publish(
+                        AgentResponse(
+                            agent_type=self.agent_type,
+                            content="",
+                            message_id=user_message_id,
+                            streaming=True,
+                            thinking=response.thinking,
+                        )
+                    )
+
+            if self._cancel_event.is_set():
+                self._conversation_history = [
+                    m for m in current_messages if m.role != "system"
+                ]
                 await self.bus.publish(
-                    AgentResponse(
+                    SystemNotice(
                         agent_type=self.agent_type,
-                        content="",
-                        message_id=user_message_id,
-                        streaming=True,
-                        thinking=response.thinking,
+                        content="Interrupted",
+                        kind="interrupt",
                     )
                 )
+                await self._set_status(AgentStatus.IDLE)
+                return
 
         # Update conversation history with final response
-        if response.content:
+        if response.content and not self._turn_reported:
             current_messages.append(LLMMessage(role="assistant", content=response.content))
             # Publish final content to GUI (it was generated inside the tool loop)
             await self.bus.publish(

@@ -175,7 +175,7 @@ class MainWindow(QMainWindow):
             pass
 
     def _apply_theme(self) -> None:
-        """Apply theme matching VS Code Copilot Chat color variables."""
+        """Apply theme matching Claude Code color variables."""
         s = dpi_scale()
 
         # Helper: scale pixel value for DPI
@@ -943,6 +943,13 @@ class MainWindow(QMainWindow):
             lambda: self._on_interrupt(self.current_agent_type)
         )
         self.agent_panel.agent_type_changed.connect(self._on_agent_type_changed)
+        self.agent_panel.message_edit_resend_requested.connect(
+            lambda content, row: self._on_message_edit_resend_requested(
+                self.current_agent_type,
+                content,
+                row,
+            )
+        )
         self.agent_panel.rollback_requested.connect(
             lambda checkpoint_id, row: self._on_rollback_requested(
                 self.current_agent_type, checkpoint_id, row
@@ -1094,14 +1101,15 @@ class MainWindow(QMainWindow):
                     message_id=rec.get("message_id"),
                 )
             elif role == "agent":
-                if rec.get("display_mode") == "bubble":
+                display_mode = str(rec.get("display_mode") or "agent_markdown")
+                if display_mode in {"bubble", "inline_notice"}:
                     panel.add_message(
                         "agent",
                         content,
-                        display_mode="bubble",
+                        display_mode=display_mode,
                         bubble_title=rec.get("bubble_title"),
                         bubble_align=str(rec.get("bubble_align") or "left"),
-                        bubble_on_timeline=bool(rec.get("bubble_on_timeline", True)),
+                        bubble_on_timeline=bool(rec.get("bubble_on_timeline", display_mode == "bubble")),
                         bubble_collapsible=bool(rec.get("bubble_collapsible", True)),
                         muted_italic=bool(rec.get("muted_italic", False)),
                         message_id=rec.get("message_id"),
@@ -1123,14 +1131,17 @@ class MainWindow(QMainWindow):
                     summary=rec.get("summary"),
                 )
             elif role == "tool_result":
-                panel.add_tool_result(
-                    content,
-                    rec.get("result"),
-                    rec.get("error"),
-                    summary=rec.get("summary"),
-                    detail=rec.get("detail"),
-                    expandable=rec.get("expandable"),
-                )
+                if rec.get("task_snapshot"):
+                    panel.add_task_snapshot_summary(str(rec.get("summary") or rec.get("result") or ""))
+                else:
+                    panel.add_tool_result(
+                        content,
+                        rec.get("result"),
+                        rec.get("error"),
+                        summary=rec.get("summary"),
+                        detail=rec.get("detail"),
+                        expandable=rec.get("expandable"),
+                    )
             elif role == "error":
                 panel.add_error(rec.get("source", ""), content)
         panel._update_width()
@@ -1165,13 +1176,9 @@ class MainWindow(QMainWindow):
                     content = build_editor_context_prompt(context, content)
                 converted.append({"role": "user", "content": content})
             elif role == "agent":
+                if rec.get("system_notice") or str(rec.get("source", "")) == "system":
+                    continue
                 converted.append({"role": "assistant", "content": content})
-            elif role == "tool_result":
-                result = rec.get("result")
-                err = rec.get("error")
-                payload = str(result) if result is not None else str(err or "")
-                # Anthropic doesn't support role="tool", use role="user" with is_tool_result flag
-                converted.append({"role": "user", "content": payload, "is_tool_result": True})
         return converted
 
     def set_async_loop(self, loop: asyncio.AbstractEventLoop) -> None:
@@ -1199,6 +1206,11 @@ class MainWindow(QMainWindow):
         self.agent_panel._current_tool_group = None
         self.agent_panel._messages_area.clear()
         self._load_conversations_for_agent(self.current_agent_type, self.agent_panel)
+        # Replay the live task-board state. Coordination task updates (fired by
+        # send_to_agent / task transitions) are rendered live from the task
+        # board and are not part of the stored tool-call records, so without
+        # this they would vanish whenever the user switches agents and back.
+        self._render_task_block_for_current_agent()
         self.agent_panel.set_queue_preview(self._agent_queue_cache.get(self.current_agent_type, []))
         cached = self._agent_status_cache.get(self.current_agent_type)
         if cached:
@@ -1268,6 +1280,31 @@ class MainWindow(QMainWindow):
             future.add_done_callback(
                 lambda done: self._rollback_finished_signal.emit(agent_type, done)
             )
+
+    def _on_message_edit_resend_requested(self, agent_type: str, content: str, row) -> None:
+        self._conv_store.truncate_from_message(
+            agent_type,
+            message_id=getattr(row, "_message_id", None),
+            content=getattr(row, "_content", None),
+            role=getattr(row, "_role", None),
+        )
+        loop_manager = getattr(self.backend, "loop_manager", None)
+        cancel = getattr(loop_manager, "cancel_current_operation", None)
+        if callable(cancel):
+            cancel(agent_type)
+        self._agent_queue_cache[agent_type] = []
+        if self._is_visible_agent(agent_type):
+            self._get_panel_for_agent(agent_type).set_queue_preview([])
+        if hasattr(self.backend, "sync_agent_conversation"):
+            self._submit_coroutine(
+                self.backend.sync_agent_conversation(
+                    agent_type,
+                    self._records_to_backend_messages(agent_type),
+                    session_id=self._conv_store.get_current_session_id(agent_type),
+                    clear_pending=True,
+                )
+            )
+        self._get_panel_for_agent(agent_type)._send_content(content)
 
     def _on_rollback_finished(self, agent_type: str, future) -> None:
         rollback_target = self._pending_rollbacks.pop(agent_type, None)
@@ -1500,11 +1537,6 @@ class MainWindow(QMainWindow):
     def _handle_tool_call(self, message: ToolCallMessage) -> None:
         agent_str = str(message.agent_type)
         state = self._state_for_agent(agent_str)
-        if agent_str == "main" and message.tool_name == "send_to_agent":
-            if self._is_visible_agent(agent_str):
-                self._get_panel_for_agent(agent_str).finish_thinking()
-            state.phase = "tool"
-            return
         if not self._is_visible_agent(agent_str):
             self._conv_store.append_tool_call(agent_str, message.tool_name, message.arguments)
             return
@@ -1517,13 +1549,16 @@ class MainWindow(QMainWindow):
         if agent_str == "main" and message.tool_name == "send_to_agent":
             target = str(message.arguments.get("agent_type") or "sub")
             summary = MainWindow._route_summary(self, "main", target)
-            expandable = False
+            request_text = str(message.arguments.get("content") or "").strip()
+            detail = MainWindow._build_send_to_agent_detail(
+                target=target,
+                request_text=request_text,
+                response_text="",
+            )
+            expandable = bool(detail)
         elif message.tool_name == "respond":
             detail = str(message.arguments.get("content") or "").strip() or None
-            summary = (
-                str(message.arguments.get("summary") or "").strip()
-                or MainWindow._respond_summary(self, agent_str, detail)
-            )
+            summary = "Respond"
             expandable = bool(detail)
         elif message.tool_name == "manage_tasks":
             summary = "<b>Task</b>"
@@ -1548,6 +1583,10 @@ class MainWindow(QMainWindow):
     def _handle_tool_result(self, message: ToolResult) -> None:
         agent_str = str(message.agent_type)
         state = self._state_for_agent(agent_str)
+        latest_task_summary_fn = getattr(self, "_latest_persisted_task_summary", None)
+        latest_task_summary = (
+            latest_task_summary_fn(agent_str) if callable(latest_task_summary_fn) else None
+        )
         if not self._is_visible_agent(agent_str):
             result_str = str(message.result) if message.result else None
             summary = None
@@ -1557,12 +1596,6 @@ class MainWindow(QMainWindow):
                 summary, detail = self._format_send_to_agent_bubble(message.result, message.error)
                 expandable = bool(detail)
                 result_str = detail or summary
-                self._conv_store.append_tool_call(
-                    agent_str,
-                    message.tool_name,
-                    self._send_to_agent_result_arguments(message.result),
-                    extra={"summary": summary},
-                )
             elif message.tool_name == "respond":
                 summary, detail = self._format_respond_bubble(
                     message.result, message.error, agent_str=agent_str
@@ -1574,6 +1607,8 @@ class MainWindow(QMainWindow):
                 summary, detail, expandable = self._format_manage_tasks_result(
                     message.result, message.error
                 )
+                if summary and latest_task_summary == summary:
+                    return
                 if summary:
                     result_str = summary
             self._conv_store.append_tool_result(
@@ -1612,23 +1647,10 @@ class MainWindow(QMainWindow):
         elif message.tool_name == "manage_tasks":
             message.result = self._augment_manage_tasks_result(agent_str, message.result)
             summary, _, _ = self._format_manage_tasks_result(message.result, message.error)
+            if summary and latest_task_summary == summary:
+                return
             if summary:
                 result_str = summary
-
-        if agent_str == "main" and message.tool_name == "send_to_agent":
-            panel.add_tool_call(
-                message.tool_name,
-                self._send_to_agent_result_arguments(message.result),
-                summary=summary,
-                detail=detail,
-                expandable=bool(expandable),
-            )
-            self._conv_store.append_tool_call(
-                agent_str,
-                message.tool_name,
-                self._send_to_agent_result_arguments(message.result),
-                extra={"summary": summary},
-            )
 
         panel.add_tool_result(
             message.tool_name,
@@ -1706,6 +1728,9 @@ class MainWindow(QMainWindow):
         if isinstance(result, dict):
             target = str(result.get("agent_type") or target)
         route = MainWindow._route_summary(self, "main", target)
+        # The dot always shows "Main to {Sub}" and expands to reveal the
+        # dispatched request content. The sub-agent's reply is rendered as a
+        # separate bubble (not inside this dot); see _reply_bubble_for_result.
         if error:
             return (route, error)
 
@@ -1714,40 +1739,54 @@ class MainWindow(QMainWindow):
             return (route, text or None)
 
         status = str(result.get("status", "success"))
-        response = str(result.get("response", "") or "").strip()
+        request_content = str(result.get("content") or "").strip()
         request_summary = str(result.get("summary") or result.get("request_summary") or "").strip()
-        response_summary = str(result.get("response_summary") or "").strip()
+
+        detail = MainWindow._build_send_to_agent_detail(
+            target=target,
+            request_text=request_content or request_summary,
+            response_text="",
+        )
 
         if status == "delegated":
-            detail = str(result.get("message", "") or "").strip() or None
-            return (request_summary or route, detail)
+            msg = str(result.get("message", "") or "").strip()
+            return (route, detail or msg or None)
 
-        if status == "timeout":
-            detail = str(result.get("error", "") or "").strip() or None
-            return (request_summary or route, detail)
+        if status in ("timeout", "error"):
+            msg = str(result.get("error", "") or "").strip()
+            return (route, detail or msg or None)
 
-        if status == "error":
-            detail = str(result.get("error", "") or "").strip() or None
-            return (request_summary or route, detail)
+        return (route, detail)
 
-        if not response:
-            return (response_summary or request_summary or route, None)
+    def _build_send_to_agent_detail(
+        *,
+        target: str,
+        request_text: str,
+        response_text: str,
+    ) -> str | None:
+        """Return the dispatched request text (if any) as the expandable body.
 
-        return (response_summary or request_summary or route, response)
+        The dot always reads "Main to {Sub}"; tapping it reveals what was sent.
+        The sub-agent's reply is rendered as a separate agent bubble — never
+        bundled into the send_to_agent detail — so the response_text parameter
+        is accepted but ignored here (the caller passes it to the reply bubble).
+        """
+        del target, response_text
+        text = str(request_text or "").strip()
+        return text or None
 
     def _format_respond_bubble(
         self, result, error: str | None, *, agent_str: str = "sub"
     ) -> tuple[str, str | None]:
         if error:
-            return (MainWindow._respond_summary(self, agent_str, error), error)
+            return ("Respond", error)
         if not isinstance(result, dict):
             text = str(result).strip() if result is not None else ""
-            return (MainWindow._respond_summary(self, agent_str, text), text or None)
+            return ("Respond", text or None)
         detail = str(result.get("content") or "").strip()
         if not detail:
             detail = str(result.get("message") or "").strip()
-        summary = str(result.get("summary") or "").strip()
-        return (summary or MainWindow._respond_summary(self, agent_str, detail), detail or None)
+        return ("Respond", detail or None)
 
     def _format_manage_tasks_result(
         self, result, error: str | None
@@ -1925,10 +1964,33 @@ class MainWindow(QMainWindow):
         tgt = message.target_agent
         tgt_str = tgt.value if isinstance(tgt, Enum) else str(tgt)
 
-        if self.current_agent_type == "main" or self.current_agent_type in {src_str, tgt_str}:
-            self._render_task_block_for_current_agent()
+        agents_to_sync = {src_str, tgt_str}
+        if "main" in agents_to_sync:
+            agents_to_sync.add("main")
+
+        for agent_str in agents_to_sync:
+            self._sync_task_snapshot_for_agent(
+                agent_str,
+                render=self.current_agent_type == agent_str,
+            )
 
     def _render_task_block_for_current_agent(self) -> None:
+        self._sync_task_snapshot_for_agent(self.current_agent_type, render=True)
+
+    def _latest_persisted_task_summary(self, agent_type: str) -> str | None:
+        records = self._conv_store.load_messages(agent_type)
+        for rec in reversed(records):
+            if (
+                rec.get("role") == "tool_result"
+                and rec.get("content") == "manage_tasks"
+                and rec.get("task_snapshot")
+            ):
+                summary = str(rec.get("summary") or rec.get("result") or "").strip()
+                if summary:
+                    return summary
+        return None
+
+    def _sync_task_snapshot_for_agent(self, agent_type: str, *, render: bool) -> None:
         loop_manager = getattr(self.backend, "loop_manager", None)
         task_board = (
             getattr(loop_manager, "_task_board", None) if loop_manager is not None else None
@@ -1936,15 +1998,25 @@ class MainWindow(QMainWindow):
         if task_board is None:
             return
         try:
-            agent_type = AgentType(self.current_agent_type)
+            agent_enum = AgentType(agent_type)
         except ValueError:
             return
-        session_id = self._conv_store.get_current_session_id(self.current_agent_type)
-        todolist = task_board.get_todolist(agent_type, session_id=session_id)
-        waitlist = task_board.get_waitlist(agent_type, session_id=session_id)
+        session_id = self._conv_store.get_current_session_id(agent_type)
+        todolist = task_board.get_todolist(agent_enum, session_id=session_id)
+        waitlist = task_board.get_waitlist(agent_enum, session_id=session_id)
+        if not todolist and not waitlist:
+            return
         todo_rows = [{"brief": t.brief, "status": t.status.value} for t in todolist]
         wait_rows = [{"brief": t.brief, "status": t.status.value} for t in waitlist]
-        self.agent_panel.add_task_block(todo_rows, wait_rows)
+        summary, _, _ = self._format_manage_tasks_result(
+            {"status": "ok", "todolist": todo_rows, "waitlist": wait_rows},
+            None,
+        )
+        if not summary or self._latest_persisted_task_summary(agent_type) == summary:
+            return
+        if render:
+            self.agent_panel.add_task_block(todo_rows, wait_rows)
+        self._conv_store.upsert_task_snapshot(agent_type, summary)
 
     def _get_panel_for_agent(self, agent_type: str) -> AgentPanel:
         return self.agent_panel

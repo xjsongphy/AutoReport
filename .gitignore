@@ -3,7 +3,7 @@ __pycache__/
 .venv/
 *.egg-info/
 dist/
-.uv/
+.uv-cache
 logs/
 external/cc-switch/
 external/skills/
