@@ -629,6 +629,7 @@ def test_edit_resend_truncates_syncs_clears_queue_and_resends():
             return "s1"
 
     fake = SimpleNamespace()
+    fake.current_agent_type = "theory"
     fake.agent_panel = _Panel()
     fake._conv_store = _Store()
     fake._agent_queue_cache = {"main": ["stale queued"]}
@@ -692,3 +693,39 @@ def test_records_to_backend_messages_skips_system_notices_and_tool_results():
         {"role": "user", "content": "hello"},
         {"role": "assistant", "content": "world"},
     ]
+
+
+def test_show_current_agent_conversation_does_not_reappend_live_task_snapshot():
+    calls: list[str] = []
+
+    class _Panel:
+        agent_type = "theory"
+        _pending_tool_groups = []
+        _current_tool_group = None
+
+        def finish_thinking(self):
+            calls.append("finish")
+
+        def set_queue_preview(self, queued):
+            calls.append("queue")
+
+        def set_status(self, status, extra):
+            calls.append("status")
+
+        def set_debug_mode(self, enabled):
+            calls.append("debug")
+
+        _messages_area = SimpleNamespace(clear=lambda: calls.append("clear"))
+
+    fake = SimpleNamespace()
+    fake.current_agent_type = "theory"
+    fake.agent_panel = _Panel()
+    fake._agent_queue_cache = {}
+    fake._agent_status_cache = {}
+    fake._debug_agents = set()
+    fake._load_conversations_for_agent = lambda agent_type, panel: calls.append("load")
+    fake._render_task_block_for_current_agent = lambda: calls.append("render_task")
+
+    MainWindow._show_current_agent_conversation(fake)
+
+    assert calls == ["finish", "clear", "load", "queue", "status", "debug"]

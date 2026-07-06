@@ -19,6 +19,7 @@ from autoreport.interfaces.types import (
     ReportMessage,
     SystemNotice,
     TaskUpdateMessage,
+    ToolResult as ToolResultMsg,
     UserMessage,
 )
 
@@ -640,6 +641,55 @@ async def test_tool_followup_streams_thinking_chunks(
         for msg in published
         if isinstance(msg, AgentResponse) and msg.thinking
     ] == ["checking result"]
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_error_payload_publishes_tool_error(
+    workspace, config, mock_provider, mock_prompt_loader
+):
+    bus = MessageBus()
+
+    async def patch_tool(**kwargs):
+        return {
+            "error": "Failed to parse patch: bad hunk",
+            "path": str(workspace / "test.md"),
+            "current_content": "",
+        }
+
+    tools = MagicMock()
+    tools.get.return_value = patch_tool
+    tools.get_definitions.return_value = []
+    loop = AgentLoop(
+        agent_type=AgentType.THEORY,
+        workspace=workspace,
+        tools=tools,
+        bus=bus,
+        config=config,
+        llm_provider=mock_provider,
+        prompt_loader=mock_prompt_loader,
+        loop_manager=None,
+    )
+    response = SimpleNamespace(
+        content="",
+        thinking=None,
+        tool_calls=[
+            LLMToolCall(
+                id="call_patch",
+                name="apply_patch",
+                arguments={"path": "test.md", "patch": "+hello\n"},
+            )
+        ],
+        usage=None,
+    )
+
+    await loop._handle_tool_calls(response, "msg-1")
+
+    published = list(bus._queue._queue)
+    tool_results = [msg for msg in published if isinstance(msg, ToolResultMsg)]
+    assert len(tool_results) == 1
+    assert tool_results[0].tool_name == "apply_patch"
+    assert tool_results[0].error == "Error executing apply_patch: Failed to parse patch: bad hunk"
+    assert tool_results[0].result is None
 
 
 @pytest.mark.asyncio

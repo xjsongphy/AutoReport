@@ -1069,6 +1069,13 @@ class AgentLoop:
 
                     result = await tool(**tool_call.arguments)
 
+                    if (
+                        tool_call.name == "apply_patch"
+                        and isinstance(result, dict)
+                        and str(result.get("error") or "").strip()
+                    ):
+                        raise RuntimeError(str(result.get("error") or "").strip())
+
                     if tool_call.name in ("apply_patch", "delete_file"):
                         self._manifest_dirty = True
                     if (

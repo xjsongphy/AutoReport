@@ -724,6 +724,28 @@ def test_task_block_after_explicit_manage_tasks_result_does_not_merge(agent_pane
     assert "Todo" in groups[1].get_summary_text()
 
 
+def test_task_snapshot_absorbs_pending_manage_tasks_call(agent_panel, qtbot):
+    agent_panel.add_tool_call(
+        "manage_tasks",
+        {"action": "start", "task_id": "tk001", "brief": "Process data"},
+        summary="<b>Task</b>",
+        expandable=False,
+    )
+
+    agent_panel.add_task_block(
+        todolist=[{"brief": "Process data", "status": "in_progress"}],
+        waitlist=[],
+    )
+    qtbot.wait(20)
+
+    groups = agent_panel._messages_area.get_tool_groups()
+    assert len(groups) == 1
+    assert groups[0].tool_names() == ["manage_tasks"]
+    assert groups[0].is_complete()
+    assert groups[0].represents_task_snapshot()
+    assert "● Process data" in groups[0].get_summary_text()
+
+
 def test_add_checkpoint_creates_message(agent_panel):
     """add_checkpoint should create a checkpoint message row."""
     agent_panel.add_checkpoint("ckpt1", "Before tool execution")

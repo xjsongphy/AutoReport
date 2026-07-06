@@ -1206,11 +1206,6 @@ class MainWindow(QMainWindow):
         self.agent_panel._current_tool_group = None
         self.agent_panel._messages_area.clear()
         self._load_conversations_for_agent(self.current_agent_type, self.agent_panel)
-        # Replay the live task-board state. Coordination task updates (fired by
-        # send_to_agent / task transitions) are rendered live from the task
-        # board and are not part of the stored tool-call records, so without
-        # this they would vanish whenever the user switches agents and back.
-        self._render_task_block_for_current_agent()
         self.agent_panel.set_queue_preview(self._agent_queue_cache.get(self.current_agent_type, []))
         cached = self._agent_status_cache.get(self.current_agent_type)
         if cached:

@@ -302,7 +302,7 @@ class ToolCallGroup(QWidget):
         self._header_btn = _DisclosureHeaderBar(
             self,
             text_format=Qt.TextFormat.RichText,
-            contents_margins=(0, 4, 0, 6),
+            contents_margins=(0, 2, 0, 6),
             spacing=4,
         )
         self._header_btn.setObjectName("toolCallHeader")
@@ -321,7 +321,7 @@ class ToolCallGroup(QWidget):
         self._task_board_host = QWidget(content)
         self._task_board_host.setObjectName("taskBoardHost")
         self._task_board_layout = QVBoxLayout(self._task_board_host)
-        self._task_board_layout.setContentsMargins(0, 4, 0, 0)
+        self._task_board_layout.setContentsMargins(0, 2, 0, 0)
         self._task_board_layout.setSpacing(2)
         self._task_board_host.setVisible(False)
         content_layout.addWidget(self._task_board_host)
@@ -462,6 +462,22 @@ class ToolCallGroup(QWidget):
             detail=detail,
             expandable=expandable,
         )
+
+    def absorb_task_snapshot(self, summary: str) -> None:
+        """Turn a pending manage_tasks call into the rendered snapshot in place."""
+        if self.tool_names() != ["manage_tasks"] or not self._calls:
+            return
+        call = self._calls[-1]
+        call.arguments = {"action": "list"}
+        call.success = True
+        call.duration_ms = max(0, int(call.duration_ms or 0))
+        call.result = summary
+        call.error = None
+        call.summary = summary
+        call.detail = None
+        call.expandable = False
+        self._expanded = False
+        self._update_display()
 
     def _tick_running(self) -> None:
         dirty = False
