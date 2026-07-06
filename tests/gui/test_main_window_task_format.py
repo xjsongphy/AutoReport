@@ -130,6 +130,69 @@ def test_invisible_manage_tasks_result_persists_augmented_task_summary():
     assert kwargs["extra"]["summary"] == args[2]
 
 
+def test_manage_tasks_result_matching_live_snapshot_is_not_appended_twice():
+    board = TaskBoard()
+    board.create_task(AgentType.THEORY, AgentType.THEORY, "derive local formula", task_id="tk1")
+    panel_calls: list[tuple[str, tuple, dict]] = []
+    store_calls: list[tuple[str, tuple, dict]] = []
+
+    class _Store:
+        def get_current_session_id(self, agent_type):
+            return None
+
+        def append_tool_result(self, *args, **kwargs):
+            store_calls.append(("tool_result", args, kwargs))
+
+        def load_messages(self, agent_type):
+            return [
+                {
+                    "role": "tool_result",
+                    "content": "manage_tasks",
+                    "summary": "<b>Task</b>\nTodo\n☐ derive local formula",
+                    "result": "<b>Task</b>\nTodo\n☐ derive local formula",
+                    "task_snapshot": True,
+                }
+            ]
+
+    class _Panel:
+        def add_tool_result(self, *args, **kwargs):
+            panel_calls.append(("tool_result", args, kwargs))
+
+    fake = SimpleNamespace()
+    fake.backend = SimpleNamespace(loop_manager=SimpleNamespace(_task_board=board))
+    fake._conv_store = _Store()
+    fake._is_visible_agent = lambda agent_type: True
+    fake._get_panel_for_agent = lambda agent_type: _Panel()
+    fake._state_for_agent = lambda agent_type: SimpleNamespace(phase="idle")
+    fake._augment_manage_tasks_result = lambda agent_str, result: MainWindow._augment_manage_tasks_result(
+        fake, agent_str, result
+    )
+    fake._format_manage_tasks_result = lambda result, error: MainWindow._format_manage_tasks_result(
+        fake, result, error
+    )
+    fake._format_send_to_agent_bubble = lambda result, error: MainWindow._format_send_to_agent_bubble(
+        fake, result, error
+    )
+    fake._format_respond_bubble = lambda result, error, agent_str="sub": MainWindow._format_respond_bubble(
+        fake, result, error, agent_str=agent_str
+    )
+    fake._latest_persisted_task_summary = lambda agent_type: MainWindow._latest_persisted_task_summary(
+        fake, agent_type
+    )
+
+    MainWindow._handle_tool_result(
+        fake,
+        ToolResult(
+            agent_type=AgentType.THEORY,
+            tool_name="manage_tasks",
+            result={"status": "ok", "message": "listed"},
+        ),
+    )
+
+    assert panel_calls == []
+    assert store_calls == []
+
+
 def test_send_to_agent_tool_result_does_not_append_delegate_bubble():
     panel_calls: list[tuple[str, tuple, dict]] = []
     store_calls: list[tuple[str, tuple, dict]] = []
@@ -488,6 +551,40 @@ def test_render_task_block_skips_when_latest_persisted_snapshot_matches_live_sta
 
     MainWindow._render_task_block_for_current_agent(fake)
     assert not getattr(panel, "_called", False)
+
+
+def test_local_sub_task_update_does_not_sync_main_snapshot():
+    calls: list[tuple[str, bool]] = []
+    fake = SimpleNamespace()
+    fake.current_agent_type = "main"
+    fake._sync_task_snapshot_for_agent = lambda agent_type, render: calls.append((agent_type, render))
+
+    MainWindow._handle_task_update_msg(
+        fake,
+        SimpleNamespace(
+            source_agent=AgentType.THEORY,
+            target_agent=AgentType.THEORY,
+        ),
+    )
+
+    assert calls == [("theory", False)]
+
+
+def test_main_dispatched_task_update_still_syncs_main_snapshot():
+    calls: list[tuple[str, bool]] = []
+    fake = SimpleNamespace()
+    fake.current_agent_type = "main"
+    fake._sync_task_snapshot_for_agent = lambda agent_type, render: calls.append((agent_type, render))
+
+    MainWindow._handle_task_update_msg(
+        fake,
+        SimpleNamespace(
+            source_agent=AgentType.MAIN,
+            target_agent=AgentType.THEORY,
+        ),
+    )
+
+    assert set(calls) == {("main", True), ("theory", False)}
 
 
 def test_send_to_agent_result_detail_omits_badge_headers():
