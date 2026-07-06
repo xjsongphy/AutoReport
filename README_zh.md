@@ -68,6 +68,52 @@ export DEEPSEEK_API_KEY="sk-..."
 autoreport
 ```
 
+## MinerU 集成
+
+AutoReport 使用 [mineru-open-api](https://github.com/opendatalab/MinerU) CLI 解析 PDF（支持 PDF、图片、DOCX、PPTX、XLSX → Markdown）。
+
+**安装：**
+
+1. 安装 mineru-open-api：
+   ```bash
+   curl -fsSL https://cdn-mineru.openxlab.org.cn/open-api-cli/install.sh | sh
+   ```
+   详见 [mineru-open-api 文档](https://mineru.net/ecosystem?tab=cli)。
+
+2. 在 [MinerU](https://mineru.net/apiManage/token) 注册获取 API Key，然后认证：
+   ```bash
+   mineru-open-api auth
+   ```
+
+3. 应用启动时自动检测可用性，未安装会给出警告。
+
+支持批量处理（单文件上限 200MB / 600 页），可提取文本/图片/表格/公式。
+
+## 配置
+
+配置文件：`autoreport.config.yaml`
+
+API 配置对话框用于管理 Provider 预设、当前 Provider 选择、API 密钥、Base URL 和默认模型。
+
+![AutoReport API 配置](assets/screenshots/configuration-window.png)
+
+```yaml
+agents:
+  defaults:
+    model: "anthropic/claude-sonnet-4.5"
+    temperature: 0.1
+    max_tool_iterations: 200
+```
+
+## 调试模式
+
+```bash
+autoreport --debug-agent data_analysis
+autoreport --debug-agent data_analysis --debug-agent plotting
+```
+
+可选 Agent：`data_analysis`、`plotting`、`theory`、`report`
+
 ## 项目结构
 
 ```
@@ -136,52 +182,6 @@ uv run ruff check --fix autoreport tests
 # 覆盖率
 uv run pytest --cov=autoreport --cov-report=html
 ```
-
-## 配置
-
-配置文件：`autoreport.config.yaml`
-
-API 配置对话框用于管理 Provider 预设、当前 Provider 选择、API 密钥、Base URL 和默认模型。
-
-![AutoReport API 配置](assets/screenshots/configuration-window.png)
-
-```yaml
-agents:
-  defaults:
-    model: "anthropic/claude-sonnet-4.5"
-    temperature: 0.1
-    max_tool_iterations: 200
-```
-
-## 调试模式
-
-```bash
-autoreport --debug-agent data_analysis
-autoreport --debug-agent data_analysis --debug-agent plotting
-```
-
-可选 Agent：`data_analysis`、`plotting`、`theory`、`report`
-
-## MinerU 集成
-
-AutoReport 使用 [mineru-open-api](https://github.com/opendatalab/MinerU) CLI 解析 PDF（支持 PDF、图片、DOCX、PPTX、XLSX → Markdown）。
-
-**安装：**
-
-1. 安装 mineru-open-api：
-   ```bash
-   curl -fsSL https://cdn-mineru.openxlab.org.cn/open-api-cli/install.sh | sh
-   ```
-   详见 [mineru-open-api 文档](https://mineru.net/ecosystem?tab=cli)。
-
-2. 在 [MinerU](https://mineru.net/apiManage/token) 注册获取 API Key，然后认证：
-   ```bash
-   mineru-open-api auth
-   ```
-
-3. 应用启动时自动检测可用性，未安装会给出警告。
-
-支持批量处理（单文件上限 200MB / 600 页），可提取文本/图片/表格/公式。
 
 ## UI 图标
 

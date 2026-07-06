@@ -70,6 +70,27 @@ export DEEPSEEK_API_KEY="sk-..."
 autoreport
 ```
 
+## MinerU Integration
+
+AutoReport uses [mineru-open-api](https://github.com/opendatalab/MinerU) CLI for PDF parsing (PDF, images, DOCX, PPTX, XLSX → Markdown).
+
+**Setup:**
+
+1. Install mineru-open-api:
+   ```bash
+   curl -fsSL https://cdn-mineru.openxlab.org.cn/open-api-cli/install.sh | sh
+   ```
+   See [mineru-open-api docs](https://mineru.net/ecosystem?tab=cli) for details.
+
+2. Register at [MinerU](https://mineru.net/apiManage/token) for an API key, then authenticate:
+   ```bash
+   mineru-open-api auth
+   ```
+
+3. The app auto-detects availability on startup and shows a warning if not installed.
+
+Supports batch processing (max 200MB / 600 pages per file), text/image/table/formula extraction.
+
 ## Configuration
 
 Configuration file: `autoreport.config.yaml`
@@ -163,27 +184,6 @@ uv run ruff check --fix autoreport tests
 # Run with coverage
 uv run pytest --cov=autoreport --cov-report=html
 ```
-
-## MinerU Integration
-
-AutoReport uses [mineru-open-api](https://github.com/opendatalab/MinerU) CLI for PDF parsing (PDF, images, DOCX, PPTX, XLSX → Markdown).
-
-**Setup:**
-
-1. Install mineru-open-api:
-   ```bash
-   curl -fsSL https://cdn-mineru.openxlab.org.cn/open-api-cli/install.sh | sh
-   ```
-   See [mineru-open-api docs](https://mineru.net/ecosystem?tab=cli) for details.
-
-2. Register at [MinerU](https://mineru.net/apiManage/token) for an API key, then authenticate:
-   ```bash
-   mineru-open-api auth
-   ```
-
-3. The app auto-detects availability on startup and shows a warning if not installed.
-
-Supports batch processing (max 200MB / 600 pages per file), text/image/table/formula extraction.
 
 ## UI Icons
 
