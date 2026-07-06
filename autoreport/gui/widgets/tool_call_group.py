@@ -279,6 +279,10 @@ class ToolCallGroup(QWidget):
         self._expanded = False
         self._detail_label: QLabel | None = None
         self._header_arrow: _DisclosureArrow | None = None
+        # True when this dot was reused in place to absorb a consecutive
+        # same-task manage_tasks call. The result-time merge then skips it
+        # (the merge already happened at call time) to avoid a double collapse.
+        self._merged_in_place = False
         self._setup_ui()
 
     def _setup_ui(self):
@@ -308,14 +312,19 @@ class ToolCallGroup(QWidget):
         self._header_arrow = self._header_btn.arrow()
         self._header_arrow.setVisible(False)
 
-        self._task_board_host = QWidget(self._header_btn)
+        content_layout.addWidget(self._header_btn)
+
+        # Task board is a sibling of the header bar (not nested inside it) so it
+        # spans the full content width — nesting it under the header's
+        # ``[text][arrow][stretch]`` row clipped it to half width and made task
+        # rows wrap short of the bubble's right edge.
+        self._task_board_host = QWidget(content)
         self._task_board_host.setObjectName("taskBoardHost")
         self._task_board_layout = QVBoxLayout(self._task_board_host)
-        self._task_board_layout.setContentsMargins(0, 0, 0, 0)
+        self._task_board_layout.setContentsMargins(0, 4, 0, 0)
         self._task_board_layout.setSpacing(2)
         self._task_board_host.setVisible(False)
-        self._header_btn.add(self._task_board_host, 1)
-        content_layout.addWidget(self._header_btn)
+        content_layout.addWidget(self._task_board_host)
 
         self._detail_host = QWidget(self)
         self._detail_layout = QVBoxLayout(self._detail_host)
@@ -402,6 +411,57 @@ class ToolCallGroup(QWidget):
         if not self._calls:
             return False
         return self._calls[-1].name == name
+
+    def represents_same_task(self, arguments: dict[str, Any]) -> bool:
+        """Whether an incoming manage_tasks call targets the task this dot shows.
+
+        Used to merge a consecutive same-task manage_tasks call into this dot
+        in real time (no thinking between). Different tasks stay separate.
+        """
+        if self.tool_names() != ["manage_tasks"]:
+            return False
+        if self.represents_task_snapshot():
+            return False
+        new_identity = ToolCallGroup._task_content_key_from_arguments(arguments or {})
+        if not new_identity:
+            return False
+        prev_key = self.task_content_key()
+        if not prev_key:
+            return False
+        prev_lines = {line.strip() for line in prev_key.splitlines() if line.strip()}
+        return new_identity.strip() in prev_lines
+
+    def represents_task_snapshot(self) -> bool:
+        if self.tool_names() != ["manage_tasks"] or not self._calls:
+            return False
+        return str(self._calls[-1].arguments.get("action") or "").strip().lower() == "list"
+
+    def restart_for_new_call(
+        self,
+        name: str,
+        arguments: dict,
+        *,
+        summary: str | None = None,
+        detail: str | None = None,
+        expandable: bool = True,
+    ) -> None:
+        """Reset this dot to a single fresh pending call, keeping the widget.
+
+        The timeline rail and chain are untouched, so the dot stays connected
+        to its neighbours while its content updates in place.
+        """
+        self._calls = []
+        self._expanded = False
+        self._merged_in_place = True
+        self.add_tool_call(
+            name=name,
+            arguments=arguments,
+            success=None,
+            duration_ms=0,
+            summary=summary,
+            detail=detail,
+            expandable=expandable,
+        )
 
     def _tick_running(self) -> None:
         dirty = False
@@ -559,7 +619,7 @@ class ToolCallGroup(QWidget):
         label.setTextFormat(Qt.TextFormat.PlainText)
         label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         label.setWordWrap(True)
-        label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         label.setMinimumWidth(0)
         layout.addWidget(label, 1)
         self._task_board_layout.addWidget(row)
@@ -709,15 +769,21 @@ class ToolCallGroup(QWidget):
         self._header_text.setText("<br/>".join(lines))
         expandable_call = self._expandable_call()
         show_task_board = len(self._calls) == 1 and self._calls[0].name == "manage_tasks" and bool(self._calls[0].summary)
-        self._header_text.setVisible(not show_task_board)
+        self._header_btn.setVisible(not show_task_board)
         self._task_board_host.setVisible(show_task_board)
         if show_task_board:
             self._render_task_board(self._calls[0].summary or "")
         else:
             self._clear_task_board()
         if self._header_arrow is not None:
-            self._header_arrow.setVisible(expandable_call is not None)
+            arrow_visible = expandable_call is not None
+            self._header_arrow.setVisible(arrow_visible)
             self._header_arrow.set_expanded(self._expanded)
+            # Hide the arrow host too so it does not reserve horizontal space
+            # (it has Fixed policy) when there is nothing to expand — otherwise
+            # the task board / header text is pushed right of other tools.
+            arrow_host = self._header_btn.arrow_host()
+            arrow_host.setVisible(arrow_visible)
             self._header_btn.align_arrow_to_first_line()
         self._header_btn.setCursor(
             Qt.CursorShape.PointingHandCursor if expandable_call is not None else Qt.CursorShape.ArrowCursor
@@ -750,6 +816,9 @@ class ToolCallGroup(QWidget):
 
     def tool_names(self) -> list[str]:
         return [call.name for call in self._calls]
+
+    def has_pending_tool(self, name: str) -> bool:
+        return any(call.name == name and call.success is None for call in self._calls)
 
     def is_complete(self) -> bool:
         return bool(self._calls) and all(call.success is not None for call in self._calls)

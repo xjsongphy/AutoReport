@@ -30,6 +30,7 @@ from autoreport.gui.widgets.file_search_popup import FileSearchPopup
 from autoreport.gui.widgets.ui_utils import IconActionButton, NoWheelComboBox, install_compact_tooltip, render_svg_icon
 from autoreport.utils.agent_labels import get_agent_badge, get_agent_title, get_agent_icon
 from autoreport.gui.widgets.messages_area import MessagesArea
+from autoreport.gui.widgets.tool_call_group import ToolCallGroup
 from autoreport.interfaces.types import ApiDebugMessage
 from autoreport.utils.logging_config import ui_logger
 from ..theme import get_theme_colors
@@ -107,6 +108,7 @@ class AgentPanel(QWidget):
     init_requested = pyqtSignal()
     agent_type_changed = pyqtSignal(str)
     rollback_requested = pyqtSignal(str, object)
+    message_edit_resend_requested = pyqtSignal(str, object)
     _file_search_result_ready = pyqtSignal(int, object)
 
     def __init__(self, panel_id: str, title: str, workspace: Path | None = None):
@@ -672,7 +674,7 @@ class AgentPanel(QWidget):
         self._messages_area.retract_from_row(row)
         self._pending_tool_groups.clear()
         self._current_tool_group = None
-        self._send_content(content)
+        self.message_edit_resend_requested.emit(content, row)
 
     def _on_message_edit_cancelled(self) -> None:
         """Handle edit cancelled - just reset state."""
@@ -952,6 +954,29 @@ class AgentPanel(QWidget):
             and not getattr(last, "_complete", True)
         ):
             last.mark_complete()
+
+        # Real-time merge: a manage_tasks call that immediately follows a dot
+        # showing the SAME task (no thinking/text between) reuses that dot,
+        # updating it in place instead of spawning a second dot that later
+        # collapses. Different tasks and calls separated by other events keep
+        # their own dots. The reused dot stays chained to its neighbours.
+        if (
+            tool_name == "manage_tasks"
+            and isinstance(last, ToolCallGroup)
+            and getattr(last, "represents_same_task", lambda _args: False)(arguments)
+        ):
+            last.restart_for_new_call(
+                tool_name,
+                arguments,
+                summary=summary,
+                detail=detail,
+                expandable=expandable,
+            )
+            self._current_tool_group = last
+            if last not in self._pending_tool_groups:
+                self._pending_tool_groups.append(last)
+            return
+
         self._current_tool_group = self._messages_area.add_tool_group()
         self._pending_tool_groups.append(self._current_tool_group)
         self._current_tool_group.add_tool_call(
@@ -973,11 +998,13 @@ class AgentPanel(QWidget):
         detail: str | None = None,
         expandable: bool | None = None,
     ) -> None:
-        target_group = None
-        if self._pending_tool_groups:
-            target_group = self._pending_tool_groups.pop(0)
-        elif hasattr(self, "_current_tool_group") and self._current_tool_group:
-            target_group = self._current_tool_group
+        target_group = self._take_pending_tool_group(tool_name)
+        if target_group is None and self._current_tool_group:
+            has_pending_tool = getattr(self._current_tool_group, "has_pending_tool", None)
+            if callable(has_pending_tool) and has_pending_tool(tool_name):
+                target_group = self._current_tool_group
+        if target_group is None:
+            target_group = self._messages_area.add_tool_group()
 
         if target_group:
             target_group.complete_tool_call(
@@ -991,12 +1018,24 @@ class AgentPanel(QWidget):
             )
             self._merge_adjacent_task_status_update(target_group)
 
+    def _take_pending_tool_group(self, tool_name: str):
+        for index, group in enumerate(list(self._pending_tool_groups)):
+            has_pending_tool = getattr(group, "has_pending_tool", None)
+            if callable(has_pending_tool) and has_pending_tool(tool_name):
+                return self._pending_tool_groups.pop(index)
+        return None
+
     def _merge_adjacent_task_status_update(self, target_group: QWidget) -> None:
         """Render adjacent same-task status changes as one in-place update."""
         tool_names = getattr(target_group, "tool_names", lambda: [])()
         if tool_names != ["manage_tasks"]:
             return
+        if getattr(target_group, "represents_task_snapshot", lambda: False)():
+            return
         if not getattr(target_group, "is_complete", lambda: False)():
+            return
+        # Already merged at call time (real-time reuse) — no second dot to fold.
+        if getattr(target_group, "_merged_in_place", False):
             return
 
         previous = self._messages_area.previous_timeline_widget(target_group)
@@ -1004,6 +1043,8 @@ class AgentPanel(QWidget):
             return
         previous_tool_names = getattr(previous, "tool_names", lambda: [])()
         if previous_tool_names != ["manage_tasks"]:
+            return
+        if getattr(previous, "represents_task_snapshot", lambda: False)():
             return
         if not getattr(previous, "is_complete", lambda: False)():
             return
@@ -1029,7 +1070,7 @@ class AgentPanel(QWidget):
             content="",
             timestamp=ts,
             display_mode="thought",
-            bubble_title="Thought for 1s",
+            bubble_title="Thinking for 1s",
             bubble_collapsible=True,
             agent_name=agent_name,
         )
@@ -1088,7 +1129,7 @@ class AgentPanel(QWidget):
         if self._thinking_row is None:
             self._thinking_timer.stop()
             return
-        self._thinking_row.set_bubble_title(f"Thought for {self._thinking_elapsed_seconds()}s")
+        self._thinking_row.set_bubble_title(f"Thinking for {self._thinking_elapsed_seconds()}s")
 
     def add_error(self, source: str, message: str) -> None:
         ts = datetime.now().strftime("%H:%M")
@@ -1197,18 +1238,43 @@ class AgentPanel(QWidget):
             lines.extend(render_items(waitlist, wait=True))
 
         summary = "\n".join(lines)
-        self.add_tool_call(
+        self.add_task_snapshot_summary(summary)
+
+    def add_task_snapshot_summary(self, summary: str) -> None:
+        """Render a completed manage_tasks/list snapshot, merging only with snapshots."""
+        previous = self._messages_area.last_timeline_widget()
+        if (
+            getattr(previous, "represents_task_snapshot", lambda: False)()
+            and getattr(previous, "is_complete", lambda: False)()
+        ):
+            scratch = self._messages_area.add_tool_group()
+            scratch.add_tool_call(
+                "manage_tasks",
+                {"action": "list"},
+                success=True,
+                duration_ms=0,
+                summary=summary,
+                expandable=False,
+            )
+            if getattr(scratch, "has_status_change_from", lambda _other: False)(previous):
+                replace_with_group = getattr(previous, "replace_with_group", None)
+                if callable(replace_with_group):
+                    replace_with_group(scratch)
+                self._messages_area.remove_tool_group(scratch)
+                return
+            self._messages_area.remove_tool_group(scratch)
+
+        group = self._messages_area.add_tool_group()
+        group.add_tool_call(
             "manage_tasks",
             {"action": "list"},
+            success=True,
+            duration_ms=0,
             summary=summary,
             expandable=False,
         )
-        self.add_tool_result(
-            "manage_tasks",
-            {"status": "ok"},
-            summary=summary,
-            expandable=False,
-        )
+        if self._messages_area.auto_scroll_enabled():
+            self._messages_area.scroll_to_bottom()
 
     # ---- Status ----
 

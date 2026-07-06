@@ -4,7 +4,7 @@ from autoreport.config.schema import ApiConfig
 from autoreport.gui.config_dialog import ConfigCard
 
 
-def test_config_card_action_column_uses_test_button_width(qtbot) -> None:
+def test_config_card_icon_buttons_keep_size_but_align_to_test_button_right_edge(qtbot) -> None:
     card = ConfigCard(
         ApiConfig(
             name="DeepSeek",
@@ -27,7 +27,7 @@ def test_config_card_action_column_uses_test_button_width(qtbot) -> None:
         for button in action_buttons
     ]
 
-    assert widths[0] == widths[2]
-    assert widths[1] == widths[2]
+    assert widths[0] < widths[2]
+    assert widths[1] < widths[2]
     assert right_edges[0] == right_edges[2]
     assert right_edges[1] == right_edges[2]

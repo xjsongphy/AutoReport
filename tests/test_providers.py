@@ -104,6 +104,142 @@ def test_anthropic_convert_tool_calls():
     assert any(b["type"] == "tool_result" for b in tool_result_msg["content"])
 
 
+def test_anthropic_convert_never_emits_null_content():
+    from autoreport.core.providers.anthropic_provider import AnthropicProvider
+
+    provider = AnthropicProvider.__new__(AnthropicProvider)
+    messages = [
+        Message(role="user", content=None),  # type: ignore[arg-type]
+        Message(role="assistant", content="ok"),
+    ]
+
+    _, anthropic_msgs = provider._convert_messages(messages)
+
+    assert anthropic_msgs[0]["content"] == ""
+    assert anthropic_msgs[1]["content"] == "ok"
+
+
+def test_anthropic_convert_merges_consecutive_text_as_string():
+    """Consecutive same-role *text* messages must merge into a plain string.
+
+    Native Anthropic accepts array-form content, but Anthropic-compatible
+    endpoints (DeepSeek, MiniMax) reject a text-only array with
+    ``invalid type: null, expected a string``. The merge must collapse
+    text-only results back to a string while keeping tool blocks as an array.
+    """
+    from autoreport.core.providers.anthropic_provider import AnthropicProvider
+
+    provider = AnthropicProvider.__new__(AnthropicProvider)
+    messages = [
+        Message(role="user", content="first turn"),
+        Message(role="assistant", content="reply one"),
+        Message(role="assistant", content="reply two"),
+        Message(role="user", content="second turn"),
+        Message(role="user", content="third turn"),
+    ]
+
+    _, anthropic_msgs = provider._convert_messages(messages)
+
+    # user, assistant(merged), user(merged) — alternating, 3 turns total.
+    assert [m["role"] for m in anthropic_msgs] == ["user", "assistant", "user"]
+    # Merged text content is a plain string, not a list of text blocks.
+    assert isinstance(anthropic_msgs[1]["content"], str)
+    assert anthropic_msgs[1]["content"] == "reply one\nreply two"
+    assert isinstance(anthropic_msgs[2]["content"], str)
+    assert anthropic_msgs[2]["content"] == "second turn\nthird turn"
+
+
+def test_anthropic_convert_merges_text_with_tool_use_keeps_array():
+    """A merged turn that still carries a tool_use block must stay a list."""
+    from autoreport.core.providers.anthropic_provider import AnthropicProvider
+
+    provider = AnthropicProvider.__new__(AnthropicProvider)
+    tc = LLMToolCall(id="call_1", name="read", arguments={"path": "x"})
+    messages = [
+        Message(role="user", content="hi"),
+        Message(role="assistant", content="thinking", tool_calls=[tc]),
+        Message(role="assistant", content="more text"),
+    ]
+
+    _, anthropic_msgs = provider._convert_messages(messages)
+
+    assistant = anthropic_msgs[1]
+    assert assistant["role"] == "assistant"
+    assert isinstance(assistant["content"], list)
+    types = [b["type"] for b in assistant["content"]]
+    assert "tool_use" in types
+    assert types.count("text") == 2
+
+
+def test_anthropic_convert_drops_thinking_blocks_on_replay():
+    """Thinking blocks must NOT be replayed — the streaming path loses the
+    API's encrypted ``signature``, so re-sending a fabricated thinking block
+    makes the next request fail to deserialize (root cause of the
+    "messages[0].content: invalid type: null" error on the second turn)."""
+    from autoreport.core.providers.anthropic_provider import AnthropicProvider
+
+    provider = AnthropicProvider.__new__(AnthropicProvider)
+    tc = LLMToolCall(id="call_1", name="read", arguments={"path": "x"})
+    messages = [
+        Message(role="user", content="hi"),
+        Message(
+            role="assistant",
+            content="",
+            thinking="reasoning trace",
+            tool_calls=[tc],
+        ),
+        Message(role="user", content="r", tool_call_id="call_1", is_tool_result=True),
+        Message(role="user", content="next turn"),
+    ]
+
+    _, anthropic_msgs = provider._convert_messages(messages)
+
+    assistant_msg = anthropic_msgs[1]
+    assert assistant_msg["role"] == "assistant"
+    # The assistant turn still carries its tool_use, but no thinking block.
+    types = [b["type"] for b in assistant_msg["content"]]
+    assert "thinking" not in types
+    assert "tool_use" in types
+    # No block anywhere carries a thinking type.
+    for m in anthropic_msgs:
+        if isinstance(m["content"], list):
+            assert not any(b.get("type") == "thinking" for b in m["content"])
+
+
+def test_anthropic_convert_flattens_historical_tool_replay_for_compatible_endpoints():
+    """Historical tool_use/tool_result pairs should not be replayed as blocks.
+
+    Anthropic-compatible endpoints accept structured tool exchange during the
+    immediate follow-up round, but re-sending that old structured pair on a
+    later user turn can fail. Once the assistant has already produced a normal
+    follow-up reply, replay the plain-text assistant turns only.
+    """
+    from autoreport.core.providers.anthropic_provider import AnthropicProvider
+
+    provider = AnthropicProvider.__new__(AnthropicProvider)
+    provider._supports_cache = False
+    tc = LLMToolCall(id="call_1", name="send_to_agent", arguments={"agent_type": "theory"})
+    messages = [
+        Message(role="user", content="dispatch task"),
+        Message(role="assistant", content="", tool_calls=[tc]),
+        Message(
+            role="user",
+            content="{'status': 'success', 'response': 'done'}",
+            tool_call_id="call_1",
+            is_tool_result=True,
+        ),
+        Message(role="assistant", content="task completed"),
+        Message(role="user", content="next turn"),
+    ]
+
+    _, anthropic_msgs = provider._convert_messages(messages)
+
+    assert [m["role"] for m in anthropic_msgs] == ["user", "assistant", "user"]
+    assert anthropic_msgs[0]["content"] == "dispatch task"
+    assert anthropic_msgs[1]["content"] == "task completed"
+    assert anthropic_msgs[2]["content"] == "next turn"
+
+
 def test_anthropic_convert_tools():
     from autoreport.core.providers.anthropic_provider import AnthropicProvider
 

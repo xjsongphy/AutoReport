@@ -182,7 +182,7 @@ def test_editor_selection_emits_selected_line_context(qtbot, tmp_path: Path) -> 
     assert blocker.args[3] == 2
 
 
-def test_dirty_unified_tab_shows_dot_and_close_for_unselected_tab(qtbot, tmp_path: Path) -> None:
+def test_dirty_unified_tab_shows_dot_for_unselected_tab(qtbot, tmp_path: Path) -> None:
     text_file = tmp_path / "note.txt"
     text_file.write_text("old", encoding="utf-8")
     other = tmp_path / "other.txt"
@@ -205,7 +205,7 @@ def test_dirty_unified_tab_shows_dot_and_close_for_unselected_tab(qtbot, tmp_pat
     texts = [b.text() for b in buttons]
 
     assert "•" in texts
-    assert "✕" in texts
+    assert "✕" not in texts
 
 
 def test_hovered_dirty_unified_tab_swaps_dot_for_close(qtbot, tmp_path: Path) -> None:
@@ -227,14 +227,44 @@ def test_hovered_dirty_unified_tab_swaps_dot_for_close(qtbot, tmp_path: Path) ->
     widget._unified_tab_bar.setCurrentIndex(1)
 
     widget._tab_hovered_index = 0
+    widget._tab_affordance_hovered_index = 0
     widget._refresh_unified_tab_affordances()
 
     host = widget._unified_tab_bar.tabButton(0, QTabBar.ButtonPosition.RightSide)
     buttons = host.findChildren(QPushButton)
     texts = [b.text() for b in buttons]
 
-    assert "•" in texts
+    assert "•" not in texts
     assert "✕" in texts
+
+
+def test_dirty_unified_tab_hover_outside_affordance_keeps_dot(qtbot, tmp_path: Path) -> None:
+    text_file = tmp_path / "note.txt"
+    text_file.write_text("old", encoding="utf-8")
+    other = tmp_path / "other.txt"
+    other.write_text("other", encoding="utf-8")
+
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.load_file(text_file)
+    widget.load_file(other)
+
+    key = str(text_file.resolve())
+    state = widget._panels[0]._tabs[key]
+    state.viewer.setText("changed")
+    qtbot.wait(10)
+    widget._sync_tabs_from_panels()
+    widget._unified_tab_bar.setCurrentIndex(1)
+
+    widget._tab_hovered_index = 0
+    widget._tab_affordance_hovered_index = -1
+    widget._refresh_unified_tab_affordances()
+
+    host = widget._unified_tab_bar.tabButton(0, QTabBar.ButtonPosition.RightSide)
+    texts = [b.text() for b in host.findChildren(QPushButton)]
+
+    assert "•" in texts
+    assert "✕" not in texts
 
 
 def test_close_modified_tab_cancel_keeps_tab_open(qtbot, tmp_path: Path, monkeypatch) -> None:
@@ -278,6 +308,25 @@ def test_close_modified_tab_save_then_close(qtbot, tmp_path: Path, monkeypatch) 
     assert widget._on_unified_tab_close(0) is True
     assert widget._unified_tab_bar.count() == 0
     assert text_file.read_text(encoding="utf-8") == "changed"
+
+
+def test_clean_open_text_file_reloads_after_external_change(qtbot, tmp_path: Path) -> None:
+    text_file = tmp_path / "note.txt"
+    text_file.write_text("old", encoding="utf-8")
+
+    widget = PreviewWidget(tmp_path)
+    qtbot.addWidget(widget)
+    widget.load_file(text_file)
+
+    state = widget._panels[0]._tabs[str(text_file.resolve())]
+    state.mtime_ns = 0
+    text_file.write_text("new", encoding="utf-8")
+    widget._reload_open_file_if_clean(text_file)
+
+    state = widget._panels[0]._tabs[str(text_file.resolve())]
+    assert state.viewer.text() == "new"
+    assert state.saved_text == "new"
+    assert not state.modified
 
 
 def test_open_tab_updates_when_file_path_changes(qtbot, tmp_path: Path) -> None:

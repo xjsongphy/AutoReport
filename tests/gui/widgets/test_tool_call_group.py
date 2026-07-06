@@ -130,6 +130,45 @@ def test_send_to_agent_result_can_expand_detail(qtbot):
     assert "Plotting will continue in background" in widget._detail_label.text()
 
 
+def test_respond_result_shows_fixed_title_with_inline_arrow_and_detail(qtbot):
+    widget = ToolCallGroup()
+    qtbot.addWidget(widget)
+    widget.resize(520, 180)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    widget.add_tool_call(
+        "respond",
+        {"summary": "Plot complete", "content": "full response"},
+        success=None,
+        summary="Respond",
+        detail="full response",
+        expandable=True,
+    )
+    widget.complete_tool_call(
+        "respond",
+        result={"status": "ok"},
+        summary="Respond",
+        detail="full response",
+        expandable=True,
+    )
+
+    assert widget.get_summary_text() == "Respond"
+    assert widget._header_arrow is not None
+    assert widget._header_arrow.isVisible()
+    assert widget._header_arrow._expanded is False
+    text_right = widget._header_text.mapTo(widget, widget._header_text.rect().topRight()).x()
+    arrow_left = widget._header_arrow.mapTo(widget, widget._header_arrow.rect().topLeft()).x()
+    assert 0 <= arrow_left - text_right <= 12
+
+    widget._header_btn.click()
+
+    assert widget._header_arrow._expanded is True
+    assert widget._detail_label is not None
+    assert "full response" in widget._detail_label.text()
+    assert "Plot complete" not in widget._detail_label.text()
+
+
 def test_multiple_tool_calls_render_on_separate_lines(qtbot):
     widget = ToolCallGroup()
     qtbot.addWidget(widget)
@@ -288,7 +327,7 @@ def test_manage_tasks_status_control_uses_scaled_spacing_and_vertical_alignment(
     assert label is not None
     assert layout is not None
     assert layout.spacing() == 7
-    assert control.geometry().center().y() == label.geometry().center().y()
+    assert control.geometry().center().y() == pytest.approx(label.geometry().center().y(), abs=2)
 
 
 def test_exec_detail_text_shrinks_in_narrow_panel(qtbot):

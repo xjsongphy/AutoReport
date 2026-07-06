@@ -339,6 +339,37 @@ def test_batch_tool_calls_render_as_separate_timeline_items(agent_panel):
     assert "b.txt" in groups[1].get_summary_text()
 
 
+def test_consecutive_same_task_manage_tasks_reuses_dot_in_real_time(agent_panel):
+    """A same-task manage_tasks call following its own dot reuses that dot
+    immediately (no second dot flicker), and the timeline stays as one group."""
+    created_summary = "<b>Task</b>\nTodo\n☐ DATA_ANALYSIS: Process all measurements"
+    started_summary = "<b>Task</b>\nTodo\n● DATA_ANALYSIS: Process all measurements"
+
+    agent_panel.add_tool_call(
+        "manage_tasks",
+        {"action": "add", "brief": "DATA_ANALYSIS: Process all measurements"},
+    )
+    agent_panel.add_tool_result("manage_tasks", created_summary, summary=created_summary)
+    first_group = agent_panel._messages_area.get_tool_groups()[0]
+
+    # Second call targets the same task → must reuse the existing dot in place.
+    agent_panel.add_tool_call(
+        "manage_tasks",
+        {"action": "start", "brief": "DATA_ANALYSIS: Process all measurements"},
+    )
+
+    groups = agent_panel._messages_area.get_tool_groups()
+    assert groups == [first_group]
+    # The reused dot is running again (success is None) while awaiting the result.
+    assert first_group._calls[-1].success is None
+
+    agent_panel.add_tool_result("manage_tasks", started_summary, summary=started_summary)
+    groups = agent_panel._messages_area.get_tool_groups()
+    assert groups == [first_group]
+    assert "● DATA_ANALYSIS: Process all measurements" in first_group.get_summary_text()
+
+
+
 def test_tool_call_before_agent_text_keeps_event_order(agent_panel):
     agent_panel.add_tool_call("read", {"path": "."})
     agent_panel.add_message(role="agent", content="Hello", streaming=True)
@@ -368,7 +399,7 @@ def test_thinking_row_finishes_with_elapsed_summary(agent_panel):
     rows = agent_panel._messages_area.get_message_rows()
     assert len(rows) == 1
     assert rows[0]._display_mode == "thought"
-    assert rows[0]._bubble_title.startswith("Thought for ")
+    assert rows[0]._bubble_title.startswith("Thinking for ")
     assert rows[0]._summary_text_label is not None
 
     agent_panel.append_thinking("raw **markdown** thought")
@@ -389,8 +420,8 @@ def test_thinking_timer_updates_existing_row_in_place(agent_panel):
 
     rows = agent_panel._messages_area.get_message_rows()
     assert rows == [row]
-    assert row._bubble_title.startswith("Thought for ")
-    assert row._bubble_title != "Thought for 1s"
+    assert row._bubble_title.startswith("Thinking for ")
+    assert row._bubble_title != "Thinking for 1s"
 
 
 def test_thinking_detail_updates_existing_detail_label(agent_panel):
@@ -620,6 +651,79 @@ def test_task_block_can_precede_deferred_send_to_agent_group(agent_panel, qtbot)
     assert groups[1].tool_names() == ["send_to_agent"]
 
 
+def test_task_block_between_send_to_agent_call_and_result_does_not_steal_result(
+    agent_panel, qtbot
+):
+    agent_panel.add_tool_call(
+        "send_to_agent",
+        {"agent_type": "theory"},
+        summary="Main to Theory",
+        detail="delegate details",
+        expandable=True,
+    )
+    agent_panel.add_task_block(
+        todolist=[],
+        waitlist=[{"brief": "Derive formulas", "status": "pending"}],
+    )
+    agent_panel.add_tool_result(
+        "send_to_agent",
+        {"status": "delegated", "agent_type": "theory"},
+        summary="Main to Theory",
+        detail="delegate details",
+        expandable=True,
+    )
+    qtbot.wait(20)
+
+    groups = agent_panel._messages_area.get_tool_groups()
+    assert len(groups) == 2
+    assert groups[0].tool_names() == ["send_to_agent"]
+    assert groups[0].is_complete()
+    assert groups[0]._header_arrow is not None
+    assert not groups[0]._header_arrow.isHidden()
+    assert groups[1].tool_names() == ["manage_tasks"]
+    assert groups[1].is_complete()
+
+
+def test_adjacent_task_block_snapshots_update_in_place(agent_panel):
+    agent_panel.add_task_block(
+        todolist=[{"brief": "Process data", "status": "pending"}],
+        waitlist=[],
+    )
+    first_group = agent_panel._messages_area.get_tool_groups()[0]
+
+    agent_panel.add_task_block(
+        todolist=[{"brief": "Process data", "status": "completed"}],
+        waitlist=[],
+    )
+
+    groups = agent_panel._messages_area.get_tool_groups()
+    assert groups == [first_group]
+    assert "☑ Process data" in groups[0].get_summary_text()
+    assert "☐ Process data" not in groups[0].get_summary_text()
+
+
+def test_task_block_after_explicit_manage_tasks_result_does_not_merge(agent_panel):
+    explicit_summary = "<b>Task</b>\nWait\n○ Process data"
+
+    agent_panel.add_tool_call(
+        "manage_tasks",
+        {"action": "complete", "task_id": "tk001", "brief": "Process data"},
+    )
+    agent_panel.add_tool_result("manage_tasks", explicit_summary, summary=explicit_summary)
+
+    agent_panel.add_task_block(
+        todolist=[{"brief": "Process data", "status": "completed"}],
+        waitlist=[],
+    )
+
+    groups = agent_panel._messages_area.get_tool_groups()
+    assert len(groups) == 2
+    assert groups[0].tool_names() == ["manage_tasks"]
+    assert groups[1].tool_names() == ["manage_tasks"]
+    assert "Wait" in groups[0].get_summary_text()
+    assert "Todo" in groups[1].get_summary_text()
+
+
 def test_add_checkpoint_creates_message(agent_panel):
     """add_checkpoint should create a checkpoint message row."""
     agent_panel.add_checkpoint("ckpt1", "Before tool execution")
@@ -797,10 +901,11 @@ def test_edit_saved_retracts_following_rows_and_sends_immediately(qtbot, agent_p
 
     assert agent_panel._messages_area.message_count() == 3
 
-    with qtbot.waitSignal(agent_panel.message_sent, timeout=1000) as blocker:
+    with qtbot.waitSignal(agent_panel.message_edit_resend_requested, timeout=1000) as blocker:
         agent_panel._on_message_edit_saved("new user", target_row)
 
     assert blocker.args[0].startswith("new user")
+    assert blocker.args[1] is target_row
     assert agent_panel._messages_area.message_count() == 0
 
 
@@ -810,12 +915,11 @@ def test_edit_saved_resends_plain_text_with_latest_file_context(qtbot, agent_pan
     target_row = agent_panel._messages_area.get_message_rows()[-1]
     agent_panel.set_opened_file("latest.tex")
 
-    with qtbot.waitSignal(agent_panel.file_context_attached, timeout=1000) as context_blocker:
-        with qtbot.waitSignal(agent_panel.message_sent, timeout=1000) as message_blocker:
-            agent_panel._on_message_edit_saved("new user", target_row)
+    with qtbot.waitSignal(agent_panel.message_edit_resend_requested, timeout=1000) as blocker:
+        agent_panel._on_message_edit_saved("new user", target_row)
 
-    assert message_blocker.args == ["new user"]
-    assert context_blocker.args[0]["file"] == "latest.tex"
+    assert blocker.args[0] == "new user"
+    assert blocker.args[1] is target_row
 
 
 def test_agent_selection_inserts_reference_without_property_error(agent_panel):

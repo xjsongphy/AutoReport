@@ -1,7 +1,7 @@
 """Unified theme management for AutoReport GUI.
 
 Provides centralized color definitions for dark/light modes,
-following VSCode Copilot Chat design language.
+following the Claude Code design language.
 """
 
 from PyQt6.QtCore import Qt
