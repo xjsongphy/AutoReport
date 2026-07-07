@@ -1,15 +1,15 @@
 <div align="center">
 
-![title](assets/screenshots/title.png)
+![title](https://raw.githubusercontent.com/xjsongphy/AutoReport/master/assets/screenshots/title.png)
 
 ### A Multi-Agent Collaborative System for Automated Physics Experiment Report Writing
 
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#)
 [![Python](https://img.shields.io/badge/python-%E2%89%A5%203.12-blue.svg)](https://www.python.org/)
 [![Built with PyQt6](https://img.shields.io/badge/built%20with-PyQt6-green.svg)](https://www.riverbankcomputing.com/software/pyqt/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/xjsongphy/AutoReport/blob/master/LICENSE)
 
-English | [中文](README_zh.md)
+English | [中文](https://github.com/xjsongphy/AutoReport/blob/master/README_zh.md)
 
 </div>
 
@@ -49,11 +49,27 @@ A multi-agent collaborative automated physics experiment report writing system. 
 
 The main workspace combines the project file tree, document preview, and agent chat timeline in one window. Users can inspect generated LaTeX/PDF output while continuing to interact with the agent team.
 
-![AutoReport main workspace](assets/screenshots/main-window.png)
+![AutoReport main workspace](https://raw.githubusercontent.com/xjsongphy/AutoReport/master/assets/screenshots/main-window.png)
 
 ## Quick Start
 
 **Prerequisites:** Python >= 3.12, [uv](https://docs.astral.sh/uv/) package manager, TeX distribution, at least one LLM Provider API key.
+
+Install from PyPI:
+
+```bash
+pip install autoreport-gui
+autoreport
+```
+
+Or with `uv`:
+
+```bash
+uv pip install autoreport-gui
+autoreport
+```
+
+Install from source:
 
 ```bash
 git clone https://github.com/xjsongphy/AutoReport && cd AutoReport
@@ -68,7 +84,7 @@ autoreport
 
 The start window lets users open an existing experiment folder, create a new project, configure API providers, or resume a recent project.
 
-![AutoReport start window](assets/screenshots/start-window.png)
+![AutoReport start window](https://raw.githubusercontent.com/xjsongphy/AutoReport/master/assets/screenshots/start-window.png)
 
 First launch prompts for API configuration. Pre-configure via environment variables:
 
@@ -106,7 +122,7 @@ Configuration file: `autoreport.config.yaml`
 
 The API configuration dialog manages provider presets, active provider selection, API keys, base URLs, and default models.
 
-![AutoReport API configuration](assets/screenshots/configuration-window.png)
+![AutoReport API configuration](https://raw.githubusercontent.com/xjsongphy/AutoReport/master/assets/screenshots/configuration-window.png)
 
 ```yaml
 agents:
@@ -211,7 +227,7 @@ Agent type icons are from [Tabler Icons](https://tabler-icons.io/) — 6000+ fre
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/chart?repos=xjsongphy/AutoReport&type=date&legend=top-left)](https://www.star-history.com/?repos=xjsongphy%2FAutoReport&type=date&legend=top-left)
+[![Star History Chart](https://api.star-history.com/chart?repos=xjsongphy/AutoReport&type=date&legend=top-left&sealed_token=Y3lV1Yo5tEoNSv5pWKul9FmJwDeZqIHN2Wn166i3TDTJnf4IOue7kaSUbnrDALp_TN4G79kz1IrUOc66GxXpkupO_tinFyx52scf-IQs_OtNrPgzMIO_bM-SLf3cTQE89VHP3ZCqUHhOKrWrObw3JFGrRMvZVDXzT-ty1u7J9cENkSVjaDTFaDb3DfEI)](https://www.star-history.com/?repos=xjsongphy%2FAutoReport&type=date&legend=top-left)
 
 ## License
 
