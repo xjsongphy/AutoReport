@@ -1,8 +1,11 @@
 """Tests for typer CLI interface."""
 
+import os
+from importlib.metadata import version
 from unittest.mock import patch
 
 from autoreport.app import app
+from autoreport.__main__ import _merge_logging_rule
 
 
 class TestCLIOptions:
@@ -78,3 +81,13 @@ class TestCLISyncPresets:
         runner = CliRunner()
         result = runner.invoke(app, ["--help"])
         assert "--debug-agent" in result.output
+
+    def test_package_version_declared(self):
+        """Installed project metadata should expose the release version."""
+        assert version("autoreport-gui") == "1.1"
+
+    def test_main_wrapper_sets_qt_logging_rule(self):
+        """Qt logging rule helper should seed the font warning suppression."""
+        os.environ.pop("QT_LOGGING_RULES", None)
+        _merge_logging_rule("qt.qpa.fonts=false")
+        assert os.environ["QT_LOGGING_RULES"] == "qt.qpa.fonts=false"
