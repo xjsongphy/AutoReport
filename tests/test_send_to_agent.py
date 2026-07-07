@@ -11,6 +11,7 @@ from autoreport.interfaces.types import (
     AgentType,
     ReportMessage,
     TaskStatus,
+    TaskUpdateMessage,
     UserMessage,
 )
 
@@ -193,14 +194,17 @@ class TestSendToAgentTool:
         assert result["agent_type"] == "data_analysis"
         assert result["blocking"] is False
         assert "task_id" in result
-        # A dispatch UserMessage to the target was published (after a TaskUpdateMessage)
-        dispatch = None
-        for _ in range(5):
-            msg = await asyncio.wait_for(bus._queue.get(), timeout=1)
-            if isinstance(msg, UserMessage):
-                dispatch = msg
-                break
-        assert dispatch is not None
+        task = board.get_task(result["task_id"], target_agent=AgentType.DATA_ANALYSIS)
+        assert task is not None
+        assert task.status == TaskStatus.IN_PROGRESS
+
+        messages = [await asyncio.wait_for(bus._queue.get(), timeout=1) for _ in range(2)]
+        started = next(msg for msg in messages if isinstance(msg, TaskUpdateMessage))
+        dispatch = next(msg for msg in messages if isinstance(msg, UserMessage))
+
+        assert started.action == "started"
+        assert started.source_agent == AgentType.MAIN
+        assert started.target_agent == AgentType.DATA_ANALYSIS
         assert dispatch.agent_type == AgentType.DATA_ANALYSIS
         assert dispatch.source == "main_agent"
         assert dispatch.summary == "Analyze CSV"
