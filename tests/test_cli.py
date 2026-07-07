@@ -84,7 +84,7 @@ class TestCLISyncPresets:
 
     def test_package_version_declared(self):
         """Installed project metadata should expose the release version."""
-        assert version("autoreport-gui") == "1.1"
+        assert version("autoreport-gui") == "1.2"
 
     def test_main_wrapper_sets_qt_logging_rule(self):
         """Qt logging rule helper should seed the font warning suppression."""
