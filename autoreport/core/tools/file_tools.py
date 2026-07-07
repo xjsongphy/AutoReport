@@ -314,7 +314,10 @@ class ApplyPatchTool(WriteEnabledTool):
         "Prefix each hunk line: ' ' (context, must match), '-' (remove, must match), '+' (add). "
         "Use '@@ <line>' to anchor a hunk after a unique line (disambiguates repeats). "
         "Blank line separates hunks. Matching is exact, whole-line; read the file first. "
-        "A pure-addition patch creates a new file."
+        "A pure-addition patch creates a new file. "
+        "Arguments: path and patch. "
+        "Example patch for a new file: '+first line\\n+second line\\n'. "
+        "Do not send full file contents unless every line is prefixed with patch markers."
     )
 
     def __init__(self, *, content_validator=None, **kwargs):
@@ -496,5 +499,4 @@ class DeleteFileTool(WriteEnabledTool):
         except Exception as e:
             logger.error("Failed to delete file {}: {}", file_path, e)
             raise
-
 

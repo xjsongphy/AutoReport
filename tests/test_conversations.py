@@ -197,6 +197,29 @@ class TestMessagePersistence:
         assert msgs[1]["role"] == "tool_result"
         assert msgs[1]["summary"] == "Done"
 
+    def test_tool_result_raw_payload_is_preserved(self, store: ConversationStore):
+        store.append_tool_result(
+            "main",
+            "send_to_agent",
+            result="delegated detail",
+            extra={
+                "result_data": {
+                    "status": "delegated",
+                    "agent_type": "theory",
+                    "content": "derive formula",
+                }
+            },
+        )
+
+        msgs = store.load_messages("main")
+        assert msgs[0]["role"] == "tool_result"
+        assert msgs[0]["result"] == "delegated detail"
+        assert msgs[0]["result_data"] == {
+            "status": "delegated",
+            "agent_type": "theory",
+            "content": "derive formula",
+        }
+
     def test_load_empty_agent(self, store: ConversationStore):
         """load_messages for an agent with no messages should return []."""
         assert store.load_messages("plotting") == []

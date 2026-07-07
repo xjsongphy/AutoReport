@@ -81,7 +81,7 @@ def test_manage_tasks_format_keeps_completed_wait_but_pending_followup_todo():
     assert expandable is False
 
 
-def test_invisible_manage_tasks_result_persists_augmented_task_summary():
+def test_invisible_manage_tasks_result_persists_augmented_task_snapshot():
     board = TaskBoard()
     board.create_task(AgentType.THEORY, AgentType.THEORY, "derive local formula", task_id="tk1")
 
@@ -91,8 +91,8 @@ def test_invisible_manage_tasks_result_persists_augmented_task_summary():
         def get_current_session_id(self, agent_type):
             return None
 
-        def append_tool_result(self, *args, **kwargs):
-            store_calls.append(("tool_result", args, kwargs))
+        def upsert_task_snapshot(self, *args, **kwargs):
+            store_calls.append(("task_snapshot", args, kwargs))
 
     fake = SimpleNamespace()
     fake.backend = SimpleNamespace(loop_manager=SimpleNamespace(_task_board=board))
@@ -124,10 +124,9 @@ def test_invisible_manage_tasks_result_persists_augmented_task_summary():
     assert len(store_calls) == 1
     _, args, kwargs = store_calls[0]
     assert args[0] == "theory"
-    assert args[1] == "manage_tasks"
-    assert "Task" in args[2]
-    assert "derive local formula" in args[2]
-    assert kwargs["extra"]["summary"] == args[2]
+    assert "Task" in args[1]
+    assert "derive local formula" in args[1]
+    assert kwargs == {}
 
 
 def test_manage_tasks_result_matching_live_snapshot_is_not_appended_twice():
@@ -140,8 +139,8 @@ def test_manage_tasks_result_matching_live_snapshot_is_not_appended_twice():
         def get_current_session_id(self, agent_type):
             return None
 
-        def append_tool_result(self, *args, **kwargs):
-            store_calls.append(("tool_result", args, kwargs))
+        def upsert_task_snapshot(self, *args, **kwargs):
+            store_calls.append(("task_snapshot", args, kwargs))
 
         def load_messages(self, agent_type):
             return [
@@ -318,7 +317,7 @@ def test_send_to_agent_result_displays_response_summary_and_detail():
     assert detail == "Derive the formula for X given Y."
 
 
-def test_manage_tasks_tool_call_displays_task_summary():
+def test_manage_tasks_tool_call_is_not_rendered_or_persisted():
     panel_calls: list[tuple[str, tuple, dict]] = []
     store_calls: list[tuple[str, tuple, dict]] = []
 
@@ -348,7 +347,177 @@ def test_manage_tasks_tool_call_displays_task_summary():
         ),
     )
 
-    assert panel_calls[0][2]["summary"] == "<b>Task</b>"
+    assert panel_calls == []
+    assert store_calls == []
+
+
+def test_load_conversation_skips_legacy_manage_tasks_call_and_result_but_keeps_snapshot():
+    panel_calls: list[tuple[str, tuple, dict]] = []
+
+    class _Panel:
+        def _update_width(self):
+            pass
+
+        _messages_area = SimpleNamespace(clear=lambda: None)
+
+        def add_tool_call(self, *args, **kwargs):
+            panel_calls.append(("tool_call", args, kwargs))
+
+        def add_tool_result(self, *args, **kwargs):
+            panel_calls.append(("tool_result", args, kwargs))
+
+        def add_task_snapshot_summary(self, *args, **kwargs):
+            panel_calls.append(("task_snapshot", args, kwargs))
+
+        def add_message(self, *args, **kwargs):
+            panel_calls.append(("message", args, kwargs))
+
+        def add_error(self, *args, **kwargs):
+            panel_calls.append(("error", args, kwargs))
+
+    fake = SimpleNamespace()
+    fake._conv_store = SimpleNamespace(
+        load_messages=lambda agent_type: [
+            {"role": "tool_call", "content": "manage_tasks", "arguments": {"action": "list"}},
+            {
+                "role": "tool_result",
+                "content": "manage_tasks",
+                "result": "<b>Task</b>",
+                "summary": "<b>Task</b>",
+            },
+            {
+                "role": "tool_result",
+                "content": "manage_tasks",
+                "result": "<b>Task</b>\nTodo\n☐ derive local formula",
+                "summary": "<b>Task</b>\nTodo\n☐ derive local formula",
+                "task_snapshot": True,
+            },
+        ]
+    )
+
+    MainWindow._load_conversations_for_agent(fake, "theory", _Panel())
+
+    assert panel_calls == [
+        (
+            "task_snapshot",
+            ("<b>Task</b>\nTodo\n☐ derive local formula",),
+            {},
+        )
+    ]
+
+
+def test_load_conversation_reconstructs_send_to_agent_route_and_detail_from_semantic_record():
+    panel_calls: list[tuple[str, tuple, dict]] = []
+
+    class _Panel:
+        def _update_width(self):
+            pass
+
+        _messages_area = SimpleNamespace(clear=lambda: None)
+
+        def add_tool_call(self, *args, **kwargs):
+            panel_calls.append(("tool_call", args, kwargs))
+
+    fake = SimpleNamespace()
+    fake._format_send_to_agent_bubble = lambda result, error: MainWindow._format_send_to_agent_bubble(
+        fake, result, error
+    )
+    fake._load_tool_call_render_state = lambda tool_name, arguments, rec: MainWindow._load_tool_call_render_state(
+        fake, tool_name, arguments, rec
+    )
+    fake._conv_store = SimpleNamespace(
+        load_messages=lambda agent_type: [
+            {
+                "role": "tool_call",
+                "content": "send_to_agent",
+                "arguments": {
+                    "agent_type": "theory",
+                    "summary": "Derive formula",
+                    "content": "Derive the formula for X from Y.",
+                    "blocking": False,
+                },
+            },
+        ]
+    )
+
+    MainWindow._load_conversations_for_agent(fake, "main", _Panel())
+
+    assert panel_calls == [
+        (
+            "tool_call",
+            (
+                "send_to_agent",
+                {
+                    "agent_type": "theory",
+                    "summary": "Derive formula",
+                    "content": "Derive the formula for X from Y.",
+                    "blocking": False,
+                },
+            ),
+            {
+                "summary": "Main to Theory",
+                "detail": "Derive the formula for X from Y.",
+                "expandable": True,
+            },
+        )
+    ]
+
+
+def test_hidden_main_send_to_agent_tool_result_persists_semantic_payload_not_display_copy():
+    store_calls: list[tuple[str, tuple, dict]] = []
+
+    class _Store:
+        def append_tool_result(self, *args, **kwargs):
+            store_calls.append(("tool_result", args, kwargs))
+
+    fake = SimpleNamespace()
+    fake._conv_store = _Store()
+    fake._is_visible_agent = lambda agent_type: False
+    fake._state_for_agent = lambda agent_type: SimpleNamespace(phase="idle")
+    fake._format_send_to_agent_bubble = lambda result, error: MainWindow._format_send_to_agent_bubble(
+        fake, result, error
+    )
+    fake._tool_result_store_extra = lambda tool_name, result, error, **kwargs: (
+        MainWindow._tool_result_store_extra(fake, tool_name, result, error, **kwargs)
+    )
+
+    MainWindow._handle_tool_result(
+        fake,
+        ToolResult(
+            agent_type=AgentType.MAIN,
+            tool_name="send_to_agent",
+            result={
+                "status": "delegated",
+                "agent_type": "plotting",
+                "summary": "Draw figure",
+                "content": "Draw the final figure in the background.",
+                "blocking": False,
+            },
+        ),
+    )
+
+    assert store_calls == [
+        (
+            "tool_result",
+            (
+                "main",
+                "send_to_agent",
+                "Draw the final figure in the background.",
+                None,
+            ),
+            {
+                "extra": {
+                    "result_data": {
+                        "status": "delegated",
+                        "agent_type": "plotting",
+                        "summary": "Draw figure",
+                        "content": "Draw the final figure in the background.",
+                        "blocking": False,
+                    }
+                }
+            },
+        )
+    ]
 
 
 def test_rollback_finished_truncates_current_session_and_refreshes_visible_panel():
@@ -438,6 +607,65 @@ def test_final_thinking_snapshot_after_answer_does_not_create_duplicate_thought(
     assert len(thought_rows) == 1
     assert len(answer_rows) == 1
     assert rows.index(thought_rows[0]) < rows.index(answer_rows[0])
+
+
+def test_thinking_finished_persists_semantic_summary_not_display_fields():
+    store_calls: list[tuple[str, tuple, dict]] = []
+
+    class _Store:
+        def append_message(self, *args, **kwargs):
+            store_calls.append(("message", args, kwargs))
+
+    fake = SimpleNamespace()
+    fake._conv_store = _Store()
+
+    MainWindow._on_thinking_finished(fake, "main", "Thought for 3s", "reasoning trace", True)
+
+    assert store_calls == [
+        (
+            "message",
+            ("main", "thinking", "reasoning trace"),
+            {"extra": {"summary": "Thought for 3s"}},
+        )
+    ]
+
+
+def test_load_conversation_restores_thinking_row_from_semantic_record():
+    panel_calls: list[tuple[str, tuple, dict]] = []
+
+    class _Panel:
+        _messages_area = SimpleNamespace(clear=lambda: None)
+
+        def add_message(self, *args, **kwargs):
+            panel_calls.append(("message", args, kwargs))
+
+        def _update_width(self):
+            pass
+
+    fake = SimpleNamespace()
+    fake._conv_store = SimpleNamespace(
+        load_messages=lambda agent_type: [
+            {
+                "role": "thinking",
+                "content": "reasoning trace",
+                "summary": "Thought for 3s",
+            }
+        ]
+    )
+
+    MainWindow._load_conversations_for_agent(fake, "main", _Panel())
+
+    assert panel_calls == [
+        (
+            "message",
+            ("agent", "reasoning trace"),
+            {
+                "display_mode": "thought",
+                "bubble_title": "Thought for 3s",
+                "bubble_collapsible": True,
+            },
+        )
+    ]
 
 
 def test_render_task_block_skips_when_backend_has_no_task_board():
@@ -629,6 +857,7 @@ def test_edit_resend_truncates_syncs_clears_queue_and_resends():
             return "s1"
 
     fake = SimpleNamespace()
+    fake.current_agent_type = "theory"
     fake.agent_panel = _Panel()
     fake._conv_store = _Store()
     fake._agent_queue_cache = {"main": ["stale queued"]}
@@ -692,3 +921,39 @@ def test_records_to_backend_messages_skips_system_notices_and_tool_results():
         {"role": "user", "content": "hello"},
         {"role": "assistant", "content": "world"},
     ]
+
+
+def test_show_current_agent_conversation_does_not_reappend_live_task_snapshot():
+    calls: list[str] = []
+
+    class _Panel:
+        agent_type = "theory"
+        _pending_tool_groups = []
+        _current_tool_group = None
+
+        def finish_thinking(self):
+            calls.append("finish")
+
+        def set_queue_preview(self, queued):
+            calls.append("queue")
+
+        def set_status(self, status, extra):
+            calls.append("status")
+
+        def set_debug_mode(self, enabled):
+            calls.append("debug")
+
+        _messages_area = SimpleNamespace(clear=lambda: calls.append("clear"))
+
+    fake = SimpleNamespace()
+    fake.current_agent_type = "theory"
+    fake.agent_panel = _Panel()
+    fake._agent_queue_cache = {}
+    fake._agent_status_cache = {}
+    fake._debug_agents = set()
+    fake._load_conversations_for_agent = lambda agent_type, panel: calls.append("load")
+    fake._render_task_block_for_current_agent = lambda: calls.append("render_task")
+
+    MainWindow._show_current_agent_conversation(fake)
+
+    assert calls == ["finish", "clear", "load", "queue", "status", "debug"]

@@ -76,7 +76,7 @@ Any `[✗]` → fix the script → re-run → re-check.
 6. **Save outputs**: Confirm images in `Plots/Fig/` and update manifest.
 7. **Signal completion**: When all requested plots are generated and all self-checks pass, call `respond` to finish. You MUST call `respond` before ending your turn on any task Main dispatched — there is no other way to finish. This unblocks the Report agent.
 
-**Automatic code validation**: Any `.py` script written through `write_file` is automatically validated for the `unicode_minus` setting and `plt.close` pairing. If validation fails, the write is rejected. Fix the reported issue and write the script again.
+**Automatic code validation**: Any `.py` script written through `apply_patch` is automatically validated for the `unicode_minus` setting and `plt.close` pairing. If validation fails, the edit is rejected. Fix the reported issue and apply the patch again.
 
 **Output files** (`Plots/`):
 - `Fig/` — Generated PNG images (300+ DPI)

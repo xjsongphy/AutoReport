@@ -55,6 +55,26 @@ def test_apply_patch_displays_as_edit(qtbot):
     assert "Patch" not in summary
 
 
+def test_task_tool_group_uses_compact_vertical_margins(qtbot):
+    widget = ToolCallGroup()
+    qtbot.addWidget(widget)
+
+    widget.add_tool_call(
+        "manage_tasks",
+        {"action": "list"},
+        success=True,
+        duration_ms=10,
+        summary="<b>Task</b>\nTodo\n☐ Process data",
+    )
+
+    header_margins = widget._header_btn.layout().contentsMargins()
+    task_margins = widget._task_board_layout.contentsMargins()
+
+    assert header_margins.top() == 2
+    assert header_margins.bottom() == 6
+    assert task_margins.top() == 2
+
+
 def test_bash_alias_renders_exec_detail(qtbot):
     widget = ToolCallGroup()
     qtbot.addWidget(widget)

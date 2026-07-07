@@ -2,7 +2,7 @@
 
 These tests do NOT require API keys. They test:
 - Tool registration and schema generation
-- Tool execution (read, write_file, bash, etc.)
+- Tool execution (read, apply_patch, exec, etc.)
 """
 
 import tempfile
@@ -60,6 +60,26 @@ class TestToolRegistry:
         reg.register(ReadTool(workspace=ws))
         reg.unregister("read")
         assert reg.get("read") is None
+
+    def test_apply_patch_schema_and_description_expose_patch_argument(self):
+        reg = ToolRegistry()
+        ws = _workspace()
+        reg.register(ApplyPatchTool(workspace=ws, write_allowed_dir=ws))
+        defs = {tool["name"]: tool for tool in reg.get_definitions()}
+
+        apply_patch_def = defs["apply_patch"]
+        assert apply_patch_def["input_schema"]["required"] == ["path", "patch"]
+        assert "pure-addition patch creates a new file" in apply_patch_def["description"]
+
+    def test_exec_schema_and_description_expose_required_arguments(self):
+        reg = ToolRegistry()
+        ws = _workspace()
+        reg.register(ExecTool(working_dir=ws))
+        defs = {tool["name"]: tool for tool in reg.get_definitions()}
+
+        exec_def = defs["exec"]
+        assert exec_def["input_schema"]["required"] == ["command", "command_description"]
+        assert "Provide both command and a short command_description" in exec_def["description"]
 
 
 class TestRead:
