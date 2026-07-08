@@ -1,6 +1,6 @@
 <div align="center">
 
-![title](https://raw.githubusercontent.com/xjsongphy/AutoReport/master/assets/screenshots/title.png)
+![title](https://github.com/xjsongphy/AutoReport/blob/master/assets/screenshots/title.png?raw=1)
 
 ### A Multi-Agent Collaborative System for Automated Physics Experiment Report Writing
 
@@ -49,7 +49,7 @@ A multi-agent collaborative automated physics experiment report writing system. 
 
 The main workspace combines the project file tree, document preview, and agent chat timeline in one window. Users can inspect generated LaTeX/PDF output while continuing to interact with the agent team.
 
-![AutoReport main workspace](https://raw.githubusercontent.com/xjsongphy/AutoReport/master/assets/screenshots/main-window.png)
+![AutoReport main workspace](https://github.com/xjsongphy/AutoReport/blob/master/assets/screenshots/main-window.png?raw=1)
 
 ## Quick Start
 
@@ -84,7 +84,7 @@ autoreport
 
 The start window lets users open an existing experiment folder, create a new project, configure API providers, or resume a recent project.
 
-![AutoReport start window](https://raw.githubusercontent.com/xjsongphy/AutoReport/master/assets/screenshots/start-window.png)
+![AutoReport start window](https://github.com/xjsongphy/AutoReport/blob/master/assets/screenshots/start-window.png?raw=1)
 
 First launch prompts for API configuration. Pre-configure via environment variables:
 
@@ -122,7 +122,7 @@ Configuration file: `autoreport.config.yaml`
 
 The API configuration dialog manages provider presets, active provider selection, API keys, base URLs, and default models.
 
-![AutoReport API configuration](https://raw.githubusercontent.com/xjsongphy/AutoReport/master/assets/screenshots/configuration-window.png)
+![AutoReport API configuration](https://github.com/xjsongphy/AutoReport/blob/master/assets/screenshots/configuration-window.png?raw=1)
 
 ```yaml
 agents:
